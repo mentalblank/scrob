@@ -1,0 +1,49 @@
+---
+import Base from "../layouts/Base.astro";
+import MediaCard from "../components/MediaCard.astro";
+import { api, type MediaItem } from "../lib/api";
+export const prerender = false;
+
+const { token } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
+
+let nextUp: MediaItem[] = [];
+let error = "";
+
+try {
+  const data = await api.history.nextUp(token);
+  nextUp = data?.next_up ?? [];
+} catch (e: any) {
+  error = e.message;
+}
+---
+
+<Base title="Next Up">
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-zinc-100 mb-2">Next Up</h1>
+    <p class="text-zinc-500">Continue where you left off</p>
+  </div>
+
+  {error && (
+    <div class="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded-lg mb-8">
+      {error}
+    </div>
+  )}
+
+  {nextUp.length === 0 && !error && (
+    <div class="text-center py-20 text-zinc-500">
+      <p class="text-lg">Nothing to watch next.</p>
+      <p class="text-sm mt-2">Start watching a show to see your next episodes here.</p>
+    </div>
+  )}
+
+  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+    {nextUp.map((item) => (
+      <MediaCard item={item} />
+    ))}
+  </div>
+</Base>
+
+<script>
+  window.addEventListener('pageshow', (e) => { if (e.persisted) location.replace(location.href); });
+</script>

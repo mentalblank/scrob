@@ -1,0 +1,282 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+import type { OidcConfig } from "../lib/api";
+
+let error = "";
+let success = "";
+let showTotpStep = false;
+let tempToken = "";
+
+const oidcConfig: OidcConfig = await api.auth.oidcConfig().catch(() => ({
+  enabled: false,
+  provider_name: "SSO",
+  disable_password_login: false,
+}));
+
+const { enabled: registrationEnabled, smtp_configured: smtpConfigured } = await api.auth.registrationStatus().catch(() => ({ enabled: false, smtp_configured: false }));
+
+const oidcError = Astro.url.searchParams.get("oidc_error");
+if (oidcError) {
+  error = decodeURIComponent(oidcError.replace(/\+/g, " "));
+}
+
+const urlError = Astro.url.searchParams.get("error");
+if (urlError === "invalid_activation_token") {
+  error = "This activation link is invalid.";
+} else if (urlError === "activation_token_expired") {
+  error = "This activation link has expired. Please register again or contact an administrator.";
+}
+
+if (Astro.url.searchParams.get("email_activated") === "true") {
+  success = "Your email has been confirmed! You can now sign in.";
+}
+
+if (Astro.url.searchParams.get("password_reset") === "true") {
+  success = "Your password has been reset. You can now sign in with your new password.";
+}
+
+
+if (Astro.request.method === "POST") {
+  const data = await Astro.request.formData();
+  const step = (data.get("_step") as string) || "login";
+
+  if (step === "login") {
+    try {
+      const result = await api.auth.login(data);
+      if (result.requires_2fa && result.temp_token) {
+        showTotpStep = true;
+        tempToken = result.temp_token;
+      } else if (result.access_token) {
+        Astro.cookies.set("token", result.access_token, {
+          path: "/",
+          httpOnly: true,
+          secure: import.meta.env.PROD,
+          sameSite: "lax",
+          maxAge: 60 * 60 * 24 * 7,
+        });
+        return Astro.redirect("/");
+      }
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : "Login failed";
+    }
+  } else if (step === "verify_2fa") {
+    const submittedTempToken = (data.get("temp_token") as string) || "";
+    const code = (data.get("totp_code") as string) || "";
+    try {
+      const result = await api.auth.totp2faVerifyLogin({ temp_token: submittedTempToken, code });
+      if (result.access_token) {
+        Astro.cookies.set("token", result.access_token, {
+          path: "/",
+          httpOnly: true,
+          secure: import.meta.env.PROD,
+          sameSite: "lax",
+          maxAge: 60 * 60 * 24 * 7,
+        });
+        return Astro.redirect("/");
+      }
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : "Verification failed";
+      showTotpStep = true;
+      tempToken = submittedTempToken;
+    }
+  }
+}
+
+const token = Astro.cookies.get("token")?.value;
+if (token) {
+  return Astro.redirect("/");
+}
+---
+
+<Base title="Login" hideNav>
+  <div class="max-w-md mx-auto mt-16 p-8 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl relative">
+    <button
+      id="theme-toggle"
+      tabindex="1"
+      class="absolute top-4 right-4 p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-100 transition-all hover:scale-110 active:scale-95"
+      aria-label="Toggle Theme"
+    >
+      <span id="sun-icon" class="hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+      </span>
+      <span id="moon-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      </span>
+    </button>
+    <div class="flex flex-col items-center mb-6">
+      <img src="/scrob.png" alt="Scrob Logo" class="w-36 object-contain mb-2" />
+      <span class="text-zinc-100 font-bold text-xl tracking-tight">Scrob</span>
+    </div>
+    <h1 class="text-3xl font-bold mb-6 text-zinc-100 text-center">Login</h1>
+    
+    {error && (
+      <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg mb-6">
+        {error}
+      </div>
+    )}
+
+    {success && (
+      <div class="bg-green-500/10 border border-green-500 text-green-400 p-3 rounded-lg mb-6">
+        {success}
+      </div>
+    )}
+
+    {!showTotpStep ? (
+      <>
+        {/* OIDC button */}
+        {oidcConfig.enabled && (
+          <a
+            href="/oidc-start"
+            tabindex="2"
+            class="flex items-center justify-center gap-2 w-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 font-bold py-2 rounded-lg transition-colors cursor-pointer mb-4"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+            </svg>
+            Login with {oidcConfig.provider_name}
+          </a>
+        )}
+
+        {/* Divider when both options are visible */}
+        {oidcConfig.enabled && !oidcConfig.disable_password_login && (
+          <div class="relative my-4">
+            <div class="absolute inset-0 flex items-center">
+              <div class="w-full border-t border-zinc-800"></div>
+            </div>
+            <div class="relative flex justify-center">
+              <span class="bg-zinc-900 px-3 text-xs text-zinc-400">or</span>
+            </div>
+          </div>
+        )}
+
+        {/* Password form */}
+        {!oidcConfig.disable_password_login && (
+          <form method="POST" class="space-y-4">
+            <input type="hidden" name="_step" value="login" />
+            <div>
+              <label for="username" class="block text-sm font-medium text-zinc-400 mb-1">Username</label>
+              <input
+                type="text"
+                name="username"
+                id="username"
+                required
+                tabindex="3"
+                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              />
+            </div>
+            <div>
+            <div class="flex items-center justify-between">
+                <label for="password" class="block text-sm font-medium text-zinc-400">Password</label>
+                {smtpConfigured && (
+                  <a href="/forgot-password" tabindex="7" class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Forgot password?</a>
+                )}
+              </div>
+              <div class="relative group/field">
+                <input
+                  type="password"
+                  name="password"
+                  id="password"
+                  required
+                  tabindex="4"
+                  class="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                />
+                <button
+                  type="button"
+                  tabindex="5"
+                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+                  aria-label="Toggle password visibility"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <button
+              type="submit"
+              tabindex="6"
+              class="w-full bg-zinc-100 text-zinc-950 font-bold py-2 rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer mt-4"
+            >
+              Sign In
+            </button>
+          </form>
+        )}
+
+        {!oidcConfig.disable_password_login && registrationEnabled && (
+          <div class="mt-6 text-center text-sm text-zinc-500">
+            Don't have an account? <a href="/register" tabindex="8" class="text-zinc-100 hover:underline">Register</a>
+          </div>
+        )}
+      </>
+    ) : (
+      <form method="POST" class="space-y-4">
+        <input type="hidden" name="_step" value="verify_2fa" />
+        <input type="hidden" name="temp_token" value={tempToken} />
+        <div class="text-center mb-2">
+          <div class="w-12 h-12 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-3">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-zinc-300">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
+          <p class="text-sm text-zinc-400">Enter the 6-digit code from your authenticator app, or a backup code.</p>
+        </div>
+        <div>
+          <label for="totp_code" class="block text-sm font-medium text-zinc-400 mb-1">Verification Code</label>
+          <input
+            type="text"
+            name="totp_code"
+            id="totp_code"
+            required
+            autocomplete="one-time-code"
+            inputmode="numeric"
+            placeholder="000000 or XXXX-XXXX"
+            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-center tracking-widest text-lg font-mono"
+          />
+        </div>
+        <button
+          type="submit"
+          class="w-full bg-zinc-100 text-zinc-950 font-bold py-2 rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer mt-4"
+        >
+          Verify
+        </button>
+        <div class="text-center">
+          <a href="/login" class="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">Back to login</a>
+        </div>
+      </form>
+    )}
+  </div>
+</Base>
+
+<script>
+  function setupPasswordToggles() {
+    const toggles = document.querySelectorAll('.password-toggle');
+    toggles.forEach(toggle => {
+      toggle.addEventListener('click', () => {
+        const input = toggle.parentElement?.querySelector('input');
+        if (!input) return;
+
+        const isPassword = input.type === 'password';
+        input.type = isPassword ? 'text' : 'password';
+
+        const eyeIcon = toggle.querySelector('.eye-icon');
+        const eyeSlashIcon = toggle.querySelector('.eye-slash-icon');
+
+        if (isPassword) {
+          eyeIcon?.classList.add('hidden');
+          eyeSlashIcon?.classList.remove('hidden');
+        } else {
+          eyeIcon?.classList.remove('hidden');
+          eyeSlashIcon?.classList.add('hidden');
+        }
+      });
+    });
+  }
+
+  setupPasswordToggles();
+  document.addEventListener('astro:after-swap', setupPasswordToggles);
+</script>

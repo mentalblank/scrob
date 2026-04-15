@@ -1,0 +1,33 @@
+---
+import MediaRow from "../../components/MediaRow.astro";
+import { api } from "../../lib/api";
+
+export const partial = true;
+
+const token = Astro.cookies.get("token")?.value;
+const type = Astro.url.searchParams.get("type");
+const id = Astro.url.searchParams.get("id");
+
+if (!token || !type || !id) {
+  return new Response(null, { status: 400 });
+}
+
+let recommendations: any[] = [];
+try {
+  if (type === "movie" || type === "episode") {
+    const res = await api.media.getRecommendations(type, parseInt(id), token);
+    recommendations = res.results;
+  } else if (type === "series") {
+    const res = await api.shows.getRecommendations(parseInt(id), token);
+    recommendations = res.results;
+  }
+} catch (e) {
+  console.error("Failed to fetch recommendations partial", e);
+}
+
+if (recommendations.length === 0) {
+  return new Response(null, { status: 204 });
+}
+---
+
+<MediaRow title="More like this" items={recommendations} />

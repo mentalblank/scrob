@@ -1,0 +1,166 @@
+---
+import type { MediaItem } from "../lib/api";
+import CardActionBar from "./CardActionBar.astro";
+
+interface Props {
+  item: MediaItem;
+}
+
+const { item } = Astro.props;
+
+const isPerson = item.type === "person";
+const isCollection = item.type === "collection";
+const year = item.release_date?.slice(0, 4) ?? null;
+const rating = item.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
+const isEpisode = item.type === "episode";
+const isSeries = item.type === "series" || (item.type === "episode" && !item.season_number && !item.id);
+const sxe = isEpisode && item.season_number != null && item.episode_number != null
+  ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
+  : null;
+
+const href = isPerson
+  ? `/person/${item.tmdb_id}`
+  : isCollection
+    ? `/collection/${item.tmdb_id}`
+    : isSeries && item.tmdb_id
+    ? `/show/${item.tmdb_id}`
+    : isEpisode && item.show_tmdb_id && item.season_number != null && item.episode_number != null
+      ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
+      : isEpisode && item.show_tmdb_id
+        ? `/show/${item.show_tmdb_id}`
+        : item.tmdb_id
+          ? `/media/${item.type}/${item.tmdb_id}`
+          : null;
+
+const posterPath = isEpisode && item.show_poster_path
+  ? (item.show_poster_path.startsWith('http') ? item.show_poster_path : `https://image.tmdb.org/t/p/w500${item.show_poster_path}`)
+  : item.poster_path
+    ? (item.poster_path.startsWith('http') ? item.poster_path : `https://image.tmdb.org/t/p/w500${item.poster_path}`)
+    : null;
+
+const showActionBar = !isPerson && !isCollection;
+const watched = item.watched ?? false;
+const inLists = item.in_lists ?? [];
+const collectionPct = item.collection_pct ?? (item.in_library ? 100 : 0);
+const inLibrary = item.in_library ?? false;
+---
+
+<div
+  class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1"
+  data-card
+  data-id={item.id ? String(item.id) : ""}
+  data-tmdb-id={item.tmdb_id ? String(item.tmdb_id) : ""}
+  data-media-type={item.type}
+  data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : ""}
+  data-season={item.season_number != null ? String(item.season_number) : ""}
+  data-episode-number={item.episode_number != null ? String(item.episode_number) : ""}
+>
+  <!-- Clickable poster -->
+  {href ? (
+    <a href={href} class="block">
+      <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
+        {posterPath ? (
+          <img
+            src={posterPath}
+            alt={item.title}
+            class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center">
+            <span class="text-3xl mb-2 opacity-30">🎬</span>
+            <span class="text-xs font-bold uppercase tracking-widest">{item.title}</span>
+          </div>
+        )}
+
+        <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+
+        {rating && (
+          <div class="absolute top-2 right-2 bg-black/80 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1">
+            <span class="text-xs leading-none">★</span> {rating}
+          </div>
+        )}
+
+        {item.library?.resolution && (
+          <div class="absolute bottom-2 left-2 bg-zinc-900/90 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-md border border-zinc-700/50 shadow-lg tracking-tighter">
+            {item.library.resolution}
+          </div>
+        )}
+      </div>
+    </a>
+  ) : (
+    <div class="block">
+      <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5">
+        {posterPath ? (
+          <img
+            src={posterPath}
+            alt={item.title}
+            class="w-full h-full object-cover"
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center">
+            <span class="text-3xl mb-2 opacity-30">🎬</span>
+            <span class="text-xs font-bold uppercase tracking-widest">{item.title}</span>
+          </div>
+        )}
+        {rating && (
+          <div class="absolute top-2 right-2 bg-black/80 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1">
+            <span class="text-xs leading-none">★</span> {rating}
+          </div>
+        )}
+      </div>
+    </div>
+  )}
+
+  <!-- Action bar (below poster, above info) -->
+  {showActionBar && (
+    <CardActionBar
+      watched={watched}
+      inLists={inLists}
+      inLibrary={inLibrary}
+      collectionPct={collectionPct}
+      isSeries={isSeries}
+    />
+  )}
+
+  <!-- Info -->
+  {href ? (
+    <a href={href} class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+      {isEpisode && item.show_title ? (
+        <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</h3>
+      ) : null}
+      <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">{item.title}</h3>
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{sxe}</span>}
+          {isPerson && item.known_for_department && (
+            <span class="text-[11px] font-medium text-zinc-500 tracking-wide truncate">{item.known_for_department}</span>
+          )}
+          {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-500 tracking-wide">{year}</span>}
+        </div>
+        <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
+          {isPerson ? 'Person' : isCollection ? 'Collection' : isSeries ? 'Show' : (item.type === 'episode' ? 'Episode' : item.type)}
+        </span>
+      </div>
+    </a>
+  ) : (
+    <div class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+      {isEpisode && item.show_title ? (
+        <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</h3>
+      ) : null}
+      <h3 class="text-sm font-bold text-zinc-500 truncate leading-tight mb-1">{item.title}</h3>
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide">{sxe}</span>}
+          {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-400 tracking-wide">{year}</span>}
+        </div>
+        <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
+          {item.type === 'episode' ? 'Episode' : item.type}
+        </span>
+      </div>
+    </div>
+  )}
+</div>

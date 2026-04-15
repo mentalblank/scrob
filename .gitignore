@@ -1,0 +1,78 @@
+# --- IDE & System ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Environment & Secrets ---
+.env
+.env.*
+!.env.example
+!.env.exanple
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.venv/
+**/.venv/
+venv/
+ENV/
+env/
+.python-version
+.pytest_cache/
+.ruff_cache/
+*.log
+backend/backend.pid
+backend/uvicorn.log
+
+# --- Node.js / Frontend ---
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.astro/
+**/.astro/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+frontend/frontend.pid
+frontend/frontend.log
+
+# --- Databases ---
+.testdb/
+*.db
+*.sqlite3
+
+# --- Common AI files ---
+backend/data/avatars/
+GEMINI.md
+CLAUDE.md
+AGENTS.md
+copilot-instructions.md
+.claude/
+
+# --- Project Specific ---
+test.http
+vuln.md
+vuln.env

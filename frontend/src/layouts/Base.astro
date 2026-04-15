@@ -1,0 +1,947 @@
+---
+import "../styles/global.css";
+import { Image } from "astro:assets";
+import logo from "../assets/scrob.png";
+
+interface Props { title: string; hideNav?: boolean }
+const { title, hideNav } = Astro.props;
+const { user, token } = Astro.locals;
+
+const pathname = Astro.url.pathname;
+const activeMovies = pathname.startsWith('/movies') || pathname.startsWith('/collection/movies') || pathname.startsWith('/trending/movies') || pathname.startsWith('/media/movie');
+const activeShows  = pathname.startsWith('/shows') || pathname.startsWith('/collection/shows') || pathname.startsWith('/show') || pathname.startsWith('/trending/shows');
+const activeHistory = pathname.startsWith('/history') || pathname === '/next-up';
+const activeLists  = pathname.startsWith('/lists') || pathname.startsWith('/list/');
+const activeHome   = !activeMovies && !activeShows && !activeHistory && !activeLists;
+
+const navLink = (active: boolean) =>
+  active
+    ? 'text-zinc-100 font-semibold'
+    : 'text-zinc-400 hover:text-zinc-100 transition-colors';
+
+const bottomNavItem = (active: boolean) =>
+  `flex flex-col items-center justify-center gap-1 flex-1 py-2 text-[10px] font-bold uppercase tracking-wider transition-colors ${active ? 'text-blue-400' : 'text-zinc-500'}`;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>{title} — Scrob</title>
+  <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Scrob" />
+  <link rel="manifest" href="/site.webmanifest" crossorigin="use-credentials" />
+  <!-- theme-color: dark default, overridden when light class is applied via JS -->
+  <meta name="theme-color" content="#09090b" id="theme-color-meta" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Scrob" />
+  <script is:inline>
+    // Theme initialization to avoid FOUC
+    const theme = (() => {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) {
+        return localStorage.getItem('theme');
+      }
+      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        return 'dark';
+      }
+      return 'light';
+    })();
+
+    if (theme === 'light') {
+      document.documentElement.classList.add('light');
+    } else {
+      document.documentElement.classList.remove('light');
+    }
+
+    // Accent color initialization to avoid FOUC
+    const accent = localStorage.getItem('accentTheme');
+    if (accent && accent !== 'blue') {
+      document.documentElement.setAttribute('data-accent', accent);
+    } else {
+      document.documentElement.removeAttribute('data-accent');
+    }
+  </script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen overflow-x-hidden">
+  {!hideNav && (
+    <nav class="px-4 md:px-6 py-3 md:py-4 text-sm relative z-30 bg-zinc-950 md:bg-transparent">
+      <!-- Default bar -->
+      <div id="nav-default" class="flex items-center justify-between gap-3">
+        <!-- Left: logo + desktop links -->
+        <div class="flex items-center gap-6 min-w-0">
+          <a href="/" class="flex items-center gap-2 text-zinc-100 font-bold text-lg tracking-tight shrink-0 group">
+            <Image src={logo} alt="Scrob Logo" width={32} height={32} loading="eager" class="w-7 h-7 md:w-8 md:h-8 object-contain group-hover:scale-105 transition-transform" />
+            <span>Scrob</span>
+          </a>
+          <div class="hidden md:flex items-center gap-6 text-sm">
+            <a href="/movies" class={navLink(activeMovies)}>Movies</a>
+            <a href="/shows" class={navLink(activeShows)}>Shows</a>
+            <a href="/lists" class={navLink(activeLists)}>Lists</a>
+            <a href="/history" class={navLink(activeHistory)}>History</a>
+          </div>
+          <!-- Desktop search -->
+          <form action="/search" method="GET" class="relative hidden md:block">
+            <input
+              id="desktop-search-input"
+              type="text"
+              name="q"
+              placeholder="Search movies & shows..."
+              class="bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 w-64 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 focus:border-zinc-700 transition-all placeholder:text-zinc-400"
+            />
+            <kbd class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400 font-sans pointer-events-none border border-zinc-800 rounded px-1.5 py-0.5 bg-zinc-950">/</kbd>
+          </form>
+        </div>
+        <!-- Right: mobile search icon + theme + user -->
+        <div class="flex items-center gap-2">
+          <!-- Mobile search icon -->
+          <button id="mobile-search-open" class="md:hidden p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors" aria-label="Search">
+            <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </button>
+          <!-- Theme toggle -->
+          <button id="theme-toggle" class="p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-all hover:scale-110 active:scale-95" aria-label="Toggle Theme">
+            <span id="sun-icon" class="hidden">
+              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+            </span>
+            <span id="moon-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+            </span>
+          </button>
+          <!-- User menu (click-toggled) -->
+          {user ? (
+            <div class="relative">
+              <button id="user-menu-btn" class="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-100 transition-colors p-3 rounded-xl bg-zinc-900 border border-zinc-800 cursor-pointer sm:p-1 sm:bg-transparent sm:border-transparent">
+                <span class="hidden sm:inline font-medium text-zinc-100 text-sm">{user.display_name}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sm:hidden text-zinc-400"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                <svg id="user-chevron" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="opacity-50 hidden sm:block transition-transform duration-200"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <div id="user-menu" class="hidden absolute top-full right-0 mt-2 w-48 z-50">
+                <div class="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl p-2">
+                  <a href="/profile" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition">Profile</a>
+                  <a href="/user-settings" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition">Profile Settings</a>
+                  <a href="/settings" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition">Settings</a>
+                  <a href="/about" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition">About</a>
+                  <div class="h-px bg-zinc-800 my-1 mx-1"></div>
+                  <form method="POST" action="/logout" style="margin:0">
+                    <button type="submit" class="block w-full text-left px-3 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition">Logout</button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <a href="/login" class="text-zinc-400 hover:text-zinc-100 transition text-sm">Login</a>
+          )}
+        </div>
+      </div>
+
+      <!-- Mobile search bar (hidden by default, shown when search icon tapped) -->
+      <div id="nav-search" class="hidden items-center gap-2">
+        <button id="mobile-search-close" class="p-2 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0" aria-label="Close search">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+        <form action="/search" method="GET" class="flex-1 flex items-center gap-2">
+          <input
+            id="mobile-search-input"
+            type="text"
+            name="q"
+            placeholder="Search movies & shows..."
+            class="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-zinc-500"
+          />
+          <button type="submit" class="self-stretch px-4 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-full transition-colors shrink-0">Go</button>
+        </form>
+      </div>
+    </nav>
+  )}
+
+  <div id="now-playing-section"></div>
+
+  <main class="px-6 md:px-6 py-6 md:py-8 max-w-screen-xl mx-auto pb-24 md:pb-8">
+    <slot />
+  </main>
+
+  <!-- Mobile bottom nav -->
+  {!hideNav && (
+    <nav class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-900 border-t border-zinc-800 flex items-stretch safe-area-bottom">
+      <a href="/" class={bottomNavItem(activeHome)}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </a>
+      <a href="/movies" class={bottomNavItem(activeMovies)}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>
+        Movies
+      </a>
+      <a href="/shows" class={bottomNavItem(activeShows)}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="15" x="2" y="7" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>
+        Shows
+      </a>
+      <a href="/lists" class={bottomNavItem(activeLists)}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        Lists
+      </a>
+      <a href="/history" class={bottomNavItem(activeHistory)}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        History
+      </a>
+    </nav>
+  )}
+
+  <!-- Rating popover (shared, repositioned on use) -->
+  <div id="rating-popover" class="hidden absolute z-50 w-72 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+    <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
+      <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Your rating</span>
+      <button id="rating-popover-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer" aria-label="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="px-3 py-3">
+      <div id="rating-stars" class="flex items-center justify-center gap-1"></div>
+    </div>
+    <div class="border-t border-zinc-800">
+      <button id="rating-remove" class="hidden w-full px-3 py-2 text-sm text-red-400 hover:bg-zinc-800 transition text-left flex items-center gap-2 cursor-pointer">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        Remove rating
+      </button>
+    </div>
+  </div>
+
+  <!-- List popover (shared, repositioned on use) -->
+  <div id="list-popover" class="hidden absolute z-50 w-64 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+    <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
+      <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Add to list</span>
+      <button id="list-popover-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer" aria-label="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="list-popover-items" class="max-h-56 overflow-y-auto py-1"></div>
+    <div class="border-t border-zinc-800">
+      <button id="list-popover-create" class="w-full px-3 py-2 text-sm text-blue-400 hover:bg-zinc-800 transition text-left flex items-center gap-2 cursor-pointer">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Create new list
+      </button>
+    </div>
+  </div>
+
+  <!-- Create list modal -->
+  <div id="create-list-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+      <h3 class="text-base font-bold text-zinc-100 mb-4">Create new list</h3>
+      <input id="create-list-name" type="text" placeholder="List name" maxlength="100"
+        class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500 mb-4" />
+      <div class="flex gap-2 justify-end">
+        <button id="create-list-cancel" class="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-100 transition cursor-pointer">Cancel</button>
+        <button id="create-list-confirm" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition cursor-pointer">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PWA install banner -->
+  <div id="pwa-banner" class="hidden fixed bottom-14 left-0 right-0 z-[60] p-4 md:bottom-6 md:left-auto md:right-6 md:max-w-sm">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-4 flex items-start gap-3">
+      <img src="/web-app-manifest-192x192.png" alt="" aria-hidden="true" class="w-12 h-12 rounded-xl shrink-0" />
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-bold text-zinc-100">Install Scrob</p>
+        <p id="pwa-banner-msg" class="text-xs text-zinc-400 mt-0.5 leading-snug">Add to your home screen for the full app experience.</p>
+      </div>
+      <button id="pwa-dismiss" aria-label="Dismiss" class="text-zinc-400 hover:text-zinc-300 transition shrink-0 cursor-pointer mt-0.5">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+      <div id="pwa-install-wrap" class="hidden">
+        <button id="pwa-install-btn" class="shrink-0 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition cursor-pointer">Install</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm dialog -->
+  <div id="confirm-dialog" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+      <h3 id="confirm-title" class="text-base font-bold text-zinc-100 mb-2"></h3>
+      <p id="confirm-body" class="text-sm text-zinc-400 mb-6"></p>
+      <div class="flex gap-2 justify-end">
+        <button id="confirm-cancel" class="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-100 transition cursor-pointer">Cancel</button>
+        <button id="confirm-ok" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white font-semibold rounded-lg transition cursor-pointer">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Theme toggle ───────────────────────────────────────────────────────────
+    const themeToggle = document.getElementById('theme-toggle');
+    const sunIcon = document.getElementById('sun-icon');
+    const moonIcon = document.getElementById('moon-icon');
+
+    const updateIcons = () => {
+      const isLight = document.documentElement.classList.contains('light');
+      sunIcon?.classList.toggle('hidden', !isLight);
+      moonIcon?.classList.toggle('hidden', isLight);
+    };
+    updateIcons();
+
+    const themeColorMeta = document.getElementById('theme-color-meta') as HTMLMetaElement | null;
+    const syncThemeColor = () => {
+      const isLight = document.documentElement.classList.contains('light');
+      if (themeColorMeta) themeColorMeta.content = isLight ? '#f9fafb' : '#09090b';
+    };
+    syncThemeColor();
+
+    themeToggle?.addEventListener('click', () => {
+      document.documentElement.classList.toggle('light');
+      const isLight = document.documentElement.classList.contains('light');
+      localStorage.setItem('theme', isLight ? 'light' : 'dark');
+      updateIcons();
+      syncThemeColor();
+    });
+
+    // ── User dropdown (click-toggled) ──────────────────────────────────────────
+    const userMenuBtn = document.getElementById('user-menu-btn');
+    const userMenu = document.getElementById('user-menu');
+    const userChevron = document.getElementById('user-chevron');
+
+    userMenuBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = !userMenu?.classList.contains('hidden');
+      userMenu?.classList.toggle('hidden', open);
+      userChevron?.style.setProperty('transform', open ? '' : 'rotate(180deg)');
+    });
+
+    document.addEventListener('click', () => {
+      userMenu?.classList.add('hidden');
+      userChevron?.style.removeProperty('transform');
+    });
+
+    // ── Mobile search expand ───────────────────────────────────────────────────
+    const navDefault = document.getElementById('nav-default');
+    const navSearch = document.getElementById('nav-search');
+    const mobileSearchInput = document.getElementById('mobile-search-input') as HTMLInputElement | null;
+
+    document.getElementById('mobile-search-open')?.addEventListener('click', () => {
+      navDefault?.classList.add('hidden');
+      navSearch?.classList.remove('hidden');
+      navSearch?.classList.add('flex');
+      mobileSearchInput?.focus();
+    });
+
+    const closeSearch = () => {
+      navSearch?.classList.add('hidden');
+      navSearch?.classList.remove('flex');
+      navDefault?.classList.remove('hidden');
+    };
+
+    document.getElementById('mobile-search-close')?.addEventListener('click', closeSearch);
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !navSearch?.classList.contains('hidden')) {
+        closeSearch();
+        return;
+      }
+      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+        e.preventDefault();
+        const desktopInput = document.getElementById('desktop-search-input') as HTMLInputElement | null;
+        if (desktopInput && getComputedStyle(desktopInput).display !== 'none') {
+          desktopInput.focus();
+        } else {
+          navDefault?.classList.add('hidden');
+          navSearch?.classList.remove('hidden');
+          navSearch?.classList.add('flex');
+          mobileSearchInput?.focus();
+        }
+      }
+    });
+  </script>
+
+  <script define:vars={{ __layoutAuthToken: token ?? '' }}>
+    // Expose the server-side token for the card action script (httpOnly cookie is not JS-readable)
+    window.__AUTH_TOKEN__ = __layoutAuthToken;
+  </script>
+
+  <script>
+    // ── Card action bar ────────────────────────────────────────────────────────
+    const API = '/api/proxy';
+    const TOKEN = () => (window as any).__AUTH_TOKEN__ ?? '';
+
+    function esc(s: unknown): string {
+      if (s == null) return '';
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    async function apiFetch(path: string, method = 'GET', body?: unknown) {
+      const res = await fetch(`${API}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${TOKEN()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    // ── Confirm dialog ─────────────────────────────────────────────────────────
+    (window as Window & { showConfirm: typeof showConfirm }).showConfirm = showConfirm;
+    function showConfirm(title: string, body: string): Promise<boolean> {
+      return new Promise(resolve => {
+        const dialog = document.getElementById('confirm-dialog')!;
+        (document.getElementById('confirm-title') as HTMLElement).textContent = title;
+        (document.getElementById('confirm-body') as HTMLElement).textContent = body;
+        dialog.classList.remove('hidden');
+        const ok = document.getElementById('confirm-ok')!;
+        const cancel = document.getElementById('confirm-cancel')!;
+        const close = (v: boolean) => { dialog.classList.add('hidden'); ok.replaceWith(ok.cloneNode(true)); cancel.replaceWith(cancel.cloneNode(true)); resolve(v); };
+        document.getElementById('confirm-ok')!.addEventListener('click', () => close(true), { once: true });
+        document.getElementById('confirm-cancel')!.addEventListener('click', () => close(false), { once: true });
+      });
+    }
+
+    // ── Rating popover ─────────────────────────────────────────────────────────
+    let _activeRatingBtn: HTMLElement | null = null;
+
+    function closeRatingPopover() {
+      document.getElementById('rating-popover')!.classList.add('hidden');
+      _activeRatingBtn = null;
+    }
+
+    function openRatingPopover(btn: HTMLElement, tmdbId: string, mediaType: string, currentRating: number | null, seasonNumber: number | null = null) {
+      _activeRatingBtn = btn;
+      const popover = document.getElementById('rating-popover')!;
+      const starsEl = document.getElementById('rating-stars')!;
+      const removeBtn = document.getElementById('rating-remove')!;
+
+      removeBtn.classList.toggle('hidden', currentRating == null);
+
+      // Build 5 stars with hover support (each click = value * 2 on 0-10 scale)
+      starsEl.innerHTML = '';
+      for (let i = 1; i <= 10; i++) {
+        const half = document.createElement('button');
+        half.className = [
+          'w-5 h-5 transition-colors cursor-pointer',
+          i <= (currentRating ?? 0) ? 'text-amber-400' : 'text-zinc-400',
+        ].join(' ');
+        half.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+        half.dataset.value = String(i);
+        half.addEventListener('mouseover', () => {
+          starsEl.querySelectorAll<HTMLElement>('[data-value]').forEach(s => {
+            s.className = Number(s.dataset.value) <= i
+              ? 'w-5 h-5 transition-colors cursor-pointer text-amber-400'
+              : 'w-5 h-5 transition-colors cursor-pointer text-zinc-400';
+          });
+        });
+        half.addEventListener('click', async () => {
+          try {
+            const ratingBody: Record<string, unknown> = { tmdb_id: Number(tmdbId), media_type: mediaType, rating: i };
+            if (seasonNumber !== null) ratingBody.season_number = seasonNumber;
+            await apiFetch('/ratings', 'POST', ratingBody);
+            btn.dataset.userRating = String(i);
+            btn.dataset.state = 'active';
+            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-amber-500/10', 'hover:text-amber-400');
+            btn.classList.add('bg-amber-500/20', 'text-amber-400', 'hover:bg-amber-500/40');
+            btn.querySelector('svg')!.setAttribute('fill', 'currentColor');
+            btn.querySelector('span')!.textContent = i.toFixed(1);
+            btn.title = `Your rating: ${i.toFixed(1)}/10`;
+            closeRatingPopover();
+          } catch { /* ignore */ }
+        });
+        starsEl.appendChild(half);
+      }
+      starsEl.addEventListener('mouseleave', () => {
+        const saved = currentRating ?? 0;
+        starsEl.querySelectorAll<HTMLElement>('[data-value]').forEach(s => {
+          s.className = Number(s.dataset.value) <= saved
+            ? 'w-5 h-5 transition-colors cursor-pointer text-amber-400'
+            : 'w-5 h-5 transition-colors cursor-pointer text-zinc-400';
+        });
+      });
+
+      removeBtn.onclick = async () => {
+        try {
+          const seasonQuery = seasonNumber !== null ? `&season_number=${seasonNumber}` : '';
+          await apiFetch(`/ratings?tmdb_id=${tmdbId}&media_type=${mediaType}${seasonQuery}`, 'DELETE');
+          btn.dataset.userRating = '';
+          btn.dataset.state = 'inactive';
+          btn.classList.remove('bg-amber-500/20', 'text-amber-400', 'hover:bg-amber-500/40');
+          btn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-amber-500/10', 'hover:text-amber-400');
+          btn.querySelector('svg')!.setAttribute('fill', 'none');
+          btn.querySelector('span')!.textContent = 'Rate';
+          btn.title = 'Rate this';
+          closeRatingPopover();
+        } catch { /* ignore */ }
+      };
+
+      const rect = btn.getBoundingClientRect();
+      popover.classList.remove('hidden');
+      const popW = popover.offsetWidth;
+      const left = Math.min(rect.left + window.scrollX, window.innerWidth - popW - 8);
+      popover.style.left = `${Math.max(8, left)}px`;
+      popover.style.top = `${rect.bottom + window.scrollY + 6}px`;
+    }
+
+    document.getElementById('rating-popover-close')!.addEventListener('click', () => closeRatingPopover());
+    document.addEventListener('click', (e) => {
+      const popover = document.getElementById('rating-popover')!;
+      if (!popover.classList.contains('hidden') && !popover.contains(e.target as Node) && e.target !== _activeRatingBtn) {
+        closeRatingPopover();
+      }
+    });
+
+    // ── List popover ───────────────────────────────────────────────────────────
+    let _activeListBtn: HTMLElement | null = null;
+    let _listTmdbId = '';
+    let _listMediaType = '';
+
+    function closeListPopover() {
+      document.getElementById('list-popover')!.classList.add('hidden');
+      _activeListBtn = null;
+    }
+
+    async function openListPopover(btn: HTMLElement, tmdbId: string, mediaType: string) {
+      _activeListBtn = btn;
+      _listTmdbId = tmdbId;
+      _listMediaType = mediaType;
+      const popover = document.getElementById('list-popover')!;
+      const itemsEl = document.getElementById('list-popover-items')!;
+      itemsEl.innerHTML = '<div class="px-3 py-2 text-xs text-zinc-500">Loading…</div>';
+      popover.classList.remove('hidden');
+
+      // Position near button (popover is absolute, so use page coords)
+      const rect = btn.getBoundingClientRect();
+      const top = rect.bottom + window.scrollY + 4;
+      const left = Math.min(rect.left + window.scrollX, window.innerWidth - 272);
+      popover.style.top = `${top}px`;
+      popover.style.left = `${left}px`;
+
+      // Fetch lists
+      let lists: { id: number; name: string }[] = [];
+      try {
+        const data = await apiFetch('/lists');
+        lists = data.lists ?? [];
+      } catch { lists = []; }
+
+      const currentLists: number[] = JSON.parse(btn.dataset.inLists ?? '[]');
+
+      if (!lists.length) {
+        itemsEl.innerHTML = '<div class="px-3 py-2 text-xs text-zinc-500">No lists yet.</div>';
+        return;
+      }
+
+      itemsEl.innerHTML = lists.map(l => `
+        <label class="flex items-center gap-2 px-3 py-2 hover:bg-zinc-800 cursor-pointer transition">
+          <input type="checkbox" data-list-id="${esc(String(l.id))}" ${currentLists.includes(l.id) ? 'checked' : ''}
+            class="w-3.5 h-3.5 rounded accent-blue-500" />
+          <span class="text-sm text-zinc-200 truncate">${esc(l.name)}</span>
+        </label>`).join('');
+
+      itemsEl.querySelectorAll<HTMLInputElement>('input[data-list-id]').forEach(cb => {
+        cb.addEventListener('change', async () => {
+          const listId = cb.dataset.listId!;
+          try {
+            if (cb.checked) {
+              await apiFetch(`/lists/${listId}/items`, 'POST', { tmdb_id: Number(_listTmdbId), media_type: _listMediaType });
+            } else {
+              // Find the list_item id — need to fetch list detail
+              const detail = await apiFetch(`/lists/${listId}`);
+              const item = detail.items?.find((i: { media: { tmdb_id: number } }) => i.media?.tmdb_id === Number(_listTmdbId));
+              if (item) {
+                await apiFetch(`/lists/${listId}/items/${item.id}`, 'DELETE');
+                // If we're on the list detail page for this list, remove the card immediately
+                const pageListId = window.location.pathname.match(/^\/list\/(\d+)/)?.[1];
+                if (pageListId === String(listId)) {
+                  const wrapper = document.querySelector(`[data-item-id="${item.id}"]`);
+                  wrapper?.remove();
+                  closeListPopover();
+                  const grid = document.getElementById('items-grid');
+                  if (grid && grid.children.length === 0) {
+                    document.getElementById('empty-state')?.classList.remove('hidden');
+                  }
+                }
+              }
+            }
+            // Update button state
+            if (_activeListBtn) {
+              const updated = cb.checked
+                ? [...JSON.parse(_activeListBtn.dataset.inLists ?? '[]'), Number(listId)]
+                : JSON.parse(_activeListBtn.dataset.inLists ?? '[]').filter((id: number) => id !== Number(listId));
+              _activeListBtn.dataset.inLists = JSON.stringify(updated);
+              const nowInLists = updated.length > 0;
+              _activeListBtn.dataset.state = nowInLists ? 'active' : 'inactive';
+
+              const isCard = _activeListBtn.parentElement?.classList.contains('grid');
+              if (nowInLists) {
+                _activeListBtn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-sky-500/10', 'hover:text-sky-400');
+                if (isCard) {
+                  _activeListBtn.classList.add('bg-sky-500/20', 'text-sky-400');
+                } else {
+                  _activeListBtn.classList.add('bg-sky-500/50', 'text-sky-300', 'hover:bg-sky-400/50');
+                }
+              } else {
+                _activeListBtn.classList.remove('bg-sky-500/20', 'bg-sky-500/50', 'text-sky-400', 'text-sky-300', 'hover:bg-sky-500/40', 'hover:bg-sky-400/50');
+                if (isCard) {
+                  _activeListBtn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-sky-500/10', 'hover:text-sky-400');
+                } else {
+                  _activeListBtn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-sky-500/10', 'hover:text-sky-400');
+                }
+              }
+            }
+          } catch { cb.checked = !cb.checked; }
+        });
+      });
+    }
+
+    document.getElementById('list-popover-close')!.addEventListener('click', () => closeListPopover());
+
+    document.getElementById('list-popover-create')!.addEventListener('click', () => {
+      closeListPopover();
+      openCreateListModal();
+    });
+
+    document.addEventListener('click', (e) => {
+      const popover = document.getElementById('list-popover')!;
+      if (!popover.classList.contains('hidden') && !popover.contains(e.target as Node) && e.target !== _activeListBtn) {
+        closeListPopover();
+      }
+    });
+
+    // ── Create list modal ──────────────────────────────────────────────────────
+    function openCreateListModal() {
+      const modal = document.getElementById('create-list-modal')!;
+      const input = document.getElementById('create-list-name') as HTMLInputElement;
+      input.value = '';
+      modal.classList.remove('hidden');
+      input.focus();
+    }
+
+    document.getElementById('create-list-cancel')!.addEventListener('click', () => {
+      document.getElementById('create-list-modal')!.classList.add('hidden');
+    });
+
+    document.getElementById('create-list-confirm')!.addEventListener('click', async () => {
+      const input = document.getElementById('create-list-name') as HTMLInputElement;
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      try {
+        await apiFetch('/lists', 'POST', { name });
+        document.getElementById('create-list-modal')!.classList.add('hidden');
+        // Re-open popover if we had an active card
+        if (_activeListBtn) {
+          const card = _activeListBtn.closest('[data-card]') as HTMLElement;
+          if (card) openListPopover(_activeListBtn, card.dataset.tmdbId!, card.dataset.mediaType!);
+        }
+      } catch { /* ignore */ }
+    });
+
+    document.getElementById('create-list-name')!.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') (document.getElementById('create-list-confirm') as HTMLButtonElement).click();
+    });
+
+    // ── Main event delegation ──────────────────────────────────────────────────
+    document.addEventListener('click', async (e) => {
+      const btn = (e.target as Element).closest<HTMLElement>('[data-action]');
+      if (!btn) return;
+
+      const card = btn.closest<HTMLElement>('[data-card]');
+      if (!card) return; // Not a media card action, let other listeners handle it
+
+      const action = btn.dataset.action;
+      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate'];
+      if (!action || !mediaActions.includes(action)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const tmdbIdRaw = card.dataset.tmdbId;
+      const tmdbId = tmdbIdRaw && tmdbIdRaw !== 'null' ? tmdbIdRaw : '';
+      const mediaId = card.dataset.id || '';
+      const mediaType = card.dataset.mediaType!;
+
+      if (action === 'watched') {
+        const isWatched = btn.dataset.watched === 'true';
+        const showTmdbId = card.dataset.showTmdbId;
+        const season = card.dataset.season;
+        // For season cards: showTmdbId = show TMDB ID, tmdbId = show TMDB ID (same)
+        // season is set → season-level operation
+        const seriesId = showTmdbId || tmdbId;
+
+        let confirmed = true;
+        if (mediaType === 'series' && season) {
+          confirmed = await showConfirm(
+            isWatched ? 'Mark season as unwatched?' : 'Mark season as watched?',
+            isWatched
+              ? 'This will remove all watch events for every episode in this season.'
+              : 'This will add a watch event for every episode in your library for this season.'
+          );
+        } else if (mediaType === 'series' && !isWatched) {
+          confirmed = await showConfirm('Mark all episodes as watched?', 'This will add a watch event for every episode in your library for this show.');
+        } else if (mediaType === 'series' && isWatched) {
+          confirmed = await showConfirm('Remove all watch history?', 'This will remove all watch events for every episode of this show.');
+        }
+        if (!confirmed) return;
+
+        try {
+          if (mediaType === 'movie' || mediaType === 'episode') {
+            if (isWatched) {
+              const query = tmdbId ? `tmdb_id=${tmdbId}` : `id=${mediaId}`;
+              await apiFetch(`/history/item?${query}&media_type=${mediaType}`, 'DELETE');
+            } else {
+              if (!tmdbId) throw new Error('Cannot mark unmatched item as watched');
+              await apiFetch('/history', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, completed: true });
+            }
+          } else if (mediaType === 'series' && season) {
+            if (isWatched) {
+              await apiFetch(`/history/season?series_tmdb_id=${seriesId}&season_number=${season}`, 'DELETE');
+            } else {
+              await apiFetch('/history/season', 'POST', { series_tmdb_id: Number(seriesId), season_number: Number(season) });
+            }
+          } else if (mediaType === 'series') {
+            if (isWatched) {
+              await apiFetch(`/history/show-all?series_tmdb_id=${tmdbId}`, 'DELETE');
+            } else {
+              await apiFetch('/history/show-all', 'POST', { series_tmdb_id: Number(tmdbId) });
+            }
+          }
+          const nowWatched = !isWatched;
+          
+          const updateButtonUI = (targetBtn, watched) => {
+            targetBtn.dataset.watched = String(watched);
+            targetBtn.dataset.state = watched ? 'active' : 'inactive';
+            targetBtn.title = watched ? 'Mark as unwatched' : 'Mark as watched';
+            
+            const isCard = targetBtn.parentElement?.classList.contains('grid');
+            if (watched) {
+              targetBtn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-400', 'hover:text-green-500');
+              if (isCard) {
+                targetBtn.classList.add('bg-green-500/20', 'text-green-400');
+              } else {
+                targetBtn.classList.add('bg-green-500/50', 'text-green-300', 'hover:bg-green-400/50');
+              }
+            } else {
+              targetBtn.classList.remove('bg-green-500/20', 'bg-green-500/50', 'text-green-400', 'text-green-300', 'hover:bg-green-500/40', 'hover:bg-green-400/50');
+              if (isCard) {
+                targetBtn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-500');
+              } else {
+                targetBtn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-green-500/10', 'hover:text-green-400');
+              }
+            }
+            targetBtn.querySelector('circle')?.setAttribute('fill', watched ? 'currentColor' : 'none');
+          };
+
+          // Update the clicked button
+          updateButtonUI(btn, nowWatched);
+
+          // If marking a show as watched/unwatched, update all season/episode cards on the page
+          if (mediaType === 'series' && !season) {
+            // Find season cards: can be [data-tmdb-id=SHOW_ID] with [data-season] set, 
+            // OR [data-show-tmdb-id=SHOW_ID] with [data-season] set.
+            const allSeasonCards = document.querySelectorAll(`
+              [data-card][data-media-type="series"][data-tmdb-id="${tmdbId}"][data-season]:not([data-season=""]),
+              [data-card][data-media-type="series"][data-show-tmdb-id="${tmdbId}"][data-season]:not([data-season=""])
+            `);
+            allSeasonCards.forEach(c => {
+              const sBtn = c.querySelector('[data-action="watched"]');
+              if (sBtn) updateButtonUI(sBtn, nowWatched);
+            });
+            // Also update any episode cards for this show
+            const allEpCards = document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${tmdbId}"]`);
+            allEpCards.forEach(c => {
+              const eBtn = c.querySelector('[data-action="watched"]');
+              if (eBtn) updateButtonUI(eBtn, nowWatched);
+            });
+          }
+
+          // If marking a season as watched/unwatched, update all episodes for that season on the page
+          if (mediaType === 'series' && season) {
+            const allEpCards = document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${seriesId}"][data-season="${season}"]`);
+            allEpCards.forEach(c => {
+              const eBtn = c.querySelector('[data-action="watched"]');
+              if (eBtn) updateButtonUI(eBtn, nowWatched);
+            });
+          }
+        } catch { /* ignore */ }
+
+      } else if (action === 'list') {
+        if (!tmdbId) { alert('Cannot add unmatched item to lists'); return; }
+        if (document.getElementById('list-popover')!.classList.contains('hidden') || _activeListBtn !== btn) {
+          openListPopover(btn, tmdbId, mediaType);
+        } else {
+          closeListPopover();
+        }
+
+      } else if (action === 'collected') {
+        const season = card.dataset.season;
+        const showTmdbId = card.dataset.showTmdbId;
+        if (mediaType === 'series' && !season) return; // show-level: read-only
+        const inLibrary = btn.dataset.inLibrary === 'true';
+        const seriesId = showTmdbId || tmdbId;
+        try {
+          if (mediaType === 'series' && season) {
+            // Season-level collect/uncollect
+            if (inLibrary) {
+              const ok = await showConfirm('Remove season from collection?', 'This will remove all collection entries for this season.');
+              if (!ok) return;
+              await apiFetch(`/media/collect-season?series_tmdb_id=${seriesId}&season_number=${season}`, 'DELETE');
+            } else {
+              await apiFetch('/media/collect-season', 'POST', { series_tmdb_id: Number(seriesId), season_number: Number(season) });
+            }
+          } else {
+            if (inLibrary) {
+              const ok = await showConfirm('Remove from collection?', 'This will remove all collection entries for this item.');
+              if (!ok) return;
+              const query = tmdbId ? `tmdb_id=${tmdbId}` : `id=${mediaId}`;
+              await apiFetch(`/media/collect?${query}&media_type=${mediaType}`, 'DELETE');
+            } else {
+              if (!tmdbId) { alert('Cannot manually collect unmatched items'); return; }
+              const collectBody: Record<string, number | string> = { tmdb_id: Number(tmdbId), media_type: mediaType };
+              if (mediaType === 'episode') {
+                const epNum = card.dataset.episodeNumber;
+                if (showTmdbId) collectBody.series_tmdb_id = Number(showTmdbId);
+                if (season) collectBody.season_number = Number(season);
+                if (epNum) collectBody.episode_number = Number(epNum);
+              }
+              await apiFetch('/media/collect', 'POST', collectBody);
+            }
+          }
+          const nowInLibrary = !inLibrary;
+          btn.dataset.inLibrary = String(nowInLibrary);
+          btn.dataset.state = nowInLibrary ? 'active' : 'inactive';
+
+          const isCard = btn.parentElement?.classList.contains('grid');
+          if (nowInLibrary) {
+            btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
+            if (isCard) {
+              btn.classList.add('bg-purple-500/20', 'text-purple-400');
+            } else {
+              btn.classList.add('bg-purple-500/50', 'text-purple-300', 'hover:bg-purple-400/50');
+            }
+          } else {
+            btn.classList.remove('bg-purple-500/20', 'bg-purple-500/50', 'text-purple-400', 'text-purple-300', 'hover:bg-purple-500/40', 'hover:bg-purple-400/50');
+            if (isCard) {
+              btn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
+            } else {
+              btn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-purple-500/50', 'hover:text-purple-400');
+            }
+          }
+
+          const collectionPct = Number(btn.dataset.collectionPct || 0);
+          btn.title = mediaType === 'series' && !season
+            ? `${collectionPct}% in library`
+            : (nowInLibrary ? 'In collection' : 'Add to collection');
+        } catch { /* ignore */ }
+
+      } else if (action === 'rate') {
+        const currentRating = btn.dataset.userRating ? Number(btn.dataset.userRating) : null;
+        const ratingSeason = card.dataset.season ? Number(card.dataset.season) : null;
+        if (document.getElementById('rating-popover')!.classList.contains('hidden') || _activeRatingBtn !== btn) {
+          openRatingPopover(btn, tmdbId, mediaType, currentRating, ratingSeason);
+        } else {
+          closeRatingPopover();
+        }
+
+      } else if (action === 'request') {
+        const originalContent = btn.innerHTML;
+        btn.innerHTML = '<svg class="animate-spin h-5 w-5 text-orange-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+        btn.classList.add('pointer-events-none');
+        
+        try {
+          const res = await apiFetch(`/media/${mediaType}/${tmdbId}/request`, 'POST');
+          if (res.status === 'added' || res.status === 'already_exists') {
+            btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-500"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-green-500">' + (res.status === 'added' ? 'Added' : 'Exists') + '</span>';
+            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
+            btn.classList.add('bg-green-500/10', 'text-green-500');
+            (btn as HTMLButtonElement).disabled = true;
+          } else {
+            throw new Error('Failed to request');
+          }
+        } catch (err: any) {
+          btn.innerHTML = originalContent;
+          btn.classList.remove('pointer-events-none');
+          // Try to parse error message
+          let msg = 'Request failed';
+          try {
+             const data = JSON.parse(err.message);
+             msg = data.detail || msg;
+          } catch {
+             if (err.message) msg = err.message;
+          }
+          alert(msg);
+        }
+      }
+    });
+  </script>
+  <script>
+    // ── PWA install prompt ─────────────────────────────────────────────────────
+    const DISMISS_KEY = 'pwa-install-dismissed';
+    const DISMISS_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+    const banner   = document.getElementById('pwa-banner')!;
+    const msgEl    = document.getElementById('pwa-banner-msg')!;
+    const installWrap = document.getElementById('pwa-install-wrap')!;
+    const installBtn  = document.getElementById('pwa-install-btn')!;
+    const dismissBtn  = document.getElementById('pwa-dismiss')!;
+
+    // Don't show if already running as installed PWA
+    const isInstalled = window.matchMedia('(display-mode: standalone)').matches
+      || (navigator as any).standalone === true;
+
+    const wasDismissed = (() => {
+      const val = localStorage.getItem(DISMISS_KEY);
+      return val ? Date.now() - Number(val) < DISMISS_TTL : false;
+    })();
+
+    function showBanner() {
+      if (isInstalled || wasDismissed) return;
+      banner.classList.remove('hidden');
+    }
+
+    function dismiss() {
+      banner.classList.add('hidden');
+      localStorage.setItem(DISMISS_KEY, String(Date.now()));
+    }
+
+    dismissBtn.addEventListener('click', dismiss);
+
+    // ── Android / desktop Chrome: use beforeinstallprompt ─────────────────────
+    let deferredPrompt: any = null;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installWrap.classList.remove('hidden');
+      setTimeout(showBanner, 2000);
+    });
+
+    installBtn.addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      if (outcome === 'accepted') {
+        banner.classList.add('hidden');
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      banner.classList.add('hidden');
+      deferredPrompt = null;
+    });
+
+    // ── iOS Safari: no beforeinstallprompt — show manual instructions ─────────
+    // iPadOS 13+ spoofs a desktop Mac UA, so also check for Mac + touch support
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent)
+      || (navigator.userAgent.includes('Mac') && navigator.maxTouchPoints > 1);
+    const isInStandaloneMode = (navigator as any).standalone === true;
+
+    if (isIos && !isInStandaloneMode) {
+      msgEl.textContent = 'Tap the Share button, then "Add to Home Screen".';
+      setTimeout(showBanner, 2000);
+    }
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((err) => {
+          console.warn('[SW] Registration failed:', err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>

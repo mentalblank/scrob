@@ -1,0 +1,18 @@
+# Documentation / assets — not needed in the image
+docs/
+
+# Dev tooling
+.git/
+.github/
+*.md
+AGENTS.md
+CLAUDE.md
+
+# Dev DB and local env
+.testdb/
+.env
+*.env
+
+# Test files
+test.http
+docker-compose-test-db.yaml

@@ -1,0 +1,53 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+
+// This page is the OIDC redirect_uri — the provider sends the browser here with
+// ?code=...&state=... after the user authenticates.
+
+let error = "";
+
+const urlError = Astro.url.searchParams.get("error");
+const errorDescription = Astro.url.searchParams.get("error_description");
+if (urlError) {
+  error = errorDescription || urlError;
+}
+
+if (!error) {
+  const code = Astro.url.searchParams.get("code") ?? "";
+  const state = Astro.url.searchParams.get("state") ?? "";
+  const storedState = Astro.cookies.get("oidc_state")?.value ?? "";
+
+  if (!code) {
+    error = "No authorization code returned by provider.";
+  } else if (!storedState || storedState !== state) {
+    error = "Invalid state parameter. Please try logging in again.";
+  } else {
+    Astro.cookies.delete("oidc_state", { path: "/" });
+
+    try {
+      const { access_token } = await api.auth.oidcExchange(code);
+      Astro.cookies.set("token", access_token, {
+        path: "/",
+        httpOnly: true,
+        secure: import.meta.env.PROD,
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 7,
+      });
+      return Astro.redirect("/");
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : "SSO login failed";
+    }
+  }
+}
+---
+
+<Base title="Login">
+  <div class="max-w-md mx-auto mt-20 p-8 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl">
+    <h1 class="text-3xl font-bold mb-6 text-zinc-100">Login</h1>
+    <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg mb-6">
+      {error}
+    </div>
+    <a href="/login" class="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Back to login</a>
+  </div>
+</Base>

@@ -1,0 +1,158 @@
+---
+import type { MediaItem } from "../lib/api";
+import CardActionBar from "./CardActionBar.astro";
+
+interface Props {
+  item: MediaItem;
+}
+
+const { item } = Astro.props;
+
+const sxe =
+  item.season_number != null && item.episode_number != null
+    ? `S${String(item.season_number).padStart(2, "0")}E${String(item.episode_number).padStart(2, "0")}`
+    : null;
+
+const isSeries = item.type === "series";
+
+const href =
+  item.show_tmdb_id && item.season_number != null && item.episode_number != null
+    ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
+    : item.show_tmdb_id
+      ? `/show/${item.show_tmdb_id}`
+      : isSeries && item.tmdb_id
+        ? `/show/${item.tmdb_id}`
+        : item.tmdb_id && item.season_number != null
+          ? `/media/${item.type}/${item.tmdb_id}`
+          : null;
+
+// Episodes: use episode still, fall back to show backdrop then show poster.
+const rawImage = isSeries
+  ? (item.backdrop_path ?? item.poster_path)
+  : (item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
+const imageUrl = rawImage
+  ? rawImage.startsWith("http")
+    ? rawImage
+    : `https://image.tmdb.org/t/p/w780${rawImage}`
+  : null;
+
+const watched = item.watched ?? false;
+const inLists = item.in_lists ?? [];
+const inLibrary = item.in_library ?? false;
+const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
+---
+
+<div
+  class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1"
+  data-card
+  data-tmdb-id={String(item.tmdb_id)}
+  data-media-type={item.type}
+  data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : ""}
+  data-season={item.season_number != null ? String(item.season_number) : ""}
+>
+  {href ? (
+    <a href={href} class="block">
+      <!-- Backdrop container: 3:2 (no title info here — info is below action bar) -->
+      <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={item.title}
+            class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-[#18181b]">
+            <span class="text-3xl mb-2 opacity-30">📺</span>
+            <span class="text-xs font-bold uppercase tracking-widest text-[#52525b]">{item.show_title ?? item.title}</span>
+          </div>
+        )}
+
+        <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+
+        {sxe && (
+          <div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">
+            {sxe}
+          </div>
+        )}
+
+        {item.library?.resolution && (
+          <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg tracking-tighter">
+            {item.library.resolution}
+          </div>
+        )}
+      </div>
+    </a>
+  ) : (
+    <div class="block">
+      <!-- Backdrop container: no link when metadata is incomplete -->
+      <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5">
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={item.title}
+            class="w-full h-full object-cover"
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-[#18181b]">
+            <span class="text-3xl mb-2 opacity-30">📺</span>
+            <span class="text-xs font-bold uppercase tracking-widest text-[#52525b]">{item.show_title ?? item.title}</span>
+          </div>
+        )}
+
+        <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+
+        {sxe && (
+          <div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">
+            {sxe}
+          </div>
+        )}
+
+        {item.library?.resolution && (
+          <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg tracking-tighter">
+            {item.library.resolution}
+          </div>
+        )}
+
+        <div class="absolute bottom-2 left-2 right-2 bg-amber-500/90 backdrop-blur-md text-zinc-950 text-xs font-bold px-2 py-1 rounded-md text-center tracking-tight">
+          Metadata missing — refresh from the show page
+        </div>
+      </div>
+    </div>
+  )}
+
+  <!-- Action bar (below image, above info) -->
+  <CardActionBar
+    watched={watched}
+    inLists={inLists}
+    inLibrary={inLibrary}
+    collectionPct={collectionPct}
+    isSeries={isSeries}
+  />
+
+  <!-- Info -->
+  {href ? (
+    <a href={href} class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+      {item.show_title && (
+        <p class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</p>
+      )}
+      <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors leading-tight">
+        {item.title}
+      </h3>
+      {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">{sxe}</span>}
+    </a>
+  ) : (
+    <div class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+      {item.show_title && (
+        <p class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</p>
+      )}
+      <h3 class="text-sm font-bold text-zinc-500 truncate leading-tight">
+        {item.title}
+      </h3>
+      {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide mt-0.5 block">{sxe}</span>}
+    </div>
+  )}
+</div>

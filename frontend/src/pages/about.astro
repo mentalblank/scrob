@@ -1,0 +1,145 @@
+---
+import Base from "../layouts/Base.astro";
+
+Astro.response.headers.set("Cache-Control", "no-store");
+
+const currentVersion = process.env.APP_VERSION ?? 'dev';
+
+let latestVersion: string | null = null;
+let releaseUrl: string | null = null;
+let updateAvailable = false;
+
+function isNewer(latest: string, current: string): boolean {
+  const parse = (v: string) => v.split('.').map(Number);
+  const [lMaj, lMin, lPat] = parse(latest);
+  const [cMaj, cMin, cPat] = parse(current);
+  if (lMaj !== cMaj) return lMaj > cMaj;
+  if (lMin !== cMin) return lMin > cMin;
+  return lPat > cPat;
+}
+
+if (currentVersion !== 'dev') {
+  try {
+    const res = await fetch('https://api.github.com/repos/ellite/scrob/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'scrob-app' },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      latestVersion = (data.tag_name as string)?.replace(/^v/, '') ?? null;
+      releaseUrl = data.html_url ?? null;
+      if (latestVersion) {
+        updateAvailable = isNewer(latestVersion, currentVersion);
+      }
+    }
+  } catch {
+    // best-effort — silently skip if GitHub is unreachable
+  }
+}
+---
+
+<Base title="About">
+  <div class="max-w-2xl mx-auto py-8">
+    <div class="flex items-center gap-4 mb-8">
+      <img src="/scrob.png" alt="Scrob Logo" class="w-16 h-16 object-contain" />
+      <div>
+        <h1 class="text-3xl font-bold text-zinc-100">Scrob</h1>
+        <p class="text-zinc-500 text-sm mt-0.5">Version {currentVersion}</p>
+      </div>
+    </div>
+
+    {updateAvailable && (
+      <a
+        href={releaseUrl!}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="flex items-center justify-between gap-3 mb-6 px-4 py-3 rounded-lg bg-blue-950 border border-blue-700 text-blue-300 hover:bg-blue-900 transition-colors group"
+      >
+        <div class="flex items-center gap-3">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span>
+            Version <strong class="text-blue-200">{latestVersion}</strong> is available
+            <span class="text-blue-500 ml-1">— view changelog</span>
+          </span>
+        </div>
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-50 group-hover:opacity-100 transition-opacity shrink-0"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+      </a>
+    )}
+
+    <div class="space-y-6 text-zinc-400 leading-relaxed">
+      <p>
+        Scrob - Open Source, Self-hosted media tracking app. It syncs your libraries from Jellyfin, Plex, and Emby,
+        tracks your watch history, ratings, and personal lists — Your own private Letterboxd + Trakt.
+      </p>
+
+      <div>
+        <h2 class="text-lg font-semibold text-zinc-100 mb-3">Links</h2>
+        <div class="space-y-2">
+          <a
+            href="https://github.com/ellite/scrob"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-2 text-zinc-400 hover:text-zinc-100 transition-colors group"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="shrink-0">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12"/>
+            </svg>
+            <span>GitHub — ellite/scrob</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-0 group-hover:opacity-50 transition-opacity"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+          </a>
+          <a
+            href="https://github.com/ellite/scrob/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-2 text-zinc-400 hover:text-zinc-100 transition-colors group"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span>Issues &amp; Requests</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-0 group-hover:opacity-50 transition-opacity"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+          </a>
+          <a
+            href="https://github.com/ellite/scrob/blob/main/LICENSE.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-2 text-zinc-400 hover:text-zinc-100 transition-colors group"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <span>License — GNU GPL v3</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-0 group-hover:opacity-50 transition-opacity"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+          </a>
+          <a
+            href="https://henrique.pt"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-2 text-zinc-400 hover:text-zinc-100 transition-colors group"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span>Author — Henrique.pt</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-0 group-hover:opacity-50 transition-opacity"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-zinc-800 text-sm text-zinc-600">
+        Built with Astro, FastAPI, and PostgreSQL. Powered by TMDB.
+      </div>
+    </div>
+  </div>
+</Base>

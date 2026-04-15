@@ -1,0 +1,471 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+export const prerender = false;
+
+const { token } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
+const [settings, profileData] = await Promise.all([
+  api.auth.getSettings(token!),
+  api.profile.get(token!).catch(() => null),
+]);
+const hasTmdbKey = !!settings?.tmdb_api_key;
+const watchRegion: string = profileData?.country ?? 'US';
+const hasProfileData = !!(
+  profileData?.country ||
+  (profileData?.movie_genres?.length ?? 0) > 0 ||
+  (profileData?.show_genres?.length ?? 0) > 0 ||
+  (profileData?.streaming_services?.length ?? 0) > 0
+);
+
+const topMovieGenres = (profileData?.movie_genres ?? []).slice(0, 3);
+const topShowGenres  = (profileData?.show_genres  ?? []).slice(0, 3);
+
+const PROVIDER_NAMES: Record<string, string> = {
+  "8": "Netflix", "9": "Prime Video", "337": "Disney+",
+  "350": "Apple TV+", "1899": "Max", "15": "Hulu",
+};
+
+const userServices = (profileData?.streaming_services ?? []).filter(id => id in PROVIDER_NAMES);
+
+const MOVIE_GENRES = [
+  { label: "Action", emoji: "💥" },
+  { label: "Adventure", emoji: "🗺️" },
+  { label: "Animation", emoji: "🎨" },
+  { label: "Comedy", emoji: "😂" },
+  { label: "Crime", emoji: "🔍" },
+  { label: "Documentary", emoji: "🎥" },
+  { label: "Drama", emoji: "🎭" },
+  { label: "Fantasy", emoji: "🧙" },
+  { label: "Horror", emoji: "👻" },
+  { label: "Mystery", emoji: "🕵️" },
+  { label: "Romance", emoji: "💕" },
+  { label: "Science Fiction", emoji: "🚀" },
+  { label: "Thriller", emoji: "😰" },
+  { label: "War", emoji: "⚔️" },
+  { label: "Western", emoji: "🤠" },
+];
+
+const TV_GENRES = [
+  { label: "Action & Adventure", emoji: "💥" },
+  { label: "Animation", emoji: "🎨" },
+  { label: "Comedy", emoji: "😂" },
+  { label: "Crime", emoji: "🔍" },
+  { label: "Documentary", emoji: "🎥" },
+  { label: "Drama", emoji: "🎭" },
+  { label: "Kids", emoji: "🧸" },
+  { label: "Mystery", emoji: "🕵️" },
+  { label: "Reality", emoji: "📺" },
+  { label: "Sci-Fi & Fantasy", emoji: "🚀" },
+  { label: "Thriller", emoji: "😰" },
+  { label: "War & Politics", emoji: "⚔️" },
+  { label: "Western", emoji: "🤠" },
+];
+
+// Poster skeleton (2:3, for movies)
+function skeleton() {
+  return Array.from({ length: 8 }).map(() => `
+    <div class="flex-shrink-0 w-40 animate-pulse">
+      <div class="aspect-[2/3] rounded-2xl bg-zinc-800/80 mb-2"></div>
+      <div class="h-2.5 bg-zinc-800 rounded-full w-3/4 mb-1.5"></div>
+      <div class="h-2.5 bg-zinc-800 rounded-full w-1/2"></div>
+    </div>
+  `).join('');
+}
+
+// Backdrop skeleton (3:2, for shows)
+function skeletonWide() {
+  return Array.from({ length: 6 }).map(() => `
+    <div class="flex-shrink-0 w-56 animate-pulse">
+      <div class="aspect-[3/2] rounded-xl bg-zinc-800/80"></div>
+    </div>
+  `).join('');
+}
+---
+
+<Base title="Discover">
+  <div class="mb-10">
+    <h1 class="text-3xl font-black text-zinc-100 tracking-tight">Discover</h1>
+  </div>
+
+  {!hasTmdbKey && (
+    <div class="p-10 bg-zinc-900/50 border border-zinc-800 rounded-2xl text-center mb-10">
+      <h2 class="text-xl font-bold text-zinc-100 mb-2">TMDB API Key Required</h2>
+      <p class="text-zinc-400 mb-5 max-w-md mx-auto">Add your TMDB API key in settings to unlock Discover.</p>
+      <a href="/settings" class="inline-flex px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all">
+        Go to Settings
+      </a>
+    </div>
+  )}
+
+  {hasTmdbKey && (
+    <>
+      <!-- For You -->
+      {hasProfileData && (topMovieGenres.length > 0 || topShowGenres.length > 0) && (
+        <section data-section class="mb-10">
+          <div class="flex items-baseline gap-3 mb-5">
+            <h2 class="text-2xl font-black text-zinc-100 tracking-tight">For You</h2>
+            <span class="text-xs text-zinc-500 font-medium">Based on your favourite genres</span>
+          </div>
+          <div id="for-you" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+            <Fragment set:html={skeleton()} />
+          </div>
+        </section>
+      )}
+
+      <!-- Now Playing -->
+      <section data-section class="mb-10">
+        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Now Playing in Theaters</h2>
+        <div id="now-playing" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+          <Fragment set:html={skeleton()} />
+        </div>
+      </section>
+
+      <!-- Trending Trailers -->
+      <section data-section class="mb-10">
+        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Trending Trailers</h2>
+        <div id="trending-trailers" class="flex gap-4 overflow-x-auto pb-3 scrollbar-none">
+          <Fragment set:html={skeletonWide()} />
+        </div>
+      </section>
+
+      <!-- Movie Genres (static) -->
+      <section class="mb-10">
+        <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest mb-4">Discover Movies</h2>
+        <div class="flex flex-wrap gap-2">
+          {MOVIE_GENRES.map(g => (
+            <a
+              href={`/movies?genre=${encodeURIComponent(g.label)}`}
+              class="flex items-center gap-2 px-5 py-3 bg-zinc-900 border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800 text-zinc-300 hover:text-zinc-100 text-base font-medium rounded-xl transition-all active:scale-95 active:opacity-70"
+            >
+              <span>{g.emoji}</span>
+              <span>{g.label}</span>
+            </a>
+          ))}
+        </div>
+      </section>
+
+      <!-- Favourite movie genre rows (poster) -->
+      {hasProfileData && topMovieGenres.map((genre, i) => (
+        <section data-section class="mb-10">
+          <div class="flex items-baseline gap-3 mb-5">
+            <h2 class="text-2xl font-black text-zinc-100 tracking-tight">{genre} Movies</h2>
+            <a href={`/movies?genre=${encodeURIComponent(genre)}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+          </div>
+          <div id={`movie-genre-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+            <Fragment set:html={skeleton()} />
+          </div>
+        </section>
+      ))}
+
+      <!-- Coming Soon -->
+      <section data-section class="mb-10">
+        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Coming Soon</h2>
+        <div id="coming-soon" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+          <Fragment set:html={skeleton()} />
+        </div>
+      </section>
+
+      <!-- Top Rated Movies -->
+      <section data-section class="mb-10">
+        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Top Rated Movies</h2>
+        <div id="top-rated-movies" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+          <Fragment set:html={skeleton()} />
+        </div>
+      </section>
+
+      {!hasProfileData && (
+        <section class="relative mb-16 rounded-3xl overflow-hidden flex items-center" id="profile-banner">
+          <div class="absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/95 to-zinc-900"></div>
+          <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_left,_rgba(59,130,246,0.12)_0%,_transparent_50%)]"></div>
+          <div class="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 rounded-l-3xl"></div>
+          <div class="relative px-8 py-8 sm:px-12 flex flex-col md:flex-row md:items-center justify-between w-full gap-5">
+            <div>
+              <p class="text-xs font-black uppercase tracking-[0.2em] text-blue-400 mb-1.5">Personalise your experience</p>
+              <h2 class="text-lg font-black text-zinc-100 leading-tight">Add your region, genres and streaming services to unlock personalised recommendations.</h2>
+            </div>
+            <a
+              href="/user-settings"
+              class="shrink-0 self-start md:self-auto inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-zinc-100 font-black rounded-2xl transition-all shadow-xl shadow-blue-900/40 active:scale-95 text-sm uppercase tracking-wider"
+            >
+              Update profile
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+              </svg>
+            </a>
+          </div>
+        </section>
+      )}
+
+      <!--
+        Streaming: each service gets its movies row + shows row adjacent.
+        Personalised (user's services) or fallback (Netflix + Prime / Netflix + Disney+).
+      -->
+      {hasProfileData && userServices.length > 0
+        ? userServices.map((id, i) => (
+            <Fragment>
+              <section data-section class="mb-6">
+                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On {PROVIDER_NAMES[id]}</h2>
+                <div id={`streaming-movie-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+                  <Fragment set:html={skeleton()} />
+                </div>
+              </section>
+              <section data-section class="mb-10">
+                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">{PROVIDER_NAMES[id]} Shows</h2>
+                <div id={`streaming-show-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+                  <Fragment set:html={skeletonWide()} />
+                </div>
+              </section>
+            </Fragment>
+          ))
+        : !hasProfileData && (
+            <Fragment>
+              <section data-section class="mb-6">
+                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On Netflix</h2>
+                <div id="fallback-movie-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+                  <Fragment set:html={skeleton()} />
+                </div>
+              </section>
+              <section data-section class="mb-10">
+                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Netflix Shows</h2>
+                <div id="fallback-show-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+                  <Fragment set:html={skeletonWide()} />
+                </div>
+              </section>
+              <section data-section class="mb-6">
+                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On Prime Video</h2>
+                <div id="fallback-movie-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+                  <Fragment set:html={skeleton()} />
+                </div>
+              </section>
+              <section data-section class="mb-10">
+                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Disney+ Shows</h2>
+                <div id="fallback-show-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+                  <Fragment set:html={skeletonWide()} />
+                </div>
+              </section>
+            </Fragment>
+          )
+      }
+
+      <!-- TV Show Genres (static) -->
+      <section class="mb-10">
+        <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest mb-4">Discover TV Shows</h2>
+        <div class="flex flex-wrap gap-2">
+          {TV_GENRES.map(g => (
+            <a
+              href={`/shows?genre=${encodeURIComponent(g.label)}`}
+              class="flex items-center gap-2 px-5 py-3 bg-zinc-900 border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800 text-zinc-300 hover:text-zinc-100 text-base font-medium rounded-xl transition-all active:scale-95 active:opacity-70"
+            >
+              <span>{g.emoji}</span>
+              <span>{g.label}</span>
+            </a>
+          ))}
+        </div>
+      </section>
+
+      <!-- Favourite show genre rows (backdrop) -->
+      {hasProfileData && topShowGenres.map((genre, i) => (
+        <section data-section class="mb-10">
+          <div class="flex items-baseline gap-3 mb-5">
+            <h2 class="text-2xl font-black text-zinc-100 tracking-tight">{genre} Shows</h2>
+            <a href={`/shows?genre=${encodeURIComponent(genre)}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+          </div>
+          <div id={`show-genre-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+            <Fragment set:html={skeletonWide()} />
+          </div>
+        </section>
+      ))}
+
+      <!-- On Air This Week (backdrop) -->
+      <section data-section class="mb-10">
+        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On Air This Week</h2>
+        <div id="on-air-this-week" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+          <Fragment set:html={skeletonWide()} />
+        </div>
+      </section>
+
+      <!-- Top Rated Shows (backdrop) -->
+      <section data-section class="mb-10">
+        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Top Rated Shows</h2>
+        <div id="top-rated-shows" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+          <Fragment set:html={skeletonWide()} />
+        </div>
+      </section>
+
+      <!-- Hidden Gems (poster) -->
+      <section data-section class="mb-10">
+        <div class="flex items-baseline gap-3 mb-5">
+          <h2 class="text-2xl font-black text-zinc-100 tracking-tight">Hidden Gems</h2>
+          <span class="text-xs text-zinc-500 font-medium">Critically acclaimed · under the radar</span>
+        </div>
+        <div id="hidden-gems" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+          <Fragment set:html={skeleton()} />
+        </div>
+      </section>
+    </>
+  )}
+</Base>
+
+<script define:vars={{ token, watchRegion, hasProfileData, topMovieGenres, topShowGenres, userServices }}>
+  function esc(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function itemUrl(item) {
+    if (item.type === 'series') return '/show/' + item.tmdb_id;
+    return '/media/movie/' + item.tmdb_id;
+  }
+
+  // 2:3 poster card — movies
+  function posterCard(item) {
+    const url = itemUrl(item);
+    const year = item.release_date ? item.release_date.slice(0, 4) : '';
+    const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : '';
+    return `<a href="${esc(url)}" class="flex-shrink-0 w-40 group active:scale-95 active:opacity-70 transition-all duration-150">
+      <div class="relative aspect-[2/3] rounded-2xl overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
+        ${item.poster_path
+          ? `<img src="${esc(item.poster_path)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy">`
+          : `<div class="w-full h-full flex items-center justify-center text-zinc-400 text-xs text-center px-2">${esc(item.title)}</div>`
+        }
+        <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+      </div>
+      <p class="text-sm font-bold text-zinc-500 dark:text-zinc-300 truncate group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors leading-snug">${esc(item.title)}</p>
+      <p class="text-xs text-zinc-500 mt-0.5">${rating ? '★ ' + esc(rating) : ''}${rating && year ? ' · ' : ''}${esc(year)}</p>
+    </a>`;
+  }
+
+  // 3:2 backdrop card — shows (title overlaid inside)
+  function backdropCard(item) {
+    const url = itemUrl(item);
+    const year = item.release_date ? item.release_date.slice(0, 4) : '';
+    const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : '';
+    const img = item.backdrop_path || item.poster_path;
+    const meta = [rating ? '★ ' + rating : '', year].filter(Boolean).join(' · ');
+    return `<a href="${esc(url)}" class="flex-shrink-0 w-56 group active:scale-95 active:opacity-70 transition-all duration-150">
+      <div class="relative aspect-[3/2] rounded-xl overflow-hidden bg-zinc-800 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
+        ${img
+          ? `<img src="${esc(img)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy">`
+          : `<div class="w-full h-full bg-zinc-800"></div>`
+        }
+        <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
+        <div class="absolute bottom-0 left-0 right-0 p-3">
+          <p class="text-sm font-bold text-white leading-snug line-clamp-2">${esc(item.title)}</p>
+          ${meta ? `<p class="text-xs text-white/60 mt-0.5">${esc(meta)}</p>` : ''}
+        </div>
+      </div>
+    </a>`;
+  }
+
+  // Trailer card — YouTube thumbnail with play button, opens YouTube in new tab
+  function trailerCard(item) {
+    const year = item.release_date ? item.release_date.slice(0, 4) : '';
+    const thumb = `https://img.youtube.com/vi/${esc(item.trailer_key)}/hqdefault.jpg`;
+    const ytUrl = `https://www.youtube.com/watch?v=${esc(item.trailer_key)}`;
+    return `<a href="${ytUrl}" target="_blank" rel="noopener noreferrer" class="flex-shrink-0 w-64 group active:scale-95 active:opacity-70 transition-all duration-150">
+      <div class="relative aspect-video rounded-xl overflow-hidden bg-zinc-800 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300 mb-2">
+        <img src="${thumb}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy">
+        <div class="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-colors duration-300 flex items-center justify-center">
+          <div class="w-12 h-12 rounded-full bg-red-600 group-hover:bg-red-500 transition-colors duration-200 flex items-center justify-center shadow-xl">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" class="w-5 h-5 translate-x-0.5"><path d="M8 5v14l11-7z"/></svg>
+          </div>
+        </div>
+      </div>
+      <p class="text-sm font-bold text-zinc-300 truncate group-hover:text-zinc-100 transition-colors leading-snug">${esc(item.title)}</p>
+      <p class="text-xs text-zinc-500 mt-0.5 truncate">${esc(item.trailer_name)}${item.trailer_name && year ? ' · ' : ''}${esc(year)}</p>
+    </a>`;
+  }
+
+  async function loadTrailers(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    try {
+      const res = await fetch('/api/proxy/media/trending/trailers', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const items = (data.results || []).slice(0, 16);
+      if (!items.length) {
+        container.closest('[data-section]')?.remove();
+        return;
+      }
+      container.innerHTML = items.map(trailerCard).join('');
+    } catch {
+      container.closest('[data-section]')?.remove();
+    }
+  }
+
+  // Static sections
+  async function loadSection(containerId, url, mode = 'poster') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    try {
+      const res = await fetch(`/api/proxy${url}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const items = (data.results || []).slice(0, 16);
+      if (!items.length) {
+        container.closest('[data-section]')?.remove();
+        return;
+      }
+      container.innerHTML = items.map(item => mode === 'backdrop' ? backdropCard(item) : posterCard(item)).join('');
+    } catch {
+      container.closest('[data-section]')?.remove();
+    }
+  }
+
+  // Static sections
+  loadSection('now-playing',      '/media/now-playing');
+  loadTrailers('trending-trailers');
+  loadSection('coming-soon',      '/media/upcoming');
+  loadSection('top-rated-movies', '/media/top-rated-movies');
+  loadSection('on-air-this-week', '/media/on-air-this-week', 'backdrop');
+  loadSection('top-rated-shows',  '/media/top-rated-shows',  'backdrop');
+  loadSection('hidden-gems',      '/media/hidden-gems?type=movie');
+
+  // For You (poster — consistent in a mixed row)
+  if (document.getElementById('for-you')) {
+    loadSection('for-you', '/media/for-you');
+  }
+
+  // Favourite genre rows
+  topMovieGenres.forEach((genre, i) => {
+    loadSection(`movie-genre-${i}`, `/media/tmdb/list?type=movie&genre=${encodeURIComponent(genre)}&category=popular`);
+  });
+  topShowGenres.forEach((genre, i) => {
+    loadSection(`show-genre-${i}`, `/media/tmdb/list?type=series&genre=${encodeURIComponent(genre)}&category=popular`, 'backdrop');
+  });
+
+  // Streaming rows (movies + shows paired per service)
+  if (hasProfileData && userServices.length > 0) {
+    userServices.forEach((id, i) => {
+      loadSection(`streaming-movie-${i}`, `/media/streaming?provider_id=${id}&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
+      loadSection(`streaming-show-${i}`,  `/media/streaming?provider_id=${id}&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+    });
+  } else if (!hasProfileData) {
+    loadSection('fallback-movie-0', `/media/streaming?provider_id=8&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
+    loadSection('fallback-show-0',  `/media/streaming?provider_id=8&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+    loadSection('fallback-movie-1', `/media/streaming?provider_id=9&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
+    loadSection('fallback-show-1',  `/media/streaming?provider_id=337&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+  }
+
+  window.addEventListener('pageshow', (e) => { if (e.persisted) location.replace(location.href); });
+</script>
+
+<style>
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+</style>

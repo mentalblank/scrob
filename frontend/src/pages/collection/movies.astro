@@ -1,0 +1,138 @@
+---
+import Base from "../../layouts/Base.astro";
+import MediaCard from "../../components/MediaCard.astro";
+import Pagination from "../../components/Pagination.astro";
+import { api } from "../../lib/api";
+export const prerender = false;
+
+const sort = Astro.url.searchParams.get("sort") ?? "title";
+const genre = Astro.url.searchParams.get("genre") ?? "";
+const year = Astro.url.searchParams.get("year") ? Number(Astro.url.searchParams.get("year")) : undefined;
+const page = Number(Astro.url.searchParams.get("page") ?? 1);
+const { token } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
+
+const data = await api.media.list({
+  type: "movie",
+  sort,
+  page,
+  ...(genre ? { genre } : {}),
+  ...(year ? { year } : {}),
+}, token);
+
+const MOVIE_GENRES = [
+  "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
+  "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery",
+  "Romance", "Science Fiction", "Thriller", "War", "Western",
+];
+
+const currentYear = new Date().getFullYear();
+const years = Array.from({ length: currentYear - 1899 }, (_, i) => currentYear - i);
+
+// Build base URL preserving active filters (without page)
+const baseParams = new URLSearchParams();
+baseParams.set("sort", sort);
+if (genre) baseParams.set("genre", genre);
+if (year) baseParams.set("year", String(year));
+const baseUrl = `/collection/movies?${baseParams.toString()}`;
+---
+
+<Base title="My Movies">
+  <div class="flex items-center gap-1 mb-6 bg-zinc-900 border border-zinc-800 rounded-xl p-1 w-fit">
+    <a href="/movies" class="px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors">Explore</a>
+    <a href="/collection/movies" class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 text-white transition-colors">My Collection</a>
+  </div>
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+    <div class="flex items-baseline gap-3">
+      <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">My Movies</h1>
+      <span class="text-zinc-500 font-medium">{data.total_results.toLocaleString()} total</span>
+    </div>
+
+    <!-- Sort controls -->
+    <div class="flex flex-wrap gap-2 text-sm bg-zinc-900/50 p-1 rounded-xl border border-zinc-800">
+      {[
+        { value: "title", label: "A–Z" },
+        { value: "rating", label: "Top Rated" },
+        { value: "release_date", label: "Newest" },
+        { value: "created_at", label: "Recently Added" },
+      ].map(({ value, label }) => {
+        const tabParams = new URLSearchParams(baseParams);
+        tabParams.set("sort", value);
+        tabParams.delete("page");
+        return (
+          <a
+            href={`/collection/movies?${tabParams.toString()}`}
+            class={`px-4 py-2 rounded-lg transition-all font-medium ${sort === value ? "bg-blue-600 text-white shadow-lg" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"}`}
+          >
+            {label}
+          </a>
+        );
+      })}
+    </div>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="flex flex-wrap gap-3 mb-8 items-center">
+    <select id="filter-genre" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+      <option value="">All Genres</option>
+      {MOVIE_GENRES.map(g => (
+        <option value={g} selected={genre === g}>{g}</option>
+      ))}
+    </select>
+
+    <select id="filter-year" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+      <option value="">All Years</option>
+      {years.map(y => (
+        <option value={y} selected={year === y}>{y}</option>
+      ))}
+    </select>
+
+    {(genre || year) && (
+      <a href={`/collection/movies?sort=${sort}`} class="text-sm text-zinc-500 hover:text-zinc-300 transition">
+        Clear filters
+      </a>
+    )}
+  </div>
+
+  {data.results.length === 0 ? (
+    <div class="bg-zinc-900/50 rounded-2xl p-12 text-center border border-dashed border-zinc-800">
+      <div class="text-zinc-500 mb-4 text-lg">
+        {(genre || year) ? "No movies match the selected filters" : "Your library is empty"}
+      </div>
+      {!(genre || year) && (
+        <a href="/settings" class="inline-flex items-center px-6 py-3 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition">
+          Set up Sync
+        </a>
+      )}
+    </div>
+  ) : (
+    <>
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        {data.results.map(item => <MediaCard item={{...item, in_library: true}} />)}
+      </div>
+
+      <Pagination
+        currentPage={data.page}
+        totalPages={data.total_pages}
+        baseUrl={baseUrl}
+      />
+    </>
+  )}
+</Base>
+
+<script define:vars={{ sort, genre, year }}>
+  function navigate() {
+    const params = new URLSearchParams();
+    params.set("sort", sort);
+    const g = document.getElementById("filter-genre").value;
+    const y = document.getElementById("filter-year").value;
+    if (g) params.set("genre", g);
+    if (y) params.set("year", y);
+    window.location.href = `/collection/movies?${params.toString()}`;
+  }
+
+  document.getElementById("filter-genre")?.addEventListener("change", navigate);
+  document.getElementById("filter-year")?.addEventListener("change", navigate);
+
+  window.addEventListener('pageshow', (e) => { if (e.persisted) location.replace(location.href); });
+</script>

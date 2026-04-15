@@ -1,0 +1,2268 @@
+---
+import Base from "../layouts/Base.astro";
+import SyncStatus from "../components/SyncStatus.astro";
+import { api } from "../lib/api";
+import type { TotpBackupCode } from "../lib/api";
+
+const { token } = Astro.locals;
+const [settings, me] = await Promise.all([
+  api.auth.getSettings(token!),
+  api.auth.me(token!),
+]);
+const hasTmdbKey = !!settings.tmdb_api_key;
+const jellyfinConfigured = !!(settings.jellyfin_url && settings.jellyfin_token);
+const embyConfigured     = !!(settings.emby_url && settings.emby_token);
+const plexConfigured     = !!(settings.plex_url && settings.plex_token);
+const traktConfigured    = !!(settings.trakt_connected || settings.trakt_client_id);
+const radarrConfigured   = !!(settings.radarr_url && settings.radarr_token);
+const sonarrConfigured   = !!(settings.sonarr_url && settings.sonarr_token);
+let backupCodes: TotpBackupCode[] = [];
+if (me.totp_enabled) {
+  try {
+    const res = await api.auth.totp2faBackupCodes(token!);
+    backupCodes = res.codes;
+  } catch {
+    // non-fatal — codes panel will just be empty
+  }
+}
+---
+
+<Base title="Settings">
+  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+  <div class="max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold text-zinc-100 mb-8">Settings</h1>
+
+    <SyncStatus />
+
+    <div id="js-message" class="hidden p-4 rounded-lg mb-8"></div>
+
+    <div class="space-y-12">
+      <!-- General Settings -->
+      <section>
+        <div class="flex items-center justify-between mb-4 border-b border-zinc-800 pb-2">
+          <h2 class="text-xl font-semibold text-zinc-100">General</h2>
+          <button
+            type="button"
+            data-action="test_tmdb"
+            class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Test Key
+          </button>
+        </div>
+        <form id="settings-form" class="space-y-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <label for="tmdb_api_key" class="block text-sm font-medium text-zinc-400">TMDB API Key</label>
+              <div class="relative group/field">
+                <input
+                  type="password"
+                  name="tmdb_api_key"
+                  id="tmdb_api_key"
+                  value={settings.tmdb_api_key || ""}
+                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                />
+                <button
+                  type="button"
+                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+                  aria-label="Toggle password visibility"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                  </svg>
+                </button>
+              </div>
+              <p class="text-xs text-zinc-500">Required for fetching metadata and posters. Will be validated before saving.</p>
+            </div>
+          </div>
+
+          <!-- ======== SYNC SECTION ======== -->
+          <div class="space-y-3 mt-8">
+            <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2">Sync</h2>
+
+            <!-- Jellyfin collapsible row -->
+            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="jellyfin-body">
+                <div class="flex items-center gap-3 pointer-events-none">
+                  <span class="w-2 h-2 bg-purple-500 rounded-full shrink-0"></span>
+                  <span class="font-medium text-zinc-200">Jellyfin</span>
+                  <span id="jellyfin-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded pointer-events-auto"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="flex gap-2" onclick="event.stopPropagation()">
+                    <button type="button" data-action="test_jellyfin" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50">Test</button>
+                    {settings.jellyfin_url && settings.jellyfin_token && (
+                      <button
+                        type="button"
+                        data-action="sync_jellyfin"
+                        disabled={!hasTmdbKey}
+                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : ""}
+                        class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-jellyfin/10 hover:bg-jellyfin/20 text-jellyfin border border-jellyfin/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
+                      >Sync</button>
+                    )}
+                  </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class={`collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0 ${jellyfinConfigured ? 'rotate-180' : ''}`}>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </div>
+              </div>
+              <div id="jellyfin-body" class={`border-t border-zinc-800 ${jellyfinConfigured ? '' : 'hidden'}`}>
+                <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+                  <!-- Left: Connection Settings -->
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="jellyfin_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
+                      <input type="url" name="jellyfin_url" id="jellyfin_url" placeholder="http://192.168.1.100:8096" value={settings.jellyfin_url || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    <div class="space-y-2">
+                      <label for="jellyfin_token" class="block text-sm font-medium text-zinc-400">API Token</label>
+                      <div class="relative group/field">
+                        <input type="password" name="jellyfin_token" id="jellyfin_token" value={settings.jellyfin_token || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="space-y-2">
+                      <label for="jellyfin_user_id" class="block text-sm font-medium text-zinc-400">User ID</label>
+                      <input type="text" name="jellyfin_user_id" id="jellyfin_user_id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" value={settings.jellyfin_user_id || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    {settings.jellyfin_url && settings.jellyfin_token && (
+                      <div id="jellyfin-library-picker" class="space-y-2">
+                        <label class="block text-sm font-medium text-zinc-400">Libraries to sync</label>
+                        <div id="jellyfin-libraries-list" class="space-y-1 text-sm text-zinc-500 italic">Loading libraries…</div>
+                        <p class="text-xs text-zinc-400">Leave all unchecked to sync every library.</p>
+                      </div>
+                    )}
+                  </div>
+                  <!-- Right: Sync Preferences -->
+                  <div class="space-y-4">
+                    <div id="jellyfin-sync-warnings" class="hidden"></div>
+                    <div class="space-y-2">
+                      <label class="block text-sm font-medium text-zinc-400">Scrobbling Webhook URL</label>
+                      <p class="text-xs text-zinc-500">Copy this URL into Jellyfin → Dashboard → Webhooks (Generic Destination) to enable real-time scrobbling.</p>
+                      <div class="flex gap-2">
+                        <input type="text" id="jellyfin-webhook-url" readonly value="" class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" />
+                        <button type="button" id="copy-jellyfin-webhook-btn" title="Copy to clipboard" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Jellyfin → Scrob</p>
+                      {[
+                        { key: "jellyfin_sync_collection", label: "Collection status" },
+                        { key: "jellyfin_sync_watched",    label: "Watched status" },
+                        { key: "jellyfin_sync_ratings",    label: "Ratings" },
+                        { key: "jellyfin_sync_playback",   label: "Playback events" },
+                      ].map(({ key, label }) => (
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name={key} id={key} checked={settings[key as keyof typeof settings] !== false} class="sync-pref-checkbox w-4 h-4 rounded accent-jellyfin cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Jellyfin</p>
+                      {[
+                        { key: "jellyfin_push_watched", label: "Watched status" },
+                        { key: "jellyfin_push_ratings", label: "Ratings" },
+                      ].map(({ key, label }) => (
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name={key} id={key} checked={!!settings[key as keyof typeof settings]} class="sync-pref-checkbox w-4 h-4 rounded accent-jellyfin cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Emby collapsible row -->
+            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="emby-body">
+                <div class="flex items-center gap-3 pointer-events-none">
+                  <span class="w-2 h-2 bg-green-500 rounded-full shrink-0"></span>
+                  <span class="font-medium text-zinc-200">Emby</span>
+                  <span id="emby-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded pointer-events-auto"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="flex gap-2" onclick="event.stopPropagation()">
+                    <button type="button" data-action="test_emby" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50">Test</button>
+                    {settings.emby_url && settings.emby_token && (
+                      <button
+                        type="button"
+                        data-action="sync_emby"
+                        disabled={!hasTmdbKey}
+                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : ""}
+                        class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-green-600/10 hover:bg-green-600/20 text-green-400 border border-green-600/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
+                      >Sync</button>
+                    )}
+                  </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class={`collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0 ${embyConfigured ? 'rotate-180' : ''}`}>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </div>
+              </div>
+              <div id="emby-body" class={`border-t border-zinc-800 ${embyConfigured ? '' : 'hidden'}`}>
+                <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+                  <!-- Left: Connection Settings -->
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="emby_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
+                      <input type="url" name="emby_url" id="emby_url" placeholder="http://192.168.1.100:8096" value={settings.emby_url || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    <div class="space-y-2">
+                      <label for="emby_token" class="block text-sm font-medium text-zinc-400">API Token</label>
+                      <div class="relative group/field">
+                        <input type="password" name="emby_token" id="emby_token" value={settings.emby_token || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="space-y-2">
+                      <label for="emby_user_id" class="block text-sm font-medium text-zinc-400">User ID</label>
+                      <input type="text" name="emby_user_id" id="emby_user_id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" value={settings.emby_user_id || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    {settings.emby_url && settings.emby_token && (
+                      <div id="emby-library-picker" class="space-y-2">
+                        <label class="block text-sm font-medium text-zinc-400">Libraries to sync</label>
+                        <div id="emby-libraries-list" class="space-y-1 text-sm text-zinc-500 italic">Loading libraries…</div>
+                        <p class="text-xs text-zinc-400">Leave all unchecked to sync every library.</p>
+                      </div>
+                    )}
+                  </div>
+                  <!-- Right: Sync Preferences -->
+                  <div class="space-y-4">
+                    <div id="emby-sync-warnings" class="hidden"></div>
+                    <div class="space-y-2">
+                      <label class="block text-sm font-medium text-zinc-400">Scrobbling Webhook URL</label>
+                      <p class="text-xs text-zinc-500">Copy this URL into Emby → Dashboard → Notifications (Webhook) to enable real-time scrobbling. Requires Emby Premiere.</p>
+                      <div class="flex gap-2">
+                        <input type="text" id="emby-webhook-url" readonly value="" class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" />
+                        <button type="button" id="copy-emby-webhook-btn" title="Copy to clipboard" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Emby → Scrob</p>
+                      {[
+                        { key: "emby_sync_collection", label: "Collection status" },
+                        { key: "emby_sync_watched",    label: "Watched status" },
+                        { key: "emby_sync_ratings",    label: "Ratings" },
+                        { key: "emby_sync_playback",   label: "Playback events" },
+                      ].map(({ key, label }) => (
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name={key} id={key} checked={settings[key as keyof typeof settings] !== false} class="sync-pref-checkbox w-4 h-4 rounded cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Emby</p>
+                      {[
+                        { key: "emby_push_watched", label: "Watched status" },
+                        { key: "emby_push_ratings", label: "Ratings" },
+                      ].map(({ key, label }) => (
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name={key} id={key} checked={!!settings[key as keyof typeof settings]} class="sync-pref-checkbox w-4 h-4 rounded cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Plex collapsible row -->
+            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="plex-body">
+                <div class="flex items-center gap-3 pointer-events-none">
+                  <span class="w-2 h-2 bg-yellow-500 rounded-full shrink-0"></span>
+                  <span class="font-medium text-zinc-200">Plex</span>
+                  <span id="plex-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded pointer-events-auto"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="flex gap-2" onclick="event.stopPropagation()">
+                    <button type="button" data-action="test_plex" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50">Test</button>
+                    {settings.plex_url && settings.plex_token && (
+                      <button
+                        type="button"
+                        data-action="sync_plex"
+                        disabled={!hasTmdbKey}
+                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : ""}
+                        class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-plex/10 hover:bg-plex/20 text-plex border border-plex/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
+                      >Sync</button>
+                    )}
+                  </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class={`collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0 ${plexConfigured ? 'rotate-180' : ''}`}>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </div>
+              </div>
+              <div id="plex-body" class={`border-t border-zinc-800 ${plexConfigured ? '' : 'hidden'}`}>
+                <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+                  <!-- Left: Connection Settings -->
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="plex_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
+                      <input type="url" name="plex_url" id="plex_url" placeholder="http://192.168.1.100:32400" value={settings.plex_url || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    <div class="space-y-2">
+                      <label for="plex_token" class="block text-sm font-medium text-zinc-400">X-Plex-Token</label>
+                      <div class="relative group/field">
+                        <input type="password" name="plex_token" id="plex_token" value={settings.plex_token || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                    {settings.plex_url && settings.plex_token && (
+                      <div id="plex-library-picker" class="space-y-2">
+                        <label class="block text-sm font-medium text-zinc-400">Libraries to sync</label>
+                        <div id="plex-libraries-list" class="space-y-1 text-sm text-zinc-500 italic">Loading libraries…</div>
+                        <p class="text-xs text-zinc-400">Leave all unchecked to sync every library.</p>
+                      </div>
+                    )}
+                    <div class="space-y-2">
+                      <label for="plex_username" class="block text-sm font-medium text-zinc-400">Your Plex Username</label>
+                      <p class="text-xs text-zinc-500">Required to correctly attribute events when multiple users share a Plex server. Enter your Plex account username (visible at plex.tv).</p>
+                      <input type="text" name="plex_username" id="plex_username" value={settings.plex_username || ""} placeholder="e.g. john_doe" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                  </div>
+                  <!-- Right: Sync Preferences -->
+                  <div class="space-y-4">
+                    <div id="plex-sync-warnings" class="hidden"></div>
+                    <div class="space-y-2">
+                      <label class="block text-sm font-medium text-zinc-400">Scrobbling Webhook URL</label>
+                      <p class="text-xs text-zinc-500">Copy this URL into your Plex account's webhook settings to enable real-time scrobbling. Requires Plex Pass.</p>
+                      <div class="flex gap-2">
+                        <input type="text" id="plex-webhook-url" readonly value="" class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" />
+                        <button type="button" id="copy-plex-webhook-btn" title="Copy to clipboard" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Plex → Scrob</p>
+                      {[
+                        { key: "plex_sync_collection", label: "Collection status" },
+                        { key: "plex_sync_watched",    label: "Watched status" },
+                        { key: "plex_sync_ratings",    label: "Ratings" },
+                        { key: "plex_sync_playback",   label: "Playback events" },
+                      ].map(({ key, label }) => (
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name={key} id={key} checked={settings[key as keyof typeof settings] !== false} class="sync-pref-checkbox w-4 h-4 rounded accent-plex cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Plex</p>
+                      {[
+                        { key: "plex_push_watched", label: "Watched status" },
+                        { key: "plex_push_ratings", label: "Ratings" },
+                      ].map(({ key, label }) => (
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name={key} id={key} checked={!!settings[key as keyof typeof settings]} class="sync-pref-checkbox w-4 h-4 rounded accent-plex cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Trakt collapsible row -->
+            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="trakt-body">
+                <div class="flex items-center gap-3 pointer-events-none">
+                  <span class="w-2 h-2 bg-red-500 rounded-full shrink-0"></span>
+                  <span class="font-medium text-zinc-200">Trakt</span>
+                  <span id="trakt-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded pointer-events-auto"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="flex gap-2" onclick="event.stopPropagation()">
+                    {settings.trakt_connected ? (
+                      <>
+                        <button
+                          type="button"
+                          data-action="sync_trakt"
+                          disabled={!hasTmdbKey}
+                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : ""}
+                          class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
+                        >Sync</button>
+                        <button type="button" id="trakt-disconnect-btn" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Disconnect</button>
+                      </>
+                    ) : (
+                      <button type="button" id="trakt-connect-btn" class="text-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Connect Trakt</button>
+                    )}
+                  </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class={`collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0 ${traktConfigured ? 'rotate-180' : ''}`}>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </div>
+              </div>
+              <div id="trakt-body" class={`border-t border-zinc-800 ${traktConfigured ? '' : 'hidden'}`}>
+                <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+                  <!-- Left: Auth / Info -->
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="trakt_client_id" class="block text-sm font-medium text-zinc-400">Client ID</label>
+                      <input
+                        type="text"
+                        name="trakt_client_id"
+                        id="trakt_client_id"
+                        value={settings.trakt_client_id || ""}
+                        placeholder="Your Trakt application Client ID"
+                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      />
+                    </div>
+                    <div class="space-y-2">
+                      <label for="trakt_client_secret" class="block text-sm font-medium text-zinc-400">Client Secret</label>
+                      <div class="relative group/field">
+                        <input
+                          type="password"
+                          name="trakt_client_secret"
+                          id="trakt_client_secret"
+                          value={settings.trakt_client_secret || ""}
+                          placeholder="Your Trakt application Client Secret"
+                          class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        />
+                        <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                        </button>
+                      </div>
+                      <p class="text-xs text-zinc-500">Create a Trakt application at <span class="text-zinc-400">trakt.tv/oauth/applications</span> to get these credentials.</p>
+                    </div>
+                    <div id="trakt-auth-panel" class="hidden space-y-3 bg-zinc-900/50 border border-zinc-700 rounded-xl p-4">
+                      <p class="text-sm text-zinc-400">Go to <strong id="trakt-verify-url" class="text-zinc-100"></strong> and enter this code:</p>
+                      <div class="font-mono text-2xl font-bold tracking-widest text-zinc-100 bg-zinc-950 border border-zinc-700 rounded-lg px-4 py-3 text-center select-all" id="trakt-user-code"></div>
+                      <p class="text-xs text-zinc-500" id="trakt-auth-status">Waiting for authorization…</p>
+                    </div>
+                    <p class="text-sm text-zinc-400">
+                      {settings.trakt_connected
+                        ? "Trakt is connected. Use Sync to import your watched history and ratings."
+                        : "Enter your Client ID and Secret, then click Connect Trakt."}
+                    </p>
+                  </div>
+                  <!-- Right: Sync Preferences (only if connected) -->
+                  {settings.trakt_connected && (
+                    <div class="space-y-4">
+                      <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Trakt → Scrob</p>
+                        {[
+                          { key: "trakt_sync_watched", label: "Watched history" },
+                          { key: "trakt_sync_ratings", label: "Ratings" },
+                        ].map(({ key, label }) => (
+                          <label class="flex items-center gap-3 cursor-pointer group">
+                            <input type="checkbox" name={key} id={key} checked={settings[key as keyof typeof settings] !== false} class="sync-pref-checkbox w-4 h-4 rounded accent-red-500 cursor-pointer" />
+                            <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Trakt</p>
+                        {[
+                          { key: "trakt_push_watched", label: "Watched status" },
+                          { key: "trakt_push_ratings", label: "Ratings" },
+                        ].map(({ key, label }) => (
+                          <label class="flex items-center gap-3 cursor-pointer group">
+                            <input type="checkbox" name={key} id={key} checked={!!settings[key as keyof typeof settings]} class="sync-pref-checkbox w-4 h-4 rounded accent-red-500 cursor-pointer" />
+                            <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ======== CONNECTIONS SECTION ======== -->
+          <div class="space-y-3 mt-8">
+            <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2">Connections</h2>
+
+            <!-- Radarr collapsible row -->
+            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="radarr-body">
+                <div class="flex items-center gap-3 pointer-events-none">
+                  <span class="w-2 h-2 bg-red-600 rounded-full shrink-0"></span>
+                  <span class="font-medium text-zinc-200">Radarr</span>
+                  <span id="radarr-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded pointer-events-auto"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="flex gap-2" onclick="event.stopPropagation()">
+                    <button type="button" data-action="test_radarr" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50">Test & Fetch</button>
+                  </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class={`collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0 ${radarrConfigured ? 'rotate-180' : ''}`}>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </div>
+              </div>
+              <div id="radarr-body" class={`border-t border-zinc-800 ${radarrConfigured ? '' : 'hidden'}`}>
+                <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="radarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
+                      <input type="url" name="radarr_url" id="radarr_url" placeholder="http://192.168.1.100:7878" value={settings.radarr_url || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    <div class="space-y-2">
+                      <label for="radarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
+                      <div class="relative group/field">
+                        <input type="password" name="radarr_token" id="radarr_token" value={settings.radarr_token || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="radarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
+                      <select name="radarr_root_folder" id="radarr_root_folder" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                        <option value="">-- Select Folder --</option>
+                        {settings.radarr_root_folder && <option value={settings.radarr_root_folder} selected>{settings.radarr_root_folder}</option>}
+                      </select>
+                    </div>
+                    <div class="space-y-2">
+                      <label for="radarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
+                      <select name="radarr_quality_profile" id="radarr_quality_profile" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                        <option value="">-- Select Profile --</option>
+                        {settings.radarr_quality_profile && <option value={settings.radarr_quality_profile} selected>Profile ID: {settings.radarr_quality_profile}</option>}
+                      </select>
+                    </div>
+                    <div class="space-y-2">
+                      <label class="block text-sm font-medium text-zinc-400">Tags</label>
+                      <div id="radarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                        <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
+                        {settings.radarr_tags?.map(tid => (
+                          <input type="hidden" name="radarr_tags" value={tid} />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sonarr collapsible row -->
+            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="sonarr-body">
+                <div class="flex items-center gap-3 pointer-events-none">
+                  <span class="w-2 h-2 bg-blue-500 rounded-full shrink-0"></span>
+                  <span class="font-medium text-zinc-200">Sonarr</span>
+                  <span id="sonarr-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded pointer-events-auto"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="flex gap-2" onclick="event.stopPropagation()">
+                    <button type="button" data-action="test_sonarr" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50">Test & Fetch</button>
+                  </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class={`collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0 ${sonarrConfigured ? 'rotate-180' : ''}`}>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </div>
+              </div>
+              <div id="sonarr-body" class={`border-t border-zinc-800 ${sonarrConfigured ? '' : 'hidden'}`}>
+                <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="sonarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
+                      <input type="url" name="sonarr_url" id="sonarr_url" placeholder="http://192.168.1.100:8989" value={settings.sonarr_url || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    <div class="space-y-2">
+                      <label for="sonarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
+                      <div class="relative group/field">
+                        <input type="password" name="sonarr_token" id="sonarr_token" value={settings.sonarr_token || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="sonarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
+                      <select name="sonarr_root_folder" id="sonarr_root_folder" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                        <option value="">-- Select Folder --</option>
+                        {settings.sonarr_root_folder && <option value={settings.sonarr_root_folder} selected>{settings.sonarr_root_folder}</option>}
+                      </select>
+                    </div>
+                    <div class="space-y-2">
+                      <label for="sonarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
+                      <select name="sonarr_quality_profile" id="sonarr_quality_profile" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                        <option value="">-- Select Profile --</option>
+                        {settings.sonarr_quality_profile && <option value={settings.sonarr_quality_profile} selected>Profile ID: {settings.sonarr_quality_profile}</option>}
+                      </select>
+                    </div>
+                    <div class="space-y-2">
+                      <label class="block text-sm font-medium text-zinc-400">Tags</label>
+                      <div id="sonarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                        <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
+                        {settings.sonarr_tags?.map(tid => (
+                          <input type="hidden" name="sonarr_tags" value={tid} />
+                        ))}
+                      </div>
+                    </div>
+                    <label class="flex items-center justify-between gap-3 p-3 bg-zinc-900 border border-zinc-800 rounded-lg cursor-pointer hover:bg-zinc-800/60 transition-colors">
+                      <span class="text-sm text-zinc-300">Use season folders</span>
+                      <input type="checkbox" name="sonarr_season_folder" id="sonarr_season_folder" value="true" class="sr-only peer" checked={settings.sonarr_season_folder !== false} />
+                      <div class="relative w-10 h-5 bg-zinc-700 peer-checked:bg-blue-600 rounded-full transition-colors pointer-events-none shrink-0 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5"></div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-6">
+            <button
+              id="save-settings-btn"
+              type="submit"
+              class="w-full sm:w-auto bg-zinc-100 text-zinc-950 font-bold px-8 py-3 rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Appearance -->
+      <section>
+        <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Appearance</h2>
+        <div class="space-y-3">
+          <p class="text-sm text-zinc-400">Accent color</p>
+          <div class="flex flex-wrap gap-3" id="accent-swatches">
+            {[
+              { id: 'blue',   label: 'Blue',   color: '#3b82f6' },
+              { id: 'purple', label: 'Purple', color: '#a855f7' },
+              { id: 'pink',   label: 'Pink',   color: '#ec4899' },
+              { id: 'red',    label: 'Red',    color: '#ef4444' },
+              { id: 'green',  label: 'Green',  color: '#22c55e' },
+              { id: 'yellow', label: 'Yellow', color: '#eab308' },
+              { id: 'orange', label: 'Orange', color: '#f97316' },
+            ].map(({ id, label, color }) => (
+              <button
+                type="button"
+                data-accent-id={id}
+                class="accent-swatch flex items-center gap-2.5 px-5 py-3 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-600 transition-all cursor-pointer text-sm text-zinc-400 hover:text-zinc-100"
+              >
+                <span class="w-5 h-5 rounded-full shrink-0" style={`background-color: ${color}`}></span>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <!-- Two-Factor Authentication -->
+      <section id="2fa-section">
+        <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Two-Factor Authentication</h2>
+
+        {!me.totp_enabled ? (
+          <div class="space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
+              <div>
+                <h3 class="font-semibold text-zinc-100 mb-1">Authenticator App</h3>
+                <p class="text-sm text-zinc-400">Protect your account with a time-based one-time password (TOTP) from any authenticator app.</p>
+              </div>
+              <button
+                type="button"
+                id="enable-2fa-btn"
+                class="w-full sm:w-auto sm:shrink-0 px-6 py-3 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm"
+              >
+                Enable 2FA
+              </button>
+            </div>
+
+            <!-- Setup panel (hidden until "Enable 2FA" is clicked) -->
+            <div id="2fa-setup-panel" class="hidden border border-zinc-700 rounded-2xl p-6 space-y-5 bg-zinc-900/30">
+              <div class="text-sm text-zinc-400">
+                Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.), then enter the 6-digit code to confirm.
+              </div>
+
+              <div class="flex flex-col md:flex-row gap-6 items-start">
+                <div class="shrink-0">
+                  <canvas id="totp-qr-canvas" class="rounded-lg bg-white p-2" width="160" height="160"></canvas>
+                </div>
+                <div class="space-y-3 flex-1">
+                  <div>
+                    <p class="text-xs text-zinc-500 mb-1">Manual entry key</p>
+                    <code id="totp-secret-display" class="block bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-300 font-mono text-sm tracking-widest break-all select-all"></code>
+                  </div>
+                  <div class="space-y-2">
+                    <label for="totp-verify-code" class="block text-sm font-medium text-zinc-400">Verification Code</label>
+                    <input
+                      type="text"
+                      id="totp-verify-code"
+                      autocomplete="one-time-code"
+                      inputmode="numeric"
+                      maxlength="6"
+                      placeholder="000000"
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    />
+                  </div>
+                  <div class="flex gap-3">
+                    <button
+                      type="button"
+                      id="confirm-enable-2fa-btn"
+                      class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer text-sm disabled:opacity-50"
+                    >
+                      Verify &amp; Enable
+                    </button>
+                    <button
+                      type="button"
+                      id="cancel-2fa-setup-btn"
+                      class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <p id="2fa-setup-error" class="hidden text-sm text-red-400"></p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Backup codes shown after successful enable (hidden initially) -->
+            <div id="2fa-new-codes-panel" class="hidden border border-green-500/30 bg-green-500/5 rounded-2xl p-6 space-y-4">
+              <div class="flex items-center gap-2 text-green-400 font-semibold">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                2FA Enabled
+              </div>
+              <p class="text-sm text-zinc-400">Save these backup codes somewhere safe. Each can only be used once. They cannot be shown again — regenerate them in settings if needed.</p>
+              <div id="2fa-new-codes-grid" class="grid grid-cols-2 gap-2"></div>
+              <button
+                type="button"
+                id="2fa-new-codes-done-btn"
+                class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer text-sm"
+              >
+                Done — reload page
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div class="space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
+              <div class="flex items-center gap-3">
+                <span class="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0"></span>
+                <div>
+                  <h3 class="font-semibold text-zinc-100">2FA is enabled</h3>
+                  <p class="text-sm text-zinc-400">Your account is protected with an authenticator app.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="disable-2fa-btn"
+                class="shrink-0 px-5 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/30 font-bold rounded-lg text-sm transition-colors cursor-pointer"
+              >
+                Disable 2FA
+              </button>
+            </div>
+
+            <!-- Disable confirmation (hidden initially) -->
+            <div id="2fa-disable-panel" class="hidden border border-zinc-700 rounded-2xl p-6 space-y-4 bg-zinc-900/30">
+              <p class="text-sm text-zinc-400">Enter your authenticator code or a backup code to disable 2FA.</p>
+              <div class="flex gap-3 items-end">
+                <div class="space-y-2 flex-1">
+                  <label for="totp-disable-code" class="block text-sm font-medium text-zinc-400">Code</label>
+                  <input
+                    type="text"
+                    id="totp-disable-code"
+                    autocomplete="one-time-code"
+                    placeholder="000000 or XXXX-XXXX"
+                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                </div>
+                <button
+                  type="button"
+                  id="confirm-disable-2fa-btn"
+                  class="px-5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  id="cancel-disable-2fa-btn"
+                  class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+              <p id="2fa-disable-error" class="hidden text-sm text-red-400"></p>
+            </div>
+
+            <!-- Backup codes -->
+            <details class="group border border-zinc-800 rounded-2xl bg-zinc-900/20 overflow-hidden">
+              <summary class="flex items-center justify-between px-6 py-4 cursor-pointer list-none select-none hover:bg-zinc-900/40 transition-colors">
+                <span class="font-medium text-zinc-300">Backup Codes</span>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-zinc-500 transition-transform group-open:rotate-180">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </summary>
+              <div class="px-6 pb-6 space-y-4">
+                <p class="text-sm text-zinc-500">Used codes are shown with strikethrough and cannot be reused. Keep these somewhere safe.</p>
+                <div class="grid grid-cols-2 gap-2">
+                  {backupCodes.map((bc) => (
+                    <span class={`font-mono text-sm px-3 py-1.5 rounded-lg border ${bc.used ? "text-zinc-400 border-zinc-800 line-through" : "text-zinc-300 border-zinc-700 bg-zinc-900"}`}>
+                      {bc.code}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </details>
+          </div>
+        )}
+      </section>
+
+      <!-- API Key -->
+      <section>
+        <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">API Key</h2>
+        <div class="space-y-4 max-w-xl">
+          <p class="text-sm text-zinc-400">Use this key to authenticate requests to the Scrob API. Keep it secret — if it leaks, regenerate it immediately.</p>
+          <div class="space-y-2">
+            <label for="scrob_api_key" class="block text-sm font-medium text-zinc-400">Your API Key</label>
+            <div class="flex gap-2">
+              <div class="relative flex-1 group/field">
+                <input
+                  type="password"
+                  id="scrob_api_key"
+                  readonly
+                  value={me.api_key}
+                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
+                />
+                <button
+                  type="button"
+                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+                  aria-label="Toggle key visibility"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                type="button"
+                id="copy-api-key-btn"
+                title="Copy to clipboard"
+                class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            id="regenerate-api-key-btn"
+            class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Regenerate Key
+          </button>
+        </div>
+      </section>
+
+      <!-- Security Settings -->
+      <section>
+        <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Security</h2>
+        <form id="password-form" class="space-y-6 max-w-md">
+          <div class="space-y-4">
+            <div class="space-y-2">
+              <label for="current_password" class="block text-sm font-medium text-zinc-400">Current Password</label>
+              <div class="relative group/field">
+                <input
+                  type="password"
+                  name="current_password"
+                  id="current_password"
+                  required
+                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                />
+                <button
+                  type="button"
+                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+                  aria-label="Toggle password visibility"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <label for="new_password" class="block text-sm font-medium text-zinc-400">New Password</label>
+              <div class="relative group/field">
+                <input
+                  type="password"
+                  name="new_password"
+                  id="new_password"
+                  required
+                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                />
+                <button
+                  type="button"
+                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+                  aria-label="Toggle password visibility"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <label for="confirm_password" class="block text-sm font-medium text-zinc-400">Confirm New Password</label>
+              <div class="relative group/field">
+                <input
+                  type="password"
+                  name="confirm_password"
+                  id="confirm_password"
+                  required
+                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                />
+                <button
+                  type="button"
+                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+                  aria-label="Toggle password visibility"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button
+              id="update-password-btn"
+              type="submit"
+              class="bg-zinc-800 text-zinc-100 font-bold px-8 py-2 rounded-lg hover:bg-zinc-700 transition-colors cursor-pointer border border-zinc-700 disabled:opacity-50"
+            >
+              Update Password
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Data Management -->
+      <section>
+        <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Data Management</h2>
+        <div class="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Watch History</h3>
+            <p class="text-zinc-400 text-sm">This will permanently delete all your watch history and progress. Your collection and ratings will not be affected.</p>
+          </div>
+          <button
+            type="button"
+            id="clear-history-btn"
+            class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap"
+          >
+            Clear History
+          </button>
+        </div>
+      </section>
+
+      <!-- Danger Zone -->
+      <section>
+        <h2 class="text-xl font-semibold text-red-500 mb-4 border-b border-red-500/20 pb-2">Danger Zone</h2>
+        <div class="bg-red-500/5 border border-red-500/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h3 class="text-lg font-bold text-zinc-100 mb-1">Delete Account</h3>
+            <p class="text-zinc-400 text-sm">Once you delete your account, there is no going back. All your data will be permanently removed.</p>
+          </div>
+          <button
+            type="button"
+            id="delete-account-btn"
+            class="px-6 py-3 bg-red-600 hover:bg-red-500 text-zinc-100 font-bold rounded-xl transition-all shadow-lg shadow-red-600/20 active:scale-95 whitespace-nowrap cursor-pointer"
+          >
+            Delete Account
+          </button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Modal -->
+  <div id="delete-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
+    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-md w-full shadow-2xl">
+      <h2 class="text-2xl font-bold text-zinc-100 mb-2">Are you sure?</h2>
+      <p class="text-zinc-400 mb-8 text-sm leading-relaxed">
+        This will permanently delete your account and remove all your data. This action cannot be undone.
+      </p>
+      <div class="flex gap-3">
+        <button type="button" id="cancel-delete" class="flex-1 px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold rounded-xl transition-all cursor-pointer">
+          Cancel
+        </button>
+        <button type="button" id="confirm-delete" class="flex-1 px-6 py-3 bg-red-600 hover:bg-red-500 text-zinc-100 font-bold rounded-xl transition-all cursor-pointer">
+          Yes, delete
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const appData = document.getElementById('app-data');
+  const token = appData?.dataset.token ?? '';
+
+  function esc(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function showMessage(text, type = 'success') {
+    const msg = document.getElementById('js-message');
+    if (!msg) return;
+    msg.textContent = text;
+    msg.className = `p-4 rounded-lg mb-8 ${
+      type === 'success' 
+        ? 'bg-green-500/10 border border-green-500 text-green-500' 
+        : 'bg-red-500/10 border border-red-500 text-red-500'
+    }`;
+    msg.classList.remove('hidden');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    // Always hide after 4 seconds
+    if (window._messageTimeout) clearTimeout(window._messageTimeout);
+    window._messageTimeout = setTimeout(() => msg.classList.add('hidden'), 4000);
+  }
+
+  function setConnStatus(id, state) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('hidden');
+    if (state === 'checking') {
+      el.textContent = 'Checking…';
+      el.className = 'text-xs font-normal px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-400';
+    } else if (state === 'connected') {
+      el.textContent = '● Connected';
+      el.className = 'text-xs font-normal px-1.5 py-0.5 rounded bg-green-500/15 text-green-400';
+    } else if (state === 'disconnected') {
+      el.textContent = '● Disconnected';
+      el.className = 'text-xs font-normal px-1.5 py-0.5 rounded bg-red-500/15 text-red-400';
+    }
+  }
+
+  function populateSelect(selectId, options, currentValue) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    sel.innerHTML = '<option value="">-- Select --</option>' + options.map(o => {
+      const val = String(o.value ?? o.path ?? o.id ?? '');
+      const label = o.label ?? o.name ?? o.path ?? val;
+      const selected = val === String(currentValue ?? '') ? 'selected' : '';
+      return `<option value="${esc(val)}" ${selected}>${esc(label)}</option>`;
+    }).join('');
+  }
+
+  async function checkConnections() {
+    if (!token) return;
+    // Check if Trakt is connected (trakt-disconnect-btn only exists when connected)
+    const traktConnected = !!document.getElementById('trakt-disconnect-btn');
+    const configuredServices = [
+      document.getElementById('jellyfin_url')?.value,
+      document.getElementById('emby_url')?.value,
+      document.getElementById('plex_url')?.value,
+      document.getElementById('radarr_url')?.value,
+      document.getElementById('sonarr_url')?.value,
+    ];
+    // Only run if at least one service has a URL configured, or Trakt is connected
+    if (configuredServices.every(v => !v) && !traktConnected) return;
+
+    // Show checking state for configured services
+    if (document.getElementById('jellyfin_url')?.value) setConnStatus('jellyfin-conn-status', 'checking');
+    if (document.getElementById('emby_url')?.value) setConnStatus('emby-conn-status', 'checking');
+    if (document.getElementById('plex_url')?.value) setConnStatus('plex-conn-status', 'checking');
+    if (document.getElementById('radarr_url')?.value) setConnStatus('radarr-conn-status', 'checking');
+    if (document.getElementById('sonarr_url')?.value) setConnStatus('sonarr-conn-status', 'checking');
+    if (traktConnected) setConnStatus('trakt-conn-status', 'checking');
+
+    try {
+      const res = await fetch('/api/proxy/auth/connection-status', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.jellyfin?.configured) {
+        setConnStatus('jellyfin-conn-status', data.jellyfin.connected ? 'connected' : 'disconnected');
+      }
+      if (data.emby?.configured) {
+        setConnStatus('emby-conn-status', data.emby.connected ? 'connected' : 'disconnected');
+      }
+      if (data.plex?.configured) {
+        setConnStatus('plex-conn-status', data.plex.connected ? 'connected' : 'disconnected');
+      }
+      if (data.radarr?.configured) {
+        setConnStatus('radarr-conn-status', data.radarr.connected ? 'connected' : 'disconnected');
+        if (data.radarr.connected) {
+          const currentFolder = document.getElementById('radarr_root_folder')?.value;
+          const currentProfile = document.getElementById('radarr_quality_profile')?.value;
+          populateSelect('radarr_root_folder', (data.radarr.root_folders ?? []).map(f => ({
+            value: f.path,
+            label: `${f.path} (${(f.freeSpace / 1024 ** 3).toFixed(1)} GB free)`
+          })), currentFolder);
+          populateSelect('radarr_quality_profile', data.radarr.quality_profiles ?? [], currentProfile);
+          const tagContainer = document.getElementById('radarr_tags_list');
+          const selectedTags = Array.from(tagContainer?.querySelectorAll('input[name="radarr_tags"]') ?? []).map(i => parseInt(i.value));
+          renderTags('radarr_tags_list', data.radarr.tags, selectedTags, 'radarr');
+        }
+      }
+      if (data.sonarr?.configured) {
+        setConnStatus('sonarr-conn-status', data.sonarr.connected ? 'connected' : 'disconnected');
+        if (data.sonarr.connected) {
+          const currentFolder = document.getElementById('sonarr_root_folder')?.value;
+          const currentProfile = document.getElementById('sonarr_quality_profile')?.value;
+          populateSelect('sonarr_root_folder', (data.sonarr.root_folders ?? []).map(f => ({
+            value: f.path,
+            label: `${f.path} (${(f.freeSpace / 1024 ** 3).toFixed(1)} GB free)`
+          })), currentFolder);
+          populateSelect('sonarr_quality_profile', data.sonarr.quality_profiles ?? [], currentProfile);
+          const tagContainer = document.getElementById('sonarr_tags_list');
+          const selectedTags = Array.from(tagContainer?.querySelectorAll('input[name="sonarr_tags"]') ?? []).map(i => parseInt(i.value));
+          renderTags('sonarr_tags_list', data.sonarr.tags, selectedTags, 'sonarr');
+        }
+      }
+      if (data.trakt?.configured) {
+        setConnStatus('trakt-conn-status', data.trakt.connected ? 'connected' : 'disconnected');
+      }
+    } catch {
+      // Non-fatal — status badges stay hidden
+    }
+  }
+
+  function renderTags(containerId, tags, selectedIds, prefix) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    if (!tags || tags.length === 0) {
+      container.innerHTML = '<span class="text-xs text-zinc-500 italic px-2 py-1">No tags found</span>';
+      return;
+    }
+
+    container.innerHTML = tags.map(tag => {
+      const isSelected = selectedIds.includes(tag.id);
+      return `
+        <label class="group relative flex items-center gap-1.5 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-md cursor-pointer transition-colors ${isSelected ? 'ring-1 ring-blue-500 border-blue-500/50 bg-blue-500/10' : ''}">
+          <input type="checkbox" name="${prefix}_tags" value="${esc(String(tag.id))}" ${isSelected ? 'checked' : ''} class="hidden tag-checkbox" />
+          <span class="text-xs font-medium text-zinc-300 group-hover:text-zinc-100">${esc(tag.label)}</span>
+        </label>
+      `;
+    }).join('');
+
+    // Add click listeners to update styling
+    container.querySelectorAll('label').forEach(label => {
+      const cb = label.querySelector('input');
+      cb.addEventListener('change', () => {
+        if (cb.checked) {
+          label.classList.add('ring-1', 'ring-blue-500', 'border-blue-500/50', 'bg-blue-500/10');
+        } else {
+          label.classList.remove('ring-1', 'ring-blue-500', 'border-blue-500/50', 'bg-blue-500/10');
+        }
+      });
+    });
+  }
+
+  function setupActions() {
+    const btns = document.querySelectorAll('.js-action-btn');
+    btns.forEach(btn => {
+      // Clean up previous listeners if any (important for Astro View Transitions)
+      const newBtn = btn.cloneNode(true);
+      if (btn.parentNode) {
+        btn.parentNode.replaceChild(newBtn, btn);
+      }
+      
+      newBtn.addEventListener('click', async () => {
+        const action = newBtn.getAttribute('data-action');
+        newBtn.disabled = true;
+        const originalText = newBtn.textContent;
+        newBtn.textContent = '...';
+
+        try {
+          let url = '';
+          let method = 'POST';
+
+          if (action === 'test_tmdb') {
+            const val = document.getElementById('tmdb_api_key').value;
+            url = `/api/proxy/auth/test-tmdb?key=${encodeURIComponent(val)}`;
+          } else if (action === 'test_jellyfin') {
+            const u = document.getElementById('jellyfin_url').value;
+            const t = document.getElementById('jellyfin_token').value;
+            const ui = document.getElementById('jellyfin_user_id').value;
+            url = `/api/proxy/auth/test-jellyfin?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+          } else if (action === 'test_emby') {
+            const u = document.getElementById('emby_url').value;
+            const t = document.getElementById('emby_token').value;
+            const ui = document.getElementById('emby_user_id').value;
+            url = `/api/proxy/auth/test-emby?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+          } else if (action === 'test_plex') {
+            const u = document.getElementById('plex_url').value;
+            const t = document.getElementById('plex_token').value;
+            url = `/api/proxy/auth/test-plex?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`;
+          } else if (action === 'test_radarr') {
+            const u = document.getElementById('radarr_url').value;
+            const t = document.getElementById('radarr_token').value;
+            setConnStatus('radarr-conn-status', 'checking');
+            // First test connection
+            const testRes = await fetch(`/api/proxy/auth/test-radarr?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!testRes.ok) {
+              setConnStatus('radarr-conn-status', 'disconnected');
+              throw new Error((await testRes.json()).detail || 'Failed to connect to Radarr');
+            }
+            
+            // Then fetch profiles
+            const profRes = await fetch(`/api/proxy/auth/radarr/profiles?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const profData = await profRes.json();
+            
+            // Populate selects
+            const rootSelect = document.getElementById('radarr_root_folder');
+            const qualSelect = document.getElementById('radarr_quality_profile');
+            if (rootSelect) {
+              const current = rootSelect.value;
+              rootSelect.innerHTML = '<option value="">-- Select Folder --</option>' + 
+                profData.root_folders.map(f => `<option value="${esc(f.path)}" ${f.path === current ? 'selected' : ''}>${esc(f.path)} (${(f.freeSpace / 1024**3).toFixed(1)}GB free)</option>`).join('');
+            }
+            if (qualSelect) {
+              const current = qualSelect.value;
+              qualSelect.innerHTML = '<option value="">-- Select Profile --</option>' + 
+                profData.quality_profiles.map(p => `<option value="${esc(String(p.id))}" ${String(p.id) === current ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+            }
+            
+            // Populate tags
+            const tagContainer = document.getElementById('radarr_tags_list');
+            const selectedTags = Array.from(tagContainer.querySelectorAll('input[name="radarr_tags"]')).map(i => parseInt(i.value));
+            renderTags('radarr_tags_list', profData.tags, selectedTags, 'radarr');
+
+            setConnStatus('radarr-conn-status', 'connected');
+            showMessage('Radarr connection successful and profiles fetched!');
+            return;
+          } else if (action === 'test_sonarr') {
+            const u = document.getElementById('sonarr_url').value;
+            const t = document.getElementById('sonarr_token').value;
+            setConnStatus('sonarr-conn-status', 'checking');
+            // First test connection
+            const testRes = await fetch(`/api/proxy/auth/test-sonarr?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!testRes.ok) {
+              setConnStatus('sonarr-conn-status', 'disconnected');
+              throw new Error((await testRes.json()).detail || 'Failed to connect to Sonarr');
+            }
+            
+            // Then fetch profiles
+            const profRes = await fetch(`/api/proxy/auth/sonarr/profiles?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const profData = await profRes.json();
+            
+            // Populate selects
+            const rootSelect = document.getElementById('sonarr_root_folder');
+            const qualSelect = document.getElementById('sonarr_quality_profile');
+            if (rootSelect) {
+              const current = rootSelect.value;
+              rootSelect.innerHTML = '<option value="">-- Select Folder --</option>' + 
+                profData.root_folders.map(f => `<option value="${esc(f.path)}" ${f.path === current ? 'selected' : ''}>${esc(f.path)} (${(f.freeSpace / 1024**3).toFixed(1)}GB free)</option>`).join('');
+            }
+            if (qualSelect) {
+              const current = qualSelect.value;
+              qualSelect.innerHTML = '<option value="">-- Select Profile --</option>' + 
+                profData.quality_profiles.map(p => `<option value="${esc(String(p.id))}" ${String(p.id) === current ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+            }
+
+            // Populate tags
+            const tagContainer = document.getElementById('sonarr_tags_list');
+            const selectedTags = Array.from(tagContainer.querySelectorAll('input[name="sonarr_tags"]')).map(i => parseInt(i.value));
+            renderTags('sonarr_tags_list', profData.tags, selectedTags, 'sonarr');
+
+            setConnStatus('sonarr-conn-status', 'connected');
+            showMessage('Sonarr connection successful and profiles fetched!');
+            return;
+          } else if (action === 'sync_jellyfin') {
+            url = `/api/proxy/sync/jellyfin`;
+          } else if (action === 'sync_emby') {
+            url = `/api/proxy/sync/emby`;
+          } else if (action === 'sync_plex') {
+            url = `/api/proxy/sync/plex`;
+          } else if (action === 'sync_trakt') {
+            url = `/api/proxy/trakt/sync`;
+          }
+
+          const res = await fetch(url, {
+            method,
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+
+          if (res.ok) {
+            if (action === 'test_jellyfin') setConnStatus('jellyfin-conn-status', 'connected');
+            if (action === 'test_emby') setConnStatus('emby-conn-status', 'connected');
+            if (action === 'test_plex') setConnStatus('plex-conn-status', 'connected');
+            showMessage(data.message || 'Action successful!');
+          } else {
+            if (action === 'test_jellyfin') setConnStatus('jellyfin-conn-status', 'disconnected');
+            if (action === 'test_emby') setConnStatus('emby-conn-status', 'disconnected');
+            if (action === 'test_plex') setConnStatus('plex-conn-status', 'disconnected');
+            throw new Error(data.detail || 'Action failed');
+          }
+        } catch (e) {
+          if (action === 'test_jellyfin') setConnStatus('jellyfin-conn-status', 'disconnected');
+          if (action === 'test_emby') setConnStatus('emby-conn-status', 'disconnected');
+          if (action === 'test_plex') setConnStatus('plex-conn-status', 'disconnected');
+          showMessage(e.message, 'error');
+        } finally {
+          newBtn.disabled = false;
+          newBtn.textContent = originalText;
+        }
+      });
+    });
+
+    // Trakt Device Auth
+    function setupTraktAuth() {
+      const connectBtn = document.getElementById('trakt-connect-btn');
+      const disconnectBtn = document.getElementById('trakt-disconnect-btn');
+
+      if (connectBtn) {
+        connectBtn.onclick = async () => {
+          connectBtn.disabled = true;
+          connectBtn.textContent = 'Starting…';
+          try {
+            // If credentials aren't saved yet, save them from the input fields first
+            const clientIdInput = document.getElementById('trakt_client_id') as HTMLInputElement | null;
+            const clientSecretInput = document.getElementById('trakt_client_secret') as HTMLInputElement | null;
+            const clientId = clientIdInput?.value.trim() || '';
+            const clientSecret = clientSecretInput?.value.trim() || '';
+            if (clientId && clientSecret) {
+              const saveRes = await fetch('/api/proxy/auth/settings', {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trakt_client_id: clientId, trakt_client_secret: clientSecret }),
+              });
+              if (!saveRes.ok) {
+                const err = await saveRes.json();
+                throw new Error(err.detail || 'Failed to save Trakt credentials');
+              }
+            }
+
+            const res = await fetch('/api/proxy/trakt/auth/device/start', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (!res.ok) {
+              const err = await res.json();
+              throw new Error(err.detail || 'Failed to start Trakt auth');
+            }
+            const data = await res.json();
+
+            const panel = document.getElementById('trakt-auth-panel');
+            const urlEl = document.getElementById('trakt-verify-url');
+            const codeEl = document.getElementById('trakt-user-code');
+            const statusEl = document.getElementById('trakt-auth-status');
+            if (panel) panel.classList.remove('hidden');
+            if (urlEl) urlEl.textContent = data.verification_url;
+            if (codeEl) codeEl.textContent = data.user_code;
+            connectBtn.textContent = 'Waiting…';
+
+            // Poll for token
+            const interval = (data.interval || 5) * 1000;
+            const deadline = Date.now() + data.expires_in * 1000;
+            const poll = async () => {
+              if (Date.now() > deadline) {
+                if (statusEl) statusEl.textContent = 'Authorization timed out. Please try again.';
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'Connect Trakt';
+                return;
+              }
+              try {
+                const pollRes = await fetch('/api/proxy/trakt/auth/device/poll', {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (pollRes.ok) {
+                  const pollData = await pollRes.json();
+                  if (pollData.status === 'connected') {
+                    if (statusEl) statusEl.textContent = 'Connected! Reloading…';
+                    window.location.reload();
+                    return;
+                  }
+                } else {
+                  const err = await pollRes.json();
+                  if (statusEl) statusEl.textContent = `Error: ${err.detail || 'Authorization failed'}`;
+                  connectBtn.disabled = false;
+                  connectBtn.textContent = 'Connect Trakt';
+                  return;
+                }
+              } catch (e) {}
+              setTimeout(poll, interval);
+            };
+            setTimeout(poll, interval);
+          } catch (e) {
+            showMessage(e.message, 'error');
+            connectBtn.disabled = false;
+            connectBtn.textContent = 'Connect Trakt';
+          }
+        };
+      }
+
+      if (disconnectBtn) {
+        disconnectBtn.onclick = async () => {
+          if (!confirm('Disconnect Trakt? This will remove your Trakt tokens from Scrob.')) return;
+          disconnectBtn.disabled = true;
+          disconnectBtn.textContent = 'Disconnecting…';
+          try {
+            await fetch('/api/proxy/trakt/auth/disconnect', {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` },
+            });
+            window.location.reload();
+          } catch (e) {
+            showMessage('Failed to disconnect Trakt', 'error');
+            disconnectBtn.disabled = false;
+            disconnectBtn.textContent = 'Disconnect';
+          }
+        };
+      }
+    }
+    setupTraktAuth();
+
+    // Delete Account Logic
+    const deleteBtn = document.getElementById('delete-account-btn');
+    const modal = document.getElementById('delete-modal');
+    const cancelBtn = document.getElementById('cancel-delete');
+    const confirmBtn = document.getElementById('confirm-delete');
+    const clearHistoryBtn = document.getElementById('clear-history-btn');
+
+    if (clearHistoryBtn) {
+      clearHistoryBtn.onclick = async () => {
+        if (!confirm('Are you sure you want to clear your entire watch history? This cannot be undone.')) return;
+        
+        clearHistoryBtn.disabled = true;
+        clearHistoryBtn.textContent = 'Clearing...';
+        
+        try {
+          const res = await fetch(`/api/proxy/history`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            showMessage('Watch history cleared successfully!');
+          } else {
+            const data = await res.json();
+            throw new Error(data.detail || 'Failed to clear history');
+          }
+        } catch (e) {
+          showMessage(e.message, 'error');
+        } finally {
+          clearHistoryBtn.disabled = false;
+          clearHistoryBtn.textContent = 'Clear History';
+        }
+      };
+    }
+
+    if (deleteBtn && modal && cancelBtn && confirmBtn) {
+      deleteBtn.onclick = () => {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      };
+
+      cancelBtn.onclick = () => {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      };
+
+      confirmBtn.onclick = async () => {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Deleting...';
+        try {
+          const res = await fetch(`/api/proxy/auth/me`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            window.location.href = '/logout';
+          } else {
+            const data = await res.json();
+            throw new Error(data.detail || 'Failed to delete account');
+          }
+        } catch (e) {
+          showMessage(e.message, 'error');
+          modal.classList.add('hidden');
+          modal.classList.remove('flex');
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Yes, delete';
+        }
+      };
+    }
+  }
+
+  function setupPasswordToggles() {
+    const toggles = document.querySelectorAll('.password-toggle');
+    toggles.forEach(toggle => {
+      toggle.addEventListener('click', () => {
+        const input = toggle.parentElement?.querySelector('input');
+        if (!input) return;
+
+        const isPassword = input.type === 'password';
+        input.type = isPassword ? 'text' : 'password';
+
+        const eyeIcon = toggle.querySelector('.eye-icon');
+        const eyeSlashIcon = toggle.querySelector('.eye-slash-icon');
+
+        if (isPassword) {
+          eyeIcon?.classList.add('hidden');
+          eyeSlashIcon?.classList.remove('hidden');
+        } else {
+          eyeIcon?.classList.remove('hidden');
+          eyeSlashIcon?.classList.add('hidden');
+        }
+      });
+    });
+  }
+
+  function setupAccentSwatches() {
+    const saved = localStorage.getItem('accentTheme') || 'blue';
+
+    function applyAccent(id) {
+      if (id === 'blue') {
+        document.documentElement.removeAttribute('data-accent');
+      } else {
+        document.documentElement.setAttribute('data-accent', id);
+      }
+      localStorage.setItem('accentTheme', id);
+
+      document.querySelectorAll('.accent-swatch').forEach(btn => {
+        const isActive = btn.getAttribute('data-accent-id') === id;
+        btn.classList.toggle('border-zinc-100', isActive);
+        btn.classList.toggle('text-zinc-100', isActive);
+        btn.classList.toggle('border-zinc-800', !isActive);
+        btn.classList.toggle('text-zinc-400', !isActive);
+      });
+    }
+
+    applyAccent(saved);
+
+    document.querySelectorAll('.accent-swatch').forEach(btn => {
+      btn.addEventListener('click', () => applyAccent(btn.getAttribute('data-accent-id')));
+    });
+  }
+
+  function renderLibraryCheckboxes(containerId, libraries, idKey) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    // Clear loading state
+    container.classList.remove('italic', 'text-zinc-500');
+    
+    if (!libraries.length) {
+      container.innerHTML = '<span class="not-italic text-zinc-500 text-sm">No supported libraries found.</span>';
+      return;
+    }
+    
+    container.innerHTML = libraries.map(lib => `
+      <label class="flex items-center gap-2 cursor-pointer group px-2 py-1.5 rounded-lg border border-transparent hover:bg-zinc-800/50 transition-colors">
+        <input
+          type="checkbox"
+          class="library-checkbox w-4 h-4 rounded accent-blue-500 cursor-pointer"
+          data-id="${esc(String(lib[idKey]))}"
+          ${lib.selected ? 'checked' : ''}
+        />
+        <span class="text-zinc-300 group-hover:text-zinc-100 transition-colors not-italic">
+          ${esc(lib.name)}
+          <span class="text-zinc-400 text-xs ml-1">${lib.type === 'movies' || lib.type === 'movie' ? 'Movies' : 'Shows'}</span>
+        </span>
+      </label>
+    `).join('');
+
+    // Add click listeners to update styling for visual feedback
+    container.querySelectorAll('label').forEach(label => {
+      const cb = label.querySelector('input') as HTMLInputElement;
+      const updateStyle = () => {
+        if (cb.checked) {
+          label.classList.add('bg-blue-500/10', 'border-blue-500/30');
+          label.classList.remove('hover:bg-zinc-800/50', 'border-transparent');
+        } else {
+          label.classList.remove('bg-blue-500/10', 'border-blue-500/30');
+          label.classList.add('hover:bg-zinc-800/50', 'border-transparent');
+        }
+      };
+      
+      cb.addEventListener('change', updateStyle);
+      updateStyle(); // init
+    });
+  }
+
+  async function loadLibraries() {
+    const jellyfinList = document.getElementById('jellyfin-libraries-list');
+    const embyList = document.getElementById('emby-libraries-list');
+    const plexList = document.getElementById('plex-libraries-list');
+
+    if (jellyfinList) {
+      try {
+        const res = await fetch(`/api/proxy/sync/jellyfin/libraries`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          renderLibraryCheckboxes('jellyfin-libraries-list', data.libraries, 'id');
+        } else {
+          jellyfinList.classList.remove('italic');
+          jellyfinList.textContent = 'Could not load libraries.';
+        }
+      } catch {
+        jellyfinList.classList.remove('italic');
+        jellyfinList.textContent = 'Could not reach Jellyfin.';
+      }
+    }
+
+    if (embyList) {
+      try {
+        const res = await fetch(`/api/proxy/sync/emby/libraries`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          renderLibraryCheckboxes('emby-libraries-list', data.libraries, 'id');
+        } else {
+          embyList.classList.remove('italic');
+          embyList.textContent = 'Could not load libraries.';
+        }
+      } catch {
+        embyList.classList.remove('italic');
+        embyList.textContent = 'Could not reach Emby.';
+      }
+    }
+
+    if (plexList) {
+      try {
+        const res = await fetch(`/api/proxy/sync/plex/libraries`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          renderLibraryCheckboxes('plex-libraries-list', data.libraries, 'key');
+        } else {
+          plexList.classList.remove('italic');
+          plexList.textContent = 'Could not load libraries.';
+        }
+      } catch {
+        plexList.classList.remove('italic');
+        plexList.textContent = 'Could not reach Plex.';
+      }
+    }
+  }
+
+  function setupSettingsForm() {
+    const form = document.getElementById('settings-form');
+    const saveBtn = document.getElementById('save-settings-btn');
+    if (!form || !saveBtn) return;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      saveBtn.disabled = true;
+      const originalText = saveBtn.textContent;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        const saves = [];
+
+        // 1. Gather library selections
+        // ONLY gather and save if the list has actually loaded (not showing "Loading..." or error)
+        const jellyfinList = document.getElementById('jellyfin-libraries-list');
+        if (jellyfinList && !jellyfinList.classList.contains('italic') && jellyfinList.querySelector('.library-checkbox')) {
+          const ids = [...jellyfinList.querySelectorAll('.library-checkbox:checked')].map(cb => cb.getAttribute('data-id'));
+          saves.push(fetch(`/api/proxy/sync/jellyfin/libraries`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ library_ids: ids }),
+          }));
+        }
+
+        const embyList = document.getElementById('emby-libraries-list');
+        if (embyList && !embyList.classList.contains('italic') && embyList.querySelector('.library-checkbox')) {
+          const ids = [...embyList.querySelectorAll('.library-checkbox:checked')].map(cb => cb.getAttribute('data-id'));
+          saves.push(fetch(`/api/proxy/sync/emby/libraries`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ library_ids: ids }),
+          }));
+        }
+
+        const plexList = document.getElementById('plex-libraries-list');
+        if (plexList && !plexList.classList.contains('italic') && plexList.querySelector('.library-checkbox')) {
+          const keys = [...plexList.querySelectorAll('.library-checkbox:checked')].map(cb => cb.getAttribute('data-id'));
+          saves.push(fetch(`/api/proxy/sync/plex/libraries`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ library_keys: keys }),
+          }));
+        }
+
+        // 2. Gather general settings
+        const formData = new FormData(form);
+        const settings = {
+          tmdb_api_key: formData.get('tmdb_api_key') || null,
+          jellyfin_url: formData.get('jellyfin_url') || null,
+          jellyfin_token: formData.get('jellyfin_token') || null,
+          jellyfin_user_id: formData.get('jellyfin_user_id') || null,
+          emby_url: formData.get('emby_url') || null,
+          emby_token: formData.get('emby_token') || null,
+          emby_user_id: formData.get('emby_user_id') || null,
+          plex_url: formData.get('plex_url') || null,
+          plex_token: formData.get('plex_token') || null,
+          plex_username: formData.get('plex_username') || null,
+          
+          radarr_url: formData.get('radarr_url') || null,
+          radarr_token: formData.get('radarr_token') || null,
+          radarr_root_folder: formData.get('radarr_root_folder') || null,
+          radarr_quality_profile: formData.get('radarr_quality_profile') ? parseInt(formData.get('radarr_quality_profile')) : null,
+          radarr_tags: formData.getAll('radarr_tags').map(id => parseInt(id)),
+
+          sonarr_url: formData.get('sonarr_url') || null,
+          sonarr_token: formData.get('sonarr_token') || null,
+          sonarr_root_folder: formData.get('sonarr_root_folder') || null,
+          sonarr_quality_profile: formData.get('sonarr_quality_profile') ? parseInt(formData.get('sonarr_quality_profile')) : null,
+          sonarr_tags: formData.getAll('sonarr_tags').map(id => parseInt(id)),
+          sonarr_season_folder: formData.get('sonarr_season_folder') === 'true',
+
+          trakt_client_id: formData.get('trakt_client_id') || null,
+          trakt_client_secret: formData.get('trakt_client_secret') || null,
+        };
+
+        // Collect sync pref checkboxes (now inside settings-form)
+        const syncKeys = [
+          'plex_sync_collection', 'plex_sync_watched', 'plex_sync_ratings', 'plex_sync_playback',
+          'jellyfin_sync_collection', 'jellyfin_sync_watched', 'jellyfin_sync_ratings', 'jellyfin_sync_playback',
+          'emby_sync_collection', 'emby_sync_watched', 'emby_sync_ratings', 'emby_sync_playback',
+          'plex_push_watched', 'plex_push_ratings',
+          'jellyfin_push_watched', 'jellyfin_push_ratings',
+          'emby_push_watched', 'emby_push_ratings',
+          'trakt_sync_watched', 'trakt_sync_ratings',
+          'trakt_push_watched', 'trakt_push_ratings',
+        ] as const;
+        const syncPrefs: Record<string, boolean> = {};
+        for (const key of syncKeys) {
+          const el = form.querySelector<HTMLInputElement>(`[name="${key}"]`);
+          if (el) syncPrefs[key] = el.checked;
+        }
+
+        saves.push(fetch(`/api/proxy/auth/settings`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...settings, ...syncPrefs }),
+        }));
+
+        const results = await Promise.all(saves);
+        const failed = results.find(r => !r.ok);
+        
+        if (failed) {
+          const data = await failed.json();
+          throw new Error(data.detail || 'Failed to update settings');
+        }
+
+        showMessage('Settings updated successfully!');
+      } catch (e) {
+        showMessage(e.message, 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalText;
+      }
+    });
+  }
+
+  function setupPasswordForm() {
+    const form = document.getElementById('password-form');
+    const updateBtn = document.getElementById('update-password-btn');
+    if (!form || !updateBtn) return;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(form);
+      const current_password = formData.get('current_password');
+      const new_password = formData.get('new_password');
+      const confirm_password = formData.get('confirm_password');
+
+      if (new_password !== confirm_password) {
+        showMessage('New passwords do not match', 'error');
+        return;
+      }
+
+      updateBtn.disabled = true;
+      const originalText = updateBtn.textContent;
+      updateBtn.textContent = 'Updating...';
+
+      try {
+        const res = await fetch(`/api/proxy/auth/change-password`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ current_password, new_password }),
+        });
+
+        if (res.ok) {
+          showMessage('Password updated successfully!');
+          form.reset();
+        } else {
+          const data = await res.json();
+          throw new Error(data.detail || 'Failed to update password');
+        }
+      } catch (e) {
+        showMessage(e.message, 'error');
+      } finally {
+        updateBtn.disabled = false;
+        updateBtn.textContent = originalText;
+      }
+    });
+  }
+
+  const COPY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>`;
+  const CHECK_ICON = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>`;
+
+  function flashCopied(btn: HTMLElement): void {
+    btn.innerHTML = CHECK_ICON;
+    btn.classList.add('bg-green-900', 'border-green-700', 'text-green-400');
+    btn.classList.remove('bg-zinc-800', 'hover:bg-zinc-700', 'border-zinc-700', 'text-zinc-300');
+    setTimeout(() => {
+      btn.innerHTML = COPY_ICON;
+      btn.classList.remove('bg-green-900', 'border-green-700', 'text-green-400');
+      btn.classList.add('bg-zinc-800', 'hover:bg-zinc-700', 'border-zinc-700', 'text-zinc-300');
+    }, 2000);
+  }
+
+  function setupApiKey() {
+    const copyBtn = document.getElementById('copy-api-key-btn');
+    const regenBtn = document.getElementById('regenerate-api-key-btn');
+    const keyInput = document.getElementById('scrob_api_key');
+
+    if (copyBtn && keyInput) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText((keyInput as HTMLInputElement).value);
+          flashCopied(copyBtn as HTMLElement);
+        } catch {
+          showMessage('Could not copy to clipboard', 'error');
+        }
+      });
+    }
+
+    if (regenBtn && keyInput) {
+      regenBtn.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to regenerate your API key? The old key will stop working immediately.')) return;
+
+        regenBtn.disabled = true;
+        const originalText = regenBtn.textContent;
+        regenBtn.textContent = 'Regenerating...';
+
+        try {
+          const res = await fetch(`/api/proxy/auth/api-key/regenerate`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || 'Failed to regenerate key');
+          }
+          const data = await res.json();
+          keyInput.value = data.api_key;
+          showMessage('API key regenerated successfully!');
+        } catch (e) {
+          showMessage(e.message, 'error');
+        } finally {
+          regenBtn.disabled = false;
+          regenBtn.textContent = originalText;
+        }
+      });
+    }
+  }
+
+  function setupPlexWebhookUrl() {
+    const input = document.getElementById('plex-webhook-url') as HTMLInputElement | null;
+    const copyBtn = document.getElementById('copy-plex-webhook-btn');
+    const keyInput = document.getElementById('scrob_api_key') as HTMLInputElement | null;
+
+    if (!input || !keyInput) return;
+
+    const apiKey = keyInput.value;
+    const webhookUrl = `${window.location.origin}/api/proxy/webhooks/plex?api_key=${encodeURIComponent(apiKey)}`;
+    input.value = webhookUrl;
+
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(input.value);
+          flashCopied(copyBtn as HTMLElement);
+        } catch {
+          showMessage('Could not copy to clipboard', 'error');
+        }
+      });
+    }
+  }
+
+  function setupEmbyWebhookUrl() {
+    const input = document.getElementById('emby-webhook-url') as HTMLInputElement | null;
+    const copyBtn = document.getElementById('copy-emby-webhook-btn');
+    const keyInput = document.getElementById('scrob_api_key') as HTMLInputElement | null;
+
+    if (!input || !keyInput) return;
+
+    const apiKey = keyInput.value;
+    const webhookUrl = `${window.location.origin}/api/proxy/webhooks/emby?api_key=${encodeURIComponent(apiKey)}`;
+    input.value = webhookUrl;
+
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(input.value);
+          flashCopied(copyBtn as HTMLElement);
+        } catch {
+          showMessage('Could not copy to clipboard', 'error');
+        }
+      });
+    }
+  }
+
+  function setupJellyfinWebhookUrl() {
+    const input = document.getElementById('jellyfin-webhook-url') as HTMLInputElement | null;
+    const copyBtn = document.getElementById('copy-jellyfin-webhook-btn');
+    const keyInput = document.getElementById('scrob_api_key') as HTMLInputElement | null;
+
+    if (!input || !keyInput) return;
+
+    const apiKey = keyInput.value;
+    const webhookUrl = `${window.location.origin}/api/proxy/webhooks/jellyfin?api_key=${encodeURIComponent(apiKey)}`;
+    input.value = webhookUrl;
+
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(input.value);
+          flashCopied(copyBtn as HTMLElement);
+        } catch {
+          showMessage('Could not copy to clipboard', 'error');
+        }
+      });
+    }
+  }
+
+  function setupCollapsibleRows() {
+    document.querySelectorAll('.collapsible-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const targetId = header.getAttribute('data-target');
+        const body = targetId ? document.getElementById(targetId) : null;
+        if (!body) return;
+        const isOpen = !body.classList.contains('hidden');
+        if (isOpen) {
+          body.classList.add('hidden');
+          header.querySelector('.collapsible-chevron')?.classList.remove('rotate-180');
+        } else {
+          body.classList.remove('hidden');
+          header.querySelector('.collapsible-chevron')?.classList.add('rotate-180');
+        }
+      });
+    });
+  }
+
+  setupAccentSwatches();
+  setupActions();
+  setupPasswordToggles();
+  loadLibraries();
+  setupSettingsForm();
+  setupPasswordForm();
+  setupApiKey();
+  setupCollapsibleRows();
+  setupPlexWebhookUrl();
+  setupJellyfinWebhookUrl();
+  setupEmbyWebhookUrl();
+  checkConnections();
+  loadSyncWarnings();
+
+  document.addEventListener('astro:after-swap', () => {
+    setupAccentSwatches();
+    setupActions();
+    setupPasswordToggles();
+    loadLibraries();
+    setupSettingsForm();
+    setupPasswordForm();
+    setupApiKey();
+    setupCollapsibleRows();
+    setupPlexWebhookUrl();
+    setupJellyfinWebhookUrl();
+    setupEmbyWebhookUrl();
+    checkConnections();
+    loadSyncWarnings();
+  });
+
+  async function loadSyncWarnings() {
+    const appData = document.getElementById('app-data') as HTMLElement | null;
+    const token = appData?.dataset.token ?? '';
+    if (!token) return;
+
+    try {
+      const res = await fetch('/api/proxy/sync/status', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const jobs: any[] = await res.json();
+
+      for (const source of ['plex', 'jellyfin', 'emby'] as const) {
+        const container = document.getElementById(`${source}-sync-warnings`);
+        if (!container) continue;
+
+        // Find the most recent completed job for this source that has warnings
+        const job = jobs.find(j => j.source === source && j.status === 'completed' && j.warnings?.length > 0);
+        if (!job) { container.classList.add('hidden'); continue; }
+
+        const warnings: any[] = job.warnings;
+        const date = new Date(job.updated_at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+        const detailsId = `${source}-warnings-details`;
+
+        container.classList.remove('hidden');
+        container.innerHTML = `
+          <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 overflow-hidden">
+            <button
+              type="button"
+              class="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-amber-500/10 transition-colors cursor-pointer"
+              onclick="const d=document.getElementById('${detailsId}');const c=this.querySelector('.warn-chevron');d.classList.toggle('hidden');c.classList.toggle('rotate-180');"
+            >
+              <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-400 shrink-0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                <span class="text-xs font-semibold uppercase tracking-wider text-amber-400">${warnings.length} show${warnings.length > 1 ? 's' : ''} couldn't be fully synced</span>
+                <span class="text-xs text-zinc-500">· ${escapeHtml(date)}</span>
+              </div>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="warn-chevron w-4 h-4 text-amber-500/60 transition-transform shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
+            <div id="${detailsId}" class="hidden border-t border-amber-500/15 px-4 py-3 space-y-2">
+              <p class="text-xs text-zinc-500 mb-3">${source === 'plex' ? 'Plex' : source === 'emby' ? 'Emby' : 'Jellyfin'} title shown. These seasons weren't found on TMDB — the show may be split into separate series there. You can fix this by manually matching in Plex/TMDB, or by using the manual collect button on the episode page.</p>
+              ${warnings.map((w: any) => `
+                <div class="flex items-start gap-3 py-1.5 border-b border-zinc-800/60 last:border-0">
+                  <div class="flex-1 min-w-0">
+                    <span class="text-sm text-zinc-200 font-medium">${escapeHtml(w.show)}</span>
+                    <span class="ml-2 text-xs text-zinc-500">Season${w.seasons.length > 1 ? 's' : ''} ${escapeHtml(w.seasons.join(', '))}</span>
+                  </div>
+                  <span class="text-xs text-zinc-500 shrink-0">${w.affected_episodes} ep${w.affected_episodes !== 1 ? 's' : ''}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+    } catch (_) { /* non-critical */ }
+  }
+
+  function escapeHtml(s: string): string {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+
+<script>
+  import QRCode from 'qrcode';
+
+  const appData = document.getElementById('app-data') as HTMLElement | null;
+  const token: string = appData?.dataset.token ?? '';
+
+  let pendingTotpSecret = '';
+
+  function show2faSetupError(msg: string) {
+    const el = document.getElementById('2fa-setup-error');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  function hide2faSetupError() {
+    document.getElementById('2fa-setup-error')?.classList.add('hidden');
+  }
+
+  function show2faDisableError(msg: string) {
+    const el = document.getElementById('2fa-disable-error');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  function setup2fa() {
+    // Enable flow
+    const enableBtn = document.getElementById('enable-2fa-btn');
+    const setupPanel = document.getElementById('2fa-setup-panel');
+    const cancelSetupBtn = document.getElementById('cancel-2fa-setup-btn');
+    const confirmEnableBtn = document.getElementById('confirm-enable-2fa-btn') as HTMLButtonElement | null;
+    const verifyInput = document.getElementById('totp-verify-code') as HTMLInputElement | null;
+    const secretDisplay = document.getElementById('totp-secret-display');
+    const qrCanvas = document.getElementById('totp-qr-canvas') as HTMLCanvasElement | null;
+    const newCodesPanel = document.getElementById('2fa-new-codes-panel');
+    const newCodesGrid = document.getElementById('2fa-new-codes-grid');
+    const newCodesDoneBtn = document.getElementById('2fa-new-codes-done-btn');
+
+    enableBtn?.addEventListener('click', async () => {
+      enableBtn.textContent = 'Loading...';
+      (enableBtn as HTMLButtonElement).disabled = true;
+      hide2faSetupError();
+
+      try {
+        const res = await fetch(`/api/proxy/auth/2fa/setup`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Failed to start 2FA setup');
+        }
+        const data = await res.json() as { provisioning_uri: string; secret: string };
+        pendingTotpSecret = data.secret;
+
+        if (secretDisplay) secretDisplay.textContent = data.secret;
+
+        if (qrCanvas) {
+          await QRCode.toCanvas(qrCanvas, data.provisioning_uri, {
+            width: 160,
+            margin: 1,
+            color: { dark: '#000000', light: '#ffffff' },
+          });
+        }
+
+        setupPanel?.classList.remove('hidden');
+      } catch (e: unknown) {
+        show2faSetupError(e instanceof Error ? e.message : 'Setup failed');
+      } finally {
+        enableBtn.textContent = 'Enable 2FA';
+        (enableBtn as HTMLButtonElement).disabled = false;
+      }
+    });
+
+    cancelSetupBtn?.addEventListener('click', () => {
+      setupPanel?.classList.add('hidden');
+      pendingTotpSecret = '';
+      hide2faSetupError();
+      if (verifyInput) verifyInput.value = '';
+    });
+
+    confirmEnableBtn?.addEventListener('click', async () => {
+      const code = verifyInput?.value.trim() ?? '';
+      if (!code || !pendingTotpSecret) return;
+
+      confirmEnableBtn.disabled = true;
+      const orig = confirmEnableBtn.textContent;
+      confirmEnableBtn.textContent = 'Verifying...';
+      hide2faSetupError();
+
+      try {
+        const res = await fetch(`/api/proxy/auth/2fa/enable`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret: pendingTotpSecret, code }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Invalid code');
+        }
+        const data = await res.json() as { codes: { id: number; code: string; used: boolean }[] };
+
+        setupPanel?.classList.add('hidden');
+
+        if (newCodesGrid) {
+          newCodesGrid.innerHTML = data.codes
+            .map(bc => `<span class="font-mono text-sm px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300">${escapeHtml(bc.code)}</span>`)
+            .join('');
+        }
+        newCodesPanel?.classList.remove('hidden');
+      } catch (e: unknown) {
+        show2faSetupError(e instanceof Error ? e.message : 'Failed to enable 2FA');
+      } finally {
+        confirmEnableBtn.disabled = false;
+        confirmEnableBtn.textContent = orig;
+      }
+    });
+
+    newCodesDoneBtn?.addEventListener('click', () => {
+      window.location.reload();
+    });
+
+    // Disable flow
+    const disableBtn = document.getElementById('disable-2fa-btn');
+    const disablePanel = document.getElementById('2fa-disable-panel');
+    const cancelDisableBtn = document.getElementById('cancel-disable-2fa-btn');
+    const confirmDisableBtn = document.getElementById('confirm-disable-2fa-btn') as HTMLButtonElement | null;
+    const disableCodeInput = document.getElementById('totp-disable-code') as HTMLInputElement | null;
+
+    disableBtn?.addEventListener('click', () => {
+      disablePanel?.classList.remove('hidden');
+      disableBtn.classList.add('hidden');
+    });
+
+    cancelDisableBtn?.addEventListener('click', () => {
+      disablePanel?.classList.add('hidden');
+      disableBtn?.classList.remove('hidden');
+      if (disableCodeInput) disableCodeInput.value = '';
+      document.getElementById('2fa-disable-error')?.classList.add('hidden');
+    });
+
+    confirmDisableBtn?.addEventListener('click', async () => {
+      const code = disableCodeInput?.value.trim() ?? '';
+      if (!code) return;
+
+      confirmDisableBtn.disabled = true;
+      const orig = confirmDisableBtn.textContent;
+      confirmDisableBtn.textContent = 'Disabling...';
+      document.getElementById('2fa-disable-error')?.classList.add('hidden');
+
+      try {
+        const res = await fetch(`/api/proxy/auth/2fa/disable`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Failed to disable 2FA');
+        }
+        window.location.reload();
+      } catch (e: unknown) {
+        show2faDisableError(e instanceof Error ? e.message : 'Failed to disable 2FA');
+        confirmDisableBtn.disabled = false;
+        confirmDisableBtn.textContent = orig;
+      }
+    });
+  }
+
+  setup2fa();
+  document.addEventListener('astro:after-swap', setup2fa);
+</script>

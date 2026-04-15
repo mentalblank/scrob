@@ -1,0 +1,237 @@
+@import "tailwindcss";
+
+@theme {
+  --color-zinc-950: var(--color-bg-page);
+  --color-zinc-900: var(--color-bg-card);
+  --color-zinc-800: var(--color-border-base);
+  --color-zinc-700: var(--color-border-muted);
+  --color-zinc-600: var(--color-text-dim);
+  --color-zinc-500: var(--color-text-muted);
+  --color-zinc-400: var(--color-text-description);
+  --color-zinc-300: var(--color-text-secondary);
+  --color-zinc-200: var(--color-text-primary);
+  --color-zinc-100: var(--color-text-base);
+
+  --color-jellyfin: var(--color-brand-jellyfin);
+  --color-plex: var(--color-brand-plex);
+
+  --color-brand-primary: var(--accent-500);
+  --color-brand-secondary: var(--accent-400);
+
+  /* Remap the blue scale to accent variables so all blue-X utilities theme automatically */
+  --color-blue-400: var(--accent-400);
+  --color-blue-500: var(--accent-500);
+  --color-blue-600: var(--accent-600);
+  --color-blue-900: var(--accent-900);
+}
+
+:root {
+  --color-bg-page: #09090b;       /* zinc-950 */
+  --color-bg-card: #18181b;       /* zinc-900 */
+  --color-border-base: #27272a;   /* zinc-800 */
+  --color-border-muted: #3f3f46;  /* zinc-700 */
+  --color-text-base: #f4f4f5;     /* zinc-100 */
+  --color-text-primary: #e4e4e7;  /* zinc-200 */
+  --color-text-secondary: #d4d4d8;/* zinc-300 */
+  --color-text-description: #a1a1aa; /* zinc-400 */
+  --color-text-muted: #71717a;    /* zinc-500 */
+  --color-text-dim: #52525b;      /* zinc-600 */
+
+  --color-brand-jellyfin: #a855f7; /* purple-500 */
+  --color-brand-plex: #eab308;    /* yellow-500 */
+
+  /* Accent color scale — default: blue */
+  --accent-400: #60a5fa;
+  --accent-500: #3b82f6;
+  --accent-600: #2563eb;
+  --accent-900: #1e3a8a;
+}
+
+/* ── Accent themes ─────────────────────────────────────── */
+html[data-accent="purple"] {
+  --accent-400: #c084fc;
+  --accent-500: #a855f7;
+  --accent-600: #9333ea;
+  --accent-900: #3b0764;
+}
+
+html[data-accent="pink"] {
+  --accent-400: #f472b6;
+  --accent-500: #ec4899;
+  --accent-600: #db2777;
+  --accent-900: #500724;
+}
+
+html[data-accent="red"] {
+  --accent-400: #f87171;
+  --accent-500: #ef4444;
+  --accent-600: #dc2626;
+  --accent-900: #450a0a;
+}
+
+html[data-accent="green"] {
+  --accent-400: #4ade80;
+  --accent-500: #22c55e;
+  --accent-600: #16a34a;
+  --accent-900: #052e16;
+}
+
+html[data-accent="yellow"] {
+  --accent-400: #facc15;
+  --accent-500: #eab308;
+  --accent-600: #ca8a04;
+  --accent-900: #422006;
+}
+
+html[data-accent="orange"] {
+  --accent-400: #fb923c;
+  --accent-500: #f97316;
+  --accent-600: #ea580c;
+  --accent-900: #431407;
+}
+
+html.light {
+  --color-bg-page: #f9fafb;       /* gray-50 */
+  --color-bg-card: #ffffff;
+  --color-border-base: #e5e7eb;   /* gray-200 */
+  --color-border-muted: #f3f4f6;  /* gray-100 */
+  --color-text-base: #111827;     /* gray-900 */
+  --color-text-primary: #1f2937;  /* gray-800 */
+  --color-text-secondary: #374151;/* gray-700 */
+  --color-text-description: #4b5563; /* gray-600 */
+  --color-text-muted: #6b7280;    /* gray-500 */
+  --color-text-dim: #9ca3af;      /* gray-400 */
+  
+  --color-brand-jellyfin: #7e22ce; /* purple-700 */
+  --color-brand-plex: #a16207;    /* yellow-700 (darker yellow for contrast) */
+}
+
+/* ── App-like feel ─────────────────────────────────────────────────────────── */
+html {
+  /* Fill notch/rounded-corner areas */
+  background-color: var(--color-bg-page);
+}
+
+body {
+  /* No rubber-band bounce on the shell */
+  overscroll-behavior: none;
+  /* Prevent iOS text size adjustment after orientation change */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Remove tap highlight flash on all interactive elements */
+a, button, input, select, textarea, label, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  /* Eliminate 300ms tap delay; allow native scroll */
+  touch-action: manipulation;
+}
+
+/* Prevent long-press callout on images and links (iOS) */
+img, a {
+  -webkit-touch-callout: none;
+}
+
+/* Safe area for bottom nav on iOS */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ── Mobile input improvements ─────────────────────────────────────────────
+   16px font-size prevents iOS Safari from auto-zooming into inputs.
+   min-height ensures comfortable touch targets. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: 1rem !important;
+    min-height: 2.75rem;
+  }
+}
+
+/* ── Now Playing bar — always render on a dark surface ─────────────────────
+   The bar uses a video backdrop or dark bg-zinc-900. In light mode zinc-900
+   remaps to white, making green-400 text illegible. Restore dark zinc values
+   for just this section so the bar looks correct in both themes. */
+html.light #now-playing-section {
+  --color-zinc-950: #09090b;
+  --color-zinc-900: #18181b;
+  --color-zinc-800: #27272a;
+  --color-zinc-700: #3f3f46;
+  --color-zinc-500: #71717a;
+  --color-zinc-400: #a1a1aa;
+  --color-zinc-300: #d4d4d8;
+  --color-zinc-100: #f4f4f5;
+}
+
+/* ── ActionBar buttons — light mode ───────────────────────────────────────────
+   All states use solid named colours — no transparency, no Tailwind opacity classes.
+   Inactive base: gray (zinc variable remap handles this automatically).
+   Inactive hover: color-100 (light preview of the colour).
+   Active base:    color-200 (clearly active).
+   Active hover:   color-100 (lighter = hover feedback on active). */
+
+html.light [data-action]:hover { filter: none; }
+
+/* Watched (green) */
+html.light [data-action="watched"][data-state="inactive"]:hover {
+  background-color: #dcfce7; color: #14532d; /* green-100 / green-900 */
+}
+html.light [data-action="watched"][data-state="active"] {
+  background-color: #bbf7d0; color: #14532d; /* green-200 / green-900 */
+}
+html.light [data-action="watched"][data-state="active"]:hover {
+  background-color: #dcfce7; color: #14532d; /* green-100 / green-900 */
+}
+
+/* Lists (sky) */
+html.light [data-action="list"][data-state="inactive"]:hover {
+  background-color: #e0f2fe; color: #0c4a6e; /* sky-100 / sky-900 */
+}
+html.light [data-action="list"][data-state="active"] {
+  background-color: #bae6fd; color: #0c4a6e; /* sky-200 / sky-900 */
+}
+html.light [data-action="list"][data-state="active"]:hover {
+  background-color: #e0f2fe; color: #0c4a6e; /* sky-100 / sky-900 */
+}
+
+/* Rate (amber) */
+html.light [data-action="rate"][data-state="inactive"]:hover {
+  background-color: #fef3c7; color: #78350f; /* amber-100 / amber-900 */
+}
+html.light [data-action="rate"][data-state="active"] {
+  background-color: #f4e7b2; color: #dc7d47; /* amber-200 / amber-900 */
+}
+html.light [data-action="rate"][data-state="active"]:hover {
+  background-color: #fef3c7; color: #c45f25; /* amber-100 / amber-900 */
+}
+
+/* Collected (purple) */
+html.light [data-action="collected"][data-state="inactive"]:hover {
+  background-color: #f3e8ff; color: #581c87; /* purple-100 / purple-900 */
+}
+html.light [data-action="collected"][data-state="active"] {
+  background-color: #e9d5ff; color: #581c87; /* purple-200 / purple-900 */
+}
+html.light [data-action="collected"][data-state="active"]:hover {
+  background-color: #f3e8ff; color: #581c87; /* purple-100 / purple-900 */
+}
+
+/* Request (orange) */
+html.light [data-action="request"][data-state="inactive"]:hover {
+  background-color: #ffedd5; color: #7c2d12; /* orange-100 / orange-900 */
+}
+html.light [data-action="request"][data-state="active"] {
+  background-color: #fed7aa; color: #7c2d12; /* orange-200 / orange-900 */
+}
+html.light [data-action="request"][data-state="active"]:hover {
+  background-color: #ffedd5; color: #7c2d12; /* orange-100 / orange-900 */
+}
+
+/* Transitions for theme switching */
+body {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+nav, div, a, button, input, span {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}

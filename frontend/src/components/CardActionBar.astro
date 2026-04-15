@@ -1,0 +1,70 @@
+---
+interface Props {
+  watched: boolean;
+  inLists: number[];
+  inLibrary: boolean;
+  collectionPct: number;
+  isSeries: boolean;
+}
+
+const { watched, inLists, inLibrary, collectionPct, isSeries } = Astro.props;
+
+const collectStyle = isSeries && collectionPct > 0
+  ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
+  : '';
+---
+
+<div class="grid grid-cols-3 flex-shrink-0">
+  <!-- Watched (green) -->
+  <button
+    data-action="watched"
+    data-watched={String(watched)}
+    data-state={watched ? 'active' : 'inactive'}
+    title={watched ? 'Mark as unwatched' : 'Mark as watched'}
+    class={`flex flex-col items-center justify-center gap-1 py-2.5 transition-all cursor-pointer border-r border-zinc-800/60 hover:brightness-125 ${watched ? 'bg-green-500/20 text-green-400' : 'bg-zinc-900 text-zinc-400 hover:bg-green-500/10 hover:text-green-500'}`}
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+      <circle cx="12" cy="12" r="3" fill={watched ? "currentColor" : "none"}/>
+    </svg>
+    <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Watched</span>
+  </button>
+
+  <!-- Lists (sky) -->
+  <button
+    data-action="list"
+    data-in-lists={JSON.stringify(inLists)}
+    data-state={inLists.length > 0 ? 'active' : 'inactive'}
+    title="Add to list"
+    class={`flex flex-col items-center justify-center gap-1 py-2.5 transition-all cursor-pointer border-r border-zinc-800/60 hover:brightness-125 ${inLists.length > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-zinc-900 text-zinc-400 hover:bg-sky-500/10 hover:text-sky-400'}`}
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="8" y1="6" x2="21" y2="6"/>
+      <line x1="8" y1="12" x2="21" y2="12"/>
+      <line x1="8" y1="18" x2="21" y2="18"/>
+      <line x1="3" y1="6" x2="3.01" y2="6"/>
+      <line x1="3" y1="12" x2="3.01" y2="12"/>
+      <line x1="3" y1="18" x2="3.01" y2="18"/>
+    </svg>
+    <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Lists</span>
+  </button>
+
+  <!-- Collected (purple) -->
+  <button
+    data-action="collected"
+    data-in-library={String(inLibrary)}
+    data-collection-pct={String(collectionPct)}
+    data-state={inLibrary ? 'active' : 'inactive'}
+    title={isSeries ? `${collectionPct}% in library` : (inLibrary ? 'Remove from collection' : 'Add to collection')}
+    style={collectStyle}
+    class={`relative flex flex-col items-center justify-center gap-1 py-2.5 transition-all cursor-pointer overflow-hidden hover:brightness-125 ${inLibrary ? 'bg-purple-500/20 text-purple-400' : 'bg-zinc-900 text-zinc-400 hover:bg-purple-500/10 hover:text-purple-400'}`}
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
+      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+      <path d="M15 22v-4a3 3 0 0 0-6 0v4"/>
+      <path d="M2 7h20"/>
+    </svg>
+    <span class="text-[8px] font-bold uppercase tracking-wider leading-none">{isSeries ? `${collectionPct}%` : 'Collected'}</span>
+  </button>
+</div>

@@ -1,0 +1,73 @@
+---
+import Base from "../../../layouts/Base.astro";
+import { api } from "../../../lib/api";
+
+const { token } = Astro.params;
+
+type ActivationState = "success" | "invalid" | "expired" | "error";
+let state: ActivationState = "error";
+
+try {
+  await api.auth.activateEmail(token!);
+  state = "success";
+} catch (e: unknown) {
+  const msg = e instanceof Error ? e.message : "";
+  if (msg.includes("invalid")) state = "invalid";
+  else if (msg.includes("expired")) state = "expired";
+  else state = "error";
+}
+---
+
+<Base title="Activate Account" hideNav>
+  <div class="max-w-md mx-auto mt-16 p-8 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl">
+    <div class="flex flex-col items-center mb-6">
+      <img src="/scrob.png" alt="Scrob Logo" class="w-36 object-contain mb-2" />
+      <span class="text-zinc-100 font-bold text-xl tracking-tight">Scrob</span>
+    </div>
+
+    {state === "success" && (
+      <div class="text-center py-2">
+        <div class="w-14 h-14 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-7 h-7 text-green-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+        </div>
+        <h1 class="text-2xl font-bold text-zinc-100 mb-2">Email confirmed!</h1>
+        <p class="text-sm text-zinc-400 mb-6">Your account is now active. You can sign in.</p>
+        <a href="/login" class="inline-block bg-zinc-100 text-zinc-950 font-bold px-6 py-2 rounded-lg hover:bg-zinc-200 transition-colors">
+          Sign in
+        </a>
+      </div>
+    )}
+
+    {state === "expired" && (
+      <div class="text-center py-2">
+        <div class="w-14 h-14 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-7 h-7 text-yellow-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+        </div>
+        <h1 class="text-2xl font-bold text-zinc-100 mb-2">Link expired</h1>
+        <p class="text-sm text-zinc-400 mb-6">This activation link has expired (links are valid for 24 hours). Please register again.</p>
+        <a href="/register" class="inline-block bg-zinc-100 text-zinc-950 font-bold px-6 py-2 rounded-lg hover:bg-zinc-200 transition-colors">
+          Register again
+        </a>
+      </div>
+    )}
+
+    {(state === "invalid" || state === "error") && (
+      <div class="text-center py-2">
+        <div class="w-14 h-14 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-7 h-7 text-red-400">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </div>
+        <h1 class="text-2xl font-bold text-zinc-100 mb-2">Invalid link</h1>
+        <p class="text-sm text-zinc-400 mb-6">This activation link is not valid. It may have already been used.</p>
+        <a href="/login" class="inline-block bg-zinc-100 text-zinc-950 font-bold px-6 py-2 rounded-lg hover:bg-zinc-200 transition-colors">
+          Back to login
+        </a>
+      </div>
+    )}
+  </div>
+</Base>

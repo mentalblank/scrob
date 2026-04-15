@@ -1,0 +1,171 @@
+---
+import Base from "../layouts/Base.astro";
+import MediaCard from "../components/MediaCard.astro";
+import Pagination from "../components/Pagination.astro";
+import { api, type MediaItem } from "../lib/api";
+export const prerender = false;
+
+const category = Astro.url.searchParams.get("category") ?? "popular";
+const genre = Astro.url.searchParams.get("genre") ?? "";
+const year = Astro.url.searchParams.get("year") ? Number(Astro.url.searchParams.get("year")) : undefined;
+const minRating = Astro.url.searchParams.get("min_rating") ? Number(Astro.url.searchParams.get("min_rating")) : undefined;
+const status = Astro.url.searchParams.get("status") ?? "";
+const page = Number(Astro.url.searchParams.get("page") ?? 1);
+const { token } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
+
+const settings = await api.auth.getSettings(token!);
+const hasTmdbKey = !!settings?.tmdb_api_key;
+
+let data: { results: MediaItem[]; total_pages: number; page: number } = { results: [], total_pages: 0, page: 1 };
+if (hasTmdbKey) {
+  try {
+    data = await api.media.tmdbList({
+      type: "series",
+      category,
+      page,
+      ...(genre ? { genre } : {}),
+      ...(year ? { year } : {}),
+      ...(minRating ? { min_rating: minRating } : {}),
+      ...(status ? { status } : {}),
+    }, token);
+  } catch (e) {
+    console.error("Failed to fetch TMDB show list:", e);
+  }
+}
+
+const TV_GENRES = [
+  "Action & Adventure", "Animation", "Comedy", "Crime", "Documentary",
+  "Drama", "Family", "Kids", "Mystery", "News", "Reality",
+  "Sci-Fi & Fantasy", "Soap", "Talk", "War & Politics", "Western",
+];
+
+const TV_STATUSES = ["Returning Series", "In Production", "Planned", "Ended", "Canceled"];
+
+const currentYear = new Date().getFullYear();
+const years = Array.from({ length: currentYear - 1949 }, (_, i) => currentYear - i);
+
+// Build base URL preserving active filters (without page)
+const baseParams = new URLSearchParams();
+baseParams.set("category", category);
+if (genre) baseParams.set("genre", genre);
+if (year) baseParams.set("year", String(year));
+if (minRating) baseParams.set("min_rating", String(minRating));
+if (status) baseParams.set("status", status);
+const baseUrl = `/shows?${baseParams.toString()}`;
+---
+
+<Base title="Explore Shows">
+  <div class="flex items-center gap-1 mb-6 bg-zinc-900 border border-zinc-800 rounded-xl p-1 w-fit">
+    <a href="/shows" class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 text-white transition-colors">Explore</a>
+    <a href="/collection/shows" class="px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors">My Collection</a>
+  </div>
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+    <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">Explore Shows</h1>
+
+    {hasTmdbKey && (
+      <div class="flex flex-wrap gap-2 text-sm bg-zinc-900/50 p-1 rounded-xl border border-zinc-800">
+        {[
+          { value: "popular", label: "Popular" },
+          { value: "top_rated", label: "Top Rated" },
+          { value: "trending", label: "Trending" },
+        ].map(({ value, label }) => {
+          const tabParams = new URLSearchParams(baseParams);
+          tabParams.set("category", value);
+          tabParams.delete("page");
+          return (
+            <a
+              href={`/shows?${tabParams.toString()}`}
+              class={`px-4 py-2 rounded-lg transition-all font-medium ${category === value ? "bg-blue-600 text-white shadow-lg" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"}`}
+            >
+              {label}
+            </a>
+          );
+        })}
+      </div>
+    )}
+  </div>
+
+  {!hasTmdbKey ? (
+    <div class="p-12 bg-zinc-900/50 border border-zinc-800 rounded-2xl text-center">
+      <div class="text-4xl mb-4">📺</div>
+      <h2 class="text-xl font-bold text-zinc-100 mb-2">TMDB API Key Required</h2>
+      <p class="text-zinc-400 mb-6 max-w-md mx-auto">To explore shows from The Movie Database, you must add your API key in the settings.</p>
+      <a href="/settings" class="inline-flex px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95">
+        Go to Settings
+      </a>
+    </div>
+  ) : (
+    <>
+      <!-- Filter bar -->
+      <div class="flex flex-wrap gap-3 mb-8 items-center">
+        <select id="filter-genre" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+          <option value="">All Genres</option>
+          {TV_GENRES.map(g => (
+            <option value={g} selected={genre === g}>{g}</option>
+          ))}
+        </select>
+
+        <select id="filter-year" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+          <option value="">All Years</option>
+          {years.map(y => (
+            <option value={y} selected={year === y}>{y}</option>
+          ))}
+        </select>
+
+        <select id="filter-rating" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+          <option value="">Any Rating</option>
+          {[9, 8, 7, 6, 5].map(r => (
+            <option value={r} selected={minRating === r}>{r}+ Stars</option>
+          ))}
+        </select>
+
+        <select id="filter-status" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+          <option value="">Any Status</option>
+          {TV_STATUSES.map(s => (
+            <option value={s} selected={status === s}>{s}</option>
+          ))}
+        </select>
+
+        {(genre || year || minRating || status) && (
+          <a href={`/shows?category=${category}`} class="text-sm text-zinc-500 hover:text-zinc-300 transition">
+            Clear filters
+          </a>
+        )}
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        {data.results.map(item => <MediaCard item={item} />)}
+      </div>
+
+      <Pagination
+        currentPage={data.page}
+        totalPages={data.total_pages}
+        baseUrl={baseUrl}
+      />
+    </>
+  )}
+</Base>
+
+<script define:vars={{ category, genre, year, minRating, status }}>
+  function navigate() {
+    const params = new URLSearchParams();
+    params.set("category", category);
+    const g = document.getElementById("filter-genre").value;
+    const y = document.getElementById("filter-year").value;
+    const r = document.getElementById("filter-rating").value;
+    const st = document.getElementById("filter-status").value;
+    if (g) params.set("genre", g);
+    if (y) params.set("year", y);
+    if (r) params.set("min_rating", r);
+    if (st) params.set("status", st);
+    window.location.href = `/shows?${params.toString()}`;
+  }
+
+  document.getElementById("filter-genre")?.addEventListener("change", navigate);
+  document.getElementById("filter-year")?.addEventListener("change", navigate);
+  document.getElementById("filter-rating")?.addEventListener("change", navigate);
+  document.getElementById("filter-status")?.addEventListener("change", navigate);
+
+  window.addEventListener('pageshow', (e) => { if (e.persisted) location.replace(location.href); });
+</script>

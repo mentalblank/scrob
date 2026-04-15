@@ -1,0 +1,1261 @@
+import json
+import re
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete, func
+
+from db import get_db
+from models.media import Media
+from models.show import Show
+from models.collection import Collection, CollectionFile
+from models.events import WatchEvent
+from models.ratings import Rating
+from models.users import User, UserSettings
+from models.base import MediaType, CollectionSource
+from models.playback_session import PlaybackSession
+from models.playback_progress import PlaybackProgress
+from models.library_selections import PlexLibrarySelection, JellyfinLibrarySelection, EmbyLibrarySelection
+from core.enrichment import enrich_media
+from core import tmdb
+from core.jellyfin import extract_quality
+
+router = APIRouter()
+
+
+async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: str = None) -> Show:
+    result = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
+    show = result.scalar_one_or_none()
+    if not show:
+        show_data = await tmdb.get_show(series_tmdb_id, api_key=api_key)
+        show = Show(
+            tmdb_id=series_tmdb_id,
+            title=show_data.get("name", ""),
+            original_title=show_data.get("original_name"),
+            overview=show_data.get("overview"),
+            poster_path=tmdb.poster_url(show_data.get("poster_path")),
+            backdrop_path=tmdb.poster_url(show_data.get("backdrop_path"), size="w1280"),
+            tmdb_rating=show_data.get("vote_average"),
+            status=show_data.get("status"),
+            tagline=show_data.get("tagline"),
+            first_air_date=show_data.get("first_air_date"),
+            last_air_date=show_data.get("last_air_date"),
+            tmdb_data={
+                "genres": [g["name"] for g in show_data.get("genres", [])],
+                "external_ids": show_data.get("external_ids", {}),
+                "seasons": [
+                    {
+                        "season_number": s["season_number"],
+                        "poster_path": tmdb.poster_url(s.get("poster_path")),
+                        "episode_count": s["episode_count"],
+                        "name": s["name"],
+                    }
+                    for s in show_data.get("seasons", [])
+                ],
+            },
+        )
+        db.add(show)
+        await db.flush()
+    return show
+
+
+# ── Shared helpers ─────────────────────────────────────────────────────────────
+
+async def _get_or_open_session(
+    db: AsyncSession,
+    session_key: str,
+    source: str,
+    user_id: int,
+    media_id: int,
+) -> PlaybackSession:
+    result = await db.execute(
+        select(PlaybackSession).where(PlaybackSession.session_key == session_key)
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        session = PlaybackSession(
+            session_key=session_key,
+            source=source,
+            user_id=user_id,
+            media_id=media_id,
+            progress_percent=0.0,
+            progress_seconds=0,
+            started_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(session)
+        await db.flush()
+    return session
+
+
+async def _close_session(db: AsyncSession, session_key: str) -> Optional[PlaybackSession]:
+    result = await db.execute(
+        select(PlaybackSession).where(PlaybackSession.session_key == session_key)
+    )
+    session = result.scalar_one_or_none()
+    if session:
+        await db.delete(session)
+    return session
+
+
+async def _update_playback_progress(
+    db: AsyncSession,
+    user_id: int,
+    media_id: int,
+    progress_percent: float,
+    progress_seconds: int,
+) -> None:
+    """Updates persistent in-progress state (Continue Watching)."""
+    # Don't track progress below 5% or above 90% (those are handled by scrobble)
+    if progress_percent < 0.05 or progress_percent >= 0.90:
+        # If we already have progress and it's now outside the range, delete it
+        await db.execute(
+            delete(PlaybackProgress).where(
+                PlaybackProgress.user_id == user_id,
+                PlaybackProgress.media_id == media_id
+            )
+        )
+        return
+
+    result = await db.execute(
+        select(PlaybackProgress).where(
+            PlaybackProgress.user_id == user_id,
+            PlaybackProgress.media_id == media_id
+        )
+    )
+    progress = result.scalar_one_or_none()
+    if progress:
+        progress.progress_percent = progress_percent
+        progress.progress_seconds = progress_seconds
+        progress.updated_at = datetime.utcnow()
+    else:
+        db.add(PlaybackProgress(
+            user_id=user_id,
+            media_id=media_id,
+            progress_percent=progress_percent,
+            progress_seconds=progress_seconds,
+            updated_at=datetime.utcnow(),
+        ))
+
+
+async def _write_watch_event(
+    db: AsyncSession,
+    user_id: int,
+    media_id: int,
+    progress_percent: float,
+    progress_seconds: int,
+    completed: bool,
+) -> None:
+    if completed:
+        db.add(WatchEvent(
+            user_id=user_id,
+            media_id=media_id,
+            watched_at=datetime.utcnow(),
+            progress_seconds=progress_seconds,
+            progress_percent=1.0,
+            completed=True,
+            play_count=1,
+        ))
+        # Remove any in-progress marker since it's now done
+        await db.execute(
+            delete(PlaybackProgress).where(
+                PlaybackProgress.user_id == user_id,
+                PlaybackProgress.media_id == media_id
+            )
+        )
+    else:
+        # Just update in-progress state, don't add to WatchEvent (History)
+        await _update_playback_progress(db, user_id, media_id, progress_percent, progress_seconds)
+
+
+# ── Jellyfin ───────────────────────────────────────────────────────────────────
+
+def parse_jellyfin_payload(payload: dict) -> dict | None:
+    notification_type = payload.get("NotificationType") or payload.get("notificationType", "")
+
+    # ── Nested format (raw Jellyfin API / custom HTTP destination) ────────────
+    item = payload.get("Item") or payload.get("item") or {}
+    session = payload.get("Session") or payload.get("session") or {}
+    if item and item.get("Type") in ("Movie", "Episode"):
+        play_state = session.get("PlayState", {})
+        position_ticks = play_state.get("PositionTicks", 0)
+        runtime_ticks = item.get("RunTimeTicks", 0)
+
+        media_sources = item.get("MediaSources", [])
+        if media_sources:
+            streams = media_sources[0].get("MediaStreams", [])
+            quality = extract_quality(streams)
+            quality["file_path"] = media_sources[0].get("Path")
+        else:
+            quality = {}
+
+        return {
+            "notification_type": notification_type,
+            "jellyfin_id": item.get("Id"),
+            "title": item.get("Name"),
+            "year": item.get("ProductionYear"),
+            "media_type": "movie" if item.get("Type") == "Movie" else "episode",
+            "tmdb_id": item.get("ProviderIds", {}).get("Tmdb"),
+            "series_tmdb_id": item.get("SeriesProviderIds", {}).get("Tmdb"),
+            "season_number": item.get("ParentIndexNumber"),
+            "episode_number": item.get("IndexNumber"),
+            "progress_percent": round(position_ticks / runtime_ticks, 4) if runtime_ticks else 0.0,
+            "progress_seconds": int(position_ticks / 10_000_000) if position_ticks else 0,
+            "is_paused": bool(play_state.get("IsPaused", False)),
+            "session_id": session.get("Id") or session.get("PlaySessionId"),
+            "username": session.get("UserName") or payload.get("NotificationUsername", ""),
+            "quality": quality,
+        }
+
+    # ── Flat format (Jellyfin Webhook plugin — Generic Destination) ───────────
+    item_type = payload.get("ItemType", "")
+    if item_type not in ("Movie", "Episode"):
+        return None
+
+    tmdb_id = (
+        payload.get("Provider_tmdb")
+        or payload.get("Provider_Tmdb")
+        or payload.get("Provider_tmdbid")
+    )
+    position_ticks = payload.get("PlaybackPositionTicks") or payload.get("PositionTicks") or 0
+    runtime_ticks = payload.get("RunTimeTicks") or 0
+
+    # SeasonNumber/EpisodeNumber are 1-indexed in the plugin template; 0 means absent
+    season_num = payload.get("SeasonNumber") or None
+    episode_num = payload.get("EpisodeNumber") or None
+
+    return {
+        "notification_type": notification_type,
+        "jellyfin_id": payload.get("ItemId"),
+        "title": payload.get("Name"),
+        "year": payload.get("Year") or payload.get("ProductionYear"),
+        "media_type": "movie" if item_type == "Movie" else "episode",
+        "tmdb_id": str(tmdb_id) if tmdb_id else None,
+        "series_tmdb_id": None,  # not exposed in flat format; resolved in find_or_create
+        "series_name": payload.get("SeriesName"),  # used to look up show when series_tmdb_id is absent
+        "season_number": season_num,
+        "episode_number": episode_num,
+        "progress_percent": round(position_ticks / runtime_ticks, 4) if runtime_ticks else 0.0,
+        "progress_seconds": int(position_ticks / 10_000_000) if position_ticks else 0,
+        "is_paused": bool(payload.get("IsPaused", False)),
+        "session_id": payload.get("PlaySessionId") or payload.get("DeviceId"),
+        "username": payload.get("UserName") or payload.get("NotificationUsername", ""),
+        "quality": {},
+    }
+
+
+async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: str = None) -> Media | None:
+    # 1. Match by Jellyfin source ID via CollectionFile (fastest path post-sync)
+    if data["jellyfin_id"]:
+        result = await db.execute(
+            select(Media)
+            .join(Collection, Collection.media_id == Media.id)
+            .join(CollectionFile, CollectionFile.collection_id == Collection.id)
+            .where(CollectionFile.source == CollectionSource.jellyfin)
+            .where(CollectionFile.source_id == data["jellyfin_id"])
+        )
+        media = result.scalars().first()
+        if media:
+            return media
+
+    # Resolve show for episode dedup and enrichment
+    show = None
+    series_tmdb_id = int(data["series_tmdb_id"]) if data.get("series_tmdb_id") else None
+
+    if data["media_type"] == "episode" and not series_tmdb_id and data.get("series_name"):
+        # Flat format: no series_tmdb_id — try local Show table first, then TMDB search
+        local_result = await db.execute(
+            select(Show).where(Show.title.ilike(data["series_name"]))
+        )
+        local_show = local_result.scalars().first()
+        if local_show:
+            series_tmdb_id = local_show.tmdb_id
+        else:
+            try:
+                res = await tmdb.search_shows(data["series_name"], api_key=api_key)
+                if res.get("results"):
+                    series_tmdb_id = res["results"][0]["id"]
+            except Exception:
+                pass
+
+    if data["media_type"] == "episode" and series_tmdb_id:
+        try:
+            show = await _find_or_create_show(db, series_tmdb_id, api_key)
+        except Exception:
+            pass
+
+    # 2. Match by TMDB ID (handles rapid webhook events before first sync, or items
+    #    already added via another source / manually — prevents duplicate media rows)
+    if data["tmdb_id"]:
+        result = await db.execute(
+            select(Media).where(
+                Media.tmdb_id == int(data["tmdb_id"]),
+                Media.media_type == MediaType(data["media_type"]),
+            )
+        )
+        media = result.scalars().first()
+        if media:
+            if media.media_type == MediaType.episode and media.show_id is None and show:
+                media.show_id = show.id
+                await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+            return media
+
+    # 2b. Movie matching by title + year if TMDB ID is missing
+    if data["media_type"] == "movie" and not data["tmdb_id"]:
+        # Try local match first to avoid redundant TMDB search
+        local_q = select(Media).where(
+            Media.media_type == MediaType.movie,
+            Media.title.ilike(data["title"]),
+        )
+        if data.get("year"):
+            local_q = local_q.where(Media.release_date.like(f"{data['year']}%"))
+        
+        media = (await db.execute(local_q)).scalars().first()
+        if media:
+            return media
+            
+        # Try TMDB search to find the real ID
+        try:
+            search_res = await tmdb.search_movies(data["title"], year=data.get("year"), api_key=api_key)
+            if search_res.get("results"):
+                tmdb_movie = search_res["results"][0]
+                data["tmdb_id"] = str(tmdb_movie["id"])
+                # Check again with the new TMDB ID
+                result = await db.execute(
+                    select(Media).where(
+                        Media.tmdb_id == tmdb_movie["id"],
+                        Media.media_type == MediaType.movie,
+                    )
+                )
+                media = result.scalars().first()
+                if media:
+                    return media
+        except Exception:
+            pass
+
+    # 3. Match by (show_id, season_number, episode_number) — catches sync-created rows
+    #    when the Jellyfin item's TMDB ID is missing or doesn't match
+    if show and data["season_number"] is not None and data["episode_number"] is not None:
+        result = await db.execute(
+            select(Media).where(
+                Media.media_type == MediaType.episode,
+                Media.show_id == show.id,
+                Media.season_number == data["season_number"],
+                Media.episode_number == data["episode_number"],
+            )
+        )
+        media = result.scalars().first()
+        if media:
+            return media
+
+    # Don't create a row for an episode we can't identify at all — it can never
+    # be enriched or matched back to a real episode, and would inflate collection counts.
+    if data["media_type"] == "episode" and data["season_number"] is None and data["episode_number"] is None and not data["tmdb_id"]:
+        print(f"  Skipping unidentifiable episode '{data['title']}' (no season/episode/tmdb_id)")
+        return None
+
+    media = Media(
+        tmdb_id=int(data["tmdb_id"]) if data["tmdb_id"] else None,
+        media_type=MediaType(data["media_type"]),
+        title=data["title"],
+        season_number=data["season_number"],
+        episode_number=data["episode_number"],
+        show_id=show.id if show else None,
+    )
+    db.add(media)
+    await db.flush()
+    if show and series_tmdb_id:
+        await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+    else:
+        await enrich_media(media, api_key=api_key)
+    return media
+
+
+@router.post("/jellyfin")
+async def jellyfin_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    # Auth: look up user by api_key
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    body = await request.body()
+    if not body:
+        return {"status": "ignored", "reason": "empty body"}
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ignored", "reason": "invalid JSON"}
+
+    data = parse_jellyfin_payload(payload)
+
+    if not data:
+        return {"status": "ignored"}
+
+    notification_type = data["notification_type"]
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    settings = settings_result.scalar_one_or_none()
+    tmdb_key = settings.tmdb_api_key if settings else None
+
+    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key)
+    session_key = f"jellyfin:{user.id}:{data['session_id']}"
+
+    if media is None:
+        return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
+
+    # Ensure in collection if it's a playback or mark-played event
+    if notification_type in ("PlaybackStart", "PlaybackProgress", "PlaybackStop", "MarkPlayed", "playback.start", "playback.progress", "playback.stop", "item.markplayed"):
+        if not settings or settings.jellyfin_sync_collection:
+            # Respect library selections: check if item's library is in the user's selection.
+            # Jellyfin webhooks don't carry the library ID, so we fetch it from the API.
+            # Only do this check when the user has configured specific libraries.
+            allow_collection = True
+            jellyfin_id = data.get("jellyfin_id")
+            if jellyfin_id and settings and settings.jellyfin_url and settings.jellyfin_token:
+                sel_result = await db.execute(
+                    select(JellyfinLibrarySelection).where(JellyfinLibrarySelection.user_id == user.id)
+                )
+                selected_ids = {row.library_id for row in sel_result.scalars().all()}
+                if selected_ids:
+                    import core.jellyfin as jellyfin_client
+                    item_data = await jellyfin_client.get_item(
+                        settings.jellyfin_url, settings.jellyfin_token, jellyfin_id
+                    )
+                    library_id: str | None = None
+                    if item_data:
+                        if item_data.get("Type") == "Episode":
+                            # Episode → Season → Series → Library; SeriesId skips to series
+                            series_id = item_data.get("SeriesId")
+                            if series_id:
+                                series_data = await jellyfin_client.get_item(
+                                    settings.jellyfin_url, settings.jellyfin_token, series_id
+                                )
+                                library_id = (series_data or {}).get("ParentId")
+                        else:
+                            # Movie → Library
+                            library_id = item_data.get("ParentId")
+                    allow_collection = library_id in selected_ids if library_id else True
+
+            if allow_collection:
+                await _ensure_collection_entry(
+                    db, user.id, media.id, CollectionSource.jellyfin, data["jellyfin_id"], data.get("quality")
+                )
+
+    if notification_type in ("PlaybackStart", "playback.start"):
+        if not settings or settings.jellyfin_sync_playback:
+            session = await _get_or_open_session(db, session_key, "jellyfin", user.id, media.id)
+            session.state = "playing"
+            await db.commit()
+
+    elif notification_type in ("PlaybackProgress", "playback.progress"):
+        if not settings or settings.jellyfin_sync_playback:
+            session = await _get_or_open_session(db, session_key, "jellyfin", user.id, media.id)
+            session.state = "paused" if data["is_paused"] else "playing"
+            session.progress_percent = data["progress_percent"]
+            session.progress_seconds = data["progress_seconds"]
+            session.updated_at = datetime.utcnow()
+            await db.commit()
+
+    elif notification_type in ("PlaybackStop", "playback.stop"):
+        session = await _close_session(db, session_key)
+        if not settings or settings.jellyfin_sync_playback:
+            # Prefer stop payload values — they're the definitive final position.
+            progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
+            progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
+            if (not settings or settings.jellyfin_sync_watched) and progress_percent > 0.05:
+                await _write_watch_event(db, user.id, media.id, progress_percent, progress_seconds, progress_percent >= 0.90)
+            await db.commit()
+
+    elif notification_type in ("MarkPlayed", "item.markplayed"):
+        await _close_session(db, session_key)
+        if not settings or settings.jellyfin_sync_watched:
+            await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
+            await db.commit()
+
+    return {"status": "ok", "event": notification_type, "title": data["title"]}
+
+
+# ── Emby ───────────────────────────────────────────────────────────────────────
+
+@router.post("/emby")
+async def emby_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    body = await request.body()
+    if not body:
+        return {"status": "ignored", "reason": "empty body"}
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ignored", "reason": "invalid JSON"}
+
+    # Emby webhook format is identical to Jellyfin's
+    data = parse_jellyfin_payload(payload)
+
+    if not data:
+        return {"status": "ignored"}
+
+    notification_type = data["notification_type"]
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    settings = settings_result.scalar_one_or_none()
+    tmdb_key = settings.tmdb_api_key if settings else None
+
+    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key)
+    session_key = f"emby:{user.id}:{data['session_id']}"
+
+    if media is None:
+        return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
+
+    if notification_type in ("PlaybackStart", "PlaybackProgress", "PlaybackStop", "MarkPlayed", "playback.start", "playback.progress", "playback.stop", "item.markplayed"):
+        if not settings or settings.emby_sync_collection:
+            allow_collection = True
+            emby_item_id = data.get("jellyfin_id")  # field name from shared parser
+            if emby_item_id and settings and settings.emby_url and settings.emby_token:
+                sel_result = await db.execute(
+                    select(EmbyLibrarySelection).where(EmbyLibrarySelection.user_id == user.id)
+                )
+                selected_ids = {row.library_id for row in sel_result.scalars().all()}
+                if selected_ids:
+                    import core.emby as emby_client
+                    item_data = await emby_client.get_item(
+                        settings.emby_url, settings.emby_token, emby_item_id
+                    )
+                    library_id: str | None = None
+                    if item_data:
+                        if item_data.get("Type") == "Episode":
+                            series_id = item_data.get("SeriesId")
+                            if series_id:
+                                series_data = await emby_client.get_item(
+                                    settings.emby_url, settings.emby_token, series_id
+                                )
+                                library_id = (series_data or {}).get("ParentId")
+                        else:
+                            library_id = item_data.get("ParentId")
+                    allow_collection = library_id in selected_ids if library_id else True
+
+            if allow_collection:
+                await _ensure_collection_entry(
+                    db, user.id, media.id, CollectionSource.emby, data["jellyfin_id"], data.get("quality")
+                )
+
+    if notification_type in ("PlaybackStart", "playback.start"):
+        if not settings or settings.emby_sync_playback:
+            session = await _get_or_open_session(db, session_key, "emby", user.id, media.id)
+            session.state = "playing"
+            await db.commit()
+
+    elif notification_type in ("PlaybackProgress", "playback.progress"):
+        if not settings or settings.emby_sync_playback:
+            session = await _get_or_open_session(db, session_key, "emby", user.id, media.id)
+            session.state = "paused" if data["is_paused"] else "playing"
+            session.progress_percent = data["progress_percent"]
+            session.progress_seconds = data["progress_seconds"]
+            session.updated_at = datetime.utcnow()
+            await db.commit()
+
+    elif notification_type in ("PlaybackStop", "playback.stop"):
+        session = await _close_session(db, session_key)
+        if not settings or settings.emby_sync_playback:
+            progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
+            progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
+            if (not settings or settings.emby_sync_watched) and progress_percent > 0.05:
+                await _write_watch_event(db, user.id, media.id, progress_percent, progress_seconds, progress_percent >= 0.90)
+            await db.commit()
+
+    elif notification_type in ("MarkPlayed", "item.markplayed"):
+        await _close_session(db, session_key)
+        if not settings or settings.emby_sync_watched:
+            await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
+            await db.commit()
+
+    return {"status": "ok", "event": notification_type, "title": data["title"]}
+
+
+# ── Plex ───────────────────────────────────────────────────────────────────────
+
+def parse_plex_payload(payload: dict) -> dict | None:
+    event = payload.get("event", "")
+    metadata = payload.get("Metadata") or {}
+    media_type = metadata.get("type")  # "movie" | "episode"
+
+    if media_type not in ("movie", "episode") and event not in ("library.new", "library.update"):
+        return None
+
+    # Extract TMDB ID from Guid array: [{"id": "tmdb://12345"}, ...]
+    guids = metadata.get("Guid") or []
+    tmdb_id: Optional[str] = None
+    tvdb_id: Optional[str] = None
+    imdb_id: Optional[str] = None
+    for g in guids:
+        gid = g.get("id", "")
+        if gid.startswith("tmdb://"):
+            tmdb_id = gid.replace("tmdb://", "")
+        elif gid.startswith("tvdb://"):
+            tvdb_id = gid.replace("tvdb://", "")
+        elif gid.startswith("imdb://"):
+            imdb_id = gid.replace("imdb://", "")
+
+    # Extract series identifiers from grandparent
+    grandparent_guid = metadata.get("grandparentGuid", "")
+    grandparent_tmdb_id: Optional[str] = None
+    grandparent_tvdb_id: Optional[str] = None
+    grandparent_imdb_id: Optional[str] = None
+
+    # Try regex on grandparentGuid — handle both modern short forms (tmdb://, tvdb://)
+    # and legacy Plex agent forms (com.plexapp.agents.themoviedb://, thetvdb://)
+    tmdb_match = re.search(r'(?:^tmdb|themoviedb(?:\.com)?)://(\d+)', grandparent_guid, re.IGNORECASE)
+    if tmdb_match:
+        grandparent_tmdb_id = tmdb_match.group(1)
+    tvdb_match = re.search(r'(?:^tvdb|thetvdb(?:\.com)?)://(\d+)', grandparent_guid, re.IGNORECASE)
+    if tvdb_match:
+        grandparent_tvdb_id = tvdb_match.group(1)
+    imdb_match = re.search(r'imdb://(tt\d+)', grandparent_guid, re.IGNORECASE)
+    if imdb_match:
+        grandparent_imdb_id = imdb_match.group(1)
+
+    view_offset_ms = metadata.get("viewOffset", 0)
+    duration_ms = metadata.get("duration", 0)
+    progress_percent = round(view_offset_ms / duration_ms, 4) if duration_ms else 0.0
+    progress_seconds = int(view_offset_ms / 1000)
+
+    # Extract quality from the 'Media' list if present (common in library.new)
+    media_list = metadata.get("Media", [])
+    quality = {}
+    if media_list:
+        m = media_list[0]
+        h = m.get("height", 0)
+        plex_res = str(m.get("videoResolution", "")).lower()
+        if plex_res in ("4k", "2160"): resolution = "4K"
+        elif plex_res == "1080": resolution = "1080p"
+        elif plex_res == "720": resolution = "720p"
+        elif plex_res == "480": resolution = "480p"
+        else: resolution = "4K" if h >= 2160 else "1080p" if h >= 900 else "720p" if h >= 620 else f"{h}p"
+
+        quality = {
+            "resolution": resolution,
+            "video_codec": m.get("videoCodec"),
+            "audio_codec": m.get("audioCodec"),
+            "audio_channels": f"{m.get('audioChannels', 0)}.0" if m.get("audioChannels") else None,
+            "audio_languages": [],
+            "subtitle_languages": [],
+        }
+        parts = m.get("Part", [])
+        if parts:
+            p = parts[0]
+            quality["file_path"] = p.get("file")
+            for s in p.get("Stream", []):
+                st = s.get("streamType")
+                l = s.get("languageTag") or s.get("languageCode") or s.get("language")
+                if not l: continue
+                if st == 2 and l not in quality["audio_languages"]: quality["audio_languages"].append(l)
+                elif st == 3 and l not in quality["subtitle_languages"]: quality["subtitle_languages"].append(l)
+
+    return {
+        "event": event,
+        "title": metadata.get("title") or metadata.get("grandparentTitle", ""),
+        "year": metadata.get("year"),
+        "media_type": "movie" if media_type == "movie" else "episode",
+        "tmdb_id": tmdb_id,
+        "tvdb_id": tvdb_id,
+        "imdb_id": imdb_id,
+        "season_number": metadata.get("parentIndex"),
+        "episode_number": metadata.get("index"),
+        "rating": metadata.get("userRating"),
+        "session_key": metadata.get("sessionKey") or metadata.get("ratingKey", ""),
+        "progress_percent": progress_percent,
+        "progress_seconds": progress_seconds,
+        "duration_ms": duration_ms,
+        "plex_rating_key": metadata.get("ratingKey"),
+        "library_section_id": str(metadata["librarySectionID"]) if metadata.get("librarySectionID") else None,
+        "library_section_type": metadata.get("librarySectionType"),
+        "account_title": (payload.get("Account") or {}).get("title", ""),
+        "grandparent_tmdb_id": grandparent_tmdb_id,
+        "grandparent_tvdb_id": grandparent_tvdb_id,
+        "grandparent_imdb_id": grandparent_imdb_id,
+        "grandparent_title": metadata.get("grandparentTitle"),
+        "grandparent_rating_key": str(metadata["grandparentRatingKey"]) if metadata.get("grandparentRatingKey") else None,
+        "quality": quality,
+    }
+
+
+async def _ensure_collection_entry(
+    db: AsyncSession,
+    user_id: int,
+    media_id: int,
+    source: CollectionSource,
+    source_id: str,
+    quality: dict = None
+) -> None:
+    """Ensures a Collection + CollectionFile entry exists for the user, creating or updating as needed."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    if not quality:
+        quality = {}
+
+    # 1. Upsert the Collection row (one per user+media)
+    coll_stmt = pg_insert(Collection).values(user_id=user_id, media_id=media_id)
+    coll_stmt = coll_stmt.on_conflict_do_nothing(constraint="uq_collection_user_media")
+    await db.execute(coll_stmt)
+    await db.flush()
+
+    # Fetch the canonical collection id
+    coll_result = await db.execute(
+        select(Collection.id).where(Collection.user_id == user_id, Collection.media_id == media_id)
+    )
+    collection_id = coll_result.scalar_one()
+
+    # 2. Upsert the CollectionFile row (one per collection+source+source_id)
+    update_dict: dict = {}
+    if quality.get("resolution"):         update_dict["resolution"]         = quality["resolution"]
+    if quality.get("video_codec"):        update_dict["video_codec"]        = quality["video_codec"]
+    if quality.get("audio_codec"):        update_dict["audio_codec"]        = quality["audio_codec"]
+    if quality.get("audio_channels"):     update_dict["audio_channels"]     = quality["audio_channels"]
+    if quality.get("audio_languages"):    update_dict["audio_languages"]    = quality["audio_languages"]
+    if quality.get("subtitle_languages"): update_dict["subtitle_languages"] = quality["subtitle_languages"]
+    if quality.get("file_path"):          update_dict["file_path"]          = quality["file_path"]
+
+    file_stmt = pg_insert(CollectionFile).values(
+        collection_id=collection_id,
+        source=source,
+        source_id=source_id,
+        resolution=quality.get("resolution"),
+        video_codec=quality.get("video_codec"),
+        audio_codec=quality.get("audio_codec"),
+        audio_channels=quality.get("audio_channels"),
+        audio_languages=quality.get("audio_languages", []),
+        subtitle_languages=quality.get("subtitle_languages", []),
+        file_path=quality.get("file_path"),
+    )
+    if update_dict:
+        file_stmt = file_stmt.on_conflict_do_update(
+            constraint="uq_collection_file_source",
+            set_=update_dict,
+        )
+    else:
+        file_stmt = file_stmt.on_conflict_do_nothing(constraint="uq_collection_file_source")
+
+    await db.execute(file_stmt)
+    await db.flush()
+
+
+async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str = None, settings=None) -> Media | None:
+    series_tmdb_id: Optional[int] = int(data["grandparent_tmdb_id"]) if data.get("grandparent_tmdb_id") else None
+
+    # If missing series_tmdb_id, try to resolve it via other identifiers
+    if data["media_type"] == "episode" and not series_tmdb_id:
+        # 1. Try grandparent TVDB/IMDb
+        if data.get("grandparent_tvdb_id"):
+            try:
+                res = await tmdb.find_by_external_id(data["grandparent_tvdb_id"], "tvdb_id", api_key=api_key)
+                if res.get("tv_results"):
+                    series_tmdb_id = res["tv_results"][0]["id"]
+            except Exception: pass
+
+        if not series_tmdb_id and data.get("grandparent_imdb_id"):
+            try:
+                res = await tmdb.find_by_external_id(data["grandparent_imdb_id"], "imdb_id", api_key=api_key)
+                if res.get("tv_results"):
+                    series_tmdb_id = res["tv_results"][0]["id"]
+            except Exception: pass
+
+        # 2. Try episode identifiers (TMDB Find returns show context)
+        if not series_tmdb_id and data.get("tvdb_id"):
+            try:
+                res = await tmdb.find_by_external_id(data["tvdb_id"], "tvdb_id", api_key=api_key)
+                if res.get("tv_episode_results"):
+                    series_tmdb_id = res["tv_episode_results"][0].get("show_id")
+            except Exception: pass
+
+        if not series_tmdb_id and data.get("imdb_id"):
+            try:
+                res = await tmdb.find_by_external_id(data["imdb_id"], "imdb_id", api_key=api_key)
+                if res.get("tv_episode_results"):
+                    series_tmdb_id = res["tv_episode_results"][0].get("show_id")
+            except Exception: pass
+
+        # 3. Fetch grandparent show from Plex to extract its TMDB GUID
+        #    (needed when grandparentGuid is a plex://show/xxx internal ID)
+        if not series_tmdb_id and data.get("grandparent_rating_key") and settings and settings.plex_url and settings.plex_token:
+            try:
+                import core.plex as plex_client
+                show_item = await plex_client.get_item(settings.plex_url, settings.plex_token, data["grandparent_rating_key"])
+                if show_item:
+                    show_guids = show_item.get("Guid") or []
+                    for g in show_guids:
+                        gid = g.get("id", "")
+                        if gid.startswith("tmdb://"):
+                            try:
+                                series_tmdb_id = int(gid.replace("tmdb://", ""))
+                            except ValueError:
+                                pass
+                            break
+                        elif re.search(r'themoviedb(?:\.com)?://(\d+)', gid, re.IGNORECASE):
+                            m = re.search(r'themoviedb(?:\.com)?://(\d+)', gid, re.IGNORECASE)
+                            if m:
+                                try:
+                                    series_tmdb_id = int(m.group(1))
+                                except ValueError:
+                                    pass
+                            break
+                    # Also try TVDB/IMDB on the show if TMDB still not found
+                    if not series_tmdb_id:
+                        for g in show_guids:
+                            gid = g.get("id", "")
+                            tvdb_m = re.search(r'(?:^tvdb|thetvdb(?:\.com)?)://(\d+)', gid, re.IGNORECASE)
+                            if tvdb_m:
+                                try:
+                                    res = await tmdb.find_by_external_id(tvdb_m.group(1), "tvdb_id", api_key=api_key)
+                                    if res.get("tv_results"):
+                                        series_tmdb_id = res["tv_results"][0]["id"]
+                                        break
+                                except Exception:
+                                    pass
+            except Exception:
+                pass
+
+        # 4. Last resort: search by show title
+        if not series_tmdb_id and data.get("grandparent_title"):
+            try:
+                res = await tmdb.search_shows(data["grandparent_title"], api_key=api_key)
+                if res.get("results"):
+                    series_tmdb_id = res["results"][0]["id"]
+            except Exception: pass
+
+    if data["tmdb_id"]:
+        tmdb_id_int = int(data["tmdb_id"])
+        media_type = MediaType(data["media_type"])
+        result = await db.execute(
+            select(Media).where(
+                Media.tmdb_id == tmdb_id_int,
+                Media.media_type == media_type,
+            )
+        )
+        media = result.scalars().first()
+        if media:
+            # Backfill show context if this episode record was created without it
+            if media.media_type == MediaType.episode and media.show_id is None and series_tmdb_id:
+                try:
+                    show = await _find_or_create_show(db, series_tmdb_id, api_key)
+                    media.show_id = show.id
+                    await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+                except Exception as e:
+                    print(f"  Could not backfill show context for episode: {e}")
+            return media
+
+    # 2b. Movie matching by title + year if TMDB ID is missing
+    if data["media_type"] == "movie" and not data["tmdb_id"]:
+        # Try local match first to avoid redundant TMDB search
+        local_q = select(Media).where(
+            Media.media_type == MediaType.movie,
+            Media.title.ilike(data["title"]),
+        )
+        if data.get("year"):
+            local_q = local_q.where(Media.release_date.like(f"{data['year']}%"))
+        
+        media = (await db.execute(local_q)).scalars().first()
+        if media:
+            return media
+            
+        # Try TMDB search to find the real ID
+        try:
+            search_res = await tmdb.search_movies(data["title"], year=data.get("year"), api_key=api_key)
+            if search_res.get("results"):
+                tmdb_movie = search_res["results"][0]
+                data["tmdb_id"] = str(tmdb_movie["id"])
+                # Check again with the new TMDB ID
+                result = await db.execute(
+                    select(Media).where(
+                        Media.tmdb_id == tmdb_movie["id"],
+                        Media.media_type == MediaType.movie,
+                    )
+                )
+                media = result.scalars().first()
+                if media:
+                    return media
+        except Exception:
+            pass
+
+    # Don't create a row for an episode we can't identify at all — it can never
+    # be enriched or matched back to a real episode, and would inflate collection counts.
+    if data["media_type"] == "episode" and data["season_number"] is None and data["episode_number"] is None and not data["tmdb_id"]:
+        print(f"  Skipping unidentifiable episode '{data['title']}' (no season/episode/tmdb_id)")
+        return None
+
+    # For episodes without a TMDB ID, look up by show+season+episode before creating
+    # to avoid duplicate Media rows on repeated webhook events (e.g. episodes not yet
+    # on TMDB that Plex tracks only by season/episode number).
+    if data["media_type"] == "episode" and not data["tmdb_id"] and series_tmdb_id and data["season_number"] is not None and data["episode_number"] is not None:
+        show_result = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
+        existing_show = show_result.scalar_one_or_none()
+        if existing_show:
+            ep_result = await db.execute(
+                select(Media).where(
+                    Media.show_id == existing_show.id,
+                    Media.season_number == data["season_number"],
+                    Media.episode_number == data["episode_number"],
+                    Media.media_type == MediaType.episode,
+                )
+            )
+            existing_ep = ep_result.scalars().first()
+            if existing_ep:
+                return existing_ep
+
+    media = Media(
+        tmdb_id=int(data["tmdb_id"]) if data["tmdb_id"] else None,
+        media_type=MediaType(data["media_type"]),
+        title=data["title"],
+        season_number=data["season_number"],
+        episode_number=data["episode_number"],
+    )
+    db.add(media)
+    await db.flush()
+
+    if media.media_type == MediaType.episode and series_tmdb_id:
+        try:
+            show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            media.show_id = show.id
+            await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+        except Exception as e:
+            print(f"  Could not enrich episode with show context: {e}")
+    else:
+        await enrich_media(media, api_key=api_key)
+    return media
+
+
+@router.post("/plex")
+async def plex_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    # Auth: look up user by api_key
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    # Plex sends multipart/form-data with a JSON string in the "payload" field
+    try:
+        form = await request.form()
+    except Exception as e:
+        return {"status": "error", "reason": f"form parse failed: {e}"}
+
+    raw_payload = form.get("payload")
+    if not raw_payload:
+        return {"status": "ignored", "reason": "no payload field"}
+
+    try:
+        payload = json.loads(str(raw_payload))
+    except (json.JSONDecodeError, TypeError):
+        return {"status": "ignored", "reason": "invalid JSON"}
+
+    event = payload.get("event", "unknown")
+
+    data = parse_plex_payload(payload)
+    if not data:
+        return {"status": "ignored"}
+
+    # If a plex_username is configured for this API key owner, ensure the event matches it.
+    # We do NOT re-route to other users here to avoid duplication when multiple webhooks exist.
+    account_title = data.get("account_title", "")
+    if account_title:
+        owner_settings_result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == user.id)
+        )
+        owner_settings = owner_settings_result.scalar_one_or_none()
+        owner_plex_username = (owner_settings.plex_username or "").strip() if owner_settings else ""
+
+        if owner_plex_username and account_title.lower() != owner_plex_username.lower():
+            return {"status": "ignored", "reason": f"event for plex user '{account_title}' does not match owner '{owner_plex_username}'"}
+    
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    settings = settings_result.scalar_one_or_none()
+    tmdb_key = settings.tmdb_api_key if settings else None
+
+    session_key = f"plex:{user.id}:{data['session_key']}"
+
+    # ── Playback events ────────────────────────────────────────────────────────
+    if event in ("media.play", "media.resume", "media.pause", "media.stop", "media.scrobble"):
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+        if media is None:
+            return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
+
+    if event == "media.play":
+        if not settings or settings.plex_sync_playback:
+            session = await _get_or_open_session(db, session_key, "plex", user.id, media.id)
+            session.state = "playing"
+            session.updated_at = datetime.utcnow()
+            # play event may have non-zero offset (e.g. Plex resumes from watched position)
+            if data["progress_percent"] > 0:
+                session.progress_percent = data["progress_percent"]
+                session.progress_seconds = data["progress_seconds"]
+            # Backfill runtime on the media row if TMDB enrichment missed it
+            if not media.runtime and data.get("duration_ms"):
+                media.runtime = max(1, round(data["duration_ms"] / 60000))
+            await db.commit()
+
+    elif event == "media.resume":
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+        if media is None:
+            return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
+        if not settings or settings.plex_sync_playback:
+            session = await _get_or_open_session(db, session_key, "plex", user.id, media.id)
+            session.state = "playing"
+            # resume always carries the current offset
+            session.progress_percent = data["progress_percent"]
+            session.progress_seconds = data["progress_seconds"]
+            session.updated_at = datetime.utcnow()
+            if not media.runtime and data.get("duration_ms"):
+                media.runtime = max(1, round(data["duration_ms"] / 60000))
+            await db.commit()
+
+    elif event == "media.pause":
+        if not settings or settings.plex_sync_playback:
+            result = await db.execute(
+                select(PlaybackSession).where(PlaybackSession.session_key == session_key)
+            )
+            session = result.scalar_one_or_none()
+            if session:
+                session.state = "paused"
+                session.progress_percent = data["progress_percent"]
+                session.progress_seconds = data["progress_seconds"]
+                session.updated_at = datetime.utcnow()
+                await db.commit()
+
+    elif event == "media.stop":
+        session = await _close_session(db, session_key)
+        if not settings or settings.plex_sync_playback:
+            # Prefer the stop event's own viewOffset — it's the definitive final position.
+            # Fall back to stored session values only if the payload has nothing.
+            progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
+            progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
+            media_id = session.media_id if session else None
+            if media_id is None:
+                fallback = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+                media_id = fallback.id if fallback else None
+            # Only write event if we have meaningful progress (avoid ghost stops at start)
+            if media_id and (not settings or settings.plex_sync_watched) and progress_percent > 0.05:
+                await _write_watch_event(
+                    db, user.id, media_id,
+                    progress_percent, progress_seconds,
+                    progress_percent >= 0.90,
+                )
+            await db.commit()
+
+    elif event == "media.scrobble":
+        # Plex fires this at ≥90% — definitive "watched". Pop any open session to
+        # prevent media.stop from writing a duplicate event.
+        await _close_session(db, session_key)
+        if not settings or settings.plex_sync_watched:
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+            if media:
+                await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
+            await db.commit()
+
+    # ── Rating ────────────────────────────────────────────────────────────────
+    elif event == "media.rate":
+        if not settings or settings.plex_sync_ratings:
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+            rating_value = data.get("rating")
+
+            existing = await db.execute(
+                select(Rating).where(Rating.media_id == media.id, Rating.user_id == user.id)
+            )
+            existing_rating = existing.scalar_one_or_none()
+
+            if rating_value is None or float(rating_value) == 0:
+                # User removed their rating
+                if existing_rating:
+                    await db.delete(existing_rating)
+                    await db.commit()
+            else:
+                if existing_rating:
+                    existing_rating.rating = float(rating_value)
+                    existing_rating.rated_at = datetime.utcnow()
+                else:
+                    db.add(Rating(
+                        media_id=media.id,
+                        user_id=user.id,
+                        rating=float(rating_value),
+                    ))
+                await db.commit()
+
+    # ── Library new ───────────────────────────────────────────────────────────
+    elif event == "library.new":
+        if not settings or settings.plex_sync_collection:
+            # Respect library selections: if the user has configured specific
+            # libraries to sync, skip items from unselected libraries.
+            section_id = data.get("library_section_id")
+            if section_id:
+                sel_result = await db.execute(
+                    select(PlexLibrarySelection).where(PlexLibrarySelection.user_id == user.id)
+                )
+                selected_keys = {row.library_key for row in sel_result.scalars().all()}
+                if selected_keys and section_id not in selected_keys:
+                    return {"status": "ignored", "reason": f"library section {section_id} not in sync selection"}
+
+            import core.plex as plex_client
+
+            # Plex fires only ONE library.new webhook per scan batch even when
+            # multiple items were added. Fetch recently-added items from the
+            # section so we catch the full batch, not just the payload item.
+            section_type = data.get("library_section_type")  # "movie" or "show"
+            plex_media_type = 1 if data["media_type"] == "movie" else 4  # 1=movie, 4=episode
+            recent_items: list = []
+            if section_id and settings and settings.plex_url and settings.plex_token:
+                recent_items = await plex_client.get_recently_added(
+                    settings.plex_url, settings.plex_token, section_id, plex_media_type
+                )
+
+            # Always include the webhook payload item (in case recentlyAdded misses it
+            # or Plex/token is not configured).
+            payload_key = data.get("plex_rating_key")
+            recent_keys = {str(it.get("ratingKey")) for it in recent_items}
+            if payload_key and str(payload_key) not in recent_keys:
+                # Fetch full item detail for the payload item
+                payload_item = None
+                if settings and settings.plex_url and settings.plex_token:
+                    payload_item = await plex_client.get_item(
+                        settings.plex_url, settings.plex_token, payload_key
+                    )
+                if payload_item:
+                    recent_items.insert(0, payload_item)
+                else:
+                    # Fallback: process only the payload data we already have
+                    recent_items = []  # handled below via the fallback path
+
+            if recent_items:
+                for plex_item in recent_items:
+                    item_guids = plex_item.get("Guid") or []
+                    item_tmdb_id = plex_client.extract_tmdb_id(item_guids)
+                    item_rating_key = str(plex_item.get("ratingKey", ""))
+                    item_quality = plex_client.extract_quality(plex_item.get("Media", []))
+
+                    # Build a minimal data dict compatible with find_or_create_media_plex
+                    item_data = {
+                        "media_type": "movie" if plex_item.get("type") == "movie" else "episode",
+                        "tmdb_id": str(item_tmdb_id) if item_tmdb_id else None,
+                        "tvdb_id": plex_client.extract_tvdb_id(item_guids),
+                        "imdb_id": plex_client.extract_imdb_id(item_guids),
+                        "title": plex_item.get("title") or plex_item.get("grandparentTitle", ""),
+                        "season_number": plex_item.get("parentIndex"),
+                        "episode_number": plex_item.get("index"),
+                        "plex_rating_key": item_rating_key,
+                        "grandparent_rating_key": str(plex_item["grandparentRatingKey"]) if plex_item.get("grandparentRatingKey") else None,
+                        "grandparent_title": plex_item.get("grandparentTitle"),
+                        "grandparent_tmdb_id": None,
+                        "grandparent_tvdb_id": None,
+                        "grandparent_imdb_id": None,
+                        "quality": item_quality,
+                    }
+                    # Extract grandparent GUIDs for episodes
+                    gp_guid = plex_item.get("grandparentGuid", "")
+                    m = re.search(r'(?:^tmdb|themoviedb(?:\.com)?)://(\d+)', gp_guid, re.IGNORECASE)
+                    if m:
+                        item_data["grandparent_tmdb_id"] = m.group(1)
+                    m = re.search(r'(?:^tvdb|thetvdb(?:\.com)?)://(\d+)', gp_guid, re.IGNORECASE)
+                    if m:
+                        item_data["grandparent_tvdb_id"] = m.group(1)
+                    m = re.search(r'imdb://(tt\d+)', gp_guid, re.IGNORECASE)
+                    if m:
+                        item_data["grandparent_imdb_id"] = m.group(1)
+
+                    try:
+                        item_media = await find_or_create_media_plex(
+                            item_data, db, api_key=tmdb_key, settings=settings
+                        )
+                        if item_media:
+                            await _ensure_collection_entry(
+                                db, user.id, item_media.id, CollectionSource.plex,
+                                item_rating_key, item_quality
+                            )
+                    except Exception as e:
+                        print(f"  library.new batch: failed to process item {item_rating_key}: {e}")
+            else:
+                # No Plex API access — fall back to processing only the payload item
+                media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+                quality = data.get("quality") or {}
+                if not quality.get("resolution") and settings and settings.plex_url and settings.plex_token:
+                    item = await plex_client.get_item(settings.plex_url, settings.plex_token, data["plex_rating_key"])
+                    if item:
+                        quality = plex_client.extract_quality(item.get("Media", []))
+                if media:
+                    await _ensure_collection_entry(
+                        db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality
+                    )
+            await db.commit()
+
+    # ── Library update (re-match / metadata refresh) ──────────────────────────
+    elif event == "library.update":
+        if not settings or settings.plex_sync_collection:
+            section_id = data.get("library_section_id")
+            if section_id:
+                sel_result = await db.execute(
+                    select(PlexLibrarySelection).where(PlexLibrarySelection.user_id == user.id)
+                )
+                selected_keys = {row.library_key for row in sel_result.scalars().all()}
+                if selected_keys and section_id not in selected_keys:
+                    return {"status": "ignored", "reason": f"library section {section_id} not in sync selection"}
+
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+            if media is None:
+                return {"status": "ignored", "reason": "could not identify media"}
+
+            quality = data.get("quality") or {}
+            if not quality.get("resolution") and settings and settings.plex_url and settings.plex_token:
+                import core.plex as plex_client
+                item = await plex_client.get_item(settings.plex_url, settings.plex_token, data["plex_rating_key"])
+                if item:
+                    quality = plex_client.extract_quality(item.get("Media", []))
+
+            # Remove stale collection entries for this Plex rating key that now
+            # point to a different (old, wrong) media row after a re-match.
+            old_files_result = await db.execute(
+                select(CollectionFile)
+                .join(Collection)
+                .where(
+                    CollectionFile.source == CollectionSource.plex,
+                    CollectionFile.source_id == data["plex_rating_key"],
+                    Collection.user_id == user.id,
+                    Collection.media_id != media.id,
+                )
+            )
+            for old_file in old_files_result.scalars().all():
+                old_collection_id = old_file.collection_id
+                await db.delete(old_file)
+                await db.flush()
+                # Drop the parent Collection row if it has no remaining files
+                remaining = await db.execute(
+                    select(func.count(CollectionFile.id)).where(
+                        CollectionFile.collection_id == old_collection_id
+                    )
+                )
+                if remaining.scalar() == 0:
+                    old_coll = await db.get(Collection, old_collection_id)
+                    if old_coll:
+                        await db.delete(old_coll)
+
+            await _ensure_collection_entry(
+                db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality
+            )
+            await db.commit()
+
+    return {"status": "ok", "event": event, "title": data["title"]}
+

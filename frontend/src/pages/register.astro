@@ -1,0 +1,212 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+
+let error = "";
+let pendingEmailConfirmation = false;
+
+const { enabled: registrationEnabled } = await api.auth.registrationStatus().catch(() => ({ enabled: false }));
+if (!registrationEnabled) {
+  return Astro.redirect("/login");
+}
+
+if (Astro.request.method === "POST") {
+  try {
+    const data = await Astro.request.formData();
+    const email = data.get("email")?.toString();
+    const username = data.get("username")?.toString();
+    const password = data.get("password")?.toString();
+    const confirmPassword = data.get("confirm_password")?.toString();
+
+    if (!email || !username || !password || !confirmPassword) {
+      throw new Error("Missing fields");
+    }
+
+    if (password !== confirmPassword) {
+      throw new Error("Passwords do not match");
+    }
+
+    const newUser = await api.auth.register({ email, username, password });
+
+    if (!newUser.email_confirmed) {
+      pendingEmailConfirmation = true;
+    } else {
+      // Auto login when email confirmation is not required
+      const loginData = new FormData();
+      loginData.append("username", username);
+      loginData.append("password", password);
+      const result = await api.auth.login(loginData);
+
+      Astro.cookies.set("token", result.access_token, {
+        path: "/",
+        httpOnly: true,
+        secure: import.meta.env.PROD,
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 7,
+      });
+
+      return Astro.redirect("/");
+    }
+  } catch (e: unknown) {
+    error = e instanceof Error ? e.message : "Registration failed";
+  }
+}
+---
+
+<Base title="Register" hideNav>
+  <div class="max-w-md mx-auto mt-16 p-8 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl relative">
+    <button 
+      id="theme-toggle"
+      class="absolute top-4 right-4 p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-100 transition-all hover:scale-110 active:scale-95"
+      aria-label="Toggle Theme"
+    >
+      <span id="sun-icon" class="hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+      </span>
+      <span id="moon-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      </span>
+    </button>
+    <div class="flex flex-col items-center mb-6">
+      <img src="/scrob.png" alt="Scrob Logo" class="w-36 object-contain mb-2" />
+      <span class="text-zinc-100 font-bold text-xl tracking-tight">Scrob</span>
+    </div>
+    <h1 class="text-3xl font-bold mb-6 text-zinc-100 text-center">
+      {pendingEmailConfirmation ? "Account created" : "Create Account"}
+    </h1>
+    
+    {error && (
+      <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg mb-6">
+        {error}
+      </div>
+    )}
+
+    {pendingEmailConfirmation ? (
+      <div class="text-center py-4">
+        <div class="w-14 h-14 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-7 h-7 text-zinc-300">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+          </svg>
+        </div>
+        <h2 class="text-lg font-semibold text-zinc-100 mb-2">Check your inbox</h2>
+        <p class="text-sm text-zinc-400 mb-6">
+          We've sent an activation link to your email address.<br />
+          Click the link to confirm your account and sign in.
+        </p>
+        <a href="/login" class="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Back to login</a>
+      </div>
+    ) : (
+    <form method="POST" class="space-y-4">
+      <div>
+        <label for="email" class="block text-sm font-medium text-zinc-400 mb-1">Email</label>
+        <input
+          type="email"
+          name="email"
+          id="email"
+          required
+          class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+        />
+      </div>
+      <div>
+        <label for="username" class="block text-sm font-medium text-zinc-400 mb-1">Username</label>
+        <input
+          type="text"
+          name="username"
+          id="username"
+          required
+          class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+        />
+      </div>
+      <div>
+        <label for="password" class="block text-sm font-medium text-zinc-400 mb-1">Password</label>
+        <div class="relative group/field">
+          <input
+            type="password"
+            name="password"
+            id="password"
+            required
+            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+          />
+          <button
+            type="button"
+            class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+            aria-label="Toggle password visibility"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div>
+        <label for="confirm_password" class="block text-sm font-medium text-zinc-400 mb-1">Confirm Password</label>
+        <div class="relative group/field">
+          <input
+            type="password"
+            name="confirm_password"
+            id="confirm_password"
+            required
+            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+          />
+          <button
+            type="button"
+            class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+            aria-label="Toggle password visibility"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <button
+        type="submit"
+        class="w-full bg-zinc-100 text-zinc-950 font-bold py-2 rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer mt-4"
+      >
+        Create Account
+      </button>
+    </form>
+    
+    <div class="mt-6 text-center text-sm text-zinc-500">
+      Already have an account? <a href="/login" class="text-zinc-100 hover:underline">Login</a>
+    </div>
+    )}
+  </div>
+</Base>
+
+<script>
+  function setupPasswordToggles() {
+    const toggles = document.querySelectorAll('.password-toggle');
+    toggles.forEach(toggle => {
+      toggle.addEventListener('click', () => {
+        const input = toggle.parentElement?.querySelector('input');
+        if (!input) return;
+
+        const isPassword = input.type === 'password';
+        input.type = isPassword ? 'text' : 'password';
+
+        const eyeIcon = toggle.querySelector('.eye-icon');
+        const eyeSlashIcon = toggle.querySelector('.eye-slash-icon');
+
+        if (isPassword) {
+          eyeIcon?.classList.add('hidden');
+          eyeSlashIcon?.classList.remove('hidden');
+        } else {
+          eyeIcon?.classList.remove('hidden');
+          eyeSlashIcon?.classList.add('hidden');
+        }
+      });
+    });
+  }
+
+  setupPasswordToggles();
+  document.addEventListener('astro:after-swap', setupPasswordToggles);
+</script>
