@@ -61,6 +61,9 @@ services:
       # ── Advanced ─────────────────────────────────────────────────────────────
       # Override the internal backend port (only needed if 7331 conflicts on bare metal installations)
       # BACKEND_PORT: "7331"
+    volumes:
+      - scrob_data:/app/backend/data
 
 volumes:
   db_data:
+  scrob_data:

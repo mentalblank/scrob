@@ -141,9 +141,12 @@ services:
       DATABASE_URL: postgresql+asyncpg://scrob:changeme@scrob-db:5432/scrob   # ← match password above
       SECRET_KEY: changeme               # ← generate with: openssl rand -hex 32
       TZ: UTC
+    volumes:
+      - scrob_data:/app/backend/data
 
 volumes:
   db_data:
+  scrob_data:
 ```
 
 3. Start:
