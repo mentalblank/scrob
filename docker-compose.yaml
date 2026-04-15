@@ -17,7 +17,7 @@ services:
 
   scrob:
     container_name: scrob
-    image: ghcr.io/ellite/scrob:latest
+    image: bellamy/scrob:latest
     restart: unless-stopped
     depends_on:
       scrob-db:

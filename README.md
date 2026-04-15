@@ -6,7 +6,7 @@
   [![GitHub Stars](https://img.shields.io/github/stars/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/stargazers)
   [![Docker Pulls](https://img.shields.io/docker/pulls/bellamy/scrob?style=flat-square)](https://hub.docker.com/r/bellamy/scrob)
   [![GitHub Contributors](https://img.shields.io/github/contributors/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/graphs/contributors)
-  [![License](https://img.shields.io/github/license/ellite/scrob?style=flat-square)](LICENSE)
+  [![GitHub Sponsors](https://img.shields.io/github/sponsors/ellite?style=flat-square)](https://github.com/sponsors/ellite)
   [![Latest Release](https://img.shields.io/github/v/release/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/releases/latest)
 </div>
 
@@ -100,6 +100,8 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 
 ### Docker Compose
 
+> Images are hosted on **Docker Hub** (`bellamy/scrob`). A mirror is also available on GHCR (`ghcr.io/ellite/scrob`) if you prefer.
+
 1. Download the compose file:
 
 ```bash
@@ -128,7 +130,7 @@ services:
 
   scrob:
     container_name: scrob
-    image: ghcr.io/ellite/scrob:latest
+    image: bellamy/scrob:latest
     restart: unless-stopped
     depends_on:
       scrob-db:
@@ -176,7 +178,7 @@ docker run -d \
   -e DATABASE_URL="postgresql+asyncpg://scrob:changeme@scrob-db:5432/scrob" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
   -e TZ=UTC \
-  ghcr.io/ellite/scrob:latest
+  bellamy/scrob:latest
 ```
 
 ### First Setup
