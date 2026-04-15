@@ -349,3 +349,9 @@ The frontend dev server starts on `http://localhost:4321` and proxies API calls 
 Scrob is licensed under the [GNU General Public License v3.0](LICENSE).
 
 You are free to use, modify, and distribute Scrob, provided that any derivative works are also released under the GPLv3.
+
+## Links
+
+- The author: [henrique.pt](https://henrique.pt)
+- Scrob Landingpage: [scrob.app](https://scrob.app)
+- Join the conversation: [Discord Server](https://discord.gg/anex9GUrPW)
