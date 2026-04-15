@@ -475,7 +475,7 @@ async def sync_items(
                         if show_id:
                             if existing_media_obj and (
                                 existing_media_obj.show_id is None
-                                or (existing_media_obj.poster_path is None and existing_media_obj.tmdb_data is None)
+                                or (existing_media_obj.poster_path is None and not existing_media_obj.tmdb_data)
                             ):
                                 ep_series_tmdb_id = show_id_to_tmdb.get(show_id)
                                 if ep_series_tmdb_id:
@@ -1447,6 +1447,69 @@ async def get_sync_status(
     result = await db.execute(query)
     jobs = result.scalars().all()
     return jobs
+
+
+@router.post("/heal")
+async def heal_metadata(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-enrich all collection items that are missing poster/date metadata."""
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+    if not settings or not settings.tmdb_api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key required")
+
+    background_tasks.add_task(run_heal, current_user.id, settings.tmdb_api_key)
+    return {"status": "started", "message": "Metadata heal is running in the background"}
+
+
+async def run_heal(user_id: int, api_key: str):
+    from models.show import Show
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        try:
+            # Load all collection media missing poster_path
+            coll_q = await db.execute(
+                select(Media)
+                .join(Collection, Collection.media_id == Media.id)
+                .where(
+                    Collection.user_id == user_id,
+                    Media.poster_path.is_(None),
+                )
+            )
+            items = coll_q.scalars().all()
+
+            movies = [m for m in items if m.media_type == MediaType.movie and m.tmdb_id]
+            episodes = [m for m in items if m.media_type == MediaType.episode and m.show_id and m.season_number is not None and m.episode_number is not None]
+
+            if not movies and not episodes:
+                print(f"Heal: nothing to fix for user {user_id}")
+                return
+
+            print(f"Heal: {len(movies)} movies, {len(episodes)} episodes to re-enrich for user {user_id}")
+
+            # Load show tmdb_ids for episodes
+            show_ids = list({m.show_id for m in episodes})
+            show_tmdb_map: dict[int, int] = {}
+            if show_ids:
+                shows_q = await db.execute(select(Show).where(Show.id.in_(show_ids)))
+                for s in shows_q.scalars().all():
+                    if s.tmdb_id:
+                        show_tmdb_map[s.id] = s.tmdb_id
+
+            to_enrich = [(m, None) for m in movies] + [
+                (m, show_tmdb_map[m.show_id]) for m in episodes if m.show_id in show_tmdb_map
+            ]
+
+            await batch_enrich_items(to_enrich, api_key=api_key)
+            await db.commit()
+            print(f"Heal complete for user {user_id}: processed {len(to_enrich)} items")
+        except Exception as e:
+            print(f"Heal failed for user {user_id}: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 @router.post("/abort")

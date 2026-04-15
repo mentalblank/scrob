@@ -831,6 +831,28 @@ if (me.totp_enabled) {
         )}
       </section>
 
+      <!-- Maintenance -->
+      <section>
+        <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Maintenance</h2>
+        <div class="space-y-3 max-w-xl">
+          <div class="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-4">
+            <div>
+              <p class="text-sm font-medium text-zinc-200">Heal missing metadata</p>
+              <p class="text-xs text-zinc-500 mt-0.5">Re-fetches posters and dates for collection items that are missing them due to TMDB errors during sync.</p>
+            </div>
+            <button
+              id="heal-btn"
+              type="button"
+              disabled={!hasTmdbKey}
+              title={!hasTmdbKey ? "TMDB API Key is required" : ""}
+              class="ml-4 shrink-0 text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30"
+            >
+              Heal
+            </button>
+          </div>
+        </div>
+      </section>
+
       <!-- API Key -->
       <section>
         <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">API Key</h2>
@@ -1912,6 +1934,34 @@ if (me.totp_enabled) {
     }
   }
 
+  function setupHealButton() {
+    const btn = document.getElementById('heal-btn');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      if (!confirm('This will re-fetch missing posters and dates for your entire collection. It runs in the background and may take a few minutes. Continue?')) return;
+      btn.disabled = true;
+      const originalText = btn.textContent;
+      btn.textContent = 'Healing...';
+      try {
+        const res = await fetch('/api/proxy/sync/heal', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (res.ok) {
+          showMessage('Metadata heal started — it will run in the background.');
+        } else {
+          const data = await res.json();
+          throw new Error(data.detail || 'Failed to start heal');
+        }
+      } catch (e) {
+        showMessage(e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
+  }
+
   function setupPlexWebhookUrl() {
     const input = document.getElementById('plex-webhook-url') as HTMLInputElement | null;
     const copyBtn = document.getElementById('copy-plex-webhook-btn');
@@ -2006,6 +2056,7 @@ if (me.totp_enabled) {
   setupSettingsForm();
   setupPasswordForm();
   setupApiKey();
+  setupHealButton();
   setupCollapsibleRows();
   setupPlexWebhookUrl();
   setupJellyfinWebhookUrl();
@@ -2021,6 +2072,7 @@ if (me.totp_enabled) {
     setupSettingsForm();
     setupPasswordForm();
     setupApiKey();
+    setupHealButton();
     setupCollapsibleRows();
     setupPlexWebhookUrl();
     setupJellyfinWebhookUrl();
