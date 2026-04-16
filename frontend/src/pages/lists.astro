@@ -5,6 +5,7 @@ import { api, type UserList, type PublicList } from "../lib/api";
 export const prerender = false;
 
 const { token, user } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
 
 let lists: UserList[] = [];
 let publicLists: PublicList[] = [];
