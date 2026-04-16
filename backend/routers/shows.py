@@ -528,6 +528,9 @@ async def get_show_season(
             # Subquery to check which (season, episode) pairs are in the user collection.
             # Primary path: match by show_id. The outerjoin also catches rows where show_id
             # points to a different DB row for the same TMDB show (duplicate show rows).
+            coll_show_conditions = [ShowModel.tmdb_id == series_tmdb_id]
+            if show:
+                coll_show_conditions.insert(0, Media.show_id == show.id)
             user_coll_eps_q = await db.execute(
                 select(Media.season_number, Media.episode_number)
                 .join(Collection, Collection.media_id == Media.id)
@@ -536,10 +539,7 @@ async def get_show_season(
                     Collection.user_id == current_user.id,
                     Media.media_type == MediaType.episode,
                     Media.season_number == season_number,
-                    or_(
-                        Media.show_id == show.id,
-                        ShowModel.tmdb_id == series_tmdb_id
-                    )
+                    or_(*coll_show_conditions)
                 )
                 .distinct()
             )
