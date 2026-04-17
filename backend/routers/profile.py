@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, case
 from sqlalchemy.orm import aliased
+from datetime import date as DateType, timedelta as TimeDelta
+from typing import Optional
 
 from db import get_db
 from dependencies import get_current_user, get_optional_user
@@ -21,6 +23,40 @@ from core.config import settings
 import schemas
 
 router = APIRouter()
+
+
+async def _check_profile_access(user_id: int, current_user, db: AsyncSession):
+    """Returns (user, profile) or raises 404/403."""
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    profile_result = await db.execute(select(UserProfileData).where(UserProfileData.user_id == user_id))
+    profile = profile_result.scalar_one_or_none()
+
+    is_owner = current_user and current_user.id == user_id
+    is_admin = current_user and current_user.role == "admin"
+    privacy = profile.privacy_level if profile else PrivacyLevel.private
+
+    is_mutual_follow = False
+    if current_user and not is_owner and privacy == PrivacyLevel.friends_only:
+        mutual_q = await db.execute(
+            select(func.count())
+            .select_from(Follow)
+            .where(Follow.follower_id == current_user.id, Follow.following_id == user_id)
+            .where(
+                select(Follow.id)
+                .where(Follow.follower_id == user_id, Follow.following_id == current_user.id)
+                .exists()
+            )
+        )
+        is_mutual_follow = mutual_q.scalar_one() > 0
+
+    if not (is_owner or is_admin or privacy == PrivacyLevel.public or is_mutual_follow):
+        raise HTTPException(status_code=403, detail="This profile is private")
+
+    return user, profile
 
 
 @router.get("/me", response_model=schemas.UserProfileResponse)
@@ -273,40 +309,9 @@ async def get_public_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_optional_user),
 ):
-    # Fetch user and profile
-    result = await db.execute(
-        select(User).where(User.id == user_id)
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    result = await db.execute(
-        select(UserProfileData).where(UserProfileData.user_id == user_id)
-    )
-    profile = result.scalar_one_or_none()
-
-    # Privacy Check
+    user, profile = await _check_profile_access(user_id, current_user, db)
     is_owner = current_user and current_user.id == user_id
     is_admin = current_user and current_user.role == "admin"
-    privacy = profile.privacy_level if profile else PrivacyLevel.private
-
-    is_mutual_follow = False
-    if current_user and not is_owner and privacy == PrivacyLevel.friends_only:
-        mutual_q = await db.execute(
-            select(func.count())
-            .select_from(Follow)
-            .where(Follow.follower_id == current_user.id, Follow.following_id == user_id)
-            .where(
-                select(Follow.id)
-                .where(Follow.follower_id == user_id, Follow.following_id == current_user.id)
-                .exists()
-            )
-        )
-        is_mutual_follow = mutual_q.scalar_one() > 0
-
-    if not (is_owner or is_admin or privacy == PrivacyLevel.public or is_mutual_follow):
-        raise HTTPException(status_code=403, detail="This profile is private")
 
     # --- Stats ---
     watched_q = await db.execute(
@@ -629,4 +634,242 @@ async def get_public_profile(
         "followers": followers_preview,
         "following": following_preview,
         "is_following": is_following,
+    }
+
+
+@router.get("/{user_id}/stats")
+async def get_user_stats(
+    user_id: int,
+    since: Optional[DateType] = None,
+    until: Optional[DateType] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_optional_user),
+):
+    await _check_profile_access(user_id, current_user, db)
+
+    # Date range filters applied to all WatchEvent queries
+    date_filters = []
+    if since:
+        date_filters.append(WatchEvent.watched_at >= since)
+    if until:
+        date_filters.append(WatchEvent.watched_at < until + TimeDelta(days=1))
+
+    # Activity granularity: daily for ranges ≤ 62 days, monthly otherwise
+    if since and until:
+        use_daily = (until - since).days <= 62
+    else:
+        use_daily = False
+    activity_fmt = "YYYY-MM-DD" if use_daily else "YYYY-MM"
+
+    # ── Watching ────────────────────────────────────────────────────────────
+    movies_q = await db.execute(
+        select(func.count(func.distinct(WatchEvent.media_id)))
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type == "movie", *date_filters)
+    )
+    movies_watched = movies_q.scalar_one()
+
+    episodes_q = await db.execute(
+        select(func.count(func.distinct(WatchEvent.media_id)))
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type == "episode", *date_filters)
+    )
+    episodes_watched = episodes_q.scalar_one()
+
+    shows_q = await db.execute(
+        select(func.count(func.distinct(ShowModel.id)))
+        .join(Media, Media.show_id == ShowModel.id)
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, *date_filters)
+    )
+    shows_watched = shows_q.scalar_one()
+
+    from sqlalchemy import Integer as SAInteger
+    from sqlalchemy.types import Text as SAText
+    # Episodes store runtime in tmdb_data['runtime']; movies use Media.runtime.
+    # JSON (non-JSONB) has no .astext; cast to Text first, guard against JSON "null".
+    json_runtime = func.cast(
+        func.nullif(func.cast(Media.tmdb_data["runtime"], SAText), "null"),
+        SAInteger,
+    )
+    effective_runtime = func.coalesce(Media.runtime, json_runtime)
+    watch_time_q = await db.execute(
+        select(func.coalesce(func.sum(effective_runtime), 0))
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+    )
+    total_watch_minutes = watch_time_q.scalar_one() or 0
+
+    movie_watch_time_q = await db.execute(
+        select(func.coalesce(func.sum(effective_runtime), 0))
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type == "movie", *date_filters)
+    )
+    movie_watch_minutes = movie_watch_time_q.scalar_one() or 0
+
+    show_watch_time_q = await db.execute(
+        select(func.coalesce(func.sum(effective_runtime), 0))
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type == "episode", *date_filters)
+    )
+    show_watch_minutes = show_watch_time_q.scalar_one() or 0
+
+    # Activity — GROUP BY must use the expression, not the label alias (PostgreSQL requirement)
+    activity_expr = func.to_char(WatchEvent.watched_at, activity_fmt)
+    activity_q = await db.execute(
+        select(
+            activity_expr.label("period"),
+            Media.media_type,
+            func.count(func.distinct(WatchEvent.media_id)).label("cnt"),
+        )
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+        .group_by(activity_expr, Media.media_type)
+        .order_by(activity_expr)
+    )
+    activity_rows = activity_q.all()
+    activity_map: dict[str, dict] = {}
+    for period_key, mtype, cnt in activity_rows:
+        if period_key not in activity_map:
+            activity_map[period_key] = {"month": period_key, "movies": 0, "episodes": 0}
+        if mtype == "movie":
+            activity_map[period_key]["movies"] = cnt
+        else:
+            activity_map[period_key]["episodes"] = cnt
+    watch_activity = sorted(activity_map.values(), key=lambda x: x["month"])
+
+    # Average watches per weekday (0=Sun … 6=Sat)
+    from sqlalchemy import extract
+    dow_expr = func.extract("dow", WatchEvent.watched_at)
+    dow_q = await db.execute(
+        select(
+            dow_expr.label("dow"),
+            func.count(func.distinct(WatchEvent.media_id)).label("cnt"),
+        )
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+        .group_by(dow_expr)
+        .order_by(dow_expr)
+    )
+    dow_raw = {int(row.dow): row.cnt for row in dow_q.all()}
+
+    # Count distinct weeks to normalise
+    weeks_q = await db.execute(
+        select(func.count(func.distinct(func.to_char(WatchEvent.watched_at, "IYYY-IW"))))
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+    )
+    total_weeks = max(weeks_q.scalar_one() or 1, 1)
+    day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    weekday_activity = [
+        {"day": day_names[i], "avg": round(dow_raw.get(i, 0) / total_weeks, 2)}
+        for i in range(7)
+    ]
+
+    # Rating date filters mirror the watch event date filters but on rated_at
+    rating_date_filters = []
+    if since:
+        rating_date_filters.append(Rating.rated_at >= since)
+    if until:
+        rating_date_filters.append(Rating.rated_at < until + TimeDelta(days=1))
+
+    rating_dist_q = await db.execute(
+        select(Rating.rating, func.count(Rating.id).label("cnt"))
+        .where(Rating.user_id == user_id, Rating.rating.isnot(None), *rating_date_filters)
+        .group_by(Rating.rating)
+        .order_by(Rating.rating)
+    )
+    rating_distribution = [
+        {"rating": float(r), "count": c} for r, c in rating_dist_q.all()
+    ]
+
+    avg_movie_rating_q = await db.execute(
+        select(func.avg(Rating.rating))
+        .join(Media, Rating.media_id == Media.id)
+        .where(Rating.user_id == user_id, Rating.rating.isnot(None), Media.media_type == "movie", *rating_date_filters)
+    )
+    avg_movie_rating = avg_movie_rating_q.scalar_one()
+    avg_movie_rating = round(float(avg_movie_rating), 2) if avg_movie_rating else None
+
+    avg_show_rating_q = await db.execute(
+        select(func.avg(Rating.rating))
+        .join(Media, Rating.media_id == Media.id)
+        .where(Rating.user_id == user_id, Rating.rating.isnot(None), Media.media_type == "series", *rating_date_filters)
+    )
+    avg_show_rating = avg_show_rating_q.scalar_one()
+    avg_show_rating = round(float(avg_show_rating), 2) if avg_show_rating else None
+
+    # ── Collection ───────────────────────────────────────────────────────────
+    movies_collected_q = await db.execute(
+        select(func.count(func.distinct(Collection.media_id)))
+        .join(Media, Collection.media_id == Media.id)
+        .where(Collection.user_id == user_id, Media.media_type == "movie")
+    )
+    movies_collected = movies_collected_q.scalar_one()
+
+    episodes_collected_q = await db.execute(
+        select(func.count(func.distinct(Collection.media_id)))
+        .join(Media, Collection.media_id == Media.id)
+        .where(Collection.user_id == user_id, Media.media_type == "episode")
+    )
+    episodes_collected = episodes_collected_q.scalar_one()
+
+    shows_collected_q = await db.execute(
+        select(func.count(func.distinct(ShowModel.id)))
+        .join(Media, Media.show_id == ShowModel.id)
+        .join(Collection, Collection.media_id == Media.id)
+        .where(Collection.user_id == user_id)
+    )
+    shows_collected = shows_collected_q.scalar_one()
+
+    # Unwatched movies in collection
+    watched_movie_ids_sub = (
+        select(WatchEvent.media_id)
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type == "movie")
+        .scalar_subquery()
+    )
+    unwatched_movies_q = await db.execute(
+        select(func.count(func.distinct(Collection.media_id)))
+        .join(Media, Collection.media_id == Media.id)
+        .where(
+            Collection.user_id == user_id,
+            Media.media_type == "movie",
+            Collection.media_id.notin_(watched_movie_ids_sub),
+        )
+    )
+    unwatched_movies = unwatched_movies_q.scalar_one()
+
+    # Shows watched from collection (has at least one watched episode in collection)
+    watched_shows_collected_q = await db.execute(
+        select(func.count(func.distinct(ShowModel.id)))
+        .join(Media, Media.show_id == ShowModel.id)
+        .join(Collection, Collection.media_id == Media.id)
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(Collection.user_id == user_id, WatchEvent.user_id == user_id)
+    )
+    shows_watched_collected = watched_shows_collected_q.scalar_one()
+
+    return {
+        # Watching
+        "granularity": "day" if use_daily else "month",
+        "weekday_activity": weekday_activity,
+        "movies_watched": movies_watched,
+        "shows_watched": shows_watched,
+        "episodes_watched": episodes_watched,
+        "total_watch_minutes": total_watch_minutes,
+        "movie_watch_minutes": movie_watch_minutes,
+        "show_watch_minutes": show_watch_minutes,
+        "watch_activity": watch_activity,
+        "rating_distribution": rating_distribution,
+        "avg_movie_rating": avg_movie_rating,
+        "avg_show_rating": avg_show_rating,
+        # Collection
+        "movies_collected": movies_collected,
+        "shows_collected": shows_collected,
+        "episodes_collected": episodes_collected,
+        "movies_watched_collected": movies_collected - unwatched_movies,
+        "movies_unwatched_collected": unwatched_movies,
+        "shows_watched_collected": shows_watched_collected,
+        "shows_unwatched_collected": max(shows_collected - shows_watched_collected, 0),
     }

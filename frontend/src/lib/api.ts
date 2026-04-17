@@ -612,6 +612,25 @@ export interface PublicProfile {
   is_following: boolean;
 }
 
+export interface UserStats {
+  movies_watched: number;
+  shows_watched: number;
+  episodes_watched: number;
+  total_watch_minutes: number;
+  watch_activity: { month: string; movies: number; episodes: number }[];
+  rating_distribution: { rating: number; count: number }[];
+  avg_movie_rating: number | null;
+  avg_show_rating: number | null;
+  movies_collected: number;
+  shows_collected: number;
+  episodes_collected: number;
+  movies_watched_collected: number;
+  movies_unwatched_collected: number;
+  shows_watched_collected: number;
+  shows_unwatched_collected: number;
+  weekday_activity: { day: string; avg: number }[];
+}
+
 export interface Comment {
   id: number;
   user_id: number;
@@ -877,6 +896,8 @@ export const api = {
       del<{ status: string }>(`/profile/${userId}/follow`, token),
     searchUsers: (q: string, token?: string) =>
       get<{ results: UserSearchResult[] }>("/profile/search", { q }, token),
+    getStats: (userId: number, token?: string) =>
+      get<UserStats>(`/profile/${userId}/stats`, undefined, token),
   },
 
   comments: {
