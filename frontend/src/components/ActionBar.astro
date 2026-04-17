@@ -160,7 +160,7 @@ const requestCls  = isMonitored
     {!listOnly && showRequest && (
       <button
         data-action="request"
-        data-state={isMonitored ? "active" : "inactive"}
+        data-state={(isMonitored || collectionPct === 100 || (inLibrary && !isSeries)) ? "active" : "inactive"}
         title={
           (isMonitored || collectionPct === 100 || (inLibrary && !isSeries))
             ? (isSeries ? "Already in Sonarr" : "Already in Radarr")
