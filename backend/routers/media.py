@@ -19,6 +19,11 @@ from models.show import Show as ShowModel
 
 router = APIRouter()
 
+# Simple TTL cache for the /for-you endpoint — keyed by user_id
+import time as _time
+_FOR_YOU_CACHE: dict[int, tuple[float, dict]] = {}
+_FOR_YOU_TTL = 900  # 15 minutes
+
 # TMDB genre name → ID mappings (used to convert filter names to discover API IDs)
 MOVIE_GENRE_IDS: dict[str, int] = {
     "Action": 28, "Adventure": 12, "Animation": 16, "Comedy": 35,
@@ -1648,6 +1653,10 @@ async def for_you(
     import random
     from models.profile import UserProfileData
 
+    cached = _FOR_YOU_CACHE.get(current_user.id)
+    if cached and (_time.monotonic() - cached[0]) < _FOR_YOU_TTL:
+        return cached[1]
+
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(tmdb_key):
         return {"results": []}
@@ -1740,7 +1749,9 @@ async def for_you(
     random.shuffle(combined)
 
     await enrich_with_state(db, current_user.id, combined)
-    return {"results": combined[:20]}
+    result = {"results": combined[:20]}
+    _FOR_YOU_CACHE[current_user.id] = (_time.monotonic(), result)
+    return result
 
 
 @router.get("/streaming")
