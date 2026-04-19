@@ -24,7 +24,7 @@ if (token) {
     api.media.recentlyAdded("movie", token),
     api.media.recentlyAdded("episode", token),
     api.history.continueWatching(token),
-    api.history.nextUp(token, 7),
+    api.history.nextUp(token, 10),
   ]);
 
   if (results[0].status === "fulfilled") recentMovies = results[0].value;
@@ -147,8 +147,8 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
         </div>
 
         {rest.length > 0 && (
-          <div class="relative grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6 pt-6">
-            {rest.map((item) => <MediaCard item={item} />)}
+          <div class="relative flex gap-3 overflow-x-auto pb-3 scrollbar-none pt-6 -mx-6 px-6 md:mx-0 md:px-0">
+            {rest.map((item) => <div class="flex-shrink-0 w-40"><MediaCard item={item} /></div>)}
           </div>
         )}
       </section>
@@ -163,16 +163,31 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           Continue Watching
         </h2>
       </div>
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-        {continueWatching.slice(0, 6).map((item) => (
-          <ContinueWatchingCard item={item} />
+      <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
+        {continueWatching.slice(0, 12).map((item) => (
+          <div class="flex-shrink-0 w-40"><ContinueWatchingCard item={item} /></div>
         ))}
       </div>
     </section>
   )}
 
   {recentMovies.results?.length > 0 && (
-    <MediaRow title="Recently Added Movies" items={recentMovies.results.slice(0, 6)} href="/collection/movies?sort=created_at" />
+    <section class="mb-16">
+      <div class="flex items-center justify-between mb-8">
+        <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
+          <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
+          Recently Added Movies
+        </h2>
+        <a href="/collection/movies?sort=created_at" class="text-sm font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
+          See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
+        </a>
+      </div>
+      <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
+        {recentMovies.results.map((item) => (
+          <div class="flex-shrink-0 w-40"><MediaCard item={item} /></div>
+        ))}
+      </div>
+    </section>
   )}
 
   {recentShows.results?.length > 0 && (
@@ -186,9 +201,9 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
         </a>
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {recentShows.results.slice(0, 6).map((item) => (
-          <EpisodeCard item={item} />
+      <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
+        {recentShows.results.map((item) => (
+          <div class="flex-shrink-0 w-56"><EpisodeCard item={item} /></div>
         ))}
       </div>
     </section>
@@ -228,11 +243,11 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6" id="grid-trending-movies">
-          {Array.from({ length: 6 }).map(() => (
-            <div class="animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
+        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0" id="grid-trending-movies">
+          {Array.from({ length: 10 }).map(() => (
+            <div class="flex-shrink-0 w-40 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
               <div class="aspect-[2/3] bg-zinc-800"></div>
-              <div class="p-4 space-y-2">
+              <div class="p-3 space-y-2">
                 <div class="h-3 bg-zinc-800 rounded w-3/4"></div>
                 <div class="h-2 bg-zinc-800 rounded w-1/4"></div>
               </div>
@@ -252,11 +267,11 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6" id="grid-trending-shows">
-          {Array.from({ length: 6 }).map(() => (
-            <div class="animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
+        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0" id="grid-trending-shows">
+          {Array.from({ length: 10 }).map(() => (
+            <div class="flex-shrink-0 w-40 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
               <div class="aspect-[2/3] bg-zinc-800"></div>
-              <div class="p-4 space-y-2">
+              <div class="p-3 space-y-2">
                 <div class="h-3 bg-zinc-800 rounded w-3/4"></div>
                 <div class="h-2 bg-zinc-800 rounded w-1/4"></div>
               </div>
@@ -276,9 +291,9 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6" id="grid-airing-today">
-          {Array.from({ length: 6 }).map(() => (
-            <div class="animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
+        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0" id="grid-airing-today">
+          {Array.from({ length: 10 }).map(() => (
+            <div class="flex-shrink-0 w-56 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
               <div class="aspect-[3/2] bg-zinc-800"></div>
             </div>
           ))}
@@ -442,7 +457,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           const collectedFill = 'none';
 
           return `<div
-            class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1"
+            class="flex-shrink-0 w-40 group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70"
             data-card
             data-tmdb-id="${esc(String(item.tmdb_id))}"
             data-media-type="${esc(item.type)}"
@@ -515,7 +530,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
             ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
             : null;
 
-          return `<a href="${esc(href)}" class="group relative block rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1">
+          return `<a href="${esc(href)}" class="flex-shrink-0 w-56 group relative block rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70">
             <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
               ${imageUrl
                 ? `<img src="${esc(imageUrl)}" alt="${esc(item.show_title ?? item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />`
@@ -554,7 +569,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           }
         }
 
-        loadSection('/api/proxy/media/trending/movies', 'grid-trending-movies', mediaCardHtml, 6);
-        loadSection('/api/proxy/media/trending/shows', 'grid-trending-shows', mediaCardHtml, 6);
-        loadSection('/api/proxy/media/airing-today/collected', 'grid-airing-today', episodeCardHtml, 6);
+        loadSection('/api/proxy/media/trending/movies', 'grid-trending-movies', mediaCardHtml, 12);
+        loadSection('/api/proxy/media/trending/shows', 'grid-trending-shows', mediaCardHtml, 12);
+        loadSection('/api/proxy/media/airing-today/collected', 'grid-airing-today', episodeCardHtml, 12);
 </script>
