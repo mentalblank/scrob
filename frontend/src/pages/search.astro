@@ -234,7 +234,6 @@ const tabs: [string | undefined, string][] = [
 
   setup();
   document.addEventListener('astro:after-swap', setup);
-  window.addEventListener('pageshow', (e) => { if (e.persisted) location.replace(location.href); });
 </script>
 
 {showYearFilter && (

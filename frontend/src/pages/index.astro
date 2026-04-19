@@ -305,7 +305,6 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
 </Base>
 
 <script define:vars={{ token }}>
-  window.addEventListener('pageshow', (e) => { if (e.persisted) location.replace(location.href); });
 
   function esc(str) {
           if (str == null) return '';

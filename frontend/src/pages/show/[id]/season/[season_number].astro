@@ -7,6 +7,7 @@ export const prerender = false;
 
 const { id, season_number } = Astro.params;
 const { token } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
 
 let season: Season | null = null;
 let error = "";

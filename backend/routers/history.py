@@ -435,7 +435,7 @@ async def mark_as_watched(
     event = WatchEvent(
         user_id=current_user.id,
         media_id=media.id,
-        watched_at=event_in.watched_at or datetime.now(),
+        watched_at=(event_in.watched_at.replace(tzinfo=None) if event_in.watched_at else datetime.now()),
         completed=event_in.completed,
         play_count=1,
         progress_percent=1.0 if event_in.completed else 0.0,

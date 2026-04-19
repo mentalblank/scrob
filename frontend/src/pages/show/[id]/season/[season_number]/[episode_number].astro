@@ -8,6 +8,7 @@ export const prerender = false;
 
 const { id, season_number, episode_number } = Astro.params;
 const { token } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
 
 let episode: EpisodeDetail | null = null;
 let error = "";

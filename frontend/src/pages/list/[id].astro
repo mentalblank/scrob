@@ -285,7 +285,6 @@ Astro.response.headers.set("Cache-Control", "no-store");
 
 <script define:vars={{ token, listId: list?.id }}>
   // Reload when restored from bfcache so DOM mutations (newly added items) aren't lost.
-  window.addEventListener('pageshow', (e) => { if (e.persisted) location.replace(location.href); });
 
   function esc(str) {
     if (str == null) return '';

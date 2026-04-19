@@ -8,6 +8,7 @@ export const prerender = false;
 
 const { id } = Astro.params;
 const { token } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
 
 let show: Show | null = null;
 let error = "";
