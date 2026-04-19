@@ -2810,6 +2810,8 @@ async def pick_for_me(
                             streaming_candidates.append(r)
 
     # ── Combine & deduplicate ──────────────────────────────────────────────
+    genre_id_map = {v: k for k, v in (MOVIE_GENRE_IDS if type == "movie" else TV_GENRE_IDS).items()}
+
     seen: set[int] = set()
     all_candidates: list[dict] = []
 
@@ -2832,6 +2834,7 @@ async def pick_for_me(
                 "tmdb_rating": r.get("vote_average"),
                 "overview": r.get("overview"),
                 "in_library": False,
+                "genres": [genre_id_map[gid] for gid in r.get("genre_ids", []) if gid in genre_id_map],
             })
 
     if not all_candidates:
@@ -2839,16 +2842,35 @@ async def pick_for_me(
 
     pick = random.choice(all_candidates)
 
+    # ── Fetch genres from local DB for the picked item ─────────────────────
+    if not pick.get("genres"):
+        if type == "movie":
+            genres_q = await db.execute(
+                select(Media.tmdb_data).where(
+                    Media.tmdb_id == pick["tmdb_id"], Media.media_type == MediaType.movie
+                ).limit(1)
+            )
+        else:
+            genres_q = await db.execute(
+                select(ShowModel.tmdb_data).where(ShowModel.tmdb_id == pick["tmdb_id"]).limit(1)
+            )
+        row = genres_q.scalar_one_or_none()
+        if row:
+            pick["genres"] = (row or {}).get("genres", [])
+
     # ── Enrich pick: overview + watch providers ────────────────────────────
     sources: list[dict] = []
     if check_tmdb_key(tmdb_key):
         try:
-            if not pick.get("overview"):
+            if not pick.get("overview") or not pick.get("genres"):
                 if type == "movie":
                     details = await tmdb.get_movie(pick["tmdb_id"], api_key=tmdb_key)
                 else:
                     details = await tmdb.get_show(pick["tmdb_id"], api_key=tmdb_key)
-                pick["overview"] = details.get("overview")
+                if not pick.get("overview"):
+                    pick["overview"] = details.get("overview")
+                if not pick.get("genres"):
+                    pick["genres"] = [g["name"] for g in details.get("genres", [])]
 
             if type == "movie":
                 providers_data = await tmdb.get_movie_watch_providers(pick["tmdb_id"], api_key=tmdb_key)
