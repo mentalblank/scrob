@@ -24,6 +24,9 @@ from dependencies import get_current_user
 
 router = APIRouter()
 
+# Global semaphore — at most one sync running at a time across all users
+_sync_semaphore = asyncio.Semaphore(1)
+
 BATCH_SIZE = 500
 TMDB_CONCURRENCY = 5  # Max concurrent TMDB requests
 # asyncpg hard limit is 32767 parameters per query; stay well under it
@@ -691,6 +694,11 @@ async def sync_items(
 
 
 async def run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+    async with _sync_semaphore:
+        await _run_jellyfin_sync(user_id, job_id, movie_limit, show_limit)
+
+
+async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
     print(f"Starting Jellyfin sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -841,6 +849,11 @@ async def run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_li
 
 
 async def run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+    async with _sync_semaphore:
+        await _run_emby_sync(user_id, job_id, movie_limit, show_limit)
+
+
+async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
     print(f"Starting Emby sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -987,6 +1000,11 @@ async def run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit:
 
 
 async def run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+    async with _sync_semaphore:
+        await _run_plex_sync(user_id, job_id, movie_limit, show_limit)
+
+
+async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
     print(f"Starting Plex sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:

@@ -370,6 +370,10 @@ export interface UserSettings {
   trakt_push_watched: boolean;
   trakt_push_ratings: boolean;
 
+  jellyfin_auto_sync_interval: number | null;
+  emby_auto_sync_interval: number | null;
+  plex_auto_sync_interval: number | null;
+
   preferences: UserPreferences | null;
 }
 

@@ -128,6 +128,11 @@ class UserSettings(Base):
     trakt_push_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_push_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
+    # Auto sync intervals in hours (null = disabled)
+    jellyfin_auto_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    emby_auto_sync_interval     : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    plex_auto_sync_interval     : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     preferences    : Mapped[Optional[dict]] = mapped_column(JSON)
 
     user : Mapped["User"] = relationship(back_populates="settings")

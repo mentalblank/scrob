@@ -126,6 +126,11 @@ class UserSettings(BaseModel):
     trakt_push_watched: Optional[bool] = None
     trakt_push_ratings: Optional[bool] = None
 
+    # Auto sync intervals in hours (null = disabled)
+    jellyfin_auto_sync_interval: Optional[int] = None
+    emby_auto_sync_interval: Optional[int] = None
+    plex_auto_sync_interval: Optional[int] = None
+
     preferences: Optional[dict] = None
 
     class Config:
