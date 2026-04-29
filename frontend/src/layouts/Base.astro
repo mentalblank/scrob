@@ -7,6 +7,7 @@ import WatchedAtPicker from "../components/WatchedAtPicker.astro";
 interface Props { title: string; hideNav?: boolean }
 const { title, hideNav } = Astro.props;
 const { user, token } = Astro.locals;
+const blurExplicit = Astro.cookies.get("blur_explicit")?.value !== "false";
 
 const pathname = Astro.url.pathname;
 const activeMovies = pathname.startsWith('/movies') || pathname.startsWith('/collection/movies') || pathname.startsWith('/trending/movies') || pathname.startsWith('/media/movie');
@@ -24,7 +25,7 @@ const bottomNavItem = (active: boolean) =>
   `flex flex-col items-center justify-center gap-1 flex-1 py-2 text-[10px] font-bold uppercase tracking-wider transition-colors active:bg-zinc-800/70 active:scale-95 ${active ? 'text-blue-400' : 'text-zinc-500'}`;
 ---
 <!doctype html>
-<html lang="en">
+<html lang="en" class={blurExplicit ? "blur-explicit" : ""}>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -1148,6 +1149,18 @@ const bottomNavItem = (active: boolean) =>
 
     // Bust bfcache on every page so back/forward always shows fresh server state
     window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload(); });
+
+    // Reveal blurred adult posters on click (capture phase so it fires before <a> navigation).
+    // Also reveals the backdrop on the same page, which cannot be clicked directly.
+    document.addEventListener('click', (e) => {
+      const adultEl = (e.target as Element).closest<HTMLElement>('[data-adult="true"]');
+      if (adultEl && document.documentElement.classList.contains('blur-explicit')) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        document.querySelectorAll<HTMLElement>('[data-adult="true"]').forEach(el => el.removeAttribute('data-adult'));
+        document.querySelectorAll<HTMLElement>('[data-adult-backdrop="true"]').forEach(el => el.removeAttribute('data-adult-backdrop'));
+      }
+    }, true);
   </script>
 </body>
 </html>

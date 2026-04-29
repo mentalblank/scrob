@@ -41,6 +41,7 @@ def format_show(show: ShowModel) -> dict:
         "genres": (show.tmdb_data or {}).get("genres", []),
         "seasons_meta": (show.tmdb_data or {}).get("seasons", []),
         "original_language": (show.tmdb_data or {}).get("original_language"),
+        "adult": (show.tmdb_data or {}).get("adult", False),
     }
 
 
@@ -174,6 +175,7 @@ async def get_show(
                         "release_date": r.get("first_air_date")
                         or r.get("release_date"),
                         "tmdb_rating": r.get("vote_average"),
+                        "adult": r.get("adult", False),
                     }
                     for r in tmdb_extra.get("recommendations", {}).get("results", [])[
                         :12
@@ -303,6 +305,7 @@ async def get_show(
             "seasons_meta": enhanced_seasons_meta,
             "original_language": (show.tmdb_data or {}).get("original_language") or (tmdb_extra or {}).get("original_language"),
             "age_rating": _extract_show_content_rating(tmdb_extra) if tmdb_extra else None,
+            "adult": (tmdb_extra or show.tmdb_data or {}).get("adult", False),
             "in_library": state_item.get("collection_pct", 0) > 0 if state_item else False,
             "watched": state_item.get("watched", False) if state_item else False,
             "in_lists": state_item.get("in_lists", []),
@@ -367,6 +370,7 @@ async def get_show(
             "genres": [g["name"] for g in data.get("genres", [])],
             "original_language": data.get("original_language"),
             "age_rating": _extract_show_content_rating(data),
+            "adult": data.get("adult", False),
             "in_library": state_item_tmdb.get("collection_pct", 0) > 0,
             "watched": state_item_tmdb.get("watched", False),
             "in_lists": state_item_tmdb.get("in_lists", []),

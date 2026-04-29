@@ -376,6 +376,7 @@ export interface UserSettings {
   plex_auto_sync_interval: number | null;
 
   preferences: UserPreferences | null;
+  blur_explicit: boolean;
 }
 
 export interface ServiceStatus {
@@ -415,6 +416,7 @@ export interface MediaItem {
   status?: string | null;
   original_language?: string | null;
   age_rating?: string | null;
+  adult?: boolean;
   show_title?: string | null;
   show_tmdb_id?: number | null;
   show_poster_path?: string | null;
@@ -520,6 +522,7 @@ export interface Show {
   status: string | null;
   original_language?: string | null;
   age_rating?: string | null;
+  adult?: boolean;
   user_rating?: number | null;
   first_air_date: string | null;
   last_air_date: string | null;

@@ -702,27 +702,45 @@ if (me.totp_enabled) {
       <!-- Appearance -->
       <section>
         <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Appearance</h2>
-        <div class="space-y-3">
-          <p class="text-sm text-zinc-400">Accent color</p>
-          <div class="flex flex-wrap gap-3" id="accent-swatches">
-            {[
-              { id: 'blue',   label: 'Blue',   color: '#3b82f6' },
-              { id: 'purple', label: 'Purple', color: '#a855f7' },
-              { id: 'pink',   label: 'Pink',   color: '#ec4899' },
-              { id: 'red',    label: 'Red',    color: '#ef4444' },
-              { id: 'green',  label: 'Green',  color: '#22c55e' },
-              { id: 'yellow', label: 'Yellow', color: '#eab308' },
-              { id: 'orange', label: 'Orange', color: '#f97316' },
-            ].map(({ id, label, color }) => (
-              <button
-                type="button"
-                data-accent-id={id}
-                class="accent-swatch flex items-center gap-2.5 px-5 py-3 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-600 transition-all cursor-pointer text-sm text-zinc-400 hover:text-zinc-100"
-              >
-                <span class="w-5 h-5 rounded-full shrink-0" style={`background-color: ${color}`}></span>
-                {label}
-              </button>
-            ))}
+        <div class="space-y-6">
+          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+            <div>
+              <p class="text-sm font-semibold text-zinc-100 mb-1">Blur explicit content</p>
+              <p class="text-xs text-zinc-400">Blur posters flagged as adult content by TMDB. Click a blurred poster to reveal it.</p>
+            </div>
+            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+              <input
+                type="checkbox"
+                name="blur_explicit"
+                id="blur-explicit-toggle"
+                class="sr-only peer"
+                checked={settings.blur_explicit !== false}
+              />
+              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            </label>
+          </div>
+          <div>
+            <p class="text-sm text-zinc-400">Accent color</p>
+            <div class="flex flex-wrap gap-3 mt-3" id="accent-swatches">
+              {[
+                { id: 'blue',   label: 'Blue',   color: '#3b82f6' },
+                { id: 'purple', label: 'Purple', color: '#a855f7' },
+                { id: 'pink',   label: 'Pink',   color: '#ec4899' },
+                { id: 'red',    label: 'Red',    color: '#ef4444' },
+                { id: 'green',  label: 'Green',  color: '#22c55e' },
+                { id: 'yellow', label: 'Yellow', color: '#eab308' },
+                { id: 'orange', label: 'Orange', color: '#f97316' },
+              ].map(({ id, label, color }) => (
+                <button
+                  type="button"
+                  data-accent-id={id}
+                  class="accent-swatch flex items-center gap-2.5 px-5 py-3 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-600 transition-all cursor-pointer text-sm text-zinc-400 hover:text-zinc-100"
+                >
+                  <span class="w-5 h-5 rounded-full shrink-0" style={`background-color: ${color}`}></span>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -1866,7 +1884,7 @@ if (me.totp_enabled) {
           plex_auto_sync_interval: formData.get('plex_auto_sync_interval') ? parseInt(formData.get('plex_auto_sync_interval') as string) : null,
         };
 
-        // Collect sync pref checkboxes (now inside settings-form)
+        // Collect boolean checkboxes (sync prefs + app preferences)
         const syncKeys = [
           'plex_sync_collection', 'plex_sync_watched', 'plex_sync_ratings', 'plex_sync_playback',
           'jellyfin_sync_collection', 'jellyfin_sync_watched', 'jellyfin_sync_ratings', 'jellyfin_sync_playback',
@@ -1876,11 +1894,20 @@ if (me.totp_enabled) {
           'emby_push_watched', 'emby_push_ratings',
           'trakt_sync_watched', 'trakt_sync_ratings',
           'trakt_push_watched', 'trakt_push_ratings',
+          'blur_explicit',
         ] as const;
         const syncPrefs: Record<string, boolean> = {};
         for (const key of syncKeys) {
           const el = form.querySelector<HTMLInputElement>(`[name="${key}"]`);
           if (el) syncPrefs[key] = el.checked;
+        }
+
+        // Sync blur_explicit to a cookie (read server-side by Base.astro) and apply immediately
+        const blurEl = form.querySelector<HTMLInputElement>('[name="blur_explicit"]');
+        if (blurEl) {
+          const val = blurEl.checked ? 'true' : 'false';
+          document.cookie = `blur_explicit=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
+          document.documentElement.classList.toggle('blur-explicit', blurEl.checked);
         }
 
         saves.push(fetch(`/api/proxy/auth/settings`, {
@@ -2148,6 +2175,15 @@ if (me.totp_enabled) {
   loadLibraries();
   setupSettingsForm();
   setupPasswordForm();
+
+  // Sync blur_explicit cookie from the server-rendered value on page load.
+  // Picks up changes made on another device/browser.
+  const blurToggle = document.getElementById('blur-explicit-toggle') as HTMLInputElement | null;
+  if (blurToggle) {
+    const val = blurToggle.checked ? 'true' : 'false';
+    document.cookie = `blur_explicit=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
+    document.documentElement.classList.toggle('blur-explicit', blurToggle.checked);
+  }
   setupApiKey();
   setupHealButton();
   setupCollapsibleRows();

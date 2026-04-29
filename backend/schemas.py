@@ -132,6 +132,7 @@ class UserSettings(BaseModel):
     plex_auto_sync_interval: Optional[int] = None
 
     preferences: Optional[dict] = None
+    blur_explicit: Optional[bool] = None
 
     class Config:
         from_attributes = True

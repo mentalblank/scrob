@@ -536,6 +536,7 @@ def format_media(media: Media) -> dict:
         "genres": (media.tmdb_data or {}).get("genres", []),
         "cast": cast[:12],
         "collection": (media.tmdb_data or {}).get("collection"),
+        "adult": (media.tmdb_data or {}).get("adult", False),
     }
 
 
@@ -833,6 +834,7 @@ async def search_media(
                 "release_date": res.get("release_date") or res.get("first_air_date"),
                 "tmdb_rating": res.get("vote_average"),
                 "in_library": False,
+                "adult": res.get("adult", False),
             }
         enriched.append(item)
 
@@ -922,6 +924,7 @@ async def trending_movies(
                     "release_date": res.get("release_date"),
                     "tmdb_rating": res.get("vote_average"),
                     "in_library": False,
+                    "adult": res.get("adult", False),
                 }
             )
     await enrich_with_state(db, current_user.id, enriched)
@@ -972,6 +975,7 @@ async def trending_shows(
                 "release_date": res.get("first_air_date"),
                 "tmdb_rating": res.get("vote_average"),
                 "in_library": tmdb_id in in_library,
+                "adult": res.get("adult", False),
             }
         )
     await enrich_with_state(db, current_user.id, enriched)
@@ -1095,6 +1099,7 @@ async def airing_today_collected(
                 "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
                 "tmdb_rating": show.get("vote_average"),
                 "release_date": episode.get("air_date"),
+                "adult": show.get("adult", False),
             }
         return {
             "id": None,
@@ -1105,6 +1110,7 @@ async def airing_today_collected(
             "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
             "tmdb_rating": show.get("vote_average"),
             "release_date": show.get("first_air_date"),
+            "adult": show.get("adult", False),
         }
 
     results = list(await asyncio.gather(*[fetch_episode(s) for s in collected_shows]))
@@ -1175,6 +1181,7 @@ async def get_person_details(
                     "release_date": c.get("release_date") or c.get("first_air_date"),
                     "character": c.get("character"),
                     "popularity": c.get("popularity", 0),
+                    "adult": c.get("adult", False),
                 }
             )
         formatted_credits.sort(key=lambda x: x["popularity"], reverse=True)
@@ -1394,6 +1401,7 @@ async def get_tmdb_list(
                     "release_date": res.get("release_date") or res.get("first_air_date"),
                     "tmdb_rating": res.get("vote_average"),
                     "in_library": tmdb_id in library_tmdb_ids,
+                    "adult": res.get("adult", False),
                 }
             )
         await enrich_with_state(db, current_user.id, enriched)
@@ -1438,6 +1446,7 @@ def _enrich_movie_list(results: list[dict], library_ids: set[int]) -> list[dict]
             "release_date": r.get("release_date"),
             "tmdb_rating": r.get("vote_average"),
             "in_library": r["id"] in library_ids,
+            "adult": r.get("adult", False),
         }
         for r in results if r.get("id")
     ]
@@ -1455,6 +1464,7 @@ def _enrich_show_list(results: list[dict], library_ids: set[int]) -> list[dict]:
             "release_date": r.get("first_air_date"),
             "tmdb_rating": r.get("vote_average"),
             "in_library": r["id"] in library_ids,
+            "adult": r.get("adult", False),
         }
         for r in results if r.get("id")
     ]
@@ -1931,6 +1941,7 @@ async def recommended(
                     "release_date": item.get("first_air_date"),
                     "tmdb_rating": item.get("vote_average"),
                     "in_library": False,
+                    "adult": item.get("adult", False),
                 })
             else:
                 enriched.append({
@@ -1942,6 +1953,7 @@ async def recommended(
                     "release_date": item.get("release_date"),
                     "tmdb_rating": item.get("vote_average"),
                     "in_library": False,
+                    "adult": item.get("adult", False),
                 })
 
     random.shuffle(enriched)
@@ -2585,6 +2597,7 @@ async def get_media_details(
                             "poster_path": tmdb.poster_url(p.get("poster_path")),
                             "release_date": p.get("release_date"),
                             "overview": p.get("overview"),
+                            "adult": p.get("adult", False),
                         }
                         for p in coll_data.get("parts", [])
                     ],
@@ -2635,6 +2648,7 @@ async def get_media_details(
             "genres": [g["name"] for g in data.get("genres", [])],
             "original_language": data.get("original_language"),
             "age_rating": _extract_movie_certification(data),
+            "adult": data.get("adult", False),
             "collection": collection,
             "production_companies": production_companies,
             "cast": [
@@ -2684,6 +2698,7 @@ async def get_media_recommendations(
                 "backdrop_path": tmdb.poster_url(r.get("backdrop_path"), size="w1280"),
                 "release_date": r.get("release_date") or r.get("first_air_date"),
                 "tmdb_rating": r.get("vote_average"),
+                "adult": r.get("adult", False),
             }
             for r in recs_raw
         ]
@@ -2855,6 +2870,7 @@ async def pick_for_me(
                 "overview": r.get("overview"),
                 "in_library": False,
                 "genres": [genre_id_map[gid] for gid in r.get("genre_ids", []) if gid in genre_id_map],
+                "adult": r.get("adult", False),
             })
 
     if not all_candidates:

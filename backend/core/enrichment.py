@@ -28,6 +28,7 @@ async def enrich_media(media: Media, api_key: str = None, series_tmdb_id: int = 
                 ],
                 "tagline": data.get("tagline"),
                 "status": data.get("status"),
+                "adult": data.get("adult", False),
             }
 
         elif media.media_type == MediaType.series:
@@ -49,6 +50,7 @@ async def enrich_media(media: Media, api_key: str = None, series_tmdb_id: int = 
                 ],
                 "tagline": data.get("tagline"),
                 "status": data.get("status"),
+                "adult": data.get("adult", False),
             }
 
         elif media.media_type == MediaType.episode:

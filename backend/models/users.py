@@ -134,6 +134,7 @@ class UserSettings(Base):
     plex_auto_sync_interval     : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     preferences    : Mapped[Optional[dict]] = mapped_column(JSON)
+    blur_explicit  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     user : Mapped["User"] = relationship(back_populates="settings")
 

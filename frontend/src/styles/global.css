@@ -267,3 +267,32 @@ nav, div, a, button, input, span {
   cursor: grabbing;
   pointer-events: none; /* Prevent link clicks while dragging */
 }
+
+/* ── Explicit content blur ──────────────────────────────────────────────── */
+html.blur-explicit [data-adult="true"] img {
+  filter: blur(24px);
+  transition: filter 0.2s ease;
+}
+html.blur-explicit [data-adult="true"]:hover img {
+  filter: blur(18px);
+}
+/* Overlay hint — shown only when blurred */
+html.blur-explicit [data-adult="true"]::after {
+  content: 'Tap to reveal';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.7);
+  pointer-events: none;
+  z-index: 10;
+}
+html.blur-explicit [data-adult-backdrop="true"] img {
+  filter: blur(24px);
+  pointer-events: none;
+}

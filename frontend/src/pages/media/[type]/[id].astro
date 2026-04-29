@@ -52,7 +52,7 @@ const refreshUrl = isEpisode
     <div class="relative">
       <!-- Backdrop -->
       {item.backdrop_path && (
-        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[600px] overflow-hidden">
+        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[600px] overflow-hidden" data-adult-backdrop={item.adult ? "true" : undefined}>
           <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent z-10"></div>
           <img
             src={item.backdrop_path}
@@ -78,7 +78,7 @@ const refreshUrl = isEpisode
         <div class="flex flex-col md:flex-row gap-8 lg:gap-12">
           <!-- Poster -->
           <div class="w-64 shrink-0 mx-auto md:mx-0">
-            <div class="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10">
+            <div class="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative" data-adult={item.adult ? "true" : undefined}>
               {item.poster_path ? (
                 <img
                   src={item.poster_path}
