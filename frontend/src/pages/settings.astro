@@ -2183,6 +2183,18 @@ if (me.totp_enabled) {
     const val = blurToggle.checked ? 'true' : 'false';
     document.cookie = `blur_explicit=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
     document.documentElement.classList.toggle('blur-explicit', blurToggle.checked);
+
+    blurToggle.addEventListener('change', async () => {
+      const v = blurToggle.checked ? 'true' : 'false';
+      document.cookie = `blur_explicit=${v}; path=/; SameSite=Lax; Max-Age=31536000`;
+      document.documentElement.classList.toggle('blur-explicit', blurToggle.checked);
+      const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+      await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blur_explicit: blurToggle.checked }),
+      });
+    });
   }
   setupApiKey();
   setupHealButton();
