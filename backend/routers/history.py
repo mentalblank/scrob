@@ -12,6 +12,7 @@ from models.playback_progress import PlaybackProgress
 from models.collection import Collection, CollectionFile
 from models.base import MediaType, CollectionSource
 from models.users import UserSettings
+from models.connections import MediaServerConnection
 from routers.media import enrich_with_state, get_user_tmdb_key, check_tmdb_key
 
 from dependencies import get_current_user
@@ -30,30 +31,25 @@ async def _push_watch_state(
     media_ids: list[int],
     watched: bool,
 ) -> None:
-    """Push watched/unwatched state for a list of media IDs to Plex and Jellyfin.
-
-    Called after creating or deleting WatchEvents so the media servers stay in sync
-    when the corresponding outbound push flags are enabled.
-    """
+    """Fan-out watched/unwatched state to all connections with push_watched enabled."""
     if not media_ids:
         return
 
+    conns_result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.user_id == user_id,
+            MediaServerConnection.push_watched == True,
+        )
+    )
+    connections = conns_result.scalars().all()
+
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = settings_result.scalar_one_or_none()
-    if not settings:
-        return
-
-    push_plex = watched and settings.plex_push_watched and settings.plex_url and settings.plex_token
-    push_plex_unwatch = not watched and settings.plex_push_watched and settings.plex_url and settings.plex_token
-    push_jf = watched and settings.jellyfin_push_watched and settings.jellyfin_url and settings.jellyfin_token and settings.jellyfin_user_id
-    push_jf_unwatch = not watched and settings.jellyfin_push_watched and settings.jellyfin_url and settings.jellyfin_token and settings.jellyfin_user_id
-    push_emby = watched and settings.emby_push_watched and settings.emby_url and settings.emby_token and settings.emby_user_id
-    push_emby_unwatch = not watched and settings.emby_push_watched and settings.emby_url and settings.emby_token and settings.emby_user_id
-    push_trakt = settings.trakt_push_watched and settings.trakt_access_token
+    push_trakt = settings and settings.trakt_push_watched and settings.trakt_access_token
 
     tasks = []
 
-    if push_plex or push_plex_unwatch or push_jf or push_jf_unwatch or push_emby or push_emby_unwatch:
+    if connections:
         files_result = await db.execute(
             select(CollectionFile)
             .join(Collection, Collection.id == CollectionFile.collection_id)
@@ -64,24 +60,30 @@ async def _push_watch_state(
         )
         coll_files = files_result.scalars().all()
 
+        conn_by_type: dict[str, list[MediaServerConnection]] = {}
+        for conn in connections:
+            conn_by_type.setdefault(conn.type, []).append(conn)
+
         for coll_file in coll_files:
             if not coll_file.source_id:
                 continue
-            if coll_file.source == CollectionSource.plex:
-                if push_plex:
-                    tasks.append(plex_client.mark_watched(settings.plex_url, settings.plex_token, coll_file.source_id))
-                elif push_plex_unwatch:
-                    tasks.append(plex_client.mark_unwatched(settings.plex_url, settings.plex_token, coll_file.source_id))
-            elif coll_file.source == CollectionSource.jellyfin:
-                if push_jf:
-                    tasks.append(jellyfin_client.mark_watched(settings.jellyfin_url, settings.jellyfin_token, settings.jellyfin_user_id, coll_file.source_id))
-                elif push_jf_unwatch:
-                    tasks.append(jellyfin_client.mark_unwatched(settings.jellyfin_url, settings.jellyfin_token, settings.jellyfin_user_id, coll_file.source_id))
-            elif coll_file.source == CollectionSource.emby:
-                if push_emby:
-                    tasks.append(emby_client.mark_watched(settings.emby_url, settings.emby_token, settings.emby_user_id, coll_file.source_id))
-                elif push_emby_unwatch:
-                    tasks.append(emby_client.mark_unwatched(settings.emby_url, settings.emby_token, settings.emby_user_id, coll_file.source_id))
+            source_type = coll_file.source.value if hasattr(coll_file.source, "value") else str(coll_file.source)
+            for conn in conn_by_type.get(source_type, []):
+                if coll_file.source == CollectionSource.plex:
+                    if watched:
+                        tasks.append(plex_client.mark_watched(conn.url, conn.token, coll_file.source_id))
+                    else:
+                        tasks.append(plex_client.mark_unwatched(conn.url, conn.token, coll_file.source_id))
+                elif coll_file.source == CollectionSource.jellyfin:
+                    if watched:
+                        tasks.append(jellyfin_client.mark_watched(conn.url, conn.token, conn.server_user_id, coll_file.source_id))
+                    else:
+                        tasks.append(jellyfin_client.mark_unwatched(conn.url, conn.token, conn.server_user_id, coll_file.source_id))
+                elif coll_file.source == CollectionSource.emby:
+                    if watched:
+                        tasks.append(emby_client.mark_watched(conn.url, conn.token, conn.server_user_id, coll_file.source_id))
+                    else:
+                        tasks.append(emby_client.mark_unwatched(conn.url, conn.token, conn.server_user_id, coll_file.source_id))
 
     if push_trakt and settings.trakt_client_id:
         media_res = await db.execute(
@@ -443,24 +445,9 @@ async def mark_as_watched(
     db.add(event)
     await db.commit()
 
-    # 4. Push to Plex / Jellyfin if outbound sync is enabled
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-
-    if settings and event_in.completed:
-        files_result = await db.execute(
-            select(CollectionFile)
-            .join(Collection, Collection.id == CollectionFile.collection_id)
-            .where(Collection.user_id == current_user.id, Collection.media_id == media.id)
-        )
-        coll_files = files_result.scalars().all()
-        for coll_file in coll_files:
-            if coll_file.source == CollectionSource.plex and settings.plex_push_watched and settings.plex_url and settings.plex_token and coll_file.source_id:
-                await plex_client.mark_watched(settings.plex_url, settings.plex_token, coll_file.source_id)
-            elif coll_file.source == CollectionSource.jellyfin and settings.jellyfin_push_watched and settings.jellyfin_url and settings.jellyfin_token and settings.jellyfin_user_id and coll_file.source_id:
-                await jellyfin_client.mark_watched(settings.jellyfin_url, settings.jellyfin_token, settings.jellyfin_user_id, coll_file.source_id)
-            elif coll_file.source == CollectionSource.emby and settings.emby_push_watched and settings.emby_url and settings.emby_token and settings.emby_user_id and coll_file.source_id:
-                await emby_client.mark_watched(settings.emby_url, settings.emby_token, settings.emby_user_id, coll_file.source_id)
+    # 4. Push to media servers if outbound push is enabled
+    if event_in.completed:
+        await _push_watch_state(db, current_user.id, [media.id], watched=True)
 
     return {"status": "ok", "message": f"Marked {media.title} as watched"}
 

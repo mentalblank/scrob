@@ -41,38 +41,13 @@ class User(Base):
     totp_backup_codes : Mapped[list["TotpBackupCode"]]   = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
-class AppSettings(Base):
-    """Single-row table — global defaults."""
-    __tablename__ = "app_settings"
-
-    id               : Mapped[int]            = mapped_column(Integer, primary_key=True)
-    jellyfin_url     : Mapped[Optional[str]]  = mapped_column(String(500))
-    jellyfin_token   : Mapped[Optional[str]]  = mapped_column(String(500))
-    jellyfin_user_id : Mapped[Optional[str]]  = mapped_column(String(255))
-    emby_url         : Mapped[Optional[str]]  = mapped_column(String(500))
-    emby_token       : Mapped[Optional[str]]  = mapped_column(String(500))
-    emby_user_id     : Mapped[Optional[str]]  = mapped_column(String(255))
-    plex_url         : Mapped[Optional[str]]  = mapped_column(String(500))
-    plex_token       : Mapped[Optional[str]]  = mapped_column(String(500))
-    updated_at       : Mapped[datetime]       = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
-
-
 class UserSettings(Base):
     __tablename__ = "user_settings"
 
     id             : Mapped[int]            = mapped_column(Integer, primary_key=True)
     user_id        : Mapped[int]            = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
     tmdb_api_key   : Mapped[Optional[str]]  = mapped_column(String(255))
-    jellyfin_url   : Mapped[Optional[str]]  = mapped_column(String(500))
-    jellyfin_token : Mapped[Optional[str]]  = mapped_column(String(500))
-    jellyfin_user_id : Mapped[Optional[str]]  = mapped_column(String(255))
-    emby_url       : Mapped[Optional[str]]  = mapped_column(String(500))
-    emby_token     : Mapped[Optional[str]]  = mapped_column(String(500))
-    emby_user_id   : Mapped[Optional[str]]  = mapped_column(String(255))
-    plex_url       : Mapped[Optional[str]]  = mapped_column(String(500))
-    plex_token     : Mapped[Optional[str]]  = mapped_column(String(500))
-    plex_username  : Mapped[Optional[str]]  = mapped_column(String(255))
-    
+
     # Radarr integration
     radarr_url             : Mapped[Optional[str]] = mapped_column(String(500))
     radarr_token           : Mapped[Optional[str]] = mapped_column(String(500))
@@ -87,28 +62,6 @@ class UserSettings(Base):
     sonarr_quality_profile  : Mapped[Optional[int]] = mapped_column(Integer)
     sonarr_tags             : Mapped[Optional[list[int]]] = mapped_column(JSON)
     sonarr_season_folder    : Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-
-    # Inbound sync flags (source → Scrob)
-    plex_sync_collection     : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    plex_sync_watched        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    plex_sync_ratings        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    plex_sync_playback       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    jellyfin_sync_collection : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    jellyfin_sync_watched    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    jellyfin_sync_ratings    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    jellyfin_sync_playback   : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    emby_sync_collection     : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    emby_sync_watched        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    emby_sync_ratings        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    emby_sync_playback       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-
-    # Outbound push flags (Scrob → source)
-    plex_push_watched        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    plex_push_ratings        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    jellyfin_push_watched    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    jellyfin_push_ratings    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    emby_push_watched        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    emby_push_ratings        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # Trakt OAuth app credentials (per-user)
     trakt_client_id          : Mapped[Optional[str]]      = mapped_column(String(255))
@@ -127,11 +80,6 @@ class UserSettings(Base):
     # Trakt outbound push flags (Scrob → Trakt)
     trakt_push_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_push_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-
-    # Auto sync intervals in hours (null = disabled)
-    jellyfin_auto_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    emby_auto_sync_interval     : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    plex_auto_sync_interval     : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     preferences    : Mapped[Optional[dict]] = mapped_column(JSON)
     blur_explicit  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")

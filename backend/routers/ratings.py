@@ -12,6 +12,7 @@ from models.ratings import Rating
 from models.collection import Collection, CollectionFile
 from models.base import CollectionSource, MediaType
 from models.users import UserSettings
+from models.connections import MediaServerConnection
 from dependencies import get_current_user
 from models.users import User
 import core.plex as plex_client
@@ -114,32 +115,47 @@ async def submit_rating(
     await db.commit()
     await db.refresh(rating)
 
-    # Push rating to Plex / Jellyfin / Trakt if outbound sync is enabled
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if settings:
-        push_tasks = []
+    # Fan-out rating push to all connections with push_ratings enabled
+    import asyncio
+    push_tasks = []
+    conns_result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.user_id == current_user.id,
+            MediaServerConnection.push_ratings == True,
+        )
+    )
+    push_connections = conns_result.scalars().all()
+    if push_connections:
         files_result = await db.execute(
             select(CollectionFile)
             .join(Collection, Collection.id == CollectionFile.collection_id)
             .where(Collection.user_id == current_user.id, Collection.media_id == media.id)
         )
         coll_files = files_result.scalars().all()
+        conn_by_type: dict[str, list] = {}
+        for conn in push_connections:
+            conn_by_type.setdefault(conn.type, []).append(conn)
         for coll_file in coll_files:
-            if coll_file.source == CollectionSource.plex and settings.plex_push_ratings and settings.plex_url and settings.plex_token and coll_file.source_id:
-                push_tasks.append(plex_client.set_rating(settings.plex_url, settings.plex_token, coll_file.source_id, body.rating))
-            elif coll_file.source == CollectionSource.jellyfin and settings.jellyfin_push_ratings and settings.jellyfin_url and settings.jellyfin_token and settings.jellyfin_user_id and coll_file.source_id:
-                push_tasks.append(jellyfin_client.set_rating(settings.jellyfin_url, settings.jellyfin_token, settings.jellyfin_user_id, coll_file.source_id, body.rating))
-            elif coll_file.source == CollectionSource.emby and settings.emby_push_ratings and settings.emby_url and settings.emby_token and settings.emby_user_id and coll_file.source_id:
-                push_tasks.append(emby_client.set_rating(settings.emby_url, settings.emby_token, settings.emby_user_id, coll_file.source_id, body.rating))
-        if settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and media.tmdb_id:
-                if media_type == MediaType.movie:
-                    push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, body.rating))
-                elif media_type == MediaType.series:
-                    push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, body.rating))
-        if push_tasks:
-            import asyncio
-            await asyncio.gather(*push_tasks, return_exceptions=True)
+            if not coll_file.source_id:
+                continue
+            source_type = coll_file.source.value if hasattr(coll_file.source, "value") else str(coll_file.source)
+            for conn in conn_by_type.get(source_type, []):
+                if coll_file.source == CollectionSource.plex:
+                    push_tasks.append(plex_client.set_rating(conn.url, conn.token, coll_file.source_id, body.rating))
+                elif coll_file.source == CollectionSource.jellyfin:
+                    push_tasks.append(jellyfin_client.set_rating(conn.url, conn.token, conn.server_user_id, coll_file.source_id, body.rating))
+                elif coll_file.source == CollectionSource.emby:
+                    push_tasks.append(emby_client.set_rating(conn.url, conn.token, conn.server_user_id, coll_file.source_id, body.rating))
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
+    if settings and settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and media.tmdb_id:
+        if media_type == MediaType.movie:
+            push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, body.rating))
+        elif media_type == MediaType.series:
+            push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, body.rating))
+    if push_tasks:
+        await asyncio.gather(*push_tasks, return_exceptions=True)
 
     return format_rating(rating, media)
 
@@ -208,31 +224,45 @@ async def delete_rating(
     await db.delete(rating)
     await db.commit()
 
-    # Push rating removal to Plex / Jellyfin / Trakt if outbound sync is enabled
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if settings:
-        push_tasks = []
+    import asyncio
+    push_tasks = []
+    conns_result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.user_id == current_user.id,
+            MediaServerConnection.push_ratings == True,
+        )
+    )
+    push_connections = conns_result.scalars().all()
+    if push_connections:
         files_result = await db.execute(
             select(CollectionFile)
             .join(Collection, Collection.id == CollectionFile.collection_id)
             .where(Collection.user_id == current_user.id, Collection.media_id == media.id)
         )
         coll_files = files_result.scalars().all()
+        conn_by_type: dict[str, list] = {}
+        for conn in push_connections:
+            conn_by_type.setdefault(conn.type, []).append(conn)
         for coll_file in coll_files:
-            if coll_file.source == CollectionSource.plex and settings.plex_push_ratings and settings.plex_url and settings.plex_token and coll_file.source_id:
-                push_tasks.append(plex_client.set_rating(settings.plex_url, settings.plex_token, coll_file.source_id, 0))
-            elif coll_file.source == CollectionSource.jellyfin and settings.jellyfin_push_ratings and settings.jellyfin_url and settings.jellyfin_token and settings.jellyfin_user_id and coll_file.source_id:
-                push_tasks.append(jellyfin_client.set_rating(settings.jellyfin_url, settings.jellyfin_token, settings.jellyfin_user_id, coll_file.source_id, 0))
-            elif coll_file.source == CollectionSource.emby and settings.emby_push_ratings and settings.emby_url and settings.emby_token and settings.emby_user_id and coll_file.source_id:
-                push_tasks.append(emby_client.set_rating(settings.emby_url, settings.emby_token, settings.emby_user_id, coll_file.source_id, 0))
-        if settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and media.tmdb_id:
-                if mt == MediaType.movie:
-                    push_tasks.append(trakt_client.remove_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
-                elif mt == MediaType.series:
-                    push_tasks.append(trakt_client.remove_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
-        if push_tasks:
-            import asyncio
-            await asyncio.gather(*push_tasks, return_exceptions=True)
+            if not coll_file.source_id:
+                continue
+            source_type = coll_file.source.value if hasattr(coll_file.source, "value") else str(coll_file.source)
+            for conn in conn_by_type.get(source_type, []):
+                if coll_file.source == CollectionSource.plex:
+                    push_tasks.append(plex_client.set_rating(conn.url, conn.token, coll_file.source_id, 0))
+                elif coll_file.source == CollectionSource.jellyfin:
+                    push_tasks.append(jellyfin_client.set_rating(conn.url, conn.token, conn.server_user_id, coll_file.source_id, 0))
+                elif coll_file.source == CollectionSource.emby:
+                    push_tasks.append(emby_client.set_rating(conn.url, conn.token, conn.server_user_id, coll_file.source_id, 0))
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
+    if settings and settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and media.tmdb_id:
+        if mt == MediaType.movie:
+            push_tasks.append(trakt_client.remove_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
+        elif mt == MediaType.series:
+            push_tasks.append(trakt_client.remove_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
+    if push_tasks:
+        await asyncio.gather(*push_tasks, return_exceptions=True)
 
     return {"status": "deleted"}

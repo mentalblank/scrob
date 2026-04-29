@@ -1,6 +1,7 @@
 # app/models/__init__.py
 from .base import Base, UserRole, MediaType, CollectionSource
-from .users import User, AppSettings, UserSettings, TotpBackupCode
+from .users import User, UserSettings, TotpBackupCode
+from .connections import MediaServerConnection
 from .profile import UserProfileData
 from .comments import Comment
 from .email_activation import EmailActivation
@@ -12,7 +13,7 @@ from .events import WatchEvent
 from .ratings import Rating
 from .lists import List, ListItem
 from .sync import SyncJob, SyncStatus
-from .library_selections import JellyfinLibrarySelection, PlexLibrarySelection
+from .library_selections import JellyfinLibrarySelection, EmbyLibrarySelection, PlexLibrarySelection
 from .playback_session import PlaybackSession
 from .playback_progress import PlaybackProgress
 from .follows import Follow
@@ -20,7 +21,8 @@ from .follows import Follow
 __all__ = [
     "Base",
     "UserRole", "MediaType", "CollectionSource",
-    "User", "AppSettings", "UserSettings", "TotpBackupCode",
+    "User", "UserSettings", "TotpBackupCode",
+    "MediaServerConnection",
     "UserProfileData",
     "Comment",
     "EmailActivation",
@@ -32,7 +34,7 @@ __all__ = [
     "Rating",
     "List", "ListItem",
     "SyncJob", "SyncStatus",
-    "JellyfinLibrarySelection", "PlexLibrarySelection",
+    "JellyfinLibrarySelection", "EmbyLibrarySelection", "PlexLibrarySelection",
     "PlaybackSession",
     "PlaybackProgress",
     "Follow",

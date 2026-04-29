@@ -321,15 +321,7 @@ export interface UserPreferences {
 
 export interface UserSettings {
   tmdb_api_key: string | null;
-  jellyfin_url: string | null;
-  jellyfin_token: string | null;
-  jellyfin_user_id: string | null;
-  emby_url: string | null;
-  emby_token: string | null;
-  emby_user_id: string | null;
-  plex_url: string | null;
-  plex_token: string | null;
-  
+
   radarr_url: string | null;
   radarr_token: string | null;
   radarr_root_folder: string | null;
@@ -342,28 +334,6 @@ export interface UserSettings {
   sonarr_quality_profile: number | null;
   sonarr_tags: number[] | null;
 
-  // Inbound sync flags (source → Abstract)
-  plex_sync_collection: boolean;
-  plex_sync_watched: boolean;
-  plex_sync_ratings: boolean;
-  plex_sync_playback: boolean;
-  jellyfin_sync_collection: boolean;
-  jellyfin_sync_watched: boolean;
-  jellyfin_sync_ratings: boolean;
-  jellyfin_sync_playback: boolean;
-  emby_sync_collection: boolean;
-  emby_sync_watched: boolean;
-  emby_sync_ratings: boolean;
-  emby_sync_playback: boolean;
-
-  // Outbound push flags (Abstract → source)
-  plex_push_watched: boolean;
-  plex_push_ratings: boolean;
-  jellyfin_push_watched: boolean;
-  jellyfin_push_ratings: boolean;
-  emby_push_watched: boolean;
-  emby_push_ratings: boolean;
-
   // Trakt
   trakt_connected: boolean;
   trakt_sync_watched: boolean;
@@ -371,13 +341,46 @@ export interface UserSettings {
   trakt_push_watched: boolean;
   trakt_push_ratings: boolean;
 
-  jellyfin_auto_sync_interval: number | null;
-  emby_auto_sync_interval: number | null;
-  plex_auto_sync_interval: number | null;
-
   preferences: UserPreferences | null;
   blur_explicit: boolean;
 }
+
+export interface MediaServerConnection {
+  id: number;
+  user_id: number;
+  type: "jellyfin" | "emby" | "plex";
+  name: string;
+  url: string;
+  token: string;
+  server_user_id: string | null;
+  server_username: string | null;
+  sync_collection: boolean;
+  sync_watched: boolean;
+  sync_ratings: boolean;
+  sync_playback: boolean;
+  push_watched: boolean;
+  push_ratings: boolean;
+  auto_sync_interval: number | null;
+  created_at: string;
+}
+
+export interface MediaServerConnectionCreate {
+  type: "jellyfin" | "emby" | "plex";
+  name: string;
+  url: string;
+  token: string;
+  server_user_id?: string | null;
+  server_username?: string | null;
+  sync_collection?: boolean;
+  sync_watched?: boolean;
+  sync_ratings?: boolean;
+  sync_playback?: boolean;
+  push_watched?: boolean;
+  push_ratings?: boolean;
+  auto_sync_interval?: number | null;
+}
+
+export type MediaServerConnectionUpdate = Partial<Omit<MediaServerConnectionCreate, "type">>;
 
 export interface ServiceStatus {
   configured: boolean;
@@ -388,9 +391,6 @@ export interface ServiceStatus {
 }
 
 export interface ConnectionStatus {
-  jellyfin: ServiceStatus;
-  emby: ServiceStatus;
-  plex: ServiceStatus;
   radarr: ServiceStatus;
   sonarr: ServiceStatus;
   trakt: ServiceStatus;
@@ -682,6 +682,14 @@ export const api = {
       del<{ message: string }>("/auth/me", token),
     regenerateApiKey: (token: string) =>
       post<UserProfile>("/auth/api-key/regenerate", undefined, token),
+    getConnections: (token: string) =>
+      get<MediaServerConnection[]>("/auth/connections", undefined, token),
+    createConnection: (body: MediaServerConnectionCreate, token: string) =>
+      post<MediaServerConnection>("/auth/connections", body, token),
+    updateConnection: (id: number, body: MediaServerConnectionUpdate, token: string) =>
+      patch<MediaServerConnection>(`/auth/connections/${id}`, body, token),
+    deleteConnection: (id: number, token: string) =>
+      del<{ status: string }>(`/auth/connections/${id}`, token),
     testJellyfin: (url: string, token: string, jellyfinUserId: string | null, userToken: string) =>
       post<{ success: boolean; message: string }>(`/auth/test-jellyfin?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}${jellyfinUserId ? `&user_id=${encodeURIComponent(jellyfinUserId)}` : ""}`, undefined, userToken),
     testEmby: (url: string, token: string, embyUserId: string | null, userToken: string) =>
@@ -870,25 +878,19 @@ export const api = {
 
   sync: {
     jellyfin: (params?: { movie_limit?: number; show_limit?: number }, token?: string) =>
-      post<{ status: string; stats: Record<string, unknown> }>("/sync/jellyfin", params, token),
+      post<{ status: string; job_id: number; message: string }>("/sync/jellyfin", params, token),
+    emby: (params?: { movie_limit?: number; show_limit?: number }, token?: string) =>
+      post<{ status: string; job_id: number; message: string }>("/sync/emby", params, token),
     plex: (params?: { movie_limit?: number; show_limit?: number }, token?: string) =>
-      post<{ status: string; stats: Record<string, unknown> }>("/sync/plex", params, token),
+      post<{ status: string; job_id: number; message: string }>("/sync/plex", params, token),
+    syncConnection: (connectionId: number, params?: { movie_limit?: number; show_limit?: number }, token?: string) =>
+      post<{ status: string; job_id: number; message: string }>(`/sync/connection/${connectionId}`, params, token),
     status: (token: string) =>
       get<SyncJob[]>("/sync/status", undefined, token),
-    jellyfinLibraries: (token: string) =>
-      get<{ libraries: { id: string; name: string; type: string; selected: boolean }[]; all_selected: boolean }>("/sync/jellyfin/libraries", undefined, token),
-    saveJellyfinLibraries: (library_ids: string[], token: string) =>
-      put<{ saved: number }>("/sync/jellyfin/libraries", { library_ids }, token),
-    emby: (params?: { movie_limit?: number; show_limit?: number }, token?: string) =>
-      post<{ status: string; stats: Record<string, unknown> }>("/sync/emby", params, token),
-    embyLibraries: (token: string) =>
-      get<{ libraries: { id: string; name: string; type: string; selected: boolean }[]; all_selected: boolean }>("/sync/emby/libraries", undefined, token),
-    saveEmbyLibraries: (library_ids: string[], token: string) =>
-      put<{ saved: number }>("/sync/emby/libraries", { library_ids }, token),
-    plexLibraries: (token: string) =>
-      get<{ libraries: { key: string; name: string; type: string; selected: boolean }[]; all_selected: boolean }>("/sync/plex/libraries", undefined, token),
-    savePlexLibraries: (library_keys: string[], token: string) =>
-      put<{ saved: number }>("/sync/plex/libraries", { library_keys }, token),
+    getConnectionLibraries: (connectionId: number, token: string) =>
+      get<{ libraries: { id?: string; key?: string; name: string; type: string; selected: boolean }[]; all_selected: boolean }>(`/sync/connection/${connectionId}/libraries`, undefined, token),
+    saveConnectionLibraries: (connectionId: number, body: { library_ids?: string[]; library_keys?: string[] }, token: string) =>
+      put<{ saved: number }>(`/sync/connection/${connectionId}/libraries`, body, token),
   },
 
   profile: {

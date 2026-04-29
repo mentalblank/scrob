@@ -14,6 +14,7 @@ from models.collection import Collection, CollectionFile
 from models.events import WatchEvent
 from models.ratings import Rating
 from models.users import User, UserSettings
+from models.connections import MediaServerConnection
 from models.base import MediaType, CollectionSource
 from models.playback_session import PlaybackSession
 from models.playback_progress import PlaybackProgress
@@ -23,6 +24,26 @@ from core import tmdb
 from core.jellyfin import extract_quality
 
 router = APIRouter()
+
+
+async def _get_oldest_connection(db: AsyncSession, user_id: int, conn_type: str) -> MediaServerConnection | None:
+    result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.user_id == user_id,
+            MediaServerConnection.type == conn_type,
+        ).order_by(MediaServerConnection.id.asc()).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _get_connection_by_id(db: AsyncSession, user_id: int, connection_id: int) -> MediaServerConnection | None:
+    result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.id == connection_id,
+            MediaServerConnection.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: str = None) -> Show:
@@ -373,13 +394,7 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
     return media
 
 
-@router.post("/jellyfin")
-async def jellyfin_webhook(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    api_key: str = Query(..., description="Scrob user API key"),
-):
-    # Auth: look up user by api_key
+async def _handle_jellyfin_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int | None = None):
     user_result = await db.execute(select(User).where(User.api_key == api_key))
     user = user_result.scalar_one_or_none()
     if not user:
@@ -395,11 +410,15 @@ async def jellyfin_webhook(
         return {"status": "ignored", "reason": "invalid JSON"}
 
     data = parse_jellyfin_payload(payload)
-
     if not data:
         return {"status": "ignored"}
 
     notification_type = data["notification_type"]
+
+    if connection_id is not None:
+        conn = await _get_connection_by_id(db, user.id, connection_id)
+    else:
+        conn = await _get_oldest_connection(db, user.id, "jellyfin")
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
     settings = settings_result.scalar_one_or_none()
@@ -411,36 +430,26 @@ async def jellyfin_webhook(
     if media is None:
         return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
 
-    # Ensure in collection if it's a playback or mark-played event
     if notification_type in ("PlaybackStart", "PlaybackProgress", "PlaybackStop", "MarkPlayed", "playback.start", "playback.progress", "playback.stop", "item.markplayed"):
-        if not settings or settings.jellyfin_sync_collection:
-            # Respect library selections: check if item's library is in the user's selection.
-            # Jellyfin webhooks don't carry the library ID, so we fetch it from the API.
-            # Only do this check when the user has configured specific libraries.
+        if not conn or conn.sync_collection:
             allow_collection = True
             jellyfin_id = data.get("jellyfin_id")
-            if jellyfin_id and settings and settings.jellyfin_url and settings.jellyfin_token:
+            if jellyfin_id and conn:
                 sel_result = await db.execute(
-                    select(JellyfinLibrarySelection).where(JellyfinLibrarySelection.user_id == user.id)
+                    select(JellyfinLibrarySelection).where(JellyfinLibrarySelection.connection_id == conn.id)
                 )
                 selected_ids = {row.library_id for row in sel_result.scalars().all()}
                 if selected_ids:
                     import core.jellyfin as jellyfin_client
-                    item_data = await jellyfin_client.get_item(
-                        settings.jellyfin_url, settings.jellyfin_token, jellyfin_id
-                    )
+                    item_data = await jellyfin_client.get_item(conn.url, conn.token, jellyfin_id)
                     library_id: str | None = None
                     if item_data:
                         if item_data.get("Type") == "Episode":
-                            # Episode → Season → Series → Library; SeriesId skips to series
                             series_id = item_data.get("SeriesId")
                             if series_id:
-                                series_data = await jellyfin_client.get_item(
-                                    settings.jellyfin_url, settings.jellyfin_token, series_id
-                                )
+                                series_data = await jellyfin_client.get_item(conn.url, conn.token, series_id)
                                 library_id = (series_data or {}).get("ParentId")
                         else:
-                            # Movie → Library
                             library_id = item_data.get("ParentId")
                     allow_collection = library_id in selected_ids if library_id else True
 
@@ -450,13 +459,13 @@ async def jellyfin_webhook(
                 )
 
     if notification_type in ("PlaybackStart", "playback.start"):
-        if not settings or settings.jellyfin_sync_playback:
+        if not conn or conn.sync_playback:
             session = await _get_or_open_session(db, session_key, "jellyfin", user.id, media.id)
             session.state = "playing"
             await db.commit()
 
     elif notification_type in ("PlaybackProgress", "playback.progress"):
-        if not settings or settings.jellyfin_sync_playback:
+        if not conn or conn.sync_playback:
             session = await _get_or_open_session(db, session_key, "jellyfin", user.id, media.id)
             session.state = "paused" if data["is_paused"] else "playing"
             session.progress_percent = data["progress_percent"]
@@ -466,31 +475,44 @@ async def jellyfin_webhook(
 
     elif notification_type in ("PlaybackStop", "playback.stop"):
         session = await _close_session(db, session_key)
-        if not settings or settings.jellyfin_sync_playback:
-            # Prefer stop payload values — they're the definitive final position.
+        if not conn or conn.sync_playback:
             progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
             progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
-            if (not settings or settings.jellyfin_sync_watched) and progress_percent > 0.05:
+            if (not conn or conn.sync_watched) and progress_percent > 0.05:
                 await _write_watch_event(db, user.id, media.id, progress_percent, progress_seconds, progress_percent >= 0.90)
             await db.commit()
 
     elif notification_type in ("MarkPlayed", "item.markplayed"):
         await _close_session(db, session_key)
-        if not settings or settings.jellyfin_sync_watched:
+        if not conn or conn.sync_watched:
             await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
             await db.commit()
 
     return {"status": "ok", "event": notification_type, "title": data["title"]}
 
 
-# ── Emby ───────────────────────────────────────────────────────────────────────
-
-@router.post("/emby")
-async def emby_webhook(
+@router.post("/jellyfin")
+async def jellyfin_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
     api_key: str = Query(..., description="Scrob user API key"),
 ):
+    return await _handle_jellyfin_webhook(request, db, api_key)
+
+
+@router.post("/jellyfin/{connection_id}")
+async def jellyfin_webhook_connection(
+    connection_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_jellyfin_webhook(request, db, api_key, connection_id)
+
+
+# ── Emby ───────────────────────────────────────────────────────────────────────
+
+async def _handle_emby_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int | None = None):
     user_result = await db.execute(select(User).where(User.api_key == api_key))
     user = user_result.scalar_one_or_none()
     if not user:
@@ -505,13 +527,16 @@ async def emby_webhook(
     except Exception:
         return {"status": "ignored", "reason": "invalid JSON"}
 
-    # Emby webhook format is identical to Jellyfin's
     data = parse_jellyfin_payload(payload)
-
     if not data:
         return {"status": "ignored"}
 
     notification_type = data["notification_type"]
+
+    if connection_id is not None:
+        conn = await _get_connection_by_id(db, user.id, connection_id)
+    else:
+        conn = await _get_oldest_connection(db, user.id, "emby")
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
     settings = settings_result.scalar_one_or_none()
@@ -524,27 +549,23 @@ async def emby_webhook(
         return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
 
     if notification_type in ("PlaybackStart", "PlaybackProgress", "PlaybackStop", "MarkPlayed", "playback.start", "playback.progress", "playback.stop", "item.markplayed"):
-        if not settings or settings.emby_sync_collection:
+        if not conn or conn.sync_collection:
             allow_collection = True
-            emby_item_id = data.get("jellyfin_id")  # field name from shared parser
-            if emby_item_id and settings and settings.emby_url and settings.emby_token:
+            emby_item_id = data.get("jellyfin_id")
+            if emby_item_id and conn:
                 sel_result = await db.execute(
-                    select(EmbyLibrarySelection).where(EmbyLibrarySelection.user_id == user.id)
+                    select(EmbyLibrarySelection).where(EmbyLibrarySelection.connection_id == conn.id)
                 )
                 selected_ids = {row.library_id for row in sel_result.scalars().all()}
                 if selected_ids:
                     import core.emby as emby_client
-                    item_data = await emby_client.get_item(
-                        settings.emby_url, settings.emby_token, emby_item_id
-                    )
+                    item_data = await emby_client.get_item(conn.url, conn.token, emby_item_id)
                     library_id: str | None = None
                     if item_data:
                         if item_data.get("Type") == "Episode":
                             series_id = item_data.get("SeriesId")
                             if series_id:
-                                series_data = await emby_client.get_item(
-                                    settings.emby_url, settings.emby_token, series_id
-                                )
+                                series_data = await emby_client.get_item(conn.url, conn.token, series_id)
                                 library_id = (series_data or {}).get("ParentId")
                         else:
                             library_id = item_data.get("ParentId")
@@ -556,13 +577,13 @@ async def emby_webhook(
                 )
 
     if notification_type in ("PlaybackStart", "playback.start"):
-        if not settings or settings.emby_sync_playback:
+        if not conn or conn.sync_playback:
             session = await _get_or_open_session(db, session_key, "emby", user.id, media.id)
             session.state = "playing"
             await db.commit()
 
     elif notification_type in ("PlaybackProgress", "playback.progress"):
-        if not settings or settings.emby_sync_playback:
+        if not conn or conn.sync_playback:
             session = await _get_or_open_session(db, session_key, "emby", user.id, media.id)
             session.state = "paused" if data["is_paused"] else "playing"
             session.progress_percent = data["progress_percent"]
@@ -572,20 +593,39 @@ async def emby_webhook(
 
     elif notification_type in ("PlaybackStop", "playback.stop"):
         session = await _close_session(db, session_key)
-        if not settings or settings.emby_sync_playback:
+        if not conn or conn.sync_playback:
             progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
             progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
-            if (not settings or settings.emby_sync_watched) and progress_percent > 0.05:
+            if (not conn or conn.sync_watched) and progress_percent > 0.05:
                 await _write_watch_event(db, user.id, media.id, progress_percent, progress_seconds, progress_percent >= 0.90)
             await db.commit()
 
     elif notification_type in ("MarkPlayed", "item.markplayed"):
         await _close_session(db, session_key)
-        if not settings or settings.emby_sync_watched:
+        if not conn or conn.sync_watched:
             await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
             await db.commit()
 
     return {"status": "ok", "event": notification_type, "title": data["title"]}
+
+
+@router.post("/emby")
+async def emby_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_emby_webhook(request, db, api_key)
+
+
+@router.post("/emby/{connection_id}")
+async def emby_webhook_connection(
+    connection_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_emby_webhook(request, db, api_key, connection_id)
 
 
 # ── Plex ───────────────────────────────────────────────────────────────────────
@@ -755,7 +795,7 @@ async def _ensure_collection_entry(
     await db.flush()
 
 
-async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str = None, settings=None) -> Media | None:
+async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str = None, conn: MediaServerConnection | None = None) -> Media | None:
     series_tmdb_id: Optional[int] = int(data["grandparent_tmdb_id"]) if data.get("grandparent_tmdb_id") else None
 
     # If missing series_tmdb_id, try to resolve it via other identifiers
@@ -792,10 +832,10 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
 
         # 3. Fetch grandparent show from Plex to extract its TMDB GUID
         #    (needed when grandparentGuid is a plex://show/xxx internal ID)
-        if not series_tmdb_id and data.get("grandparent_rating_key") and settings and settings.plex_url and settings.plex_token:
+        if not series_tmdb_id and data.get("grandparent_rating_key") and conn:
             try:
                 import core.plex as plex_client
-                show_item = await plex_client.get_item(settings.plex_url, settings.plex_token, data["grandparent_rating_key"])
+                show_item = await plex_client.get_item(conn.url, conn.token, data["grandparent_rating_key"])
                 if show_item:
                     show_guids = show_item.get("Guid") or []
                     for g in show_guids:
@@ -939,19 +979,12 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
     return media
 
 
-@router.post("/plex")
-async def plex_webhook(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    api_key: str = Query(..., description="Scrob user API key"),
-):
-    # Auth: look up user by api_key
+async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int | None = None):
     user_result = await db.execute(select(User).where(User.api_key == api_key))
     user = user_result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Plex sends multipart/form-data with a JSON string in the "payload" field
     try:
         form = await request.form()
     except Exception as e:
@@ -972,53 +1005,47 @@ async def plex_webhook(
     if not data:
         return {"status": "ignored"}
 
-    # If a plex_username is configured for this API key owner, ensure the event matches it.
-    # We do NOT re-route to other users here to avoid duplication when multiple webhooks exist.
-    account_title = data.get("account_title", "")
-    if account_title:
-        owner_settings_result = await db.execute(
-            select(UserSettings).where(UserSettings.user_id == user.id)
-        )
-        owner_settings = owner_settings_result.scalar_one_or_none()
-        owner_plex_username = (owner_settings.plex_username or "").strip() if owner_settings else ""
+    if connection_id is not None:
+        conn = await _get_connection_by_id(db, user.id, connection_id)
+    else:
+        conn = await _get_oldest_connection(db, user.id, "plex")
 
-        if owner_plex_username and account_title.lower() != owner_plex_username.lower():
-            return {"status": "ignored", "reason": f"event for plex user '{account_title}' does not match owner '{owner_plex_username}'"}
-    
+    # If a plex server_username is configured on the connection, enforce it.
+    account_title = data.get("account_title", "")
+    if account_title and conn and conn.server_username:
+        if account_title.lower() != conn.server_username.strip().lower():
+            return {"status": "ignored", "reason": f"event for plex user '{account_title}' does not match connection '{conn.server_username}'"}
+
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
     settings = settings_result.scalar_one_or_none()
     tmdb_key = settings.tmdb_api_key if settings else None
 
     session_key = f"plex:{user.id}:{data['session_key']}"
 
-    # ── Playback events ────────────────────────────────────────────────────────
     if event in ("media.play", "media.resume", "media.pause", "media.stop", "media.scrobble"):
-        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
         if media is None:
             return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
 
     if event == "media.play":
-        if not settings or settings.plex_sync_playback:
+        if not conn or conn.sync_playback:
             session = await _get_or_open_session(db, session_key, "plex", user.id, media.id)
             session.state = "playing"
             session.updated_at = datetime.utcnow()
-            # play event may have non-zero offset (e.g. Plex resumes from watched position)
             if data["progress_percent"] > 0:
                 session.progress_percent = data["progress_percent"]
                 session.progress_seconds = data["progress_seconds"]
-            # Backfill runtime on the media row if TMDB enrichment missed it
             if not media.runtime and data.get("duration_ms"):
                 media.runtime = max(1, round(data["duration_ms"] / 60000))
             await db.commit()
 
     elif event == "media.resume":
-        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
         if media is None:
             return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
-        if not settings or settings.plex_sync_playback:
+        if not conn or conn.sync_playback:
             session = await _get_or_open_session(db, session_key, "plex", user.id, media.id)
             session.state = "playing"
-            # resume always carries the current offset
             session.progress_percent = data["progress_percent"]
             session.progress_seconds = data["progress_seconds"]
             session.updated_at = datetime.utcnow()
@@ -1027,7 +1054,7 @@ async def plex_webhook(
             await db.commit()
 
     elif event == "media.pause":
-        if not settings or settings.plex_sync_playback:
+        if not conn or conn.sync_playback:
             result = await db.execute(
                 select(PlaybackSession).where(PlaybackSession.session_key == session_key)
             )
@@ -1041,17 +1068,14 @@ async def plex_webhook(
 
     elif event == "media.stop":
         session = await _close_session(db, session_key)
-        if not settings or settings.plex_sync_playback:
-            # Prefer the stop event's own viewOffset — it's the definitive final position.
-            # Fall back to stored session values only if the payload has nothing.
+        if not conn or conn.sync_playback:
             progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
             progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
             media_id = session.media_id if session else None
             if media_id is None:
-                fallback = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+                fallback = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
                 media_id = fallback.id if fallback else None
-            # Only write event if we have meaningful progress (avoid ghost stops at start)
-            if media_id and (not settings or settings.plex_sync_watched) and progress_percent > 0.05:
+            if media_id and (not conn or conn.sync_watched) and progress_percent > 0.05:
                 await _write_watch_event(
                     db, user.id, media_id,
                     progress_percent, progress_seconds,
@@ -1060,19 +1084,16 @@ async def plex_webhook(
             await db.commit()
 
     elif event == "media.scrobble":
-        # Plex fires this at ≥90% — definitive "watched". Pop any open session to
-        # prevent media.stop from writing a duplicate event.
         await _close_session(db, session_key)
-        if not settings or settings.plex_sync_watched:
-            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+        if not conn or conn.sync_watched:
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
             if media:
                 await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
             await db.commit()
 
-    # ── Rating ────────────────────────────────────────────────────────────────
     elif event == "media.rate":
-        if not settings or settings.plex_sync_ratings:
-            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+        if not conn or conn.sync_ratings:
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
             rating_value = data.get("rating")
 
             existing = await db.execute(
@@ -1081,7 +1102,6 @@ async def plex_webhook(
             existing_rating = existing.scalar_one_or_none()
 
             if rating_value is None or float(rating_value) == 0:
-                # User removed their rating
                 if existing_rating:
                     await db.delete(existing_rating)
                     await db.commit()
@@ -1097,15 +1117,12 @@ async def plex_webhook(
                     ))
                 await db.commit()
 
-    # ── Library new ───────────────────────────────────────────────────────────
     elif event == "library.new":
-        if not settings or settings.plex_sync_collection:
-            # Respect library selections: if the user has configured specific
-            # libraries to sync, skip items from unselected libraries.
+        if not conn or conn.sync_collection:
             section_id = data.get("library_section_id")
-            if section_id:
+            if section_id and conn:
                 sel_result = await db.execute(
-                    select(PlexLibrarySelection).where(PlexLibrarySelection.user_id == user.id)
+                    select(PlexLibrarySelection).where(PlexLibrarySelection.connection_id == conn.id)
                 )
                 selected_keys = {row.library_key for row in sel_result.scalars().all()}
                 if selected_keys and section_id not in selected_keys:
@@ -1113,33 +1130,23 @@ async def plex_webhook(
 
             import core.plex as plex_client
 
-            # Plex fires only ONE library.new webhook per scan batch even when
-            # multiple items were added. Fetch recently-added items from the
-            # section so we catch the full batch, not just the payload item.
-            section_type = data.get("library_section_type")  # "movie" or "show"
-            plex_media_type = 1 if data["media_type"] == "movie" else 4  # 1=movie, 4=episode
+            plex_media_type = 1 if data["media_type"] == "movie" else 4
             recent_items: list = []
-            if section_id and settings and settings.plex_url and settings.plex_token:
+            if section_id and conn:
                 recent_items = await plex_client.get_recently_added(
-                    settings.plex_url, settings.plex_token, section_id, plex_media_type
+                    conn.url, conn.token, section_id, plex_media_type
                 )
 
-            # Always include the webhook payload item (in case recentlyAdded misses it
-            # or Plex/token is not configured).
             payload_key = data.get("plex_rating_key")
             recent_keys = {str(it.get("ratingKey")) for it in recent_items}
             if payload_key and str(payload_key) not in recent_keys:
-                # Fetch full item detail for the payload item
                 payload_item = None
-                if settings and settings.plex_url and settings.plex_token:
-                    payload_item = await plex_client.get_item(
-                        settings.plex_url, settings.plex_token, payload_key
-                    )
+                if conn:
+                    payload_item = await plex_client.get_item(conn.url, conn.token, payload_key)
                 if payload_item:
                     recent_items.insert(0, payload_item)
                 else:
-                    # Fallback: process only the payload data we already have
-                    recent_items = []  # handled below via the fallback path
+                    recent_items = []
 
             if recent_items:
                 for plex_item in recent_items:
@@ -1148,7 +1155,6 @@ async def plex_webhook(
                     item_rating_key = str(plex_item.get("ratingKey", ""))
                     item_quality = plex_client.extract_quality(plex_item.get("Media", []))
 
-                    # Build a minimal data dict compatible with find_or_create_media_plex
                     item_data = {
                         "media_type": "movie" if plex_item.get("type") == "movie" else "episode",
                         "tmdb_id": str(item_tmdb_id) if item_tmdb_id else None,
@@ -1165,7 +1171,6 @@ async def plex_webhook(
                         "grandparent_imdb_id": None,
                         "quality": item_quality,
                     }
-                    # Extract grandparent GUIDs for episodes
                     gp_guid = plex_item.get("grandparentGuid", "")
                     m = re.search(r'(?:^tmdb|themoviedb(?:\.com)?)://(\d+)', gp_guid, re.IGNORECASE)
                     if m:
@@ -1179,7 +1184,7 @@ async def plex_webhook(
 
                     try:
                         item_media = await find_or_create_media_plex(
-                            item_data, db, api_key=tmdb_key, settings=settings
+                            item_data, db, api_key=tmdb_key, conn=conn
                         )
                         if item_media:
                             await _ensure_collection_entry(
@@ -1189,11 +1194,10 @@ async def plex_webhook(
                     except Exception as e:
                         print(f"  library.new batch: failed to process item {item_rating_key}: {e}")
             else:
-                # No Plex API access — fall back to processing only the payload item
-                media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+                media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
                 quality = data.get("quality") or {}
-                if not quality.get("resolution") and settings and settings.plex_url and settings.plex_token:
-                    item = await plex_client.get_item(settings.plex_url, settings.plex_token, data["plex_rating_key"])
+                if not quality.get("resolution") and conn:
+                    item = await plex_client.get_item(conn.url, conn.token, data["plex_rating_key"])
                     if item:
                         quality = plex_client.extract_quality(item.get("Media", []))
                 if media:
@@ -1202,31 +1206,28 @@ async def plex_webhook(
                     )
             await db.commit()
 
-    # ── Library update (re-match / metadata refresh) ──────────────────────────
     elif event == "library.update":
-        if not settings or settings.plex_sync_collection:
+        if not conn or conn.sync_collection:
             section_id = data.get("library_section_id")
-            if section_id:
+            if section_id and conn:
                 sel_result = await db.execute(
-                    select(PlexLibrarySelection).where(PlexLibrarySelection.user_id == user.id)
+                    select(PlexLibrarySelection).where(PlexLibrarySelection.connection_id == conn.id)
                 )
                 selected_keys = {row.library_key for row in sel_result.scalars().all()}
                 if selected_keys and section_id not in selected_keys:
                     return {"status": "ignored", "reason": f"library section {section_id} not in sync selection"}
 
-            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, settings=settings)
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
             if media is None:
                 return {"status": "ignored", "reason": "could not identify media"}
 
             quality = data.get("quality") or {}
-            if not quality.get("resolution") and settings and settings.plex_url and settings.plex_token:
+            if not quality.get("resolution") and conn:
                 import core.plex as plex_client
-                item = await plex_client.get_item(settings.plex_url, settings.plex_token, data["plex_rating_key"])
+                item = await plex_client.get_item(conn.url, conn.token, data["plex_rating_key"])
                 if item:
                     quality = plex_client.extract_quality(item.get("Media", []))
 
-            # Remove stale collection entries for this Plex rating key that now
-            # point to a different (old, wrong) media row after a re-match.
             old_files_result = await db.execute(
                 select(CollectionFile)
                 .join(Collection)
@@ -1241,7 +1242,6 @@ async def plex_webhook(
                 old_collection_id = old_file.collection_id
                 await db.delete(old_file)
                 await db.flush()
-                # Drop the parent Collection row if it has no remaining files
                 remaining = await db.execute(
                     select(func.count(CollectionFile.id)).where(
                         CollectionFile.collection_id == old_collection_id
@@ -1258,4 +1258,23 @@ async def plex_webhook(
             await db.commit()
 
     return {"status": "ok", "event": event, "title": data["title"]}
+
+
+@router.post("/plex")
+async def plex_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_plex_webhook(request, db, api_key)
+
+
+@router.post("/plex/{connection_id}")
+async def plex_webhook_connection(
+    connection_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_plex_webhook(request, db, api_key, connection_id)
 

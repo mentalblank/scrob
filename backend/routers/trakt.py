@@ -270,6 +270,31 @@ async def run_trakt_sync(user_id: int, job_id: int):
                 await db.commit()
                 return
 
+            # Refresh the access token if it has expired
+            if not await trakt_client.validate_token(settings.trakt_client_id, settings.trakt_access_token):
+                if settings.trakt_refresh_token and settings.trakt_client_secret:
+                    try:
+                        from datetime import datetime, timezone
+                        token_data = await trakt_client.refresh_access_token(
+                            settings.trakt_client_id,
+                            settings.trakt_client_secret,
+                            settings.trakt_refresh_token,
+                        )
+                        settings.trakt_access_token = token_data["access_token"]
+                        settings.trakt_refresh_token = token_data["refresh_token"]
+                        settings.trakt_token_expires_at = token_data.get("expires_in", 0) + int(datetime.now(timezone.utc).timestamp())
+                        await db.commit()
+                    except Exception as exc:
+                        err = f"Trakt token expired and refresh failed: {exc}"
+                        await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.failed, error_message=err))
+                        await db.commit()
+                        return
+                else:
+                    err = "Trakt token expired. Please reconnect Trakt in Settings."
+                    await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.failed, error_message=err))
+                    await db.commit()
+                    return
+
             client_id = settings.trakt_client_id
             access_token = settings.trakt_access_token
             api_key = settings.tmdb_api_key

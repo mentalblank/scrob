@@ -10,6 +10,7 @@ from models.media import Media
 from models.show import Show
 from models.collection import Collection, CollectionFile
 from models.users import User, UserSettings
+from models.connections import MediaServerConnection
 from models.sync import SyncJob, SyncStatus
 from models.events import WatchEvent
 from models.ratings import Rating
@@ -698,7 +699,7 @@ async def run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_li
         await _run_jellyfin_sync(user_id, job_id, movie_limit, show_limit)
 
 
-async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
     print(f"Starting Jellyfin sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -706,24 +707,35 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
             await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.running, processed_items=0, total_items=0))
             await db.commit()
 
-            result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
-            settings = result.scalar_one_or_none()
+            settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+            settings = settings_result.scalar_one_or_none()
+            tmdb_api_key = settings.tmdb_api_key if settings else None
 
-            if not settings or not settings.tmdb_api_key or not settings.jellyfin_url or not settings.jellyfin_token or not settings.jellyfin_user_id:
-                err = "Missing Jellyfin settings (URL, Token, or User ID)"
+            # Load the specific connection (or oldest jellyfin connection for this user)
+            conn_q = select(MediaServerConnection).where(
+                MediaServerConnection.user_id == user_id,
+                MediaServerConnection.type == "jellyfin",
+            )
+            if connection_id:
+                conn_q = conn_q.where(MediaServerConnection.id == connection_id)
+            else:
+                conn_q = conn_q.order_by(MediaServerConnection.id.asc()).limit(1)
+            conn_result = await db.execute(conn_q)
+            conn = conn_result.scalar_one_or_none()
+
+            if not conn or not tmdb_api_key:
+                err = "Missing Jellyfin connection or TMDB API key"
                 await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.failed, error_message=err))
                 await db.commit()
                 return
 
-            j_url = settings.jellyfin_url
-            j_token = settings.jellyfin_token
-            j_user = settings.jellyfin_user_id
+            j_url, j_token, j_user = conn.url, conn.token, conn.server_user_id
 
             print(f"  Fetching libraries from {j_url}")
             libraries = await jellyfin.get_libraries(j_url, j_token, j_user)
 
             sel_result = await db.execute(
-                select(JellyfinLibrarySelection).where(JellyfinLibrarySelection.user_id == user_id)
+                select(JellyfinLibrarySelection).where(JellyfinLibrarySelection.connection_id == conn.id)
             )
             selected_ids = {row.library_id for row in sel_result.scalars().all()}
             if selected_ids:
@@ -745,7 +757,6 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                     if movie_limit:
                         items = items[:movie_limit]
 
-                    # For movies without a direct TMDB provider ID, try resolving via IMDb or title search
                     movies_without_tmdb = [
                         m for m in items
                         if not get_jellyfin_tmdb_id(m.get("ProviderIds", {}))
@@ -761,18 +772,16 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                                 imdb_id = pids.get("Imdb") or pids.get("imdb")
                                 try:
                                     if imdb_id:
-                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=settings.tmdb_api_key)
+                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=tmdb_api_key)
                                         if res.get("movie_results"):
                                             tid = res["movie_results"][0]["id"]
                                             m.setdefault("ProviderIds", {})["Tmdb"] = str(tid)
                                             return
-                                    # Fallback: title search
                                     title = m.get("Name")
                                     year = m.get("ProductionYear")
                                     if title:
-                                        res = await tmdb.search_movies(title, year=year, api_key=settings.tmdb_api_key)
+                                        res = await tmdb.search_movies(title, year=year, api_key=tmdb_api_key)
                                         if res.get("results"):
-                                            # Find best match by title (case insensitive)
                                             best = res["results"][0]
                                             for r in res["results"]:
                                                 if r.get("title", "").lower() == title.lower():
@@ -789,8 +798,8 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                     await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
                     await db.commit()
 
-                    w = await sync_items(items, MediaType.movie, CollectionSource.jellyfin, db, stats, user_id, job_id, api_key=settings.tmdb_api_key,
-                        sync_collection=settings.jellyfin_sync_collection, sync_watched=settings.jellyfin_sync_watched, sync_ratings=settings.jellyfin_sync_ratings)
+                    w = await sync_items(items, MediaType.movie, CollectionSource.jellyfin, db, stats, user_id, job_id, api_key=tmdb_api_key,
+                        sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings)
                     all_warnings.extend(w)
 
                 elif lib_type in ("tvshows", "tv"):
@@ -808,9 +817,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                     await db.commit()
 
                     print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
-                    show_map, show_id_to_tmdb = await sync_shows_batch(
-                        series_tmdb_map, db, api_key=settings.tmdb_api_key
-                    )
+                    show_map, show_id_to_tmdb = await sync_shows_batch(series_tmdb_map, db, api_key=tmdb_api_key)
                     unmatched_shows = [s for s in shows if str(s.get("Id")) not in show_map]
                     for s in unmatched_shows:
                         all_warnings.append({
@@ -823,7 +830,6 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                     items = await jellyfin.get_episodes(lib_id, j_url, j_token, j_user)
                     filtered_episodes = [e for e in items if str(e.get("SeriesId")) in show_map]
 
-                    # Correct total_items: shows were temporary placeholders, replace with episode count
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
                     await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
                     await db.commit()
@@ -831,8 +837,8 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                     w = await sync_items(
                         filtered_episodes, MediaType.episode, CollectionSource.jellyfin,
                         db, stats, user_id, job_id, show_map,
-                        api_key=settings.tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
-                        sync_collection=settings.jellyfin_sync_collection, sync_watched=settings.jellyfin_sync_watched, sync_ratings=settings.jellyfin_sync_ratings,
+                        api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
+                        sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
                     )
                     all_warnings.extend(w)
 
@@ -848,12 +854,12 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
             await db.commit()
 
 
-async def run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+async def run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
     async with _sync_semaphore:
-        await _run_emby_sync(user_id, job_id, movie_limit, show_limit)
+        await _run_emby_sync(user_id, job_id, movie_limit, show_limit, connection_id)
 
 
-async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
     print(f"Starting Emby sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -861,24 +867,42 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.running, processed_items=0, total_items=0))
             await db.commit()
 
-            result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
-            settings = result.scalar_one_or_none()
+            if connection_id is not None:
+                conn_result = await db.execute(
+                    select(MediaServerConnection).where(
+                        MediaServerConnection.id == connection_id,
+                        MediaServerConnection.user_id == user_id,
+                        MediaServerConnection.type == "emby",
+                    )
+                )
+            else:
+                conn_result = await db.execute(
+                    select(MediaServerConnection).where(
+                        MediaServerConnection.user_id == user_id,
+                        MediaServerConnection.type == "emby",
+                    ).order_by(MediaServerConnection.id.asc()).limit(1)
+                )
+            conn = conn_result.scalar_one_or_none()
 
-            if not settings or not settings.tmdb_api_key or not settings.emby_url or not settings.emby_token or not settings.emby_user_id:
-                err = "Missing Emby settings (URL, Token, or User ID)"
+            settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+            settings = settings_result.scalar_one_or_none()
+            tmdb_api_key = settings.tmdb_api_key if settings else None
+
+            if not conn or not conn.url or not conn.token or not conn.server_user_id:
+                err = "Missing Emby connection (URL, Token, or User ID)"
                 await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.failed, error_message=err))
                 await db.commit()
                 return
 
-            e_url = settings.emby_url
-            e_token = settings.emby_token
-            e_user = settings.emby_user_id
+            e_url = conn.url
+            e_token = conn.token
+            e_user = conn.server_user_id
 
             print(f"  Fetching libraries from {e_url}")
             libraries = await emby.get_libraries(e_url, e_token, e_user)
 
             sel_result = await db.execute(
-                select(EmbyLibrarySelection).where(EmbyLibrarySelection.user_id == user_id)
+                select(EmbyLibrarySelection).where(EmbyLibrarySelection.connection_id == conn.id)
             )
             selected_ids = {row.library_id for row in sel_result.scalars().all()}
             if selected_ids:
@@ -915,7 +939,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                                 imdb_id = pids.get("Imdb") or pids.get("imdb")
                                 try:
                                     if imdb_id:
-                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=settings.tmdb_api_key)
+                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=tmdb_api_key)
                                         if res.get("movie_results"):
                                             tid = res["movie_results"][0]["id"]
                                             m.setdefault("ProviderIds", {})["Tmdb"] = str(tid)
@@ -923,7 +947,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                                     title = m.get("Name")
                                     year = m.get("ProductionYear")
                                     if title:
-                                        res = await tmdb.search_movies(title, year=year, api_key=settings.tmdb_api_key)
+                                        res = await tmdb.search_movies(title, year=year, api_key=tmdb_api_key)
                                         if res.get("results"):
                                             best = res["results"][0]
                                             for r in res["results"]:
@@ -941,8 +965,8 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
                     await db.commit()
 
-                    w = await sync_items(items, MediaType.movie, CollectionSource.emby, db, stats, user_id, job_id, api_key=settings.tmdb_api_key,
-                        sync_collection=settings.emby_sync_collection, sync_watched=settings.emby_sync_watched, sync_ratings=settings.emby_sync_ratings)
+                    w = await sync_items(items, MediaType.movie, CollectionSource.emby, db, stats, user_id, job_id, api_key=tmdb_api_key,
+                        sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings)
                     all_warnings.extend(w)
 
                 elif lib_type in ("tvshows", "tv"):
@@ -961,7 +985,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
                     print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
                     show_map, show_id_to_tmdb = await sync_shows_batch(
-                        series_tmdb_map, db, api_key=settings.tmdb_api_key
+                        series_tmdb_map, db, api_key=tmdb_api_key
                     )
                     unmatched_shows = [s for s in shows if str(s.get("Id")) not in show_map]
                     for s in unmatched_shows:
@@ -982,8 +1006,8 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     w = await sync_items(
                         filtered_episodes, MediaType.episode, CollectionSource.emby,
                         db, stats, user_id, job_id, show_map,
-                        api_key=settings.tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
-                        sync_collection=settings.emby_sync_collection, sync_watched=settings.emby_sync_watched, sync_ratings=settings.emby_sync_ratings,
+                        api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
+                        sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
                     )
                     all_warnings.extend(w)
 
@@ -999,12 +1023,12 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             await db.commit()
 
 
-async def run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+async def run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
     async with _sync_semaphore:
-        await _run_plex_sync(user_id, job_id, movie_limit, show_limit)
+        await _run_plex_sync(user_id, job_id, movie_limit, show_limit, connection_id)
 
 
-async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
     print(f"Starting Plex sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -1012,20 +1036,41 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.running, processed_items=0, total_items=0))
             await db.commit()
 
-            result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
-            settings = result.scalar_one_or_none()
+            if connection_id is not None:
+                conn_result = await db.execute(
+                    select(MediaServerConnection).where(
+                        MediaServerConnection.id == connection_id,
+                        MediaServerConnection.user_id == user_id,
+                        MediaServerConnection.type == "plex",
+                    )
+                )
+            else:
+                conn_result = await db.execute(
+                    select(MediaServerConnection).where(
+                        MediaServerConnection.user_id == user_id,
+                        MediaServerConnection.type == "plex",
+                    ).order_by(MediaServerConnection.id.asc()).limit(1)
+                )
+            conn = conn_result.scalar_one_or_none()
 
-            if not settings or not settings.tmdb_api_key or not settings.plex_url or not settings.plex_token:
-                err = "Missing Plex settings (URL or Token)"
+            settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+            settings = settings_result.scalar_one_or_none()
+            tmdb_api_key = settings.tmdb_api_key if settings else None
+
+            if not conn or not conn.url or not conn.token:
+                err = "Missing Plex connection (URL or Token)"
                 await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.failed, error_message=err))
                 await db.commit()
                 return
 
+            p_url = conn.url
+            p_token = conn.token
+
             print(f"  Fetching Plex libraries...")
-            libraries = await plex.get_libraries(settings)
+            libraries = await plex.get_libraries(p_url, p_token)
 
             sel_result = await db.execute(
-                select(PlexLibrarySelection).where(PlexLibrarySelection.user_id == user_id)
+                select(PlexLibrarySelection).where(PlexLibrarySelection.connection_id == conn.id)
             )
             selected_keys = {row.library_key for row in sel_result.scalars().all()}
             if selected_keys:
@@ -1043,11 +1088,10 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                 print(f"  Processing library: {lib_title} ({lib_type})")
 
                 if lib_type == "movie":
-                    items = await plex.get_movies(settings, lib_key)
+                    items = await plex.get_movies(p_url, p_token, lib_key)
                     if movie_limit:
                         items = items[:movie_limit]
 
-                    # For movies without a direct TMDB GUID, try resolving via IMDb or title search
                     movies_without_tmdb = [
                         m for m in items
                         if not plex.extract_tmdb_id(m.get("Guid", []))
@@ -1063,18 +1107,16 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                                 imdb_id = plex.extract_imdb_id(guids)
                                 try:
                                     if imdb_id:
-                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=settings.tmdb_api_key)
+                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=tmdb_api_key)
                                         if res.get("movie_results"):
                                             tid = res["movie_results"][0]["id"]
                                             m.setdefault("Guid", []).append({"id": f"tmdb://{tid}"})
                                             return
-                                    # Fallback: title search
                                     title = m.get("title")
                                     year = m.get("year")
                                     if title:
-                                        res = await tmdb.search_movies(title, year=year, api_key=settings.tmdb_api_key)
+                                        res = await tmdb.search_movies(title, year=year, api_key=tmdb_api_key)
                                         if res.get("results"):
-                                            # Find best match by title (case insensitive)
                                             best = res["results"][0]
                                             for r in res["results"]:
                                                 if r.get("title", "").lower() == title.lower():
@@ -1091,12 +1133,12 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
                     await db.commit()
 
-                    w = await sync_items(items, MediaType.movie, CollectionSource.plex, db, stats, user_id, job_id, api_key=settings.tmdb_api_key,
-                        sync_collection=settings.plex_sync_collection, sync_watched=settings.plex_sync_watched, sync_ratings=settings.plex_sync_ratings)
+                    w = await sync_items(items, MediaType.movie, CollectionSource.plex, db, stats, user_id, job_id, api_key=tmdb_api_key,
+                        sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings)
                     all_warnings.extend(w)
 
                 elif lib_type == "show":
-                    shows = await plex.get_shows(settings, lib_key)
+                    shows = await plex.get_shows(p_url, p_token, lib_key)
                     if show_limit:
                         shows = shows[:show_limit]
 
@@ -1105,7 +1147,6 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         for s in shows if plex.extract_tmdb_id(s.get("Guid", []))
                     }
 
-                    # For shows without a direct TMDB GUID, try resolving via TVDB or IMDb
                     shows_without_tmdb = [
                         s for s in shows
                         if s.get("ratingKey") not in series_tmdb_map
@@ -1122,19 +1163,18 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                                 imdb_id = plex.extract_imdb_id(guids)
                                 try:
                                     if tvdb_id:
-                                        res = await tmdb.find_by_external_id(tvdb_id, "tvdb_id", api_key=settings.tmdb_api_key)
+                                        res = await tmdb.find_by_external_id(tvdb_id, "tvdb_id", api_key=tmdb_api_key)
                                         if res.get("tv_results"):
                                             series_tmdb_map[s["ratingKey"]] = res["tv_results"][0]["id"]
                                             return
                                     if imdb_id:
-                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=settings.tmdb_api_key)
+                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=tmdb_api_key)
                                         if res.get("tv_results"):
                                             series_tmdb_map[s["ratingKey"]] = res["tv_results"][0]["id"]
                                             return
-                                    # Last resort: title search
                                     title = s.get("title") or s.get("titleSort")
                                     if title:
-                                        res = await tmdb.search_shows(title, api_key=settings.tmdb_api_key)
+                                        res = await tmdb.search_shows(title, api_key=tmdb_api_key)
                                         if res.get("results"):
                                             series_tmdb_map[s["ratingKey"]] = res["results"][0]["id"]
                                 except Exception as e:
@@ -1148,7 +1188,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
                     print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
                     show_map, show_id_to_tmdb = await sync_shows_batch(
-                        series_tmdb_map, db, api_key=settings.tmdb_api_key
+                        series_tmdb_map, db, api_key=tmdb_api_key
                     )
                     print(f"    Mapped {len(show_map)}/{len(series_tmdb_map)} shows.")
 
@@ -1162,10 +1202,9 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         })
 
                     print(f"    Fetching episodes for {lib_title}...")
-                    items = await plex.get_episodes(settings, lib_key)
+                    items = await plex.get_episodes(p_url, p_token, lib_key)
                     filtered_episodes = [i for i in items if str(i.get("grandparentRatingKey")) in show_map]
 
-                    # Correct total_items: shows were temporary placeholders, replace with episode count
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
                     await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
                     await db.commit()
@@ -1173,8 +1212,8 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     w = await sync_items(
                         filtered_episodes, MediaType.episode, CollectionSource.plex,
                         db, stats, user_id, job_id, show_map,
-                        api_key=settings.tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
-                        sync_collection=settings.plex_sync_collection, sync_watched=settings.plex_sync_watched, sync_ratings=settings.plex_sync_ratings,
+                        api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
+                        sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
                     )
                     all_warnings.extend(w)
 
@@ -1194,191 +1233,156 @@ class LibrarySelectionBody(BaseModel):
     library_ids: list[str]
 
 
-@router.get("/jellyfin/libraries")
-async def get_jellyfin_libraries(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-    if not settings or not settings.jellyfin_url or not settings.jellyfin_token:
-        raise HTTPException(status_code=400, detail="Jellyfin not configured")
-
-    try:
-        available = await jellyfin.get_libraries(settings.jellyfin_url, settings.jellyfin_token, settings.jellyfin_user_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach Jellyfin: {e}")
-
-    sel_result = await db.execute(
-        select(JellyfinLibrarySelection).where(JellyfinLibrarySelection.user_id == current_user.id)
-    )
-    selected_ids = {row.library_id for row in sel_result.scalars().all()}
-
-    libraries = [
-        {
-            "id": lib["Id"],
-            "name": lib["Name"],
-            "type": lib.get("CollectionType"),
-            "selected": lib["Id"] in selected_ids,
-        }
-        for lib in available
-        if lib.get("CollectionType") in ("movies", "tvshows", "tv")
-    ]
-    return {"libraries": libraries, "all_selected": len(selected_ids) == 0}
-
-
-@router.put("/jellyfin/libraries")
-async def save_jellyfin_libraries(
-    body: LibrarySelectionBody,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-    if not settings or not settings.jellyfin_url or not settings.jellyfin_token:
-        raise HTTPException(status_code=400, detail="Jellyfin not configured")
-
-    try:
-        available = await jellyfin.get_libraries(settings.jellyfin_url, settings.jellyfin_token, settings.jellyfin_user_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach Jellyfin: {e}")
-
-    name_map = {lib["Id"]: lib["Name"] for lib in available}
-
-    await db.execute(
-        delete(JellyfinLibrarySelection).where(JellyfinLibrarySelection.user_id == current_user.id)
-    )
-    for lid in body.library_ids:
-        if lid in name_map:
-            db.add(JellyfinLibrarySelection(user_id=current_user.id, library_id=lid, library_name=name_map[lid]))
-    await db.commit()
-    return {"saved": len(body.library_ids)}
-
-
-@router.get("/emby/libraries")
-async def get_emby_libraries(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-    if not settings or not settings.emby_url or not settings.emby_token:
-        raise HTTPException(status_code=400, detail="Emby not configured")
-
-    try:
-        available = await emby.get_libraries(settings.emby_url, settings.emby_token, settings.emby_user_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach Emby: {e}")
-
-    sel_result = await db.execute(
-        select(EmbyLibrarySelection).where(EmbyLibrarySelection.user_id == current_user.id)
-    )
-    selected_ids = {row.library_id for row in sel_result.scalars().all()}
-
-    libraries = [
-        {
-            "id": lib["Id"],
-            "name": lib["Name"],
-            "type": lib.get("CollectionType"),
-            "selected": lib["Id"] in selected_ids,
-        }
-        for lib in available
-        if lib.get("CollectionType") in ("movies", "tvshows", "tv")
-    ]
-    return {"libraries": libraries, "all_selected": len(selected_ids) == 0}
-
-
-@router.put("/emby/libraries")
-async def save_emby_libraries(
-    body: LibrarySelectionBody,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-    if not settings or not settings.emby_url or not settings.emby_token:
-        raise HTTPException(status_code=400, detail="Emby not configured")
-
-    try:
-        available = await emby.get_libraries(settings.emby_url, settings.emby_token, settings.emby_user_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach Emby: {e}")
-
-    name_map = {lib["Id"]: lib["Name"] for lib in available}
-
-    await db.execute(
-        delete(EmbyLibrarySelection).where(EmbyLibrarySelection.user_id == current_user.id)
-    )
-    for lid in body.library_ids:
-        if lid in name_map:
-            db.add(EmbyLibrarySelection(user_id=current_user.id, library_id=lid, library_name=name_map[lid]))
-    await db.commit()
-    return {"saved": len(body.library_ids)}
-
-
 class PlexLibrarySelectionBody(BaseModel):
     library_keys: list[str]
 
 
-@router.get("/plex/libraries")
-async def get_plex_libraries(
+async def _get_connection_or_404(db: AsyncSession, connection_id: int, user_id: int) -> MediaServerConnection:
+    result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.id == connection_id,
+            MediaServerConnection.user_id == user_id,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    return conn
+
+
+@router.get("/connection/{connection_id}/libraries")
+async def get_connection_libraries(
+    connection_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-    if not settings or not settings.plex_url or not settings.plex_token:
-        raise HTTPException(status_code=400, detail="Plex not configured")
+    conn = await _get_connection_or_404(db, connection_id, current_user.id)
 
     try:
-        available = await plex.get_libraries(settings)
+        if conn.type == "jellyfin":
+            available = await jellyfin.get_libraries(conn.url, conn.token, conn.server_user_id)
+            sel_result = await db.execute(
+                select(JellyfinLibrarySelection).where(JellyfinLibrarySelection.connection_id == conn.id)
+            )
+            selected_ids = {row.library_id for row in sel_result.scalars().all()}
+            libraries = [
+                {"id": lib["Id"], "name": lib["Name"], "type": lib.get("CollectionType"), "selected": lib["Id"] in selected_ids}
+                for lib in available if lib.get("CollectionType") in ("movies", "tvshows", "tv")
+            ]
+            return {"libraries": libraries, "all_selected": len(selected_ids) == 0}
+
+        elif conn.type == "emby":
+            available = await emby.get_libraries(conn.url, conn.token, conn.server_user_id)
+            sel_result = await db.execute(
+                select(EmbyLibrarySelection).where(EmbyLibrarySelection.connection_id == conn.id)
+            )
+            selected_ids = {row.library_id for row in sel_result.scalars().all()}
+            libraries = [
+                {"id": lib["Id"], "name": lib["Name"], "type": lib.get("CollectionType"), "selected": lib["Id"] in selected_ids}
+                for lib in available if lib.get("CollectionType") in ("movies", "tvshows", "tv")
+            ]
+            return {"libraries": libraries, "all_selected": len(selected_ids) == 0}
+
+        elif conn.type == "plex":
+            available = await plex.get_libraries(conn.url, conn.token)
+            sel_result = await db.execute(
+                select(PlexLibrarySelection).where(PlexLibrarySelection.connection_id == conn.id)
+            )
+            selected_keys = {row.library_key for row in sel_result.scalars().all()}
+            libraries = [
+                {"key": lib["key"], "name": lib["title"], "type": lib.get("type"), "selected": lib["key"] in selected_keys}
+                for lib in available if lib.get("type") in ("movie", "show")
+            ]
+            return {"libraries": libraries, "all_selected": len(selected_keys) == 0}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown connection type: {conn.type}")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach Plex: {e}")
-
-    sel_result = await db.execute(
-        select(PlexLibrarySelection).where(PlexLibrarySelection.user_id == current_user.id)
-    )
-    selected_keys = {row.library_key for row in sel_result.scalars().all()}
-
-    libraries = [
-        {
-            "key": lib["key"],
-            "name": lib["title"],
-            "type": lib.get("type"),
-            "selected": lib["key"] in selected_keys,
-        }
-        for lib in available
-        if lib.get("type") in ("movie", "show")
-    ]
-    return {"libraries": libraries, "all_selected": len(selected_keys) == 0}
+        raise HTTPException(status_code=502, detail=f"Could not reach server: {e}")
 
 
-@router.put("/plex/libraries")
-async def save_plex_libraries(
-    body: PlexLibrarySelectionBody,
+@router.put("/connection/{connection_id}/libraries")
+async def save_connection_libraries(
+    connection_id: int,
+    body: dict,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-    if not settings or not settings.plex_url or not settings.plex_token:
-        raise HTTPException(status_code=400, detail="Plex not configured")
+    conn = await _get_connection_or_404(db, connection_id, current_user.id)
 
     try:
-        available = await plex.get_libraries(settings)
+        if conn.type == "jellyfin":
+            library_ids: list[str] = body.get("library_ids", [])
+            available = await jellyfin.get_libraries(conn.url, conn.token, conn.server_user_id)
+            name_map = {lib["Id"]: lib["Name"] for lib in available}
+            await db.execute(delete(JellyfinLibrarySelection).where(JellyfinLibrarySelection.connection_id == conn.id))
+            for lid in library_ids:
+                if lid in name_map:
+                    db.add(JellyfinLibrarySelection(user_id=current_user.id, connection_id=conn.id, library_id=lid, library_name=name_map[lid]))
+            await db.commit()
+            return {"saved": len(library_ids)}
+
+        elif conn.type == "emby":
+            library_ids = body.get("library_ids", [])
+            available = await emby.get_libraries(conn.url, conn.token, conn.server_user_id)
+            name_map = {lib["Id"]: lib["Name"] for lib in available}
+            await db.execute(delete(EmbyLibrarySelection).where(EmbyLibrarySelection.connection_id == conn.id))
+            for lid in library_ids:
+                if lid in name_map:
+                    db.add(EmbyLibrarySelection(user_id=current_user.id, connection_id=conn.id, library_id=lid, library_name=name_map[lid]))
+            await db.commit()
+            return {"saved": len(library_ids)}
+
+        elif conn.type == "plex":
+            library_keys: list[str] = body.get("library_keys", [])
+            available = await plex.get_libraries(conn.url, conn.token)
+            name_map = {lib["key"]: lib["title"] for lib in available}
+            await db.execute(delete(PlexLibrarySelection).where(PlexLibrarySelection.connection_id == conn.id))
+            for key in library_keys:
+                if key in name_map:
+                    db.add(PlexLibrarySelection(user_id=current_user.id, connection_id=conn.id, library_key=key, library_name=name_map[key]))
+            await db.commit()
+            return {"saved": len(library_keys)}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown connection type: {conn.type}")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach Plex: {e}")
+        raise HTTPException(status_code=502, detail=f"Could not reach server: {e}")
 
-    name_map = {lib["key"]: lib["title"] for lib in available}
 
-    await db.execute(
-        delete(PlexLibrarySelection).where(PlexLibrarySelection.user_id == current_user.id)
-    )
-    for key in body.library_keys:
-        if key in name_map:
-            db.add(PlexLibrarySelection(user_id=current_user.id, library_key=key, library_name=name_map[key]))
+@router.post("/connection/{connection_id}")
+async def sync_connection(
+    connection_id: int,
+    background_tasks: BackgroundTasks,
+    movie_limit: int = Query(default=0),
+    show_limit: int = Query(default=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conn = await _get_connection_or_404(db, connection_id, current_user.id)
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
+    if not settings or not settings.tmdb_api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key required")
+
+    source_map = {"jellyfin": CollectionSource.jellyfin, "emby": CollectionSource.emby, "plex": CollectionSource.plex}
+    source = source_map.get(conn.type)
+    if not source:
+        raise HTTPException(status_code=400, detail=f"Unknown connection type: {conn.type}")
+
+    job = SyncJob(user_id=current_user.id, source=source, status=SyncStatus.pending)
+    db.add(job)
     await db.commit()
-    return {"saved": len(body.library_keys)}
+    await db.refresh(job)
+
+    runner_map = {"jellyfin": run_jellyfin_sync, "emby": run_emby_sync, "plex": run_plex_sync}
+    background_tasks.add_task(runner_map[conn.type], current_user.id, job.id, movie_limit, show_limit, connection_id)
+    return {"status": "started", "job_id": job.id, "message": f"{conn.type.capitalize()} sync is running in the background"}
 
 
 @router.post("/jellyfin")
@@ -1389,13 +1393,19 @@ async def sync_jellyfin(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
     if not settings or not settings.tmdb_api_key:
         raise HTTPException(status_code=400, detail="TMDB API key required")
-    if not settings.jellyfin_url or not settings.jellyfin_token:
-        raise HTTPException(status_code=400, detail="Jellyfin not configured")
+
+    conn_result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.user_id == current_user.id,
+            MediaServerConnection.type == "jellyfin",
+        ).order_by(MediaServerConnection.id.asc()).limit(1)
+    )
+    if not conn_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="No Jellyfin connection configured")
 
     job = SyncJob(user_id=current_user.id, source=CollectionSource.jellyfin, status=SyncStatus.pending)
     db.add(job)
@@ -1414,13 +1424,19 @@ async def sync_emby(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
     if not settings or not settings.tmdb_api_key:
         raise HTTPException(status_code=400, detail="TMDB API key required")
-    if not settings.emby_url or not settings.emby_token:
-        raise HTTPException(status_code=400, detail="Emby not configured")
+
+    conn_result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.user_id == current_user.id,
+            MediaServerConnection.type == "emby",
+        ).order_by(MediaServerConnection.id.asc()).limit(1)
+    )
+    if not conn_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="No Emby connection configured")
 
     job = SyncJob(user_id=current_user.id, source=CollectionSource.emby, status=SyncStatus.pending)
     db.add(job)
@@ -1439,13 +1455,19 @@ async def sync_plex(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = result.scalar_one_or_none()
-
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
     if not settings or not settings.tmdb_api_key:
         raise HTTPException(status_code=400, detail="TMDB API key required")
-    if not settings.plex_url or not settings.plex_token:
-        raise HTTPException(status_code=400, detail="Plex not configured")
+
+    conn_result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.user_id == current_user.id,
+            MediaServerConnection.type == "plex",
+        ).order_by(MediaServerConnection.id.asc()).limit(1)
+    )
+    if not conn_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="No Plex connection configured")
 
     job = SyncJob(user_id=current_user.id, source=CollectionSource.plex, status=SyncStatus.pending)
     db.add(job)

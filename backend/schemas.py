@@ -70,15 +70,6 @@ class TotpBackupCodesResponse(BaseModel):
 
 class UserSettings(BaseModel):
     tmdb_api_key: Optional[str] = None
-    jellyfin_url: Optional[str] = None
-    jellyfin_token: Optional[str] = None
-    jellyfin_user_id: Optional[str] = None
-    emby_url: Optional[str] = None
-    emby_token: Optional[str] = None
-    emby_user_id: Optional[str] = None
-    plex_url: Optional[str] = None
-    plex_token: Optional[str] = None
-    plex_username: Optional[str] = None
 
     # Radarr integration
     radarr_url: Optional[str] = None
@@ -95,28 +86,6 @@ class UserSettings(BaseModel):
     sonarr_tags: Optional[list[int]] = None
     sonarr_season_folder: Optional[bool] = None
 
-    # Inbound sync flags (source → Scrob)
-    plex_sync_collection: Optional[bool] = None
-    plex_sync_watched: Optional[bool] = None
-    plex_sync_ratings: Optional[bool] = None
-    plex_sync_playback: Optional[bool] = None
-    jellyfin_sync_collection: Optional[bool] = None
-    jellyfin_sync_watched: Optional[bool] = None
-    jellyfin_sync_ratings: Optional[bool] = None
-    jellyfin_sync_playback: Optional[bool] = None
-    emby_sync_collection: Optional[bool] = None
-    emby_sync_watched: Optional[bool] = None
-    emby_sync_ratings: Optional[bool] = None
-    emby_sync_playback: Optional[bool] = None
-
-    # Outbound push flags (Scrob → source)
-    plex_push_watched: Optional[bool] = None
-    plex_push_ratings: Optional[bool] = None
-    jellyfin_push_watched: Optional[bool] = None
-    jellyfin_push_ratings: Optional[bool] = None
-    emby_push_watched: Optional[bool] = None
-    emby_push_ratings: Optional[bool] = None
-
     # Trakt — app credentials + sync flags; OAuth tokens managed via /trakt/* endpoints
     trakt_client_id: Optional[str] = None
     trakt_client_secret: Optional[str] = None
@@ -126,13 +95,52 @@ class UserSettings(BaseModel):
     trakt_push_watched: Optional[bool] = None
     trakt_push_ratings: Optional[bool] = None
 
-    # Auto sync intervals in hours (null = disabled)
-    jellyfin_auto_sync_interval: Optional[int] = None
-    emby_auto_sync_interval: Optional[int] = None
-    plex_auto_sync_interval: Optional[int] = None
-
     preferences: Optional[dict] = None
     blur_explicit: Optional[bool] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MediaServerConnectionBase(BaseModel):
+    type: str
+    name: str
+    url: str
+    token: str
+    server_user_id: Optional[str] = None
+    server_username: Optional[str] = None
+    sync_collection: bool = True
+    sync_watched: bool = True
+    sync_ratings: bool = True
+    sync_playback: bool = True
+    push_watched: bool = False
+    push_ratings: bool = False
+    auto_sync_interval: Optional[int] = None
+
+
+class MediaServerConnectionCreate(MediaServerConnectionBase):
+    pass
+
+
+class MediaServerConnectionUpdate(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    token: Optional[str] = None
+    server_user_id: Optional[str] = None
+    server_username: Optional[str] = None
+    sync_collection: Optional[bool] = None
+    sync_watched: Optional[bool] = None
+    sync_ratings: Optional[bool] = None
+    sync_playback: Optional[bool] = None
+    push_watched: Optional[bool] = None
+    push_ratings: Optional[bool] = None
+    auto_sync_interval: Optional[int] = None
+
+
+class MediaServerConnectionResponse(MediaServerConnectionBase):
+    id: int
+    user_id: int
+    created_at: datetime
 
     class Config:
         from_attributes = True

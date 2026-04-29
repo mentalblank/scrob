@@ -1,7 +1,6 @@
 import httpx
 import xmltodict
 from typing import Optional, List, Dict
-from models.users import UserSettings
 
 TIMEOUT = httpx.Timeout(120.0)
 
@@ -179,28 +178,23 @@ async def validate_connection(url: str, token: str) -> bool:
     except Exception:
         return False
 
-async def get_libraries(settings: UserSettings) -> List[Dict]:
-    url = f"{settings.plex_url}/library/sections"
-    data = await _get(url, settings.plex_token)
+async def get_libraries(url: str, token: str) -> List[Dict]:
+    data = await _get(f"{url.rstrip('/')}/library/sections", token)
     return data.get("MediaContainer", {}).get("Directory", [])
 
-async def get_movies(settings: UserSettings, section_id: str) -> List[Dict]:
-    url = f"{settings.plex_url}/library/sections/{section_id}/all"
+async def get_movies(url: str, token: str, section_id: str) -> List[Dict]:
     params = {"includeGuids": 1, "includeDetails": 1}
-    data = await _get(url, settings.plex_token, params=params)
+    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 
-async def get_shows(settings: UserSettings, section_id: str) -> List[Dict]:
-    url = f"{settings.plex_url}/library/sections/{section_id}/all"
+async def get_shows(url: str, token: str, section_id: str) -> List[Dict]:
     params = {"includeGuids": 1, "includeDetails": 1}
-    data = await _get(url, settings.plex_token, params=params)
+    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 
-async def get_episodes(settings: UserSettings, section_id: str) -> List[Dict]:
-    # In Plex, it's often better to get all episodes for a library directly
-    url = f"{settings.plex_url}/library/sections/{section_id}/all"
-    params = {"type": 4, "includeGuids": 1, "includeDetails": 1} # 4 is Episode
-    data = await _get(url, settings.plex_token, params=params)
+async def get_episodes(url: str, token: str, section_id: str) -> List[Dict]:
+    params = {"type": 4, "includeGuids": 1, "includeDetails": 1}
+    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 
 async def get_recently_added(url: str, token: str, section_id: str, media_type: int, limit: int = 50) -> List[Dict]:

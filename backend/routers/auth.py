@@ -14,6 +14,7 @@ from jose import jwt, JWTError
 
 from db import get_db
 from models.users import User, UserSettings, TotpBackupCode
+from models.connections import MediaServerConnection
 from models.email_activation import EmailActivation
 from models.password_reset import PasswordResetToken
 from core.security import verify_password, get_password_hash, create_access_token, ALGORITHM
@@ -300,34 +301,25 @@ async def update_user_settings(
     current_user: User = Depends(get_current_user)
 ):
     from core import tmdb
-    
+
     query = select(UserSettings).where(UserSettings.user_id == current_user.id)
     result = await db.execute(query)
     settings = result.scalar_one_or_none()
-    
+
     if not settings:
         settings = UserSettings(user_id=current_user.id)
         db.add(settings)
 
-    # Update fields
     # trakt_connected is a read-only computed field; never write it back
     READ_ONLY_FIELDS = {"trakt_connected"}
     update_data = {k: v for k, v in settings_in.model_dump(exclude_unset=True).items() if k not in READ_ONLY_FIELDS}
 
-    # Validate TMDB key if changed
     if "tmdb_api_key" in update_data and update_data["tmdb_api_key"]:
         success = await tmdb.validate_api_key(update_data["tmdb_api_key"])
         if not success:
             raise HTTPException(status_code=400, detail="Invalid TMDB API Key")
 
-    # Validate service URLs to prevent SSRF (cloud metadata credential theft, etc.)
-    url_fields = {
-        "jellyfin_url": "Jellyfin URL",
-        "emby_url": "Emby URL",
-        "plex_url": "Plex URL",
-        "radarr_url": "Radarr URL",
-        "sonarr_url": "Sonarr URL",
-    }
+    url_fields = {"radarr_url": "Radarr URL", "sonarr_url": "Sonarr URL"}
     for field, label in url_fields.items():
         if field in update_data and update_data[field]:
             update_data[field] = await validate_service_url(update_data[field], label)
@@ -335,10 +327,105 @@ async def update_user_settings(
     for field, value in update_data.items():
         if hasattr(settings, field):
             setattr(settings, field, value)
-    
+
     await db.commit()
     await db.refresh(settings)
     return _settings_response(settings)
+
+
+# ── Media Server Connection CRUD ───────────────────────────────────────────────
+
+@router.get("/connections", response_model=list[schemas.MediaServerConnectionResponse])
+async def list_connections(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(MediaServerConnection)
+        .where(MediaServerConnection.user_id == current_user.id)
+        .order_by(MediaServerConnection.created_at)
+    )
+    return result.scalars().all()
+
+
+@router.post("/connections", response_model=schemas.MediaServerConnectionResponse, status_code=201)
+async def create_connection(
+    body: schemas.MediaServerConnectionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if body.type not in ("plex", "jellyfin", "emby"):
+        raise HTTPException(status_code=400, detail="type must be plex, jellyfin, or emby")
+    validated_url = await validate_service_url(body.url, f"{body.type.capitalize()} URL")
+    conn = MediaServerConnection(
+        user_id=current_user.id,
+        type=body.type,
+        name=body.name,
+        url=validated_url,
+        token=body.token,
+        server_user_id=body.server_user_id,
+        server_username=body.server_username,
+        sync_collection=body.sync_collection,
+        sync_watched=body.sync_watched,
+        sync_ratings=body.sync_ratings,
+        sync_playback=body.sync_playback,
+        push_watched=body.push_watched,
+        push_ratings=body.push_ratings,
+        auto_sync_interval=body.auto_sync_interval,
+    )
+    db.add(conn)
+    await db.commit()
+    await db.refresh(conn)
+    return conn
+
+
+@router.patch("/connections/{connection_id}", response_model=schemas.MediaServerConnectionResponse)
+async def update_connection(
+    connection_id: int,
+    body: schemas.MediaServerConnectionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.id == connection_id,
+            MediaServerConnection.user_id == current_user.id,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    update_data = body.model_dump(exclude_unset=True)
+    if "url" in update_data and update_data["url"]:
+        update_data["url"] = await validate_service_url(update_data["url"], f"{conn.type.capitalize()} URL")
+
+    for field, value in update_data.items():
+        setattr(conn, field, value)
+
+    await db.commit()
+    await db.refresh(conn)
+    return conn
+
+
+@router.delete("/connections/{connection_id}")
+async def delete_connection(
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(MediaServerConnection).where(
+            MediaServerConnection.id == connection_id,
+            MediaServerConnection.user_id == current_user.id,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    await db.delete(conn)
+    await db.commit()
+    return {"status": "deleted"}
 
 @router.post("/change-password")
 async def change_password(
@@ -472,42 +559,18 @@ async def get_connection_status(
     current_user: User = Depends(get_current_user)
 ):
     import asyncio
-    from core import jellyfin as jf, emby as emby_client, plex as px, radarr as rdr, sonarr as snr
+    from core import radarr as rdr, sonarr as snr
 
-    query = select(UserSettings).where(UserSettings.user_id == current_user.id)
-    result = await db.execute(query)
-    user_settings = result.scalar_one_or_none()
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    user_settings = settings_result.scalar_one_or_none()
 
-    if not user_settings:
-        return {
-            "jellyfin": {"configured": False, "connected": False},
-            "emby": {"configured": False, "connected": False},
-            "plex": {"configured": False, "connected": False},
-            "radarr": {"configured": False, "connected": False},
-            "sonarr": {"configured": False, "connected": False},
-            "trakt": {"configured": False, "connected": False},
-        }
-
-    async def check_jellyfin():
-        if not (user_settings.jellyfin_url and user_settings.jellyfin_token):
-            return {"configured": False, "connected": False}
-        connected = await jf.validate_connection(user_settings.jellyfin_url, user_settings.jellyfin_token, user_settings.jellyfin_user_id)
-        return {"configured": True, "connected": connected}
-
-    async def check_emby():
-        if not (user_settings.emby_url and user_settings.emby_token):
-            return {"configured": False, "connected": False}
-        connected = await emby_client.validate_connection(user_settings.emby_url, user_settings.emby_token, user_settings.emby_user_id)
-        return {"configured": True, "connected": connected}
-
-    async def check_plex():
-        if not (user_settings.plex_url and user_settings.plex_token):
-            return {"configured": False, "connected": False}
-        connected = await px.validate_connection(user_settings.plex_url, user_settings.plex_token)
-        return {"configured": True, "connected": connected}
+    conns_result = await db.execute(
+        select(MediaServerConnection).where(MediaServerConnection.user_id == current_user.id)
+    )
+    media_server_conns = conns_result.scalars().all()
 
     async def check_radarr():
-        if not (user_settings.radarr_url and user_settings.radarr_token):
+        if not user_settings or not (user_settings.radarr_url and user_settings.radarr_token):
             return {"configured": False, "connected": False}
         connected = await rdr.validate_connection(user_settings.radarr_url, user_settings.radarr_token)
         if not connected:
@@ -520,7 +583,7 @@ async def get_connection_status(
         return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags}
 
     async def check_sonarr():
-        if not (user_settings.sonarr_url and user_settings.sonarr_token):
+        if not user_settings or not (user_settings.sonarr_url and user_settings.sonarr_token):
             return {"configured": False, "connected": False}
         connected = await snr.validate_connection(user_settings.sonarr_url, user_settings.sonarr_token)
         if not connected:
@@ -534,16 +597,43 @@ async def get_connection_status(
 
     async def check_trakt():
         from core import trakt as trakt_client
-        if not (user_settings.trakt_access_token and user_settings.trakt_client_id):
+        from datetime import datetime, timezone
+        if not user_settings or not (user_settings.trakt_access_token and user_settings.trakt_client_id):
             return {"configured": False, "connected": False}
         connected = await trakt_client.validate_token(user_settings.trakt_client_id, user_settings.trakt_access_token)
+        if not connected and user_settings.trakt_refresh_token and user_settings.trakt_client_secret:
+            try:
+                token_data = await trakt_client.refresh_access_token(
+                    user_settings.trakt_client_id,
+                    user_settings.trakt_client_secret,
+                    user_settings.trakt_refresh_token,
+                )
+                user_settings.trakt_access_token = token_data["access_token"]
+                user_settings.trakt_refresh_token = token_data["refresh_token"]
+                user_settings.trakt_token_expires_at = token_data.get("expires_in", 0) + int(datetime.now(timezone.utc).timestamp())
+                await db.commit()
+                connected = True
+            except Exception:
+                pass
         return {"configured": True, "connected": connected}
 
-    jf_status, emby_status, px_status, rdr_status, snr_status, trakt_status = await asyncio.gather(
-        check_jellyfin(), check_emby(), check_plex(), check_radarr(), check_sonarr(), check_trakt()
+    async def check_media_server(conn):
+        from core import jellyfin, plex
+        try:
+            if conn.type == "plex":
+                connected = await plex.validate_connection(conn.url, conn.token)
+            else:
+                connected = await jellyfin.validate_connection(conn.url, conn.token, conn.server_user_id)
+        except Exception:
+            connected = False
+        return {"id": conn.id, "connected": connected}
+
+    media_server_tasks = [check_media_server(c) for c in media_server_conns]
+    rdr_status, snr_status, trakt_status, *ms_statuses = await asyncio.gather(
+        check_radarr(), check_sonarr(), check_trakt(), *media_server_tasks
     )
 
-    return {"jellyfin": jf_status, "emby": emby_status, "plex": px_status, "radarr": rdr_status, "sonarr": snr_status, "trakt": trakt_status}
+    return {"radarr": rdr_status, "sonarr": snr_status, "trakt": trakt_status, "connections": ms_statuses}
 
 
 @router.get("/sonarr/profiles")

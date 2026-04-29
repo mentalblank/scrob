@@ -13,18 +13,21 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from core.limiter import limiter
 
-from sqlalchemy import select, update, or_
+from sqlalchemy import select, update
 from models.sync import SyncJob, SyncStatus
 from models.base import CollectionSource
 
 
 async def _auto_sync_scheduler():
     from db import async_sessionmaker
-    from models.users import UserSettings
+    from models.connections import MediaServerConnection
     from routers.sync import run_jellyfin_sync, run_emby_sync, run_plex_sync
     from datetime import datetime, timezone
 
     CHECK_INTERVAL = 300  # seconds between scheduler ticks
+
+    source_map = {"jellyfin": CollectionSource.jellyfin, "emby": CollectionSource.emby, "plex": CollectionSource.plex}
+    runner_map = {"jellyfin": run_jellyfin_sync, "emby": run_emby_sync, "plex": run_plex_sync}
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
@@ -32,63 +35,55 @@ async def _auto_sync_scheduler():
             async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
             async with async_session() as db:
                 result = await db.execute(
-                    select(UserSettings).where(
-                        or_(
-                            UserSettings.jellyfin_auto_sync_interval.isnot(None),
-                            UserSettings.emby_auto_sync_interval.isnot(None),
-                            UserSettings.plex_auto_sync_interval.isnot(None),
-                        )
+                    select(MediaServerConnection).where(
+                        MediaServerConnection.auto_sync_interval.isnot(None)
                     )
                 )
-                all_settings = result.scalars().all()
+                connections = result.scalars().all()
 
                 now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-                for user_settings in all_settings:
-                    user_id = user_settings.user_id
-                    sources = [
-                        (CollectionSource.jellyfin, user_settings.jellyfin_auto_sync_interval, run_jellyfin_sync),
-                        (CollectionSource.emby,     user_settings.emby_auto_sync_interval,     run_emby_sync),
-                        (CollectionSource.plex,     user_settings.plex_auto_sync_interval,     run_plex_sync),
-                    ]
-                    for source, interval, run_fn in sources:
-                        if not interval:
+                for conn in connections:
+                    user_id = conn.user_id
+                    source = source_map.get(conn.type)
+                    run_fn = runner_map.get(conn.type)
+                    if not source or not run_fn:
+                        continue
+
+                    # Skip if a sync is already pending or running for this user+source
+                    active_q = await db.execute(
+                        select(SyncJob).where(
+                            SyncJob.user_id == user_id,
+                            SyncJob.source == source,
+                            SyncJob.status.in_([SyncStatus.pending, SyncStatus.running]),
+                        )
+                    )
+                    if active_q.scalar_one_or_none():
+                        continue
+
+                    # Find the last completed or failed sync for this user+source+connection
+                    last_q = await db.execute(
+                        select(SyncJob).where(
+                            SyncJob.user_id == user_id,
+                            SyncJob.source == source,
+                            SyncJob.status.in_([SyncStatus.completed, SyncStatus.failed]),
+                        ).order_by(SyncJob.updated_at.desc()).limit(1)
+                    )
+                    last_job = last_q.scalar_one_or_none()
+
+                    if last_job:
+                        elapsed_hours = (now - last_job.updated_at).total_seconds() / 3600
+                        if elapsed_hours < conn.auto_sync_interval:
                             continue
 
-                        # Skip if a sync is already pending or running for this user+source
-                        active_q = await db.execute(
-                            select(SyncJob).where(
-                                SyncJob.user_id == user_id,
-                                SyncJob.source == source,
-                                SyncJob.status.in_([SyncStatus.pending, SyncStatus.running]),
-                            )
-                        )
-                        if active_q.scalar_one_or_none():
-                            continue
+                    job = SyncJob(user_id=user_id, source=source, status=SyncStatus.pending)
+                    db.add(job)
+                    await db.flush()
+                    job_id = job.id
+                    await db.commit()
 
-                        # Find the last completed or failed sync for this user+source
-                        last_q = await db.execute(
-                            select(SyncJob).where(
-                                SyncJob.user_id == user_id,
-                                SyncJob.source == source,
-                                SyncJob.status.in_([SyncStatus.completed, SyncStatus.failed]),
-                            ).order_by(SyncJob.updated_at.desc()).limit(1)
-                        )
-                        last_job = last_q.scalar_one_or_none()
-
-                        if last_job:
-                            elapsed_hours = (now - last_job.updated_at).total_seconds() / 3600
-                            if elapsed_hours < interval:
-                                continue
-
-                        job = SyncJob(user_id=user_id, source=source, status=SyncStatus.pending)
-                        db.add(job)
-                        await db.flush()
-                        job_id = job.id
-                        await db.commit()
-
-                        print(f"Auto-sync: queuing {source.value} sync for user {user_id} (job {job_id})")
-                        asyncio.create_task(run_fn(user_id, job_id, 0, 0))
+                    print(f"Auto-sync: queuing {conn.type} sync for user {user_id}, connection {conn.id} (job {job_id})")
+                    asyncio.create_task(run_fn(user_id, job_id, 0, 0, conn.id))
 
         except Exception as e:
             print(f"Auto-sync scheduler error: {e}")
