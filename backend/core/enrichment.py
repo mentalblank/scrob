@@ -83,6 +83,10 @@ async def enrich_media(media: Media, api_key: str = None, series_tmdb_id: int = 
         # enrichment was already attempted and won't retry it indefinitely.
         if media.tmdb_data is None:
             media.tmdb_data = {}
-        import traceback
-        print(f"  TMDB enrich FAILED for {media.title}: {e}")
-        traceback.print_exc()
+        from httpx import HTTPStatusError
+        if isinstance(e, HTTPStatusError) and e.response.status_code == 404:
+            print(f"  TMDB enrich SKIPPED for {media.title}: not found on TMDB (id={media.tmdb_id})")
+        else:
+            import traceback
+            print(f"  TMDB enrich FAILED for {media.title}: {e}")
+            traceback.print_exc()

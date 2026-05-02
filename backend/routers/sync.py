@@ -825,9 +825,9 @@ async def sync_items(
     return all_warnings
 
 
-async def run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int):
+async def run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
     async with _sync_semaphore:
-        await _run_jellyfin_sync(user_id, job_id, movie_limit, show_limit)
+        await _run_jellyfin_sync(user_id, job_id, movie_limit, show_limit, connection_id)
 
 
 async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
