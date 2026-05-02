@@ -592,15 +592,28 @@ async def list_media(
     total_pages = (total_count + page_size - 1) // page_size
 
     # Sort and Paginate
-    sort_map = {
-        "rating": Media.tmdb_rating.desc().nulls_last(),
-        "release_date": Media.release_date.desc().nulls_last(),
-        "title": func.lower(Media.title).asc(),
-        "created_at": Collection.added_at.desc(),
-    }
-    order = sort_map.get(sort, Collection.added_at.desc())
-
-    query = base_query.order_by(order).offset(offset).limit(page_size)
+    if sort == "last_watched":
+        last_watched_sq = (
+            select(WatchEvent.media_id, func.max(WatchEvent.watched_at).label("last_watched_at"))
+            .where(WatchEvent.user_id == current_user.id)
+            .group_by(WatchEvent.media_id)
+            .subquery()
+        )
+        query = (
+            base_query
+            .outerjoin(last_watched_sq, last_watched_sq.c.media_id == Media.id)
+            .order_by(last_watched_sq.c.last_watched_at.desc().nulls_last())
+            .offset(offset).limit(page_size)
+        )
+    else:
+        sort_map = {
+            "rating": Media.tmdb_rating.desc().nulls_last(),
+            "release_date": Media.release_date.desc().nulls_last(),
+            "title": func.lower(Media.title).asc(),
+            "created_at": Collection.added_at.desc(),
+        }
+        order = sort_map.get(sort, Collection.added_at.desc())
+        query = base_query.order_by(order).offset(offset).limit(page_size)
     result = await db.execute(query)
     items = result.scalars().all()
 

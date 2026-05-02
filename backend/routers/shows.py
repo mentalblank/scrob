@@ -88,6 +88,19 @@ async def list_shows(
         q = base_query.order_by(ShowModel.first_air_date.desc().nulls_last())
     elif sort == "created_at":
         q = base_query.order_by(ShowModel.created_at.desc().nulls_last())
+    elif sort == "last_watched":
+        last_watched_sq = (
+            select(Media.show_id, func.max(WatchEvent.watched_at).label("last_watched_at"))
+            .join(WatchEvent, WatchEvent.media_id == Media.id)
+            .where(WatchEvent.user_id == current_user.id, Media.show_id.isnot(None))
+            .group_by(Media.show_id)
+            .subquery()
+        )
+        q = (
+            base_query
+            .outerjoin(last_watched_sq, last_watched_sq.c.show_id == ShowModel.id)
+            .order_by(last_watched_sq.c.last_watched_at.desc().nulls_last())
+        )
     else:
         q = base_query.order_by(func.lower(ShowModel.title).asc())
 

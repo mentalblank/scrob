@@ -49,26 +49,20 @@ const baseUrl = `/collection/movies?${baseParams.toString()}`;
     </div>
 
     <!-- Sort controls -->
-    <div class="flex flex-wrap gap-2 text-sm bg-zinc-900/50 p-1 rounded-xl border border-zinc-800 justify-around">
+    <select
+      id="sort-select"
+      class="bg-zinc-900 border border-zinc-800 text-zinc-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+    >
       {[
         { value: "title", label: "A–Z" },
         { value: "rating", label: "Top" },
         { value: "release_date", label: "Newest" },
         { value: "created_at", label: "Recently Added" },
-      ].map(({ value, label }) => {
-        const tabParams = new URLSearchParams(baseParams);
-        tabParams.set("sort", value);
-        tabParams.delete("page");
-        return (
-          <a
-            href={`/collection/movies?${tabParams.toString()}`}
-            class={`px-4 py-2 rounded-lg transition-all font-medium active:scale-95 active:opacity-70 ${sort === value ? "bg-blue-600 text-white shadow-lg" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"}`}
-          >
-            {label}
-          </a>
-        );
-      })}
-    </div>
+        { value: "last_watched", label: "Recently Watched" },
+      ].map(({ value, label }) => (
+        <option value={value} selected={sort === value}>{label}</option>
+      ))}
+    </select>
   </div>
 
   <!-- Filter bar -->
@@ -123,7 +117,7 @@ const baseUrl = `/collection/movies?${baseParams.toString()}`;
 <script define:vars={{ sort, genre, year }}>
   function navigate() {
     const params = new URLSearchParams();
-    params.set("sort", sort);
+    params.set("sort", document.getElementById("sort-select").value);
     const g = document.getElementById("filter-genre").value;
     const y = document.getElementById("filter-year").value;
     if (g) params.set("genre", g);
@@ -133,5 +127,6 @@ const baseUrl = `/collection/movies?${baseParams.toString()}`;
 
   document.getElementById("filter-genre")?.addEventListener("change", navigate);
   document.getElementById("filter-year")?.addEventListener("change", navigate);
+  document.getElementById("sort-select")?.addEventListener("change", navigate);
 
 </script>
