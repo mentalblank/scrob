@@ -26,6 +26,7 @@ from models.ratings import Rating
 from models.show import Show
 from models.sync import SyncJob, SyncStatus
 from models.users import User, UserSettings
+from models.global_settings import GlobalSettings
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +298,9 @@ async def run_trakt_sync(user_id: int, job_id: int):
 
             client_id = settings.trakt_client_id
             access_token = settings.trakt_access_token
-            api_key = settings.tmdb_api_key
+            _gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+            _gs = _gs_result.scalar_one_or_none()
+            api_key = settings.tmdb_api_key or (_gs.tmdb_api_key if _gs else None)
             sync_watched = settings.trakt_sync_watched
             sync_ratings = settings.trakt_sync_ratings
 
@@ -537,7 +540,12 @@ async def sync_trakt(
 
     if not settings or not settings.trakt_access_token:
         raise HTTPException(status_code=400, detail="Trakt is not connected")
-    if not settings.tmdb_api_key:
+    _tmdb_key = settings.tmdb_api_key
+    if not _tmdb_key:
+        _gs_r = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        _gs = _gs_r.scalar_one_or_none()
+        _tmdb_key = _gs.tmdb_api_key if _gs else None
+    if not _tmdb_key:
         raise HTTPException(status_code=400, detail="TMDB API key required for sync")
 
     from models.base import CollectionSource

@@ -14,6 +14,7 @@ from models.collection import Collection, CollectionFile
 from models.events import WatchEvent
 from models.ratings import Rating
 from models.users import User, UserSettings
+from models.global_settings import GlobalSettings
 from models.connections import MediaServerConnection
 from models.base import MediaType, CollectionSource
 from models.playback_session import PlaybackSession
@@ -24,6 +25,14 @@ from core import tmdb
 from core.jellyfin import extract_quality
 
 router = APIRouter()
+
+
+async def _get_tmdb_key(db: AsyncSession, settings: UserSettings | None) -> str | None:
+    if settings and settings.tmdb_api_key:
+        return settings.tmdb_api_key
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    gs = gs_result.scalar_one_or_none()
+    return gs.tmdb_api_key if gs else None
 
 
 async def _get_oldest_connection(db: AsyncSession, user_id: int, conn_type: str) -> MediaServerConnection | None:
@@ -422,7 +431,7 @@ async def _handle_jellyfin_webhook(request: Request, db: AsyncSession, api_key: 
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
     settings = settings_result.scalar_one_or_none()
-    tmdb_key = settings.tmdb_api_key if settings else None
+    tmdb_key = await _get_tmdb_key(db, settings)
 
     media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key)
     session_key = f"jellyfin:{user.id}:{data['session_id']}"
@@ -540,7 +549,7 @@ async def _handle_emby_webhook(request: Request, db: AsyncSession, api_key: str,
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
     settings = settings_result.scalar_one_or_none()
-    tmdb_key = settings.tmdb_api_key if settings else None
+    tmdb_key = await _get_tmdb_key(db, settings)
 
     media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key)
     session_key = f"emby:{user.id}:{data['session_id']}"
@@ -1018,7 +1027,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
     settings = settings_result.scalar_one_or_none()
-    tmdb_key = settings.tmdb_api_key if settings else None
+    tmdb_key = await _get_tmdb_key(db, settings)
 
     session_key = f"plex:{user.id}:{data['session_key']}"
 

@@ -17,6 +17,7 @@ from .library_selections import JellyfinLibrarySelection, EmbyLibrarySelection, 
 from .playback_session import PlaybackSession
 from .playback_progress import PlaybackProgress
 from .follows import Follow
+from .global_settings import GlobalSettings
 
 __all__ = [
     "Base",
@@ -38,4 +39,5 @@ __all__ = [
     "PlaybackSession",
     "PlaybackProgress",
     "Follow",
+    "GlobalSettings",
 ]

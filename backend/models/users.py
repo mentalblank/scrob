@@ -16,6 +16,7 @@ class User(Base):
     password_hash : Mapped[Optional[str]]  = mapped_column(String(255), nullable=True)
     api_key       : Mapped[str]            = mapped_column(String(64), unique=True, nullable=False)
     role          : Mapped[UserRole]       = mapped_column(Enum(UserRole), nullable=False, default=UserRole.user)
+    is_admin      : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     email_confirmed : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     totp_enabled  : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False)
     totp_secret   : Mapped[Optional[str]]  = mapped_column(String(255))

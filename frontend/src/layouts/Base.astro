@@ -127,6 +127,9 @@ const bottomNavItem = (active: boolean) =>
                   <a href={`/stats/${user.id}`} class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Statistics</a>
                   <a href="/user-settings" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Profile Settings</a>
                   <a href="/settings" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Settings</a>
+                  {user.is_admin && (
+                    <a href="/admin" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Admin</a>
+                  )}
                   <a href="/about" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">About</a>
                   <div class="h-px bg-zinc-800 my-1 mx-1"></div>
                   <form method="POST" action="/logout" style="margin:0">

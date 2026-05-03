@@ -18,11 +18,20 @@ from models.library_selections import JellyfinLibrarySelection, EmbyLibrarySelec
 from datetime import datetime, timezone
 from dateutil import parser
 from models.base import MediaType, CollectionSource
+from models.global_settings import GlobalSettings
 from core import jellyfin, emby, plex, tmdb
 import core.trakt as trakt_client
 from core.enrichment import enrich_media
 
 from dependencies import get_current_user
+
+
+async def _get_effective_tmdb_key(db: AsyncSession, user_settings: UserSettings | None) -> str | None:
+    if user_settings and user_settings.tmdb_api_key:
+        return user_settings.tmdb_api_key
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    gs = gs_result.scalar_one_or_none()
+    return gs.tmdb_api_key if gs else None
 
 router = APIRouter()
 
@@ -840,7 +849,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
 
             settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
             settings = settings_result.scalar_one_or_none()
-            tmdb_api_key = settings.tmdb_api_key if settings else None
+            tmdb_api_key = await _get_effective_tmdb_key(db, settings)
 
             # Load the specific connection (or oldest jellyfin connection for this user)
             conn_q = select(MediaServerConnection).where(
@@ -1023,7 +1032,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
             settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
             settings = settings_result.scalar_one_or_none()
-            tmdb_api_key = settings.tmdb_api_key if settings else None
+            tmdb_api_key = await _get_effective_tmdb_key(db, settings)
 
             if not conn or not conn.url or not conn.token or not conn.server_user_id:
                 err = "Missing Emby connection (URL, Token, or User ID)"
@@ -1198,7 +1207,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
             settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
             settings = settings_result.scalar_one_or_none()
-            tmdb_api_key = settings.tmdb_api_key if settings else None
+            tmdb_api_key = await _get_effective_tmdb_key(db, settings)
 
             if not conn or not conn.url or not conn.token:
                 err = "Missing Plex connection (URL or Token)"
@@ -1515,7 +1524,7 @@ async def sync_connection(
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = settings_result.scalar_one_or_none()
-    if not settings or not settings.tmdb_api_key:
+    if not await _get_effective_tmdb_key(db, settings):
         raise HTTPException(status_code=400, detail="TMDB API key required")
 
     source_map = {"jellyfin": CollectionSource.jellyfin, "emby": CollectionSource.emby, "plex": CollectionSource.plex}
@@ -1543,7 +1552,7 @@ async def sync_jellyfin(
 ):
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = settings_result.scalar_one_or_none()
-    if not settings or not settings.tmdb_api_key:
+    if not await _get_effective_tmdb_key(db, settings):
         raise HTTPException(status_code=400, detail="TMDB API key required")
 
     conn_result = await db.execute(
@@ -1574,7 +1583,7 @@ async def sync_emby(
 ):
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = settings_result.scalar_one_or_none()
-    if not settings or not settings.tmdb_api_key:
+    if not await _get_effective_tmdb_key(db, settings):
         raise HTTPException(status_code=400, detail="TMDB API key required")
 
     conn_result = await db.execute(
@@ -1605,7 +1614,7 @@ async def sync_plex(
 ):
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = settings_result.scalar_one_or_none()
-    if not settings or not settings.tmdb_api_key:
+    if not await _get_effective_tmdb_key(db, settings):
         raise HTTPException(status_code=400, detail="TMDB API key required")
 
     conn_result = await db.execute(
@@ -1646,7 +1655,7 @@ async def heal_metadata(
     """Re-enrich all collection items that are missing poster/date metadata."""
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = result.scalar_one_or_none()
-    if not settings or not settings.tmdb_api_key:
+    if not await _get_effective_tmdb_key(db, settings):
         raise HTTPException(status_code=400, detail="TMDB API key required")
 
     background_tasks.add_task(run_heal, current_user.id, settings.tmdb_api_key)

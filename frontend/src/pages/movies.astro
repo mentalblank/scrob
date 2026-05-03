@@ -14,7 +14,7 @@ const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
 
 const settings = await api.auth.getSettings(token!);
-const hasTmdbKey = !!settings?.tmdb_api_key;
+const hasTmdbKey = !!settings?.has_effective_tmdb_key;
 
 let data: { results: MediaItem[]; total_pages: number; page: number } = { results: [], total_pages: 0, page: 1 };
 if (hasTmdbKey) {

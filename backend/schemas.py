@@ -15,6 +15,7 @@ class User(UserBase):
     id: int
     api_key: str
     display_name: str
+    is_admin: bool = False
     totp_enabled: bool = False
     email_confirmed: bool = True
     has_password: bool = True
@@ -70,6 +71,7 @@ class TotpBackupCodesResponse(BaseModel):
 
 class UserSettings(BaseModel):
     tmdb_api_key: Optional[str] = None
+    has_effective_tmdb_key: bool = False
 
     # Radarr integration
     radarr_url: Optional[str] = None
@@ -207,3 +209,32 @@ class PublicProfileResponse(BaseModel):
     followers: list[dict] = []
     following: list[dict] = []
     is_following: bool = False
+
+
+class GlobalSettings(BaseModel):
+    tmdb_api_key           : Optional[str] = None
+    radarr_url             : Optional[str] = None
+    radarr_token           : Optional[str] = None
+    radarr_root_folder     : Optional[str] = None
+    radarr_quality_profile : Optional[int] = None
+    radarr_tags            : Optional[list] = None
+    sonarr_url             : Optional[str] = None
+    sonarr_token           : Optional[str] = None
+    sonarr_root_folder     : Optional[str] = None
+    sonarr_quality_profile : Optional[int] = None
+    sonarr_tags            : Optional[list] = None
+    sonarr_season_folder   : bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class AdminUser(BaseModel):
+    id         : int
+    username   : str
+    email      : str
+    is_admin   : bool
+    created_at : datetime
+
+    class Config:
+        from_attributes = True

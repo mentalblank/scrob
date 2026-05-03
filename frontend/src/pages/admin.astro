@@ -1,0 +1,579 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+import type { AdminUser } from "../lib/api";
+
+const { token, user } = Astro.locals;
+
+if (!user?.is_admin) {
+  return Astro.redirect("/", 302);
+}
+
+Astro.response.headers.set("Cache-Control", "no-store");
+
+const [globalSettings, users] = await Promise.all([
+  api.admin.getSettings(token!),
+  api.admin.listUsers(token!),
+]);
+
+const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
+---
+
+<Base title="Admin">
+  <div id="app-data"
+    data-token={token}
+    data-current-user-id={user!.id}
+    data-admin-count={adminCount}
+    class="hidden" aria-hidden="true">
+  </div>
+
+  <div class="max-w-4xl mx-auto px-4 py-8 space-y-10">
+    <h1 class="text-2xl font-bold text-zinc-100">Admin Panel</h1>
+
+    <div id="js-message" class="hidden"></div>
+
+    <!-- ── Global Server Settings ── -->
+    <section>
+      <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2 mb-6">Global Server Settings</h2>
+      <p class="text-zinc-400 text-sm mb-6">These settings apply to all users. A user's own settings always take priority if configured on their profile.</p>
+
+      <form id="global-settings-form" class="space-y-3">
+
+        <!-- TMDB -->
+        <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+          <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="tmdb-body">
+            <div class="flex items-center gap-3 pointer-events-none">
+              <span class="w-2 h-2 bg-blue-500 rounded-full shrink-0"></span>
+              <span class="font-medium text-zinc-200">TMDB</span>
+            </div>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </div>
+          <div id="tmdb-body" class="border-t border-zinc-800 hidden">
+            <div class="px-6 py-6">
+              <div class="space-y-2 max-w-md">
+                <label for="tmdb_api_key" class="block text-sm font-medium text-zinc-400">API Key</label>
+                <div class="relative group/field">
+                  <input
+                    type="password"
+                    name="tmdb_api_key"
+                    id="tmdb_api_key"
+                    value={globalSettings.tmdb_api_key ?? ""}
+                    placeholder="eyJhbGciOiJIUzI1NiJ9..."
+                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                  <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle visibility">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                  </button>
+                </div>
+                <p class="text-xs text-zinc-500">Required for all users who don't set their own key.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Radarr -->
+        <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+          <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="radarr-body">
+            <div class="flex items-center gap-3 pointer-events-none">
+              <span class="w-2 h-2 bg-yellow-500 rounded-full shrink-0"></span>
+              <div class="flex flex-col gap-0.5">
+                <span class="font-medium text-zinc-200">Radarr</span>
+                <span id="radarr-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded self-start pointer-events-auto"></span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="flex gap-2" onclick="event.stopPropagation()">
+                <button type="button" id="test-radarr-btn" class="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Test & Fetch</button>
+              </div>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+              </svg>
+            </div>
+          </div>
+          <div id="radarr-body" class="border-t border-zinc-800 hidden">
+            <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+              <div class="space-y-4">
+                <div class="space-y-2">
+                  <label for="radarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
+                  <input type="url" name="radarr_url" id="radarr_url" placeholder="http://192.168.1.100:7878" value={globalSettings.radarr_url ?? ""}
+                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                </div>
+                <div class="space-y-2">
+                  <label for="radarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
+                  <div class="relative group/field">
+                    <input type="password" name="radarr_token" id="radarr_token" value={globalSettings.radarr_token ?? ""}
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle visibility">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="space-y-4">
+                <div class="space-y-2">
+                  <label for="radarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
+                  <select name="radarr_root_folder" id="radarr_root_folder"
+                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                    <option value="">-- Select Folder --</option>
+                    {globalSettings.radarr_root_folder && <option value={globalSettings.radarr_root_folder} selected>{globalSettings.radarr_root_folder}</option>}
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label for="radarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
+                  <select name="radarr_quality_profile" id="radarr_quality_profile"
+                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                    <option value="">-- Select Profile --</option>
+                    {globalSettings.radarr_quality_profile && <option value={globalSettings.radarr_quality_profile} selected>Profile ID: {globalSettings.radarr_quality_profile}</option>}
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label class="block text-sm font-medium text-zinc-400">Tags</label>
+                  <div id="radarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                    <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
+                    {globalSettings.radarr_tags?.map((tid: number) => (
+                      <input type="hidden" name="radarr_tags" value={tid} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sonarr -->
+        <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+          <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="sonarr-body">
+            <div class="flex items-center gap-3 pointer-events-none">
+              <span class="w-2 h-2 bg-sky-500 rounded-full shrink-0"></span>
+              <div class="flex flex-col gap-0.5">
+                <span class="font-medium text-zinc-200">Sonarr</span>
+                <span id="sonarr-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded self-start pointer-events-auto"></span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="flex gap-2" onclick="event.stopPropagation()">
+                <button type="button" id="test-sonarr-btn" class="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Test & Fetch</button>
+              </div>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+              </svg>
+            </div>
+          </div>
+          <div id="sonarr-body" class="border-t border-zinc-800 hidden">
+            <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+              <div class="space-y-4">
+                <div class="space-y-2">
+                  <label for="sonarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
+                  <input type="url" name="sonarr_url" id="sonarr_url" placeholder="http://192.168.1.100:8989" value={globalSettings.sonarr_url ?? ""}
+                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                </div>
+                <div class="space-y-2">
+                  <label for="sonarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
+                  <div class="relative group/field">
+                    <input type="password" name="sonarr_token" id="sonarr_token" value={globalSettings.sonarr_token ?? ""}
+                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle visibility">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="space-y-4">
+                <div class="space-y-2">
+                  <label for="sonarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
+                  <select name="sonarr_root_folder" id="sonarr_root_folder"
+                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                    <option value="">-- Select Folder --</option>
+                    {globalSettings.sonarr_root_folder && <option value={globalSettings.sonarr_root_folder} selected>{globalSettings.sonarr_root_folder}</option>}
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label for="sonarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
+                  <select name="sonarr_quality_profile" id="sonarr_quality_profile"
+                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                    <option value="">-- Select Profile --</option>
+                    {globalSettings.sonarr_quality_profile && <option value={globalSettings.sonarr_quality_profile} selected>Profile ID: {globalSettings.sonarr_quality_profile}</option>}
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label class="block text-sm font-medium text-zinc-400">Tags</label>
+                  <div id="sonarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                    <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
+                    {globalSettings.sonarr_tags?.map((tid: number) => (
+                      <input type="hidden" name="sonarr_tags" value={tid} />
+                    ))}
+                  </div>
+                </div>
+                <label class="flex items-center justify-between gap-3 p-3 bg-zinc-900 border border-zinc-800 rounded-lg cursor-pointer hover:bg-zinc-800/60 transition-colors">
+                  <span class="text-sm text-zinc-300">Use season folders</span>
+                  <input type="checkbox" name="sonarr_season_folder" id="sonarr_season_folder" value="true" class="sr-only peer" checked={globalSettings.sonarr_season_folder !== false} />
+                  <div class="relative w-10 h-5 bg-zinc-700 peer-checked:bg-blue-600 rounded-full transition-colors pointer-events-none shrink-0 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-2">
+          <button type="submit" id="save-settings-btn"
+            class="w-full sm:w-auto bg-zinc-100 text-zinc-950 font-bold px-8 py-3 rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-50">
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ── Users ── -->
+    <section>
+      <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2 mb-6">Users</h2>
+
+      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-zinc-800 text-left">
+              <th class="px-4 py-3 text-zinc-400 font-medium">Username</th>
+              <th class="px-4 py-3 text-zinc-400 font-medium">Email</th>
+              <th class="px-4 py-3 text-zinc-400 font-medium">Role</th>
+              <th class="px-4 py-3 text-zinc-400 font-medium text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="users-table-body">
+            {users.map((u: AdminUser) => (
+              <tr class="border-b border-zinc-800/50 last:border-0 hover:bg-zinc-800/30 transition"
+                  data-user-id={u.id} data-is-admin={u.is_admin}>
+                <td class="px-4 py-3 text-zinc-100 font-medium">{u.username}</td>
+                <td class="px-4 py-3 text-zinc-400">{u.email}</td>
+                <td class="px-4 py-3">
+                  {u.is_admin
+                    ? <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">Admin</span>
+                    : <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-zinc-700/50 text-zinc-400 border border-zinc-700">User</span>
+                  }
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <div class="flex items-center justify-end gap-2">
+                    <button
+                      class="toggle-admin-btn px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer border"
+                      class:list={[
+                        u.is_admin
+                          ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700"
+                          : "bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/20"
+                      ]}
+                    >
+                      {u.is_admin ? "Remove Admin" : "Make Admin"}
+                    </button>
+                    <button class="delete-user-btn px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-all active:scale-95 cursor-pointer">
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</Base>
+
+<script>
+  const appData = document.getElementById('app-data') as HTMLElement;
+  const token = appData.dataset.token!;
+  const currentUserId = parseInt(appData.dataset.currentUserId!);
+
+  function esc(s: string | null | undefined): string {
+    if (s == null) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function showMessage(text: string, type: 'success' | 'error' = 'success') {
+    const msg = document.getElementById('js-message')!;
+    msg.textContent = text;
+    msg.className = `p-4 rounded-lg mb-8 ${
+      type === 'success'
+        ? 'bg-green-500/10 border border-green-500 text-green-500'
+        : 'bg-red-500/10 border border-red-500 text-red-500'
+    }`;
+    msg.classList.remove('hidden');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if ((window as any)._msgTimeout) clearTimeout((window as any)._msgTimeout);
+    (window as any)._msgTimeout = setTimeout(() => msg.classList.add('hidden'), 4000);
+  }
+
+  function setConnStatus(id: string, state: 'checking' | 'connected' | 'disconnected') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('hidden');
+    if (state === 'checking') {
+      el.textContent = 'Checking…';
+      el.className = 'text-xs font-normal px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-400';
+    } else if (state === 'connected') {
+      el.textContent = '● Connected';
+      el.className = 'text-xs font-normal px-1.5 py-0.5 rounded bg-green-500/15 text-green-400';
+    } else {
+      el.textContent = '● Disconnected';
+      el.className = 'text-xs font-normal px-1.5 py-0.5 rounded bg-red-500/15 text-red-400';
+    }
+  }
+
+  function renderTags(containerId: string, tags: { id: number; label: string }[], selectedIds: number[], prefix: string) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!tags || tags.length === 0) {
+      container.innerHTML = '<span class="text-xs text-zinc-500 italic px-2 py-1">No tags available</span>';
+      return;
+    }
+    container.innerHTML = tags.map(tag => {
+      const checked = selectedIds.includes(tag.id);
+      return `<label class="flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer text-xs transition-colors ${checked ? 'bg-blue-600/20 text-blue-300' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+        <input type="checkbox" name="${esc(prefix)}_tags" value="${esc(String(tag.id))}" ${checked ? 'checked' : ''} class="sr-only" />
+        ${esc(tag.label)}
+      </label>`;
+    }).join('');
+    container.querySelectorAll('label').forEach(label => {
+      label.addEventListener('click', () => {
+        const cb = label.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        const isChecked = cb.checked;
+        label.className = `flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer text-xs transition-colors ${isChecked ? 'bg-blue-600/20 text-blue-300' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`;
+      });
+    });
+  }
+
+  // ── Collapsibles ──
+  document.querySelectorAll('.collapsible-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const targetId = header.getAttribute('data-target');
+      const body = targetId ? document.getElementById(targetId) : null;
+      if (!body) return;
+      const isOpen = !body.classList.contains('hidden');
+      body.classList.toggle('hidden', isOpen);
+      header.querySelector('.collapsible-chevron')?.classList.toggle('rotate-180', !isOpen);
+    });
+  });
+
+  // ── Password toggles ──
+  document.querySelectorAll('.password-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = btn.closest('.relative')?.querySelector('input') as HTMLInputElement | null;
+      if (!input) return;
+      input.type = input.type === 'password' ? 'text' : 'password';
+      btn.querySelector('.eye-icon')?.classList.toggle('hidden');
+      btn.querySelector('.eye-slash-icon')?.classList.toggle('hidden');
+    });
+  });
+
+  // ── Test & Fetch ──
+  document.getElementById('test-radarr-btn')?.addEventListener('click', async () => {
+    const u = (document.getElementById('radarr_url') as HTMLInputElement).value.trim();
+    const t = (document.getElementById('radarr_token') as HTMLInputElement).value.trim();
+    if (!u || !t) { showMessage('Enter Radarr URL and API key first.', 'error'); return; }
+    setConnStatus('radarr-conn-status', 'checking');
+    try {
+      const testRes = await fetch(`/api/proxy/auth/test-radarr?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!testRes.ok) { setConnStatus('radarr-conn-status', 'disconnected'); throw new Error((await testRes.json()).detail || 'Failed to connect'); }
+
+      const profRes = await fetch(`/api/proxy/auth/radarr/profiles?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const profData = await profRes.json();
+
+      const rootSelect = document.getElementById('radarr_root_folder') as HTMLSelectElement;
+      const qualSelect = document.getElementById('radarr_quality_profile') as HTMLSelectElement;
+      const currentFolder = rootSelect.value;
+      const currentProfile = qualSelect.value;
+      rootSelect.innerHTML = '<option value="">-- Select Folder --</option>' +
+        profData.root_folders.map((f: { path: string; freeSpace: number }) =>
+          `<option value="${esc(f.path)}" ${f.path === currentFolder ? 'selected' : ''}>${esc(f.path)} (${(f.freeSpace / 1024**3).toFixed(1)}GB free)</option>`).join('');
+      qualSelect.innerHTML = '<option value="">-- Select Profile --</option>' +
+        profData.quality_profiles.map((p: { id: number; name: string }) =>
+          `<option value="${esc(String(p.id))}" ${String(p.id) === currentProfile ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+
+      const tagContainer = document.getElementById('radarr_tags_list')!;
+      const selectedTags = Array.from(tagContainer.querySelectorAll<HTMLInputElement>('input[name="radarr_tags"]')).map(i => parseInt(i.value));
+      renderTags('radarr_tags_list', profData.tags, selectedTags, 'radarr');
+
+      setConnStatus('radarr-conn-status', 'connected');
+      showMessage('Radarr connected and profiles fetched.');
+    } catch (err: unknown) {
+      showMessage(err instanceof Error ? err.message : 'Radarr error', 'error');
+    }
+  });
+
+  document.getElementById('test-sonarr-btn')?.addEventListener('click', async () => {
+    const u = (document.getElementById('sonarr_url') as HTMLInputElement).value.trim();
+    const t = (document.getElementById('sonarr_token') as HTMLInputElement).value.trim();
+    if (!u || !t) { showMessage('Enter Sonarr URL and API key first.', 'error'); return; }
+    setConnStatus('sonarr-conn-status', 'checking');
+    try {
+      const testRes = await fetch(`/api/proxy/auth/test-sonarr?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!testRes.ok) { setConnStatus('sonarr-conn-status', 'disconnected'); throw new Error((await testRes.json()).detail || 'Failed to connect'); }
+
+      const profRes = await fetch(`/api/proxy/auth/sonarr/profiles?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const profData = await profRes.json();
+
+      const rootSelect = document.getElementById('sonarr_root_folder') as HTMLSelectElement;
+      const qualSelect = document.getElementById('sonarr_quality_profile') as HTMLSelectElement;
+      const currentFolder = rootSelect.value;
+      const currentProfile = qualSelect.value;
+      rootSelect.innerHTML = '<option value="">-- Select Folder --</option>' +
+        profData.root_folders.map((f: { path: string; freeSpace: number }) =>
+          `<option value="${esc(f.path)}" ${f.path === currentFolder ? 'selected' : ''}>${esc(f.path)} (${(f.freeSpace / 1024**3).toFixed(1)}GB free)</option>`).join('');
+      qualSelect.innerHTML = '<option value="">-- Select Profile --</option>' +
+        profData.quality_profiles.map((p: { id: number; name: string }) =>
+          `<option value="${esc(String(p.id))}" ${String(p.id) === currentProfile ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+
+      const tagContainer = document.getElementById('sonarr_tags_list')!;
+      const selectedTags = Array.from(tagContainer.querySelectorAll<HTMLInputElement>('input[name="sonarr_tags"]')).map(i => parseInt(i.value));
+      renderTags('sonarr_tags_list', profData.tags, selectedTags, 'sonarr');
+
+      setConnStatus('sonarr-conn-status', 'connected');
+      showMessage('Sonarr connected and profiles fetched.');
+    } catch (err: unknown) {
+      showMessage(err instanceof Error ? err.message : 'Sonarr error', 'error');
+    }
+  });
+
+  // ── Global settings form ──
+  document.getElementById('global-settings-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('save-settings-btn') as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    const form = e.target as HTMLFormElement;
+    const fd = new FormData(form);
+    const body: Record<string, string | number | boolean | number[] | null> = {};
+
+    for (const f of ['tmdb_api_key', 'radarr_url', 'radarr_token', 'radarr_root_folder', 'sonarr_url', 'sonarr_token', 'sonarr_root_folder']) {
+      const v = ((fd.get(f) as string) ?? '').trim();
+      body[f] = v || null;
+    }
+    for (const f of ['radarr_quality_profile', 'sonarr_quality_profile']) {
+      const v = ((fd.get(f) as string) ?? '').trim();
+      body[f] = v ? parseInt(v) : null;
+    }
+    body['sonarr_season_folder'] = fd.get('sonarr_season_folder') === 'true';
+
+    const radarrTags = fd.getAll('radarr_tags').map(v => parseInt(v as string)).filter(n => !isNaN(n));
+    body['radarr_tags'] = radarrTags.length ? radarrTags : null;
+    const sonarrTags = fd.getAll('sonarr_tags').map(v => parseInt(v as string)).filter(n => !isNaN(n));
+    body['sonarr_tags'] = sonarrTags.length ? sonarrTags : null;
+
+    try {
+      const res = await fetch('/api/proxy/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to save');
+      showMessage('Settings saved successfully.');
+    } catch (err: unknown) {
+      showMessage(err instanceof Error ? err.message : 'Failed to save', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+    }
+  });
+
+  // ── Users table ──
+  function countAdmins(): number {
+    return document.querySelectorAll('#users-table-body tr[data-is-admin="true"]').length;
+  }
+
+  function refreshToggleButtons() {
+    const sole = countAdmins() === 1;
+    document.querySelectorAll<HTMLTableRowElement>('#users-table-body tr[data-user-id]').forEach(row => {
+      const userId = parseInt(row.dataset.userId!);
+      const isAdmin = row.dataset.isAdmin === 'true';
+      const btn = row.querySelector('.toggle-admin-btn') as HTMLButtonElement;
+      if (isAdmin && userId === currentUserId && sole) {
+        btn.disabled = true;
+        btn.title = 'You are the sole admin. Promote another user first.';
+      } else {
+        btn.disabled = false;
+        btn.title = '';
+      }
+    });
+  }
+
+  function updateRow(row: HTMLTableRowElement, isAdmin: boolean) {
+    row.dataset.isAdmin = String(isAdmin);
+    const badge = row.querySelector('td:nth-child(3) span')!;
+    if (isAdmin) {
+      badge.className = 'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20';
+      badge.textContent = 'Admin';
+    } else {
+      badge.className = 'inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-zinc-700/50 text-zinc-400 border border-zinc-700';
+      badge.textContent = 'User';
+    }
+    const btn = row.querySelector('.toggle-admin-btn') as HTMLButtonElement;
+    if (isAdmin) {
+      btn.className = 'toggle-admin-btn px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer border bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700';
+      btn.textContent = 'Remove Admin';
+    } else {
+      btn.className = 'toggle-admin-btn px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer border bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/20';
+      btn.textContent = 'Make Admin';
+    }
+    refreshToggleButtons();
+  }
+
+  refreshToggleButtons();
+
+  document.getElementById('users-table-body')!.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    const row = target.closest('tr[data-user-id]') as HTMLTableRowElement | null;
+    if (!row) return;
+    const userId = parseInt(row.dataset.userId!);
+
+    if (target.classList.contains('toggle-admin-btn')) {
+      const btn = target as HTMLButtonElement;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/proxy/admin/users/${userId}/toggle-admin`, {
+          method: 'PATCH', headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+        const updated = await res.json();
+        updateRow(row, updated.is_admin);
+        showMessage('User updated.');
+      } catch (err: unknown) {
+        showMessage(err instanceof Error ? err.message : 'Failed', 'error');
+        btn.disabled = false;
+      }
+    }
+
+    if (target.classList.contains('delete-user-btn')) {
+      if (userId === currentUserId) {
+        showMessage('Use account settings to delete your own account.', 'error');
+        return;
+      }
+      const username = row.querySelector('td')!.textContent!.trim();
+      if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+      const btn = target as HTMLButtonElement;
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/proxy/admin/users/${userId}`, {
+          method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+        row.remove();
+        refreshToggleButtons();
+        showMessage('User deleted.');
+      } catch (err: unknown) {
+        showMessage(err instanceof Error ? err.message : 'Failed', 'error');
+        btn.disabled = false;
+      }
+    }
+  });
+</script>

@@ -263,9 +263,33 @@ export interface UserProfile {
   username: string;
   display_name: string;
   role: string;
+  is_admin: boolean;
   api_key: string;
   totp_enabled: boolean;
   created_at: string;
+}
+
+export interface AdminUser {
+  id: number;
+  username: string;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface GlobalSettings {
+  tmdb_api_key: string | null;
+  radarr_url: string | null;
+  radarr_token: string | null;
+  radarr_root_folder: string | null;
+  radarr_quality_profile: number | null;
+  radarr_tags: number[] | null;
+  sonarr_url: string | null;
+  sonarr_token: string | null;
+  sonarr_root_folder: string | null;
+  sonarr_quality_profile: number | null;
+  sonarr_tags: number[] | null;
+  sonarr_season_folder: boolean;
 }
 
 export interface LoginResponse {
@@ -321,6 +345,7 @@ export interface UserPreferences {
 
 export interface UserSettings {
   tmdb_api_key: string | null;
+  has_effective_tmdb_key: boolean;
 
   radarr_url: string | null;
   radarr_token: string | null;
@@ -943,5 +968,18 @@ export const api = {
       patch<{ id: number; content: string; updated_at: string | null }>(`/comments/${id}`, { content }, token),
     delete: (id: number, token: string) =>
       del<{ message: string }>(`/comments/${id}`, token),
+  },
+
+  admin: {
+    getSettings: (token: string) =>
+      get<GlobalSettings>("/admin/settings", undefined, token),
+    updateSettings: (body: Partial<GlobalSettings>, token: string) =>
+      patch<GlobalSettings>("/admin/settings", body, token),
+    listUsers: (token: string) =>
+      get<AdminUser[]>("/admin/users", undefined, token),
+    toggleAdmin: (userId: number, token: string) =>
+      patch<AdminUser>(`/admin/users/${userId}/toggle-admin`, undefined, token),
+    deleteUser: (userId: number, token: string) =>
+      del<{ status: string }>(`/admin/users/${userId}`, token),
   },
 };

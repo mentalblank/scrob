@@ -14,6 +14,7 @@ from jose import jwt, JWTError
 
 from db import get_db
 from models.users import User, UserSettings, TotpBackupCode
+from models.global_settings import GlobalSettings
 from models.connections import MediaServerConnection
 from models.email_activation import EmailActivation
 from models.password_reset import PasswordResetToken
@@ -141,6 +142,9 @@ async def register(request: Request, user_in: schemas.UserCreate, db: AsyncSessi
             detail="User with this email or username already exists",
         )
 
+    count_result = await db.execute(select(func.count()).select_from(User))
+    is_first_user = count_result.scalar_one() == 0
+
     email_confirmed = not app_settings.require_email_validation
     new_user = User(
         email=user_in.email,
@@ -148,6 +152,7 @@ async def register(request: Request, user_in: schemas.UserCreate, db: AsyncSessi
         password_hash=get_password_hash(user_in.password),
         api_key=_generate_api_key(),
         role=user_in.role,
+        is_admin=is_first_user,
         email_confirmed=email_confirmed,
     )
     db.add(new_user)
@@ -265,14 +270,29 @@ async def delete_user_me(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if current_user.is_admin:
+        count_result = await db.execute(
+            select(func.count()).select_from(User).where(User.is_admin.is_(True))
+        )
+        if count_result.scalar_one() <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You are the sole admin. Promote another user to admin before deleting your account.",
+            )
     await db.execute(delete(User).where(User.id == current_user.id))
     await db.commit()
     return {"status": "account deleted"}
 
-def _settings_response(settings: UserSettings) -> schemas.UserSettings:
+async def _settings_response(settings: UserSettings, db: AsyncSession) -> schemas.UserSettings:
     """Build a UserSettings schema response, injecting computed fields."""
     data = schemas.UserSettings.model_validate(settings)
     data.trakt_connected = bool(settings.trakt_access_token)
+    if not settings.tmdb_api_key:
+        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        gs = gs_result.scalar_one_or_none()
+        data.has_effective_tmdb_key = bool(gs and gs.tmdb_api_key)
+    else:
+        data.has_effective_tmdb_key = True
     return data
 
 
@@ -292,7 +312,7 @@ async def get_user_settings(
         await db.commit()
         await db.refresh(settings)
 
-    return _settings_response(settings)
+    return await _settings_response(settings, db)
 
 @router.patch("/settings", response_model=schemas.UserSettings)
 async def update_user_settings(
@@ -330,7 +350,7 @@ async def update_user_settings(
 
     await db.commit()
     await db.refresh(settings)
-    return _settings_response(settings)
+    return await _settings_response(settings, db)
 
 
 # ── Media Server Connection CRUD ───────────────────────────────────────────────

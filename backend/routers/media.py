@@ -25,6 +25,7 @@ from core import tmdb
 from dependencies import get_current_user
 from models.users import User, UserSettings
 from models.show import Show as ShowModel
+from models.global_settings import GlobalSettings
 
 router = APIRouter()
 
@@ -81,13 +82,16 @@ async def enrich_with_state(
     # --- Radarr / Sonarr state (Request button logic) ---
     settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = settings_q.scalar_one_or_none()
-    
+    gs = await _get_global_settings(db)
+
     monitored_status = {} # tmdb_id -> bool
     request_enabled_map = {} # tmdb_id -> bool
-    
-    if settings:
-        radarr_ready = all([settings.radarr_url, settings.radarr_token, settings.radarr_root_folder, settings.radarr_quality_profile])
-        sonarr_ready = all([settings.sonarr_url, settings.sonarr_token, settings.sonarr_root_folder, settings.sonarr_quality_profile])
+
+    radarr_cfg = _effective_radarr(settings, gs)
+    sonarr_cfg = _effective_sonarr(settings, gs)
+    if radarr_cfg or sonarr_cfg:
+        radarr_ready = radarr_cfg is not None
+        sonarr_ready = sonarr_cfg is not None
         
         # We only do the expensive lookup if len(items) == 1 (detail view)
         if len(items) == 1:
@@ -101,28 +105,25 @@ async def enrich_with_state(
                 request_enabled_map[tid] = radarr_ready
                 if radarr_ready:
                     try:
-                        url = settings.radarr_url.rstrip("/")
+                        url = radarr_cfg.radarr_url.rstrip("/")
                         async with httpx.AsyncClient(timeout=5.0) as client:
                             res = await client.get(
                                 f"{url}/api/v3/movie/lookup",
-                                params={"apiKey": settings.radarr_token, "term": f"tmdb:{tid}"}
+                                params={"apiKey": radarr_cfg.radarr_token, "term": f"tmdb:{tid}"}
                             )
                             if res.status_code == 200:
                                 lookup = res.json()
                                 if lookup:
-                                    # If any result has a non-zero id, it's already in Radarr
                                     for entry in lookup:
                                         if entry.get("id"):
                                             monitored_status[tid] = True
                                             break
                     except Exception: pass
-            
+
             elif t == "series":
                 request_enabled_map[tid] = sonarr_ready
                 if sonarr_ready:
                     try:
-                        # Get TVDB ID: prefer cached value in Show.tmdb_data (no API call),
-                        # fall back to live TMDB lookup only if missing.
                         tvdb_id: int | None = None
                         show_q = await db.execute(
                             select(ShowModel).where(ShowModel.tmdb_id == tid)
@@ -138,16 +139,15 @@ async def enrich_with_state(
                             tvdb_id = ext_ids.get("tvdb_id")
 
                         if tvdb_id:
-                            url = settings.sonarr_url.rstrip("/")
+                            url = sonarr_cfg.sonarr_url.rstrip("/")
                             async with httpx.AsyncClient(timeout=5.0) as client:
                                 res = await client.get(
                                     f"{url}/api/v3/series/lookup",
-                                    params={"apiKey": settings.sonarr_token, "term": f"tvdb:{tvdb_id}"}
+                                    params={"apiKey": sonarr_cfg.sonarr_token, "term": f"tvdb:{tvdb_id}"}
                                 )
                                 if res.status_code == 200:
                                     lookup = res.json()
                                     if lookup:
-                                        # If any result has a non-zero id, it's already in Sonarr
                                         for entry in lookup:
                                             if entry.get("id"):
                                                 monitored_status[tid] = True
@@ -482,12 +482,36 @@ async def enrich_with_state(
     return items
 
 
+async def _get_global_settings(db: AsyncSession) -> GlobalSettings | None:
+    result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    return result.scalar_one_or_none()
+
+
 async def get_user_tmdb_key(db: AsyncSession, user_id: int) -> str | None:
     result = await db.execute(
         select(UserSettings).where(UserSettings.user_id == user_id)
     )
     settings_row = result.scalar_one_or_none()
-    return settings_row.tmdb_api_key if settings_row else None
+    if settings_row and settings_row.tmdb_api_key:
+        return settings_row.tmdb_api_key
+    gs = await _get_global_settings(db)
+    return gs.tmdb_api_key if gs else None
+
+
+def _effective_radarr(user_settings: UserSettings | None, global_settings: GlobalSettings | None):
+    """Return the settings object whose Radarr config is fully configured, user first."""
+    for s in (user_settings, global_settings):
+        if s and all([s.radarr_url, s.radarr_token, s.radarr_root_folder, s.radarr_quality_profile]):
+            return s
+    return None
+
+
+def _effective_sonarr(user_settings: UserSettings | None, global_settings: GlobalSettings | None):
+    """Return the settings object whose Sonarr config is fully configured, user first."""
+    for s in (user_settings, global_settings):
+        if s and all([s.sonarr_url, s.sonarr_token, s.sonarr_root_folder, s.sonarr_quality_profile]):
+            return s
+    return None
 
 
 def check_tmdb_key(api_key: str | None) -> bool:
@@ -2246,52 +2270,50 @@ async def request_media(
         select(UserSettings).where(UserSettings.user_id == current_user.id)
     )
     settings = settings_q.scalar_one_or_none()
-    
-    if not settings:
-        raise HTTPException(status_code=400, detail="User settings not configured")
+    gs = await _get_global_settings(db)
 
     if type == MediaType.movie:
-        if not all([settings.radarr_url, settings.radarr_token, settings.radarr_root_folder, settings.radarr_quality_profile]):
+        radarr_cfg = _effective_radarr(settings, gs)
+        if not radarr_cfg:
             raise HTTPException(status_code=400, detail="Radarr not configured in settings")
-        
+
         from core import radarr
         try:
-            # We need the title for the request pattern, or let radarr lookup do it
             res = await radarr.add_movie(
-                url=settings.radarr_url,
-                token=settings.radarr_token,
+                url=radarr_cfg.radarr_url,
+                token=radarr_cfg.radarr_token,
                 tmdb_id=tmdb_id,
-                title="", # Radarr client does a lookup by tmdb_id anyway
-                root_folder=settings.radarr_root_folder,
-                quality_profile_id=settings.radarr_quality_profile,
-                tags=settings.radarr_tags
+                title="",
+                root_folder=radarr_cfg.radarr_root_folder,
+                quality_profile_id=radarr_cfg.radarr_quality_profile,
+                tags=radarr_cfg.radarr_tags
             )
             return res
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Radarr error: {e}")
 
     elif type == MediaType.series:
-        if not all([settings.sonarr_url, settings.sonarr_token, settings.sonarr_root_folder, settings.sonarr_quality_profile]):
+        sonarr_cfg = _effective_sonarr(settings, gs)
+        if not sonarr_cfg:
             raise HTTPException(status_code=400, detail="Sonarr not configured in settings")
-        
+
         from core import sonarr, tmdb
         try:
-            # Sonarr needs TVDB ID. TMDB /tv/{id}/external_ids provides it.
             tmdb_key = await get_user_tmdb_key(db, current_user.id)
             ext_ids = await tmdb.get_external_ids(tmdb_id, "tv", api_key=tmdb_key)
             tvdb_id = ext_ids.get("tvdb_id")
-            
+
             if not tvdb_id:
                 raise HTTPException(status_code=400, detail="Could not find TVDB ID for this show")
 
             res = await sonarr.add_series(
-                url=settings.sonarr_url,
-                token=settings.sonarr_token,
+                url=sonarr_cfg.sonarr_url,
+                token=sonarr_cfg.sonarr_token,
                 tvdb_id=tvdb_id,
-                root_folder=settings.sonarr_root_folder,
-                quality_profile_id=settings.sonarr_quality_profile,
-                tags=settings.sonarr_tags,
-                season_folder=settings.sonarr_season_folder if settings.sonarr_season_folder is not None else True,
+                root_folder=sonarr_cfg.sonarr_root_folder,
+                quality_profile_id=sonarr_cfg.sonarr_quality_profile,
+                tags=sonarr_cfg.sonarr_tags,
+                season_folder=sonarr_cfg.sonarr_season_folder if sonarr_cfg.sonarr_season_folder is not None else True,
             )
             return res
         except Exception as e:

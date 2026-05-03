@@ -12,7 +12,7 @@ const apiUrl = import.meta.env.PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Fetch settings first to check for TMDB key
 const settings = await api.auth.getSettings(token!);
-const hasTmdbKey = !!settings?.tmdb_api_key;
+const hasTmdbKey = !!settings?.has_effective_tmdb_key;
 
 let recentMovies: { results: MediaItem[] } = { results: [] };
 let recentShows: { results: MediaItem[] } = { results: [] };

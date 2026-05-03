@@ -15,7 +15,7 @@ const isUserSearch = type === "user";
 const showYearFilter = type === "movie" || type === "series";
 
 const settings = await api.auth.getSettings(token!);
-const hasTmdbKey = !!settings?.tmdb_api_key;
+const hasTmdbKey = !!settings?.has_effective_tmdb_key;
 
 let results: MediaItem[] = [];
 let userResults: UserSearchResult[] = [];

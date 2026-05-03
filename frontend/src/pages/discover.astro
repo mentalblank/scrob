@@ -9,7 +9,7 @@ const [settings, profileData] = await Promise.all([
   api.auth.getSettings(token!),
   api.profile.get(token!).catch(() => null),
 ]);
-const hasTmdbKey = !!settings?.tmdb_api_key;
+const hasTmdbKey = !!settings?.has_effective_tmdb_key;
 const watchRegion: string = profileData?.country ?? 'US';
 const hasProfileData = !!(
   profileData?.country ||
