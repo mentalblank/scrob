@@ -1287,3 +1287,262 @@ async def plex_webhook_connection(
 ):
     return await _handle_plex_webhook(request, db, api_key, connection_id)
 
+
+# ── Kodi ───────────────────────────────────────────────────────────────────────
+
+def parse_kodi_payload(payload: dict) -> dict | None:
+    method = payload.get("method") or payload.get("event") or ""
+
+    if method in ("Player.OnPlay", "playback_started"):
+        notification_type = "play"
+    elif method in ("Player.OnPause", "playback_paused"):
+        notification_type = "pause"
+    elif method in ("Player.OnResume", "playback_resumed"):
+        notification_type = "resume"
+    elif method in ("Player.OnStop", "playback_stopped"):
+        notification_type = "stop"
+    elif method in ("Player.OnAVChange", "playback_seeked"):
+        notification_type = "progress"
+    else:
+        return None
+
+    params_data = (payload.get("params") or {}).get("data") or {}
+    addon_data = payload.get("data") or {}
+    item = payload.get("item") or addon_data.get("item") or params_data.get("item") or {}
+    player = payload.get("player") or addon_data.get("player") or params_data.get("player") or {}
+
+    item_type = item.get("type", "")
+    if item_type not in ("movie", "episode"):
+        return None
+
+    unique_ids = item.get("uniqueid") or {}
+    tmdb_id = unique_ids.get("tmdb") or unique_ids.get("tmdbid") or item.get("tmdb_id")
+    imdb_id = unique_ids.get("imdb") or item.get("imdbnumber")
+    tvdb_id = unique_ids.get("tvdb")
+
+    def hms_to_seconds(t: dict) -> int:
+        return t.get("hours", 0) * 3600 + t.get("minutes", 0) * 60 + t.get("seconds", 0)
+
+    time_info = player.get("time") or {}
+    totaltime_info = player.get("totaltime") or {}
+    position_seconds = int(payload.get("position_seconds") or hms_to_seconds(time_info))
+    total_seconds = int(payload.get("total_seconds") or hms_to_seconds(totaltime_info) or item.get("runtime") or 0)
+    progress_percent = round(position_seconds / total_seconds, 4) if total_seconds else 0.0
+
+    ended = bool(params_data.get("end", False)) if method == "Player.OnStop" else False
+
+    return {
+        "notification_type": notification_type,
+        "media_type": "movie" if item_type == "movie" else "episode",
+        "title": item.get("title") or item.get("label") or "",
+        "year": item.get("year"),
+        "tmdb_id": str(tmdb_id) if tmdb_id else None,
+        "imdb_id": str(imdb_id) if imdb_id else None,
+        "tvdb_id": str(tvdb_id) if tvdb_id else None,
+        "series_name": item.get("showtitle"),
+        "season_number": item.get("season"),
+        "episode_number": item.get("episode"),
+        "progress_percent": progress_percent,
+        "progress_seconds": position_seconds,
+        "is_paused": notification_type == "pause",
+        "ended": ended,
+        "session_id": str(item.get("id") or payload.get("session_id") or "0"),
+    }
+
+
+async def find_or_create_media_kodi(data: dict, db: AsyncSession, api_key: str = None) -> Media | None:
+    series_tmdb_id: Optional[int] = None
+
+    if data["media_type"] == "episode":
+        if data.get("tvdb_id"):
+            try:
+                res = await tmdb.find_by_external_id(data["tvdb_id"], "tvdb_id", api_key=api_key)
+                if res.get("tv_results"):
+                    series_tmdb_id = res["tv_results"][0]["id"]
+            except Exception:
+                pass
+
+        if not series_tmdb_id and data.get("imdb_id"):
+            try:
+                res = await tmdb.find_by_external_id(data["imdb_id"], "imdb_id", api_key=api_key)
+                if res.get("tv_results"):
+                    series_tmdb_id = res["tv_results"][0]["id"]
+            except Exception:
+                pass
+
+        if not series_tmdb_id and data.get("series_name"):
+            local = await db.execute(select(Show).where(Show.title.ilike(data["series_name"])))
+            local_show = local.scalars().first()
+            if local_show:
+                series_tmdb_id = local_show.tmdb_id
+            else:
+                try:
+                    res = await tmdb.search_shows(data["series_name"], api_key=api_key)
+                    if res.get("results"):
+                        series_tmdb_id = res["results"][0]["id"]
+                except Exception:
+                    pass
+
+    show = None
+    if series_tmdb_id:
+        try:
+            show = await _find_or_create_show(db, series_tmdb_id, api_key)
+        except Exception:
+            pass
+
+    if data.get("tmdb_id"):
+        result = await db.execute(
+            select(Media).where(
+                Media.tmdb_id == int(data["tmdb_id"]),
+                Media.media_type == MediaType(data["media_type"]),
+            )
+        )
+        media = result.scalars().first()
+        if media:
+            if media.media_type == MediaType.episode and media.show_id is None and show:
+                media.show_id = show.id
+                await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+            return media
+
+    if data["media_type"] == "movie":
+        local_q = select(Media).where(Media.media_type == MediaType.movie, Media.title.ilike(data["title"]))
+        if data.get("year"):
+            local_q = local_q.where(Media.release_date.like(f"{data['year']}%"))
+        media = (await db.execute(local_q)).scalars().first()
+        if media:
+            return media
+        try:
+            search_res = await tmdb.search_movies(data["title"], year=data.get("year"), api_key=api_key)
+            if search_res.get("results"):
+                tmdb_movie = search_res["results"][0]
+                data["tmdb_id"] = str(tmdb_movie["id"])
+                result = await db.execute(
+                    select(Media).where(Media.tmdb_id == tmdb_movie["id"], Media.media_type == MediaType.movie)
+                )
+                media = result.scalars().first()
+                if media:
+                    return media
+        except Exception:
+            pass
+
+    if (
+        data["media_type"] == "episode"
+        and show
+        and data.get("season_number") is not None
+        and data.get("episode_number") is not None
+    ):
+        result = await db.execute(
+            select(Media).where(
+                Media.media_type == MediaType.episode,
+                Media.show_id == show.id,
+                Media.season_number == data["season_number"],
+                Media.episode_number == data["episode_number"],
+            )
+        )
+        media = result.scalars().first()
+        if media:
+            return media
+
+    if data["media_type"] == "episode" and not data.get("tmdb_id") and data.get("season_number") is None:
+        return None
+
+    media = Media(
+        tmdb_id=int(data["tmdb_id"]) if data.get("tmdb_id") else None,
+        media_type=MediaType(data["media_type"]),
+        title=data["title"],
+        season_number=data.get("season_number"),
+        episode_number=data.get("episode_number"),
+        show_id=show.id if show else None,
+    )
+    db.add(media)
+    await db.flush()
+    if show and series_tmdb_id:
+        await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+    else:
+        await enrich_media(media, api_key=api_key)
+    return media
+
+
+async def _handle_kodi_webhook(request: Request, db: AsyncSession, api_key: str):
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    body = await request.body()
+    if not body:
+        return {"status": "ignored", "reason": "empty body"}
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ignored", "reason": "invalid JSON"}
+
+    data = parse_kodi_payload(payload)
+    if not data:
+        return {"status": "ignored"}
+
+    notification_type = data["notification_type"]
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    settings = settings_result.scalar_one_or_none()
+    tmdb_key = await _get_tmdb_key(db, settings)
+
+    media = await find_or_create_media_kodi(data, db, api_key=tmdb_key)
+    if media is None:
+        return {"status": "ignored", "reason": "could not identify media"}
+
+    session_key = f"kodi:{user.id}:{data['session_id']}"
+
+    if notification_type == "play":
+        session = await _get_or_open_session(db, session_key, "kodi", user.id, media.id)
+        session.state = "playing"
+        session.updated_at = datetime.utcnow()
+        await db.commit()
+
+    elif notification_type == "resume":
+        session = await _get_or_open_session(db, session_key, "kodi", user.id, media.id)
+        session.state = "playing"
+        session.progress_percent = data["progress_percent"]
+        session.progress_seconds = data["progress_seconds"]
+        session.updated_at = datetime.utcnow()
+        await db.commit()
+
+    elif notification_type == "pause":
+        result = await db.execute(select(PlaybackSession).where(PlaybackSession.session_key == session_key))
+        session = result.scalar_one_or_none()
+        if session:
+            session.state = "paused"
+            session.progress_percent = data["progress_percent"]
+            session.progress_seconds = data["progress_seconds"]
+            session.updated_at = datetime.utcnow()
+            await db.commit()
+
+    elif notification_type == "progress":
+        session = await _get_or_open_session(db, session_key, "kodi", user.id, media.id)
+        session.state = "paused" if data["is_paused"] else "playing"
+        session.progress_percent = data["progress_percent"]
+        session.progress_seconds = data["progress_seconds"]
+        session.updated_at = datetime.utcnow()
+        await db.commit()
+
+    elif notification_type == "stop":
+        session = await _close_session(db, session_key)
+        progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
+        progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
+        completed = data.get("ended") or progress_percent >= 0.90
+        if progress_percent > 0.05:
+            await _write_watch_event(db, user.id, media.id, progress_percent, progress_seconds, completed)
+        await db.commit()
+
+    return {"status": "ok", "event": notification_type, "title": data["title"]}
+
+
+@router.post("/kodi")
+async def kodi_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_kodi_webhook(request, db, api_key)
+
