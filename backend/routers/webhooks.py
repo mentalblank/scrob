@@ -464,7 +464,8 @@ async def _handle_jellyfin_webhook(request: Request, db: AsyncSession, api_key: 
 
             if allow_collection:
                 await _ensure_collection_entry(
-                    db, user.id, media.id, CollectionSource.jellyfin, data["jellyfin_id"], data.get("quality")
+                    db, user.id, media.id, CollectionSource.jellyfin, data["jellyfin_id"], data.get("quality"),
+                    connection_id=conn.id if conn else None,
                 )
 
     if notification_type in ("PlaybackStart", "playback.start"):
@@ -582,7 +583,8 @@ async def _handle_emby_webhook(request: Request, db: AsyncSession, api_key: str,
 
             if allow_collection:
                 await _ensure_collection_entry(
-                    db, user.id, media.id, CollectionSource.emby, data["jellyfin_id"], data.get("quality")
+                    db, user.id, media.id, CollectionSource.emby, data["jellyfin_id"], data.get("quality"),
+                    connection_id=conn.id if conn else None,
                 )
 
     if notification_type in ("PlaybackStart", "playback.start"):
@@ -750,7 +752,8 @@ async def _ensure_collection_entry(
     media_id: int,
     source: CollectionSource,
     source_id: str,
-    quality: dict = None
+    quality: dict = None,
+    connection_id: int | None = None,
 ) -> None:
     """Ensures a Collection + CollectionFile entry exists for the user, creating or updating as needed."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -772,6 +775,7 @@ async def _ensure_collection_entry(
 
     # 2. Upsert the CollectionFile row (one per collection+source+source_id)
     update_dict: dict = {}
+    if connection_id is not None:          update_dict["connection_id"]       = connection_id
     if quality.get("resolution"):         update_dict["resolution"]         = quality["resolution"]
     if quality.get("video_codec"):        update_dict["video_codec"]        = quality["video_codec"]
     if quality.get("audio_codec"):        update_dict["audio_codec"]        = quality["audio_codec"]
@@ -784,6 +788,7 @@ async def _ensure_collection_entry(
         collection_id=collection_id,
         source=source,
         source_id=source_id,
+        connection_id=connection_id,
         resolution=quality.get("resolution"),
         video_codec=quality.get("video_codec"),
         audio_codec=quality.get("audio_codec"),
@@ -1198,7 +1203,8 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                         if item_media:
                             await _ensure_collection_entry(
                                 db, user.id, item_media.id, CollectionSource.plex,
-                                item_rating_key, item_quality
+                                item_rating_key, item_quality,
+                                connection_id=conn.id if conn else None,
                             )
                     except Exception as e:
                         print(f"  library.new batch: failed to process item {item_rating_key}: {e}")
@@ -1211,7 +1217,8 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                         quality = plex_client.extract_quality(item.get("Media", []))
                 if media:
                     await _ensure_collection_entry(
-                        db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality
+                        db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality,
+                        connection_id=conn.id if conn else None,
                     )
             await db.commit()
 
@@ -1262,7 +1269,8 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                         await db.delete(old_coll)
 
             await _ensure_collection_entry(
-                db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality
+                db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality,
+                connection_id=conn.id if conn else None,
             )
             await db.commit()
 
