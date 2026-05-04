@@ -172,6 +172,14 @@ html.light #now-playing-section {
   --color-zinc-100: #f4f4f5;
 }
 
+#now-playing-section:empty {
+  display: none;
+}
+
+#now-playing-section:not(:empty) + main {
+  padding-top: 0;
+}
+
 /* ── ActionBar buttons — light mode ───────────────────────────────────────────
    All states use solid named colours — no transparency, no Tailwind opacity classes.
    Inactive base: gray (zinc variable remap handles this automatically).
