@@ -120,11 +120,12 @@ def extract_quality(media_streams: list) -> dict:
 
         if stream_type == "Video" and not quality["video_codec"]:
             height = stream.get("Height", 0)
-            if height >= 2160:
+            width = stream.get("Width", 0)
+            if width >= 3200 or height >= 2000:
                 quality["resolution"] = "4K"
-            elif height >= 1080:
+            elif width >= 1700 or height >= 800:
                 quality["resolution"] = "1080p"
-            elif height >= 720:
+            elif width >= 1100 or height >= 540:
                 quality["resolution"] = "720p"
             else:
                 quality["resolution"] = f"{height}p"

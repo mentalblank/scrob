@@ -692,12 +692,17 @@ def parse_plex_payload(payload: dict) -> dict | None:
     if media_list:
         m = media_list[0]
         h = m.get("height", 0)
+        w = m.get("width", 0)
         plex_res = str(m.get("videoResolution", "")).lower()
         if plex_res in ("4k", "2160"): resolution = "4K"
         elif plex_res == "1080": resolution = "1080p"
         elif plex_res == "720": resolution = "720p"
         elif plex_res == "480": resolution = "480p"
-        else: resolution = "4K" if h >= 2160 else "1080p" if h >= 900 else "720p" if h >= 620 else f"{h}p"
+        elif plex_res: resolution = f"{plex_res}p"
+        elif w >= 3200 or h >= 2000: resolution = "4K"
+        elif w >= 1700 or h >= 800: resolution = "1080p"
+        elif w >= 1100 or h >= 540: resolution = "720p"
+        else: resolution = f"{h}p"
 
         quality = {
             "resolution": resolution,

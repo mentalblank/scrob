@@ -91,29 +91,8 @@ def get_jellyfin_tmdb_id(provider_ids: dict) -> int | None:
 
 
 def extract_jellyfin_quality(item: dict) -> dict:
-    media_streams = item.get("MediaStreams", [])
-    quality = {}
-    audio_langs, subtitle_langs = [], []
-    for stream in media_streams:
-        t = stream.get("Type", "")
-        if t == "Video" and "resolution" not in quality:
-            h = stream.get("Height", 0)
-            quality["resolution"] = "4K" if h >= 2160 else "1080p" if h >= 1080 else "720p" if h >= 720 else f"{h}p"
-            quality["video_codec"] = stream.get("Codec")
-        elif t == "Audio":
-            if "audio_codec" not in quality:
-                quality["audio_codec"] = stream.get("Codec")
-                ch = stream.get("Channels", 0)
-                quality["audio_channels"] = f"{ch}.0" if ch else None
-            lang = stream.get("Language")
-            if lang:
-                audio_langs.append(lang)
-        elif t == "Subtitle":
-            lang = stream.get("Language")
-            if lang:
-                subtitle_langs.append(lang)
-    quality["audio_languages"] = audio_langs
-    quality["subtitle_languages"] = subtitle_langs
+    from core.jellyfin import extract_quality
+    quality = extract_quality(item.get("MediaStreams", []))
     quality["file_path"] = item.get("Path")
     return quality
 

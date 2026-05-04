@@ -280,29 +280,7 @@ Plex webhooks require a **Plex Pass** subscription.
 
 ### Kodi
 
-Kodi does not have built-in webhook support, so you need a small add-on to forward playback events. **[script.service.kodi.webhooks](https://github.com/d8ahazard/service.webhooks.kodi)** is the recommended option.
-
-1. Install the add-on in Kodi.
-2. In the add-on settings, add a new webhook destination pointed at your Scrob Kodi webhook URL (shown in **Settings → Connections → Kodi**).
-3. Enable the events: `playback_started`, `playback_paused`, `playback_resumed`, `playback_stopped`, and optionally `playback_seeked` (for in-progress tracking).
-
-The webhook URL format is:
-
-```
-https://your-scrob-url/api/proxy/webhooks/kodi?api_key=YOUR_API_KEY
-```
-
-**Payload format** — Scrob accepts both the native Kodi JSON-RPC notification format (`method`/`params.data`) and the flatter add-on format (`event`/`item`/`player`). Supported event names:
-
-| Kodi event | Scrob action |
-|---|---|
-| `Player.OnPlay` / `playback_started` | Start session |
-| `Player.OnPause` / `playback_paused` | Pause session |
-| `Player.OnResume` / `playback_resumed` | Resume session |
-| `Player.OnStop` / `playback_stopped` | End session, scrobble if ≥ 90 % |
-| `Player.OnAVChange` / `playback_seeked` | Update progress |
-
-Kodi is scrobble-only — it does not sync a library into your collection. Run a sync from Jellyfin, Plex, or Emby if you want your Kodi-played items to appear in My Collection.
+COMING SOON
 
 ## OIDC / Single Sign-On
 

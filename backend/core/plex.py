@@ -57,9 +57,9 @@ def extract_quality(media_list: List[Dict]) -> Dict:
     # Plex usually has multiple 'Media' objects for different versions, we take the first
     m = media_list[0]
     h = m.get("height", 0)
+    w = m.get("width", 0)
 
-    # Prefer Plex's own videoResolution label (e.g. "1080", "720", "4k") when available,
-    # as it correctly handles non-standard heights like 1040 that are still 1080p encodes.
+    # Prefer Plex's own videoResolution label (e.g. "1080", "720", "4k") when available.
     plex_res = str(m.get("videoResolution", "")).lower()
     if plex_res in ("4k", "2160"):
         resolution = "4K"
@@ -72,9 +72,16 @@ def extract_quality(media_list: List[Dict]) -> Dict:
     elif plex_res:
         resolution = f"{plex_res}p"
     else:
-        # Fallback: derive from height with a small tolerance so encodes like
-        # 1040px (anamorphic 1080p) are not misclassified as 720p.
-        resolution = "4K" if h >= 2160 else "1080p" if h >= 900 else "720p" if h >= 620 else f"{h}p"
+        # Fallback using both width and height so cinemascope encodes like
+        # 1920x800 (2.40:1) are not misclassified — width is the reliable dimension.
+        if w >= 3200 or h >= 2000:
+            resolution = "4K"
+        elif w >= 1700 or h >= 800:
+            resolution = "1080p"
+        elif w >= 1100 or h >= 540:
+            resolution = "720p"
+        else:
+            resolution = f"{h}p"
 
     quality = {
         "resolution": resolution,
