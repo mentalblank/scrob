@@ -26,6 +26,10 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 - [Configuration](#configuration)
 - [Development](#development)
 - [Webhooks](#webhooks-real-time-scrobbling)
+  - [Jellyfin](#jellyfin)
+  - [Plex](#plex)
+  - [Emby](#emby)
+  - [Kodi](#kodi)
 - [OIDC / Single Sign-On](#oidc--single-sign-on)
 - [Email Validation & SMTP](#email-validation--smtp)
 - [Contributing](#contributing)
@@ -36,7 +40,7 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 
 - **Multi-source sync**: Import your full library, watch history, and ratings from Jellyfin, Plex, and Emby. Incremental syncs keep everything up to date.
 - **Keep all servers in sync**: Keep your watched status in sync between all your servers. Supports multiple instances.
-- **Real-time scrobbling**: Webhooks from Jellyfin, Plex, and Emby update your watch state as you play — no manual sync needed.
+- **Real-time scrobbling**: Webhooks from Jellyfin, Plex, Emby, and Kodi update your watch state as you play — no manual sync needed.
 - **Trakt integration**: Sync your watched history and ratings from Trakt, and push Scrob activity back to Trakt automatically.
 - **Watch history & ratings**: Track every movie and episode you've watched. Rate them on a 10-point scale with optional reviews.
 - **Season ratings**: Rate individual seasons separately from the overall show.
@@ -242,7 +246,11 @@ DATABASE_URL: postgresql+asyncpg://user:password@your-db-host:5432/scrob
 Webhooks update your watch history and Continue Watching in real time. Each user's webhook URL is shown in **Settings** next to the relevant integration.
 
 ```
-https://your-scrob-url/api/proxy/webhooks/{jellyfin|plex|emby}?api_key=YOUR_API_KEY
+# Jellyfin, Plex, Emby — connection_id is shown in Settings next to each server
+https://your-scrob-url/api/proxy/webhooks/{jellyfin|plex|emby}/{connection_id}?api_key=YOUR_API_KEY
+
+# Kodi — no connection, just the API key
+https://your-scrob-url/api/proxy/webhooks/kodi?api_key=YOUR_API_KEY
 ```
 
 ### Jellyfin
@@ -269,6 +277,32 @@ Plex webhooks require a **Plex Pass** subscription.
 1. In Emby, go to **Dashboard → Notifications → Add Notification → Webhook**.
 2. Paste your Scrob Emby webhook URL.
 3. Enable events: `Playback Start`, `Playback Progress`, `Playback Stop`.
+
+### Kodi
+
+Kodi does not have built-in webhook support, so you need a small add-on to forward playback events. **[script.service.kodi.webhooks](https://github.com/d8ahazard/service.webhooks.kodi)** is the recommended option.
+
+1. Install the add-on in Kodi.
+2. In the add-on settings, add a new webhook destination pointed at your Scrob Kodi webhook URL (shown in **Settings → Connections → Kodi**).
+3. Enable the events: `playback_started`, `playback_paused`, `playback_resumed`, `playback_stopped`, and optionally `playback_seeked` (for in-progress tracking).
+
+The webhook URL format is:
+
+```
+https://your-scrob-url/api/proxy/webhooks/kodi?api_key=YOUR_API_KEY
+```
+
+**Payload format** — Scrob accepts both the native Kodi JSON-RPC notification format (`method`/`params.data`) and the flatter add-on format (`event`/`item`/`player`). Supported event names:
+
+| Kodi event | Scrob action |
+|---|---|
+| `Player.OnPlay` / `playback_started` | Start session |
+| `Player.OnPause` / `playback_paused` | Pause session |
+| `Player.OnResume` / `playback_resumed` | Resume session |
+| `Player.OnStop` / `playback_stopped` | End session, scrobble if ≥ 90 % |
+| `Player.OnAVChange` / `playback_seeked` | Update progress |
+
+Kodi is scrobble-only — it does not sync a library into your collection. Run a sync from Jellyfin, Plex, or Emby if you want your Kodi-played items to appear in My Collection.
 
 ## OIDC / Single Sign-On
 
