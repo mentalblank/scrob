@@ -41,6 +41,12 @@ const bottomNavItem = (active: boolean) =>
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Scrob" />
+  <style>
+    /* Inline so icons render correctly on first paint before external CSS loads */
+    #sun-icon { display: none; }
+    html.light #sun-icon { display: inline; }
+    html.light #moon-icon { display: none; }
+  </style>
   <script is:inline>
     // Theme initialization to avoid FOUC
     const theme = (() => {
@@ -105,7 +111,7 @@ const bottomNavItem = (active: boolean) =>
           </button>
           <!-- Theme toggle -->
           <button id="theme-toggle" class="p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-all hover:scale-110 active:scale-95" aria-label="Toggle Theme">
-            <span id="sun-icon" class="hidden">
+            <span id="sun-icon">
               <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
             </span>
             <span id="moon-icon">
@@ -282,15 +288,6 @@ const bottomNavItem = (active: boolean) =>
   <script>
     // ── Theme toggle ───────────────────────────────────────────────────────────
     const themeToggle = document.getElementById('theme-toggle');
-    const sunIcon = document.getElementById('sun-icon');
-    const moonIcon = document.getElementById('moon-icon');
-
-    const updateIcons = () => {
-      const isLight = document.documentElement.classList.contains('light');
-      sunIcon?.classList.toggle('hidden', !isLight);
-      moonIcon?.classList.toggle('hidden', isLight);
-    };
-    updateIcons();
 
     const themeColorMeta = document.getElementById('theme-color-meta') as HTMLMetaElement | null;
     const syncThemeColor = () => {
@@ -303,7 +300,6 @@ const bottomNavItem = (active: boolean) =>
       document.documentElement.classList.toggle('light');
       const isLight = document.documentElement.classList.contains('light');
       localStorage.setItem('theme', isLight ? 'light' : 'dark');
-      updateIcons();
       syncThemeColor();
     });
 
