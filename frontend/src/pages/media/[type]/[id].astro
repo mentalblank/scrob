@@ -53,7 +53,7 @@ const refreshUrl = isEpisode
     <div class="relative">
       <!-- Backdrop -->
       {item.backdrop_path && (
-        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[600px] overflow-hidden" data-adult-backdrop={item.adult ? "true" : undefined}>
+        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[600px] overflow-hidden" style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);" data-adult-backdrop={item.adult ? "true" : undefined}>
           <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent z-10"></div>
           <img
             src={item.backdrop_path}

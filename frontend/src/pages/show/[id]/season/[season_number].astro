@@ -40,7 +40,7 @@ const show = season?.show;
     <div class="relative">
       <!-- Backdrop -->
       {(season.backdrop_path || show?.backdrop_path) && (
-        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[500px] overflow-hidden">
+        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[500px] overflow-hidden" style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);">
           <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-transparent z-10"></div>
           <img src={season.backdrop_path || show.backdrop_path} alt="" class="w-full h-full object-cover opacity-30 blur-[1px]" />
         </div>
