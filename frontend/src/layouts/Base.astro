@@ -70,7 +70,7 @@ const bottomNavItem = (active: boolean) =>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen overflow-x-hidden">
   {!hideNav && (
-    <nav class="px-4 md:px-6 py-3 md:py-4 text-sm relative z-30 bg-zinc-950 md:bg-transparent">
+    <nav class="px-4 md:px-6 py-3 md:py-4 text-sm sticky top-0 z-40 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800/50 transition-colors">
       <!-- Default bar -->
       <div id="nav-default" class="flex items-center justify-between gap-3 safe-area-top">
         <!-- Left: logo + desktop links -->
