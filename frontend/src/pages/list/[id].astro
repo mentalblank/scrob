@@ -99,6 +99,16 @@ Astro.response.headers.set("Cache-Control", "no-store");
                 </button>
               </>
             )}
+            <button
+              id="rss-btn"
+              class="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all text-sm border border-zinc-700 cursor-pointer"
+              title="Copy RSS Feed for Sonarr/Radarr"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 text-orange-500">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12.75 19.5v-.75a7.5 7.5 0 0 0-7.5-7.5H4.5m0-4.5h.75a12 12 0 0 1 12 12v.75m-9.75 0h.75c0-1.242-1.008-2.25-2.25-2.25v.75Z" />
+              </svg>
+              RSS Feed
+            </button>
           </div>
         </div>
       </div>
@@ -283,7 +293,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
   )}
 </Base>
 
-<script define:vars={{ token, listId: list?.id }}>
+<script define:vars={{ token, listId: list?.id, apiKey: user?.api_key }}>
   // Reload when restored from bfcache so DOM mutations (newly added items) aren't lost.
 
   function esc(str) {
@@ -379,6 +389,21 @@ Astro.response.headers.set("Cache-Control", "no-store");
       if (res.ok) window.location.href = '/lists';
     } catch (err) {
       console.error('Failed to delete list', err);
+    }
+  });
+
+  // --- RSS Feed ---
+  document.getElementById('rss-btn')?.addEventListener('click', async () => {
+    const rssUrl = `${window.location.origin}/api/proxy/lists/${listId}/rss${apiKey ? `?apikey=${apiKey}` : ''}`;
+    try {
+      await navigator.clipboard.writeText(rssUrl);
+      if (window.showToast) {
+        window.showToast('RSS Link copied to clipboard!', 'success');
+      } else {
+        alert('RSS Link copied to clipboard!');
+      }
+    } catch (err) {
+      prompt('RSS Feed URL (Copy this):', rssUrl);
     }
   });
 

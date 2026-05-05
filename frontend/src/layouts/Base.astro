@@ -617,6 +617,44 @@ const bottomNavItem = (active: boolean) =>
       });
     }
 
+    // ── Toast system ──────────────────────────────────────────────────────────
+    (window as any).showToast = showToast;
+    function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
+      const existing = document.querySelectorAll('.scrob-toast');
+      existing.forEach(t => {
+        t.classList.add('translate-y-10', 'opacity-0');
+        setTimeout(() => t.remove(), 300);
+      });
+
+      const toast = document.createElement('div');
+      toast.className = `scrob-toast fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-2xl font-bold shadow-2xl transition-all duration-300 translate-y-10 opacity-0 flex items-center gap-2 pointer-events-none`;
+      
+      const colors = {
+        success: 'bg-emerald-600 text-white shadow-emerald-900/40',
+        error: 'bg-red-600 text-white shadow-red-900/40',
+        info: 'bg-blue-600 text-white shadow-blue-900/40'
+      };
+      toast.classList.add(...colors[type].split(' '));
+      
+      const icon = {
+        success: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>',
+        error: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>',
+        info: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" /></svg>'
+      };
+      
+      toast.innerHTML = `${icon[type]} <span>${message}</span>`;
+      document.body.appendChild(toast);
+      
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-10', 'opacity-0');
+      });
+      
+      setTimeout(() => {
+        toast.classList.add('translate-y-10', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
     // ── Rating popover ─────────────────────────────────────────────────────────
     let _activeRatingBtn: HTMLElement | null = null;
 

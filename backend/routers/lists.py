@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,8 @@ from models.show import Show as ShowModel
 from dependencies import get_current_user
 from models.users import User
 from routers.media import enrich_with_state
+from core.config import settings as app_settings
+from xml.sax.saxutils import escape
 
 router = APIRouter()
 
@@ -386,3 +388,84 @@ async def remove_list_item(
     await db.delete(item)
     await db.commit()
     return {"message": "Item removed"}
+
+
+@router.get("/{list_id}/rss")
+async def get_list_rss(
+    list_id: int,
+    apikey: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    # Authentication (optional for public lists, required for others)
+    user = None
+    if apikey:
+        result = await db.execute(select(User).where(User.api_key == apikey))
+        user = result.scalar_one_or_none()
+
+    # Get list with items and media
+    result = await db.execute(
+        select(ListModel)
+        .options(
+            selectinload(ListModel.items)
+            .selectinload(ListItem.media)
+            .selectinload(Media.show)
+        )
+        .where(ListModel.id == list_id)
+    )
+    lst = result.scalar_one_or_none()
+    if not lst:
+        raise HTTPException(status_code=404, detail="List not found")
+
+    # Access control
+    if lst.privacy_level != PrivacyLevel.public:
+        if not user or user.id != lst.user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    # Generate RSS items
+    items_sorted = sorted(lst.items, key=lambda x: (x.sort_order, x.added_at), reverse=True)
+    
+    rss_items = []
+    for item in items_sorted:
+        m = item.media
+        if m.media_type == MediaType.person:
+            continue  # Sonarr/Radarr don't care about people
+            
+        title = m.title
+        year = m.release_date[:4] if m.release_date else ""
+        
+        if m.media_type == MediaType.episode and m.show:
+            title = f"{m.show.title} - {m.season_number}x{m.episode_number:02d} - {m.title}"
+        elif year:
+            title = f"{title} ({year})"
+            
+        # Sonarr/Radarr can often use TMDB/IMDB IDs if provided in the description or as a custom tag
+        # For now, we'll provide them in the description as it's widely compatible
+        description = f"Type: {m.media_type.value}\n"
+        if m.tmdb_id:
+            description += f"TMDB: {m.tmdb_id}\n"
+        if m.overview:
+            description += f"\n{m.overview}"
+            
+        link = f"{app_settings.server_url}/list/{lst.id}"
+        guid = f"scrob:{m.media_type.value}:{m.tmdb_id or m.id}"
+        
+        rss_items.append(f"""
+        <item>
+            <title>{escape(title)}</title>
+            <link>{escape(link)}</link>
+            <description>{escape(description)}</description>
+            <pubDate>{item.added_at.strftime("%a, %d %b %Y %H:%M:%S GMT")}</pubDate>
+            <guid isPermaLink="false">{escape(guid)}</guid>
+        </item>""")
+
+    rss_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+    <channel>
+        <title>Scrob List: {escape(lst.name)}</title>
+        <description>{escape(lst.description or "")}</description>
+        <link>{escape(app_settings.server_url)}/list/{lst.id}</link>
+        {"".join(rss_items)}
+    </channel>
+</rss>"""
+
+    return Response(content=rss_xml, media_type="application/rss+xml")
