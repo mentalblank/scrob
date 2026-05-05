@@ -708,6 +708,8 @@ export const api = {
       post<{ id: number; email: string; username: string }>("/auth/register", body),
     registrationStatus: () =>
       get<{ enabled: boolean; smtp_configured: boolean }>("/auth/registration-status"),
+    hasUsers: () =>
+      get<{ has_users: boolean }>("/auth/has-users"),
     activateEmail: (token: string) =>
       post<{ success: boolean }>(`/auth/activate/${token}`, undefined),
     forgotPassword: (email: string) =>

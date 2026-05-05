@@ -23,9 +23,11 @@ from core.config import settings as app_settings
 from core.email import send_activation_email, send_password_reset_email
 from core.url_validator import validate_service_url
 from core.limiter import limiter
+from core.backup import restore_backup
 import schemas
 from dependencies import get_current_user
 from sqlalchemy.orm import selectinload
+from fastapi import File, UploadFile
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +263,38 @@ async def activate_email_api(token: str, db: AsyncSession = Depends(get_db)):
     return {"success": True}
 
 
+@router.get("/has-users")
+async def has_users(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(func.count()).select_from(User))
+    return {"has_users": result.scalar_one() > 0}
+
+
+@router.post("/bootstrap-restore")
+async def bootstrap_restore(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    count_result = await db.execute(select(func.count()).select_from(User))
+    if count_result.scalar_one() > 0:
+        raise HTTPException(status_code=403, detail="Bootstrap restore is only available when no users exist.")
+
+    if not (file.filename or "").endswith(".bak"):
+        raise HTTPException(status_code=400, detail="Only .bak backup files are accepted.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    await db.rollback()
+
+    try:
+        await restore_backup(content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"status": "restored"}
+
+
 @router.get("/me", response_model=schemas.User)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
@@ -271,14 +305,16 @@ async def delete_user_me(
     current_user: User = Depends(get_current_user)
 ):
     if current_user.is_admin:
-        count_result = await db.execute(
-            select(func.count()).select_from(User).where(User.is_admin.is_(True))
-        )
-        if count_result.scalar_one() <= 1:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You are the sole admin. Promote another user to admin before deleting your account.",
+        total_result = await db.execute(select(func.count()).select_from(User))
+        if total_result.scalar_one() > 1:
+            admin_result = await db.execute(
+                select(func.count()).select_from(User).where(User.is_admin.is_(True))
             )
+            if admin_result.scalar_one() <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="You are the sole admin. Promote another user to admin before deleting your account.",
+                )
     await db.execute(delete(User).where(User.id == current_user.id))
     await db.commit()
     return {"status": "account deleted"}

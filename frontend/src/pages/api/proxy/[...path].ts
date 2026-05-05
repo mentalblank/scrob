@@ -43,8 +43,8 @@ async function handle({ params, request }: Parameters<APIRoute>[0]): Promise<Res
   const resCt = res.headers.get("Content-Type");
   if (resCt) responseHeaders.set("Content-Type", resCt);
 
-  // Forward streaming headers so the browser can seek
-  for (const h of ["Content-Range", "Accept-Ranges", "Content-Length"]) {
+  // Forward streaming and download headers
+  for (const h of ["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition"]) {
     const v = res.headers.get(h);
     if (v) responseHeaders.set(h, v);
   }

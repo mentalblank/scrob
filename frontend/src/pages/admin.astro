@@ -277,8 +277,85 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </table>
       </div>
     </section>
+
+    <!-- ── Database ── -->
+    <section>
+      <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2 mb-6">Database</h2>
+
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- Backup -->
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-3">
+          <div>
+            <h3 class="font-semibold text-zinc-100 mb-1">Backup</h3>
+            <p class="text-sm text-zinc-400">Download a full SQL dump of the database. Keep it somewhere safe.</p>
+          </div>
+          <button id="backup-btn"
+            class="mt-auto w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50">
+            Download Backup
+          </button>
+        </div>
+
+        <!-- Restore -->
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-3">
+          <div>
+            <h3 class="font-semibold text-zinc-100 mb-1">Restore</h3>
+            <p class="text-sm text-zinc-400">Upload a <code class="text-zinc-300">.bak</code> backup file to restore. <span class="text-red-400 font-medium">All existing data will be overwritten.</span></p>
+          </div>
+          <div class="flex flex-col gap-3 mt-auto">
+            <input id="restore-file" type="file" accept=".bak"
+              class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
+            <button id="restore-btn" disabled
+              class="w-full sm:w-auto px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+              Restore Database
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 </Base>
+
+<!-- Delete User Confirmation Modal -->
+<div id="delete-user-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div id="delete-user-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+    <h2 class="text-xl font-black text-zinc-100 mb-2">Delete User?</h2>
+    <p id="delete-user-modal-body" class="text-sm text-zinc-400 mb-6"></p>
+    <div class="flex gap-3">
+      <button type="button" id="delete-user-cancel-btn"
+        class="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        Cancel
+      </button>
+      <button type="button" id="delete-user-confirm-btn"
+        class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Restore Confirmation Modal -->
+<div id="restore-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div id="restore-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+    <h2 class="text-xl font-black text-zinc-100 mb-2">Restore Database?</h2>
+    <p class="text-sm text-zinc-400 mb-1">Restoring from:</p>
+    <p id="restore-modal-filename" class="text-sm text-zinc-100 font-medium mb-4 break-all"></p>
+    <div class="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 mb-6">
+      <p class="text-sm text-red-400 font-medium">All existing data will be permanently overwritten. This cannot be undone.</p>
+    </div>
+    <div class="flex gap-3">
+      <button type="button" id="restore-cancel-btn"
+        class="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        Cancel
+      </button>
+      <button type="button" id="restore-confirm-btn"
+        class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        Restore
+      </button>
+    </div>
+  </div>
+</div>
 
 <script>
   const appData = document.getElementById('app-data') as HTMLElement;
@@ -485,6 +562,96 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
     }
   });
 
+  // ── Database backup ──
+  document.getElementById('backup-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('backup-btn') as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = 'Preparing…';
+    try {
+      const res = await fetch('/api/proxy/admin/backup', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Backup failed');
+      }
+      const cd = res.headers.get('Content-Disposition');
+      const filename = cd?.match(/filename="([^"]+)"/)?.[1] ?? 'scrob_backup.bak';
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      showMessage('Backup downloaded successfully.');
+    } catch (err: unknown) {
+      showMessage(err instanceof Error ? err.message : 'Backup failed', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Download Backup';
+    }
+  });
+
+  // ── Database restore ──
+  const restoreFile = document.getElementById('restore-file') as HTMLInputElement;
+  const restoreBtn = document.getElementById('restore-btn') as HTMLButtonElement;
+  const restoreModal = document.getElementById('restore-modal')!;
+
+  function openRestoreModal() {
+    const file = restoreFile.files?.[0];
+    if (!file) return;
+    document.getElementById('restore-modal-filename')!.textContent = file.name;
+    restoreModal.classList.remove('hidden');
+  }
+
+  function closeRestoreModal() {
+    restoreModal.classList.add('hidden');
+  }
+
+  restoreFile?.addEventListener('change', () => {
+    restoreBtn.disabled = !restoreFile.files?.length;
+  });
+
+  restoreBtn?.addEventListener('click', openRestoreModal);
+
+  document.getElementById('restore-cancel-btn')?.addEventListener('click', closeRestoreModal);
+  document.getElementById('restore-modal-backdrop')?.addEventListener('click', closeRestoreModal);
+
+  document.getElementById('restore-confirm-btn')?.addEventListener('click', async () => {
+    const file = restoreFile.files?.[0];
+    if (!file) return;
+    closeRestoreModal();
+    restoreBtn.disabled = true;
+    restoreBtn.textContent = 'Restoring…';
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/proxy/admin/restore', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: fd,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Restore failed');
+      }
+      restoreBtn.textContent = 'Redirecting…';
+      showMessage('Database restored. Logging out…');
+      setTimeout(() => {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/logout';
+        document.body.appendChild(form);
+        form.submit();
+      }, 1500);
+    } catch (err: unknown) {
+      showMessage(err instanceof Error ? err.message : 'Restore failed', 'error');
+      restoreBtn.disabled = false;
+      restoreBtn.textContent = 'Restore Database';
+    }
+  });
+
   // ── Users table ──
   function countAdmins(): number {
     return document.querySelectorAll('#users-table-body tr[data-is-admin="true"]').length;
@@ -529,6 +696,56 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
 
   refreshToggleButtons();
 
+  // ── Delete user modal ──
+  const deleteUserModal = document.getElementById('delete-user-modal')!;
+  let pendingDelete: { userId: number; row: HTMLTableRowElement; btn: HTMLButtonElement; isSelf: boolean } | null = null;
+
+  function openDeleteModal(userId: number, username: string, row: HTMLTableRowElement, btn: HTMLButtonElement, isSelf: boolean) {
+    pendingDelete = { userId, row, btn, isSelf };
+    const body = document.getElementById('delete-user-modal-body')!;
+    if (isSelf) {
+      body.innerHTML = `Deleting your own account (<strong class="text-zinc-100">${esc(username)}</strong>) will log you out immediately. This cannot be undone.`;
+    } else {
+      body.innerHTML = `Are you sure you want to delete <strong class="text-zinc-100">${esc(username)}</strong>? This cannot be undone.`;
+    }
+    deleteUserModal.classList.remove('hidden');
+  }
+
+  function closeDeleteModal() {
+    deleteUserModal.classList.add('hidden');
+    pendingDelete = null;
+  }
+
+  document.getElementById('delete-user-cancel-btn')?.addEventListener('click', closeDeleteModal);
+  document.getElementById('delete-user-modal-backdrop')?.addEventListener('click', closeDeleteModal);
+
+  document.getElementById('delete-user-confirm-btn')?.addEventListener('click', async () => {
+    if (!pendingDelete) return;
+    const { userId, row, btn, isSelf } = pendingDelete;
+    closeDeleteModal();
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/proxy/admin/users/${userId}`, {
+        method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+      if (isSelf) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/logout';
+        document.body.appendChild(form);
+        form.submit();
+      } else {
+        row.remove();
+        refreshToggleButtons();
+        showMessage('User deleted.');
+      }
+    } catch (err: unknown) {
+      showMessage(err instanceof Error ? err.message : 'Failed', 'error');
+      btn.disabled = false;
+    }
+  });
+
   document.getElementById('users-table-body')!.addEventListener('click', async (e) => {
     const target = e.target as HTMLElement;
     const row = target.closest('tr[data-user-id]') as HTMLTableRowElement | null;
@@ -554,26 +771,9 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
     }
 
     if (target.classList.contains('delete-user-btn')) {
-      if (userId === currentUserId) {
-        showMessage('Use account settings to delete your own account.', 'error');
-        return;
-      }
       const username = row.querySelector('td')!.textContent!.trim();
-      if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
-      const btn = target as HTMLButtonElement;
-      btn.disabled = true;
-      try {
-        const res = await fetch(`/api/proxy/admin/users/${userId}`, {
-          method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
-        row.remove();
-        refreshToggleButtons();
-        showMessage('User deleted.');
-      } catch (err: unknown) {
-        showMessage(err instanceof Error ? err.message : 'Failed', 'error');
-        btn.disabled = false;
-      }
+      const isSelf = userId === currentUserId;
+      openDeleteModal(userId, username, row, target as HTMLButtonElement, isSelf);
     }
   });
 </script>
