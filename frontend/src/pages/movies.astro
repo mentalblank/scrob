@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
 import MediaListCard from "../components/MediaListCard.astro";
 import ViewToggle from "../components/ViewToggle.astro";
+import VisibilityFilters from "../components/VisibilityFilters.astro";
 import Pagination from "../components/Pagination.astro";
 import { api, type MediaItem } from "../lib/api";
 export const prerender = false;
@@ -126,7 +127,10 @@ const baseUrl = `/movies?${baseParams.toString()}`;
             </a>
           )}
         </div>
-        <ViewToggle currentView={viewPreference} />
+        <div class="flex items-center gap-2">
+          <VisibilityFilters />
+          <ViewToggle currentView={viewPreference} />
+        </div>
       </div>
 
       {viewPreference === "list" ? (

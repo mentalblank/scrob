@@ -1,0 +1,196 @@
+---
+import { api, type ExploreFilters, type VisibilityAction } from "../lib/api";
+
+const { token } = Astro.locals;
+const settings = await api.auth.getSettings(token!);
+const filters: ExploreFilters = settings?.preferences?.explore_filters || {
+  watched: 'show',
+  unwatched: 'show',
+  collected: 'show',
+  uncollected: 'show',
+  listed: 'show',
+  unlisted: 'show'
+};
+
+const options: { key: keyof ExploreFilters; label: string }[] = [
+  { key: 'watched', label: 'Watched' },
+  { key: 'unwatched', label: 'Not Watched' },
+  { key: 'collected', label: 'In Library' },
+  { key: 'uncollected', label: 'Not In Library' },
+  { key: 'listed', label: 'Listed' },
+  { key: 'unlisted', label: 'Not Listed' },
+];
+---
+
+<div class="relative inline-block" id="visibility-filters-container">
+  <button
+    id="visibility-toggle-btn"
+    class="flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 rounded-lg text-sm text-zinc-300 transition-all active:scale-95 cursor-pointer"
+    title="Visibility Filters"
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>
+    </svg>
+    <span class="hidden sm:inline">Visibility</span>
+  </button>
+
+  <div
+    id="visibility-popover"
+    class="hidden absolute right-0 top-full mt-2 w-72 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden"
+  >
+    <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+      <span class="text-xs font-bold text-zinc-400 uppercase tracking-widest">Visibility Filters</span>
+      <button id="visibility-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    
+    <div class="p-2 flex flex-col gap-1">
+      {options.map(({ key, label }) => (
+        <div class="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-800/50 transition-colors">
+          <span class="text-xs font-medium text-zinc-300">{label}</span>
+          <div class="flex items-center bg-zinc-950 border border-zinc-800 rounded-md p-0.5" data-filter-group={key}>
+            {['show', 'fade', 'hide'].map((action) => (
+              <button
+                data-action={action}
+                class={`px-2 py-1 text-[10px] font-bold uppercase rounded transition-all cursor-pointer ${filters[key] === action ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                {action}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div class="p-3 border-t border-zinc-800 bg-zinc-950/30">
+      <button
+        id="visibility-reset"
+        class="w-full py-2 text-[10px] font-bold uppercase text-zinc-500 hover:text-zinc-100 transition-colors cursor-pointer"
+      >
+        Reset to defaults
+      </button>
+    </div>
+  </div>
+</div>
+
+<script define:vars={{ initialFilters: filters }}>
+  const container = document.getElementById('visibility-filters-container');
+  const btn = document.getElementById('visibility-toggle-btn');
+  const popover = document.getElementById('visibility-popover');
+  const closeBtn = document.getElementById('visibility-close');
+  const resetBtn = document.getElementById('visibility-reset');
+  
+  let currentFilters = { ...initialFilters };
+
+  // Apply initial filters to body
+  Object.entries(currentFilters).forEach(([key, value]) => {
+    document.body.setAttribute(`data-v-${key}`, value);
+  });
+
+  function togglePopover(show) {
+    popover.classList.toggle('hidden', !show);
+  }
+
+  btn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePopover(popover.classList.contains('hidden'));
+  });
+
+  closeBtn?.addEventListener('click', () => togglePopover(false));
+
+  document.addEventListener('click', (e) => {
+    if (!container.contains(e.target)) togglePopover(false);
+  });
+
+  // Handle filter changes
+  container.querySelectorAll('[data-filter-group]').forEach(group => {
+    const key = group.dataset.filterGroup;
+    group.querySelectorAll('button[data-action]').forEach(actionBtn => {
+      actionBtn.addEventListener('click', async () => {
+        const action = actionBtn.dataset.action;
+        
+        // Update UI
+        group.querySelectorAll('button').forEach(b => {
+          b.classList.remove('bg-blue-600', 'text-white');
+          b.classList.add('text-zinc-500', 'hover:text-zinc-300');
+        });
+        actionBtn.classList.remove('text-zinc-500', 'hover:text-zinc-300');
+        actionBtn.classList.add('bg-blue-600', 'text-white');
+
+        // Apply to body
+        document.body.setAttribute(`data-v-${key}`, action);
+        currentFilters[key] = action;
+
+        // Save to backend
+        try {
+          await fetch('/api/proxy/auth/settings', {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${window.__AUTH_TOKEN__}`
+            },
+            body: JSON.stringify({
+              preferences: {
+                explore_filters: currentFilters
+              }
+            })
+          });
+        } catch (err) {
+          console.error('Failed to save visibility settings:', err);
+        }
+      });
+    });
+  });
+
+  resetBtn?.addEventListener('click', async () => {
+    const defaults = {
+      watched: 'show',
+      unwatched: 'show',
+      collected: 'show',
+      uncollected: 'show',
+      listed: 'show',
+      unlisted: 'show'
+    };
+    
+    currentFilters = { ...defaults };
+    
+    // Update body
+    Object.entries(currentFilters).forEach(([key, value]) => {
+      document.body.setAttribute(`data-v-${key}`, value);
+    });
+
+    // Update UI buttons
+    container.querySelectorAll('[data-filter-group]').forEach(group => {
+      const key = group.dataset.filterGroup;
+      group.querySelectorAll('button').forEach(b => {
+        const action = b.dataset.action;
+        if (action === defaults[key]) {
+          b.classList.add('bg-blue-600', 'text-white');
+          b.classList.remove('text-zinc-500', 'hover:text-zinc-300');
+        } else {
+          b.classList.remove('bg-blue-600', 'text-white');
+          b.classList.add('text-zinc-500', 'hover:text-zinc-300');
+        }
+      });
+    });
+
+    // Save
+    try {
+      await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${window.__AUTH_TOKEN__}`
+        },
+        body: JSON.stringify({
+          preferences: {
+            explore_filters: currentFilters
+          }
+        })
+      });
+    } catch (err) {
+      console.error('Failed to reset visibility settings:', err);
+    }
+  });
+</script>

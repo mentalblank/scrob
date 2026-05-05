@@ -3,6 +3,7 @@ import Base from "../../layouts/Base.astro";
 import MediaCard from "../../components/MediaCard.astro";
 import MediaListCard from "../../components/MediaListCard.astro";
 import ViewToggle from "../../components/ViewToggle.astro";
+import VisibilityFilters from "../../components/VisibilityFilters.astro";
 import Pagination from "../../components/Pagination.astro";
 import { api, type MediaItem } from "../../lib/api";
 
@@ -28,7 +29,10 @@ try {
       <h1 class="text-3xl font-bold text-zinc-100 mb-2">Trending Shows</h1>
       <p class="text-zinc-500">Popular TV shows right now on TMDB</p>
     </div>
-    <ViewToggle currentView={viewPreference} />
+    <div class="flex items-center gap-2">
+      <VisibilityFilters />
+      <ViewToggle currentView={viewPreference} />
+    </div>
   </div>
 
   {error && (

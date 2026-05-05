@@ -26,7 +26,7 @@ if (me.totp_enabled) {
 ---
 
 <Base title="Settings">
-  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+  <div id="app-data" data-token={token} data-preferences={JSON.stringify(settings.preferences || {})} class="hidden" aria-hidden="true"></div>
   <div class="max-w-4xl mx-auto">
     <h1 class="text-3xl font-bold text-zinc-100 mb-8">Settings</h1>
 
@@ -570,7 +570,42 @@ if (me.totp_enabled) {
          </div>
        </section>
 
-       <!-- Appearance -->
+       <!-- Explore Visibility -->
+      <section>
+        <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Explore Visibility</h2>
+        <p class="text-sm text-zinc-400 mb-6">Choose how items you've already watched or collected appear on Explore pages.</p>
+        
+        <div class="space-y-3">
+          {[
+            { key: 'watched', label: 'Watched' },
+            { key: 'unwatched', label: 'Not Watched' },
+            { key: 'collected', label: 'In Library' },
+            { key: 'uncollected', label: 'Not In Library' },
+            { key: 'listed', label: 'Listed' },
+            { key: 'unlisted', label: 'Not Listed' },
+          ].map(({ key, label }) => (
+            <div class="flex items-center justify-between p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+              <div>
+                <p class="text-sm font-semibold text-zinc-100">{label}</p>
+              </div>
+              <div class="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-1" data-v-group={key}>
+                {['show', 'fade', 'hide'].map((action) => (
+                  <button
+                    type="button"
+                    data-v-action={action}
+                    class={`px-3 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all cursor-pointer ${settings.preferences?.explore_filters?.[key] === action || (!settings.preferences?.explore_filters?.[key] && action === 'show') ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  >
+                    {action}
+                  </button>
+                ))}
+                <input type="hidden" name={`v_${key}`} value={settings.preferences?.explore_filters?.[key] || 'show'} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <!-- Appearance -->
       <section>
         <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Appearance</h2>
         <div class="space-y-6">
@@ -1712,6 +1747,25 @@ if (me.totp_enabled) {
     });
   }
 
+  function setupVisibilityToggles() {
+    document.querySelectorAll('[data-v-group]').forEach(group => {
+      const input = group.querySelector('input') as HTMLInputElement;
+      group.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const action = btn.getAttribute('data-v-action');
+          if (!action) return;
+          input.value = action;
+          group.querySelectorAll('button').forEach(b => {
+            b.classList.remove('bg-blue-600', 'text-white', 'shadow-lg');
+            b.classList.add('text-zinc-500', 'hover:text-zinc-300');
+          });
+          btn.classList.add('bg-blue-600', 'text-white', 'shadow-lg');
+          btn.classList.remove('text-zinc-500', 'hover:text-zinc-300');
+        });
+      });
+    });
+  }
+
   function renderLibraryCheckboxes(containerId, libraries, idKey) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -1906,6 +1960,8 @@ if (me.totp_enabled) {
 
       try {
         const saves = [];
+        const appData = document.getElementById('app-data') as HTMLElement;
+        const currentPreferences = JSON.parse(appData.dataset.preferences || '{}');
 
         // Gather general settings
         const formData = new FormData(form);
@@ -1949,10 +2005,23 @@ if (me.totp_enabled) {
           document.documentElement.classList.toggle('blur-explicit', blurEl.checked);
         }
 
+        // Gather visibility filters
+        const visibilityFilters: Record<string, string> = {};
+        form.querySelectorAll('[data-v-group]').forEach(group => {
+          const key = group.getAttribute('data-v-group')!;
+          const input = group.querySelector(`input[name="v_${key}"]`) as HTMLInputElement;
+          visibilityFilters[key] = input.value;
+        });
+
+        const updatedPreferences = {
+          ...currentPreferences,
+          explore_filters: visibilityFilters
+        };
+
         saves.push(fetch(`/api/proxy/auth/settings`, {
           method: 'PATCH',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...settings, ...syncPrefs }),
+          body: JSON.stringify({ ...settings, ...syncPrefs, preferences: updatedPreferences }),
         }));
 
         const results = await Promise.all(saves);
@@ -2143,6 +2212,7 @@ if (me.totp_enabled) {
   setupActions();
   setupPasswordToggles();
   setupConnections();
+  setupVisibilityToggles();
   setupSettingsForm();
   setupPasswordForm();
 
@@ -2179,6 +2249,7 @@ if (me.totp_enabled) {
     setupActions();
     setupPasswordToggles();
     setupConnections();
+    setupVisibilityToggles();
     setupSettingsForm();
     setupPasswordForm();
     setupApiKey();

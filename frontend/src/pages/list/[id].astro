@@ -4,6 +4,7 @@ import MediaCard from "../../components/MediaCard.astro";
 import MediaListCard from "../../components/MediaListCard.astro";
 import ViewToggle from "../../components/ViewToggle.astro";
 import ListCard from "../../components/ListCard.astro";
+import VisibilityFilters from "../../components/VisibilityFilters.astro";
 import { api, type ListDetail, type UserList, type PublicList, type MediaItem } from "../../lib/api";
 export const prerender = false;
 
@@ -228,7 +229,10 @@ Astro.response.headers.set("Cache-Control", "no-store");
       <div>
         <div class="flex items-center justify-between mb-6">
           <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest">Items</h2>
-          <ViewToggle currentView={viewPreference} />
+          <div class="flex items-center gap-4">
+            <VisibilityFilters />
+            <ViewToggle currentView={viewPreference} />
+          </div>
         </div>
         {list.items.length === 0 ? (
           <div id="empty-state" class="text-center py-16 bg-zinc-900/20 border border-zinc-800/50 border-dashed rounded-3xl">
@@ -640,6 +644,9 @@ Astro.response.headers.set("Cache-Control", "no-store");
         data-media-type="${esc(media.type)}"
         data-show-tmdb-id="${media.show_tmdb_id ?? ''}"
         data-season="${media.season_number ?? ''}"
+        data-watched="${media.watched ?? false}"
+        data-collected="${media.in_library ?? false}"
+        data-listed="${(media.in_lists ?? []).length > 0}"
       >
         <a href="${esc(href)}" class="block">
           <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300"${media.adult ? ' data-adult="true"' : ''}>

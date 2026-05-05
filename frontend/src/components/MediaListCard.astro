@@ -44,6 +44,12 @@ const watched = item.watched ?? false;
 const inLists = item.in_lists ?? [];
 const collectionPct = item.collection_pct ?? (item.in_library ? 100 : 0);
 const inLibrary = item.in_library ?? false;
+const isDvr = item.is_monitored === true;
+const isPartialWatched = !watched && (
+  (item.type === 'series' && (item.watched_episodes_count ?? 0) > 0) ||
+  ((item.progress_percent ?? 0) > 0)
+);
+const isPartialCollected = item.type === 'series' && collectionPct > 0 && collectionPct < 100;
 
 // Truncate overview if it's too long
 const overview = item.overview || (isPerson && item.known_for_department ? `Known for: ${item.known_for_department}` : null);
@@ -58,6 +64,12 @@ const overview = item.overview || (isPerson && item.known_for_department ? `Know
   data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : ""}
   data-season={item.season_number != null ? String(item.season_number) : ""}
   data-episode-number={item.episode_number != null ? String(item.episode_number) : ""}
+  data-watched={String(watched)}
+  data-collected={String(inLibrary)}
+  data-listed={String(inLists.length > 0)}
+  data-dvr={String(isDvr)}
+  data-partial-watched={String(isPartialWatched)}
+  data-partial-collected={String(isPartialCollected)}
 >
   <!-- Left Side: Poster -->
   {href ? (

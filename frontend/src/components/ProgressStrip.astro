@@ -1,0 +1,54 @@
+---
+interface Props {
+  watchedEpisodesCount?: number;
+  totalEpisodesCount?: number;
+  totalPlays?: number;
+  totalDurationWatched?: number;
+  remainingEpisodesCount?: number;
+  remainingDuration?: number;
+  className?: string;
+}
+
+const {
+  watchedEpisodesCount = 0,
+  totalEpisodesCount = 0,
+  totalPlays = 0,
+  totalDurationWatched = 0,
+  remainingEpisodesCount = 0,
+  remainingDuration = 0,
+  className = "",
+} = Astro.props;
+
+const progressPct = totalEpisodesCount > 0 ? Math.min(100, Math.round((watchedEpisodesCount / totalEpisodesCount) * 100)) : 0;
+
+function formatDuration(minutes: number) {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours < 24) return `${hours}h ${mins}m`;
+  const days = Math.floor(hours / 24);
+  const h = hours % 24;
+  return `${days}d ${h}h`;
+}
+---
+
+<div class={`flex flex-col gap-1.5 ${className}`}>
+  <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+    <span>Progress</span>
+    <span class="text-zinc-300 tabular-nums">{progressPct}%</span>
+  </div>
+  
+  <div class="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden border border-white/5">
+    <div 
+      class="h-full bg-blue-500 rounded-full transition-all duration-700 ease-out" 
+      style={`width: ${progressPct}%`}
+    ></div>
+  </div>
+
+  <div class="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">
+    <span>{watchedEpisodesCount} / {totalEpisodesCount} ep</span>
+    {remainingDuration > 0 && (
+      <span class="text-zinc-400" title="Estimated time left">-{formatDuration(remainingDuration)}</span>
+    )}
+  </div>
+</div>

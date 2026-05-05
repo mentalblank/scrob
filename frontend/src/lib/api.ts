@@ -331,6 +331,17 @@ export interface OidcExchangeResponse {
 
 export type PrivacyLevel = "public" | "friends_only" | "private";
 
+export type VisibilityAction = "show" | "fade" | "hide";
+
+export interface ExploreFilters {
+  watched: VisibilityAction;
+  unwatched: VisibilityAction;
+  collected: VisibilityAction;
+  uncollected: VisibilityAction;
+  listed: VisibilityAction;
+  unlisted: VisibilityAction;
+}
+
 export interface UserPreferences {
   display_name: string | null;
   bio: string | null;
@@ -341,6 +352,7 @@ export interface UserPreferences {
   content_language: string | null;
   privacy_level: PrivacyLevel;
   avatar_url: string | null;
+  explore_filters?: ExploreFilters;
 }
 
 export interface UserSettings {
@@ -474,6 +486,14 @@ export interface MediaItem {
   };
   production_companies?: ProductionCompany[];
   recommendations?: MediaItem[];
+  // Progress/Stats
+  watched_episodes_count?: number;
+  total_episodes_count?: number;
+  total_plays?: number;
+  total_duration_watched?: number;
+  remaining_episodes_count?: number;
+  remaining_duration?: number;
+  progress_percent?: number;
 }
 
 export interface SubtitleTrack {
