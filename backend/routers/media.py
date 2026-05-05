@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response
 from starlette.background import BackgroundTask
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, func, cast as sa_cast, Text
+from sqlalchemy import select, or_, and_, func, cast as sa_cast, Text, delete
 from sqlalchemy.orm import joinedload
 
 from db import get_db
@@ -26,6 +26,7 @@ from dependencies import get_current_user
 from models.users import User, UserSettings
 from models.show import Show as ShowModel
 from models.global_settings import GlobalSettings
+from models.blocklist import BlocklistItem
 
 router = APIRouter()
 
@@ -1415,6 +1416,15 @@ async def get_tmdb_list(
                 data = await tmdb.get_popular_shows(page=page, api_key=tmdb_key)
 
         results = data.get("results", [])
+
+        # Filter out blocked items
+        blocked_q = await db.execute(
+            select(BlocklistItem.tmdb_id)
+            .where(BlocklistItem.user_id == current_user.id, BlocklistItem.media_type == type)
+        )
+        blocked_ids = {r[0] for r in blocked_q.all()}
+        results = [res for res in results if res["id"] not in blocked_ids]
+
         tmdb_ids = [res["id"] for res in results]
 
         # Check local library
@@ -3746,3 +3756,72 @@ async def pick_for_me(
 
     pick["sources"] = sources
     return pick
+
+
+# ── Blocklist ───────────────────────────────────────────────────────────────
+
+@router.get("/blocklist")
+async def get_blocklist(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all blocked items for the current user."""
+    q = select(BlocklistItem).where(BlocklistItem.user_id == current_user.id)
+    result = await db.execute(q)
+    blocked = result.scalars().all()
+    return [{"tmdb_id": b.tmdb_id, "media_type": b.media_type} for b in blocked]
+
+
+class BlockRequest(BaseModel):
+    tmdb_id: int
+    media_type: MediaType
+
+
+@router.post("/blocklist")
+async def block_item(
+    req: BlockRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Block a media item from appearing in explore pages."""
+    existing = await db.execute(
+        select(BlocklistItem).where(
+            BlocklistItem.user_id == current_user.id,
+            BlocklistItem.tmdb_id == req.tmdb_id,
+            BlocklistItem.media_type == req.media_type,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {"status": "already blocked"}
+
+    new_block = BlocklistItem(
+        user_id=current_user.id,
+        tmdb_id=req.tmdb_id,
+        media_type=req.media_type,
+    )
+    db.add(new_block)
+    await db.commit()
+    return {"status": "blocked"}
+
+
+@router.delete("/blocklist")
+async def unblock_item(
+    tmdb_id: int,
+    media_type: MediaType,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unblock a media item."""
+    q = select(BlocklistItem).where(
+        BlocklistItem.user_id == current_user.id,
+        BlocklistItem.tmdb_id == tmdb_id,
+        BlocklistItem.media_type == media_type,
+    )
+    result = await db.execute(q)
+    block = result.scalar_one_or_none()
+    if not block:
+        raise HTTPException(status_code=404, detail="Not blocked")
+
+    await db.delete(block)
+    await db.commit()
+    return {"status": "unblocked"}

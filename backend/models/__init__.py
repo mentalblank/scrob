@@ -18,6 +18,7 @@ from .playback_session import PlaybackSession
 from .playback_progress import PlaybackProgress
 from .follows import Follow
 from .global_settings import GlobalSettings
+from .blocklist import BlocklistItem
 
 __all__ = [
     "Base",
@@ -40,4 +41,5 @@ __all__ = [
     "PlaybackProgress",
     "Follow",
     "GlobalSettings",
+    "BlocklistItem",
 ]

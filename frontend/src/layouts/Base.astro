@@ -905,7 +905,7 @@ const bottomNavItem = (active: boolean) =>
       if (!card) return;
 
       const action = btn.dataset.action;
-      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate'];
+      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'block'];
       if (!action || !mediaActions.includes(action)) return;
 
       e.preventDefault();
@@ -915,6 +915,24 @@ const bottomNavItem = (active: boolean) =>
       const tmdbId = tmdbIdRaw && tmdbIdRaw !== 'null' ? tmdbIdRaw : '';
       const mediaId = card.dataset.id || '';
       const mediaType = card.dataset.mediaType!;
+
+      if (action === 'block') {
+        const title = card.querySelector('h3')?.textContent || 'this item';
+        const confirmed = await showConfirm(
+          "Don't show this again?",
+          `Hide "${title}" from your explore pages.`
+        );
+        if (!confirmed) return;
+        try {
+          await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType });
+          card.style.transition = 'all 0.3s ease';
+          card.style.opacity = '0';
+          card.style.transform = 'scale(0.9)';
+          card.style.pointerEvents = 'none';
+          setTimeout(() => card.remove(), 300);
+        } catch { /* ignore */ }
+        return;
+      }
 
       if (action === 'watched') {
         const isWatched = btn.dataset.watched === 'true';
