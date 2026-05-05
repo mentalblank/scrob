@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, Enum as SQLEnum
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, PrivacyLevel
+from .base import Base
 
 
 class List(Base):
@@ -14,7 +14,6 @@ class List(Base):
     user_id       : Mapped[int]           = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name          : Mapped[str]           = mapped_column(String(255), nullable=False)
     description   : Mapped[Optional[str]] = mapped_column(Text)
-    privacy_level : Mapped[PrivacyLevel]  = mapped_column(SQLEnum(PrivacyLevel), default=PrivacyLevel.private, nullable=False, server_default=PrivacyLevel.private.value)
     created_at    : Mapped[datetime]      = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at    : Mapped[datetime]      = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

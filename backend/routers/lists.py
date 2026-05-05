@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from db import get_db
 from models.lists import List as ListModel, ListItem
 from models.media import Media
-from models.base import MediaType, PrivacyLevel
+from models.base import MediaType
 from models.show import Show as ShowModel
 from dependencies import get_current_user
 from models.users import User
@@ -22,13 +22,11 @@ router = APIRouter()
 class ListCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    privacy_level: PrivacyLevel = PrivacyLevel.private
 
 
 class ListUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    privacy_level: Optional[PrivacyLevel] = None
 
 
 class ListItemAdd(BaseModel):
@@ -53,7 +51,6 @@ def _format_list(lst: ListModel) -> dict:
         "id": lst.id,
         "name": lst.name,
         "description": lst.description,
-        "privacy_level": lst.privacy_level,
         "item_count": len(lst.items),
         "created_at": lst.created_at.isoformat(),
         "updated_at": lst.updated_at.isoformat(),
@@ -101,7 +98,7 @@ async def get_public_lists(
         select(ListModel, User.username)
         .join(User, User.id == ListModel.user_id)
         .options(selectinload(ListModel.items).selectinload(ListItem.media).selectinload(Media.show))
-        .where(ListModel.privacy_level == PrivacyLevel.public, ListModel.user_id != current_user.id)
+        .where(ListModel.user_id != current_user.id)
         .order_by(func.random())
         .limit(3)
     )
@@ -142,7 +139,6 @@ async def create_list(
         user_id=current_user.id,
         name=body.name,
         description=body.description,
-        privacy_level=body.privacy_level,
     )
     db.add(lst)
     await db.commit()
@@ -151,7 +147,6 @@ async def create_list(
         "id": lst.id,
         "name": lst.name,
         "description": lst.description,
-        "privacy_level": lst.privacy_level,
         "item_count": 0,
         "created_at": lst.created_at.isoformat(),
         "updated_at": lst.updated_at.isoformat(),
@@ -177,8 +172,6 @@ async def get_list(
     lst = result.scalar_one_or_none()
     if not lst:
         raise HTTPException(status_code=404, detail="List not found")
-    if lst.user_id != current_user.id and lst.privacy_level == PrivacyLevel.private:
-        raise HTTPException(status_code=403, detail="Access denied")
 
     items_sorted = sorted(lst.items, key=lambda x: (x.sort_order, x.added_at))
     formatted_items = [_format_item(i) for i in items_sorted]
@@ -237,8 +230,6 @@ async def update_list(
         lst.name = body.name
     if body.description is not None:
         lst.description = body.description
-    if body.privacy_level is not None:
-        lst.privacy_level = body.privacy_level
 
     await db.commit()
 

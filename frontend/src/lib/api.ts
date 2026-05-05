@@ -228,7 +228,6 @@ export interface UserList {
   id: number;
   name: string;
   description: string | null;
-  privacy_level: PrivacyLevel;
   item_count: number;
   created_at: string;
   updated_at: string;
@@ -329,8 +328,6 @@ export interface OidcExchangeResponse {
   access_token: string;
 }
 
-export type PrivacyLevel = "public" | "friends_only" | "private";
-
 export interface UserPreferences {
   display_name: string | null;
   bio: string | null;
@@ -339,7 +336,6 @@ export interface UserPreferences {
   show_genres: string[];
   streaming_services: string[];
   content_language: string | null;
-  privacy_level: PrivacyLevel;
   avatar_url: string | null;
 }
 
@@ -616,26 +612,14 @@ export interface ProfileFollowEntry {
   avatar_url: string | null;
 }
 
+
 export interface ProfileListItem {
   id: number;
   name: string;
   description: string | null;
-  privacy_level: PrivacyLevel;
   item_count: number;
   updated_at: string;
   preview_posters: { url: string; adult: boolean }[];
-}
-
-export interface ProfileCommentItem {
-  id: number;
-  content: string;
-  media_type: string;
-  tmdb_id: number;
-  season_number: number | null;
-  episode_number: number | null;
-  title: string | null;
-  poster_path: string | null;
-  created_at: string;
 }
 
 export interface PublicProfile {
@@ -657,7 +641,6 @@ export interface PublicProfile {
   recently_watched_shows: ProfileWatchedItem[];
   top_rated_movies: ProfileRatedItem[];
   top_rated_shows: ProfileRatedItem[];
-  recent_comments: ProfileCommentItem[];
   lists: ProfileListItem[];
   follower_count: number;
   following_count: number;
@@ -683,18 +666,6 @@ export interface UserStats {
   shows_watched_collected: number;
   shows_unwatched_collected: number;
   weekday_activity: { day: string; avg: number }[];
-}
-
-export interface Comment {
-  id: number;
-  user_id: number;
-  username: string;
-  display_name: string;
-  avatar_url: string | null;
-  user_is_public: boolean;
-  content: string;
-  created_at: string;
-  updated_at?: string | null;
 }
 
 // API calls
@@ -916,11 +887,11 @@ export const api = {
       get<{ lists: UserList[] }>("/lists", undefined, token),
     getPublic: (token: string) =>
       get<{ lists: PublicList[] }>("/lists/public", undefined, token),
-    create: (body: { name: string; description?: string; privacy_level?: PrivacyLevel }, token: string) =>
+    create: (body: { name: string; description?: string }, token: string) =>
       post<UserList>("/lists", body, token),
     get: (id: number, token: string) =>
       get<ListDetail>(`/lists/${id}`, undefined, token),
-    update: (id: number, body: { name?: string; description?: string; privacy_level?: PrivacyLevel }, token: string) =>
+    update: (id: number, body: { name?: string; description?: string }, token: string) =>
       patch<UserList>(`/lists/${id}`, body, token),
     delete: (id: number, token: string) =>
       del<{ message: string }>(`/lists/${id}`, token),
@@ -966,17 +937,6 @@ export const api = {
       get<{ results: UserSearchResult[] }>("/profile/search", { q }, token),
     getStats: (userId: number, token?: string) =>
       get<UserStats>(`/profile/${userId}/stats`, undefined, token),
-  },
-
-  comments: {
-    list: (params: { media_type: string; tmdb_id: number; season_number?: number; episode_number?: number }, token?: string) =>
-      get<Comment[]>("/comments", params, token),
-    create: (body: { media_type: string; tmdb_id: number; season_number?: number; episode_number?: number; content: string }, token: string) =>
-      post<Comment>("/comments", body, token),
-    update: (id: number, content: string, token: string) =>
-      patch<{ id: number; content: string; updated_at: string | null }>(`/comments/${id}`, { content }, token),
-    delete: (id: number, token: string) =>
-      del<{ message: string }>(`/comments/${id}`, token),
   },
 
   admin: {
