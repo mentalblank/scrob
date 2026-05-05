@@ -1,8 +1,12 @@
 ---
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
+import MediaListCard from "../components/MediaListCard.astro";
+import ViewToggle from "../components/ViewToggle.astro";
 import Pagination from "../components/Pagination.astro";
 import { api, type MediaItem } from "../lib/api";
+
+const viewPreference = Astro.cookies.get("media_view_preference")?.value === "list" ? "list" : "grid";
 
 const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
@@ -24,9 +28,12 @@ try {
 ---
 
 <Base title={`Airing Today — Page ${page}`}>
-  <div class="mb-8">
-    <h1 class="text-3xl font-bold text-zinc-100 mb-2">Airing Today</h1>
-    <p class="text-zinc-500">TV shows with new episodes airing today</p>
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-3xl font-bold text-zinc-100 mb-2">Airing Today</h1>
+      <p class="text-zinc-500">TV shows with episodes airing today</p>
+    </div>
+    <ViewToggle currentView={viewPreference} />
   </div>
 
   {error && (
@@ -35,11 +42,19 @@ try {
     </div>
   )}
 
-  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-    {data.results.map((item) => (
-      <MediaCard item={item} />
-    ))}
-  </div>
+  {viewPreference === "list" ? (
+    <div class="flex flex-col gap-4">
+      {data.results.map((item) => (
+        <MediaListCard item={item} />
+      ))}
+    </div>
+  ) : (
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+      {data.results.map((item) => (
+        <MediaCard item={item} />
+      ))}
+    </div>
+  )}
 
   <Pagination
     currentPage={data.page}

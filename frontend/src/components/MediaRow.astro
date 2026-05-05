@@ -1,14 +1,16 @@
 ---
 import type { MediaItem } from "../lib/api";
 import MediaCard from "./MediaCard.astro";
+import MediaListCard from "./MediaListCard.astro";
 
 interface Props {
   title: string;
   items: MediaItem[];
   href?: string;
+  view?: "grid" | "list";
 }
 
-const { title, items, href } = Astro.props;
+const { title, items, href, view = "grid" } = Astro.props;
 ---
 
 <section class="mb-16">
@@ -30,8 +32,16 @@ const { title, items, href } = Astro.props;
       <p class="text-zinc-500 font-medium italic">Nothing here yet.</p>
     </div>
   ) : (
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-      {items.map(item => <MediaCard item={item} />)}
-    </div>
+    <>
+      {view === "list" ? (
+        <div class="flex flex-col gap-4">
+          {items.map(item => <MediaListCard item={item} />)}
+        </div>
+      ) : (
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+          {items.map(item => <MediaCard item={item} />)}
+        </div>
+      )}
+    </>
   )}
 </section>

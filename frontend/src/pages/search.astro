@@ -1,8 +1,12 @@
 ---
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
+import MediaListCard from "../components/MediaListCard.astro";
+import ViewToggle from "../components/ViewToggle.astro";
 import Pagination from "../components/Pagination.astro";
 import { api, type MediaItem, type UserSearchResult } from "../lib/api";
+
+const viewPreference = Astro.cookies.get("media_view_preference")?.value === "list" ? "list" : "grid";
 
 const { token, user: currentUser } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
@@ -85,20 +89,23 @@ const tabs: [string | undefined, string][] = [
     )}
   </div>
 
-  <!-- Year filter (media only) -->
-  {showYearFilter && (
-    <div class="flex items-center gap-3 mb-6">
-      <select id="filter-year" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
-        <option value="">All Years</option>
-        {years.map(y => (
-          <option value={y} selected={year === y}>{y}</option>
-        ))}
-      </select>
-      {year && (
-        <a href={`/search?q=${encodeURIComponent(q)}&type=${type}`} class="text-sm text-zinc-500 hover:text-zinc-300 transition">Clear</a>
-      )}
-    </div>
-  )}
+  <!-- Filter bar -->
+  <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
+    {showYearFilter ? (
+      <div class="flex items-center gap-3">
+        <select id="filter-year" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+          <option value="">All Years</option>
+          {years.map(y => (
+            <option value={y} selected={year === y}>{y}</option>
+          ))}
+        </select>
+        {year && (
+          <a href={`/search?q=${encodeURIComponent(q)}&type=${type}`} class="text-sm text-zinc-500 hover:text-zinc-300 transition">Clear</a>
+        )}
+      </div>
+    ) : <div></div>}
+    {!isUserSearch && <ViewToggle currentView={viewPreference} />}
+  </div>
 
   {error && (
     <div class="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded-lg mb-8">{error}</div>
@@ -183,11 +190,21 @@ const tabs: [string | undefined, string][] = [
   )}
 
   {!isUserSearch && (
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-      {results.map((item) => (
-        <MediaCard item={item} />
-      ))}
-    </div>
+    <>
+      {viewPreference === "list" ? (
+        <div class="flex flex-col gap-4">
+          {results.map((item) => (
+            <MediaListCard item={item} />
+          ))}
+        </div>
+      ) : (
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+          {results.map((item) => (
+            <MediaCard item={item} />
+          ))}
+        </div>
+      )}
+    </>
   )}
 
   {!isUserSearch && totalPages > 1 && (

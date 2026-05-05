@@ -1,9 +1,13 @@
 ---
 import Base from "../../layouts/Base.astro";
 import MediaCard from "../../components/MediaCard.astro";
+import MediaListCard from "../../components/MediaListCard.astro";
+import ViewToggle from "../../components/ViewToggle.astro";
 import ListCard from "../../components/ListCard.astro";
 import { api, type ListDetail, type UserList, type PublicList, type MediaItem } from "../../lib/api";
 export const prerender = false;
+
+const viewPreference = Astro.cookies.get("media_view_preference")?.value === "list" ? "list" : "grid";
 
 const { id } = Astro.params;
 const { token, user } = Astro.locals;
@@ -222,20 +226,27 @@ Astro.response.headers.set("Cache-Control", "no-store");
 
       <!-- Items Grid -->
       <div>
-        <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest mb-6">Items</h2>
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest">Items</h2>
+          <ViewToggle currentView={viewPreference} />
+        </div>
         {list.items.length === 0 ? (
           <div id="empty-state" class="text-center py-16 bg-zinc-900/20 border border-zinc-800/50 border-dashed rounded-3xl">
             <div class="text-4xl mb-3">📋</div>
             <p class="text-zinc-500">{list.is_owner ? "This list is empty. Search above to add movies and shows." : "This list is empty."}</p>
           </div>
         ) : (
-          <div id="items-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+          <div id="items-grid" class={viewPreference === "list" ? "flex flex-col gap-4" : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6"}>
             {list.items.map((entry) => (
               <div class="relative group/item" data-item-id={entry.id}>
-                <MediaCard item={entry.media} />
+                {viewPreference === "list" ? (
+                  <MediaListCard item={entry.media} />
+                ) : (
+                  <MediaCard item={entry.media} />
+                )}
                 {list.is_owner && (
                   <button
-                    class="remove-item-btn absolute top-2 left-2 bg-red-600/90 hover:bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg cursor-pointer z-10 transition-colors"
+                    class="remove-item-btn absolute top-2 right-2 bg-red-600/90 hover:bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg cursor-pointer z-10 transition-colors"
                     data-item-id={entry.id}
                     aria-label="Remove from list"
                   >
@@ -248,7 +259,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
             ))}
           </div>
         )}
-        {list.items.length === 0 && <div id="items-grid" class="hidden grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6"></div>}
+        {list.items.length === 0 && <div id="items-grid" class={`hidden ${viewPreference === 'list' ? 'flex flex-col gap-4' : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6'}`}></div>}
       </div>
 
       <!-- Other Lists -->
@@ -697,7 +708,9 @@ Astro.response.headers.set("Cache-Control", "no-store");
       if (!grid) {
         grid = document.createElement('div');
         grid.id = 'items-grid';
-        grid.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6';
+        grid.className = document.cookie.includes('media_view_preference=list') 
+          ? 'flex flex-col gap-4' 
+          : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6';
         emptyState?.parentNode?.insertBefore(grid, emptyState);
       }
       emptyState?.classList.add('hidden');
@@ -717,7 +730,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
       wrapper.setAttribute('data-item-id', String(entry.id));
       wrapper.innerHTML = `
         ${buildCard(cardMedia)}
-        <button class="remove-item-btn absolute top-2 left-2 bg-red-600/90 hover:bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg cursor-pointer z-10 transition-colors"
+        <button class="remove-item-btn absolute top-2 right-2 bg-red-600/90 hover:bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg cursor-pointer z-10 transition-colors"
           data-item-id="${esc(String(entry.id))}" aria-label="Remove from list">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-3.5 h-3.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
