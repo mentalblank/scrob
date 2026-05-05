@@ -21,8 +21,4 @@ class CollectionSource(str, enum.Enum):
     plex     = "plex"
     trakt    = "trakt"
     manual   = "manual"
-
-class PrivacyLevel(str, enum.Enum):
-    public       = "public"
-    friends_only = "friends_only"
-    private      = "private"
+

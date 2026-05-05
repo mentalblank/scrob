@@ -228,7 +228,6 @@ export interface UserList {
   id: number;
   name: string;
   description: string | null;
-  privacy_level: PrivacyLevel;
   item_count: number;
   created_at: string;
   updated_at: string;
@@ -616,11 +615,11 @@ export interface ProfileFollowEntry {
   avatar_url: string | null;
 }
 
+
 export interface ProfileListItem {
   id: number;
   name: string;
   description: string | null;
-  privacy_level: PrivacyLevel;
   item_count: number;
   updated_at: string;
   preview_posters: { url: string; adult: boolean }[];
@@ -916,11 +915,11 @@ export const api = {
       get<{ lists: UserList[] }>("/lists", undefined, token),
     getPublic: (token: string) =>
       get<{ lists: PublicList[] }>("/lists/public", undefined, token),
-    create: (body: { name: string; description?: string; privacy_level?: PrivacyLevel }, token: string) =>
+    create: (body: { name: string; description?: string }, token: string) =>
       post<UserList>("/lists", body, token),
     get: (id: number, token: string) =>
       get<ListDetail>(`/lists/${id}`, undefined, token),
-    update: (id: number, body: { name?: string; description?: string; privacy_level?: PrivacyLevel }, token: string) =>
+    update: (id: number, body: { name?: string; description?: string }, token: string) =>
       patch<UserList>(`/lists/${id}`, body, token),
     delete: (id: number, token: string) =>
       del<{ message: string }>(`/lists/${id}`, token),
