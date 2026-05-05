@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -10,9 +11,12 @@ from models.lists import List as ListModel, ListItem
 from models.media import Media
 from models.base import MediaType, PrivacyLevel
 from models.show import Show as ShowModel
+from models.users import UserSettings
 from dependencies import get_current_user
 from models.users import User
 from routers.media import enrich_with_state
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -266,6 +270,63 @@ async def delete_list(
     return {"message": "List deleted"}
 
 
+def _trakt_media_type(media_type: MediaType) -> Optional[str]:
+    if media_type == MediaType.movie:
+        return "movies"
+    if media_type == MediaType.series:
+        return "shows"
+    return None
+
+
+async def _push_list_item_to_trakt(
+    db: AsyncSession,
+    user_id: int,
+    list_trakt_slug: str,
+    media: Media,
+    remove: bool = False,
+) -> None:
+    trakt_type = _trakt_media_type(media.media_type)
+    if not trakt_type or not media.tmdb_id:
+        return
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    settings = settings_result.scalar_one_or_none()
+    if (
+        not settings
+        or not settings.trakt_push_lists
+        or not settings.trakt_access_token
+        or not settings.trakt_client_id
+    ):
+        return
+
+    from core import trakt as trakt_client
+    try:
+        if list_trakt_slug == "__watchlist__":
+            if remove:
+                await trakt_client.remove_from_watchlist(
+                    settings.trakt_client_id, settings.trakt_access_token,
+                    trakt_type, media.tmdb_id,
+                )
+            else:
+                await trakt_client.add_to_watchlist(
+                    settings.trakt_client_id, settings.trakt_access_token,
+                    trakt_type, media.tmdb_id,
+                )
+        else:
+            if remove:
+                await trakt_client.remove_from_list(
+                    settings.trakt_client_id, settings.trakt_access_token,
+                    list_trakt_slug, trakt_type, media.tmdb_id,
+                )
+            else:
+                await trakt_client.add_to_list(
+                    settings.trakt_client_id, settings.trakt_access_token,
+                    list_trakt_slug, trakt_type, media.tmdb_id,
+                )
+    except Exception as exc:
+        logger.warning("Failed to push list item to Trakt (slug=%s, remove=%s): %s", list_trakt_slug, remove, exc)
+
+
 @router.post("/{list_id}/items", status_code=201)
 async def add_list_item(
     list_id: int,
@@ -276,7 +337,8 @@ async def add_list_item(
     list_result = await db.execute(
         select(ListModel).where(ListModel.id == list_id, ListModel.user_id == current_user.id)
     )
-    if not list_result.scalar_one_or_none():
+    lst = list_result.scalar_one_or_none()
+    if not lst:
         raise HTTPException(status_code=404, detail="List not found")
 
     media_result = await db.execute(
@@ -354,6 +416,9 @@ async def add_list_item(
     db.add(item)
     await db.commit()
 
+    if lst.trakt_slug:
+        await _push_list_item_to_trakt(db, current_user.id, lst.trakt_slug, media, remove=False)
+
     item_result = await db.execute(
         select(ListItem)
         .options(selectinload(ListItem.media).selectinload(Media.show))
@@ -373,6 +438,7 @@ async def remove_list_item(
 ):
     result = await db.execute(
         select(ListItem)
+        .options(selectinload(ListItem.media))
         .join(ListModel, ListModel.id == ListItem.list_id)
         .where(
             ListItem.id == item_id,
@@ -383,6 +449,17 @@ async def remove_list_item(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    list_result = await db.execute(
+        select(ListModel).where(ListModel.id == list_id)
+    )
+    lst = list_result.scalar_one_or_none()
+    media = item.media
+
     await db.delete(item)
     await db.commit()
+
+    if lst and lst.trakt_slug and media:
+        await _push_list_item_to_trakt(db, current_user.id, lst.trakt_slug, media, remove=True)
+
     return {"message": "Item removed"}

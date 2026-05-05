@@ -384,6 +384,7 @@ if (me.totp_enabled) {
                         {[
                           { key: "trakt_sync_watched", label: "Watched history" },
                           { key: "trakt_sync_ratings", label: "Ratings" },
+                          { key: "trakt_sync_lists", label: "Lists" },
                         ].map(({ key, label }) => (
                           <label class="flex items-center gap-3 cursor-pointer group">
                             <input type="checkbox" name={key} id={key} checked={settings[key as keyof typeof settings] !== false} class="sync-pref-checkbox w-4 h-4 rounded accent-red-500 cursor-pointer" />
@@ -396,6 +397,7 @@ if (me.totp_enabled) {
                         {[
                           { key: "trakt_push_watched", label: "Watched status" },
                           { key: "trakt_push_ratings", label: "Ratings" },
+                          { key: "trakt_push_lists", label: "Lists" },
                         ].map(({ key, label }) => (
                           <label class="flex items-center gap-3 cursor-pointer group">
                             <input type="checkbox" name={key} id={key} checked={!!settings[key as keyof typeof settings]} class="sync-pref-checkbox w-4 h-4 rounded accent-red-500 cursor-pointer" />
@@ -1850,8 +1852,8 @@ if (me.totp_enabled) {
 
         // Collect boolean checkboxes (Trakt sync prefs + app preferences)
         const syncKeys = [
-          'trakt_sync_watched', 'trakt_sync_ratings',
-          'trakt_push_watched', 'trakt_push_ratings',
+          'trakt_sync_watched', 'trakt_sync_ratings', 'trakt_sync_lists',
+          'trakt_push_watched', 'trakt_push_ratings', 'trakt_push_lists',
           'blur_explicit',
         ] as const;
         const syncPrefs: Record<string, boolean> = {};

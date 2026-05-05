@@ -363,8 +363,10 @@ export interface UserSettings {
   trakt_connected: boolean;
   trakt_sync_watched: boolean;
   trakt_sync_ratings: boolean;
+  trakt_sync_lists: boolean;
   trakt_push_watched: boolean;
   trakt_push_ratings: boolean;
+  trakt_push_lists: boolean;
 
   preferences: UserPreferences | null;
   blur_explicit: boolean;

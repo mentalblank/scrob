@@ -267,6 +267,101 @@ async def remove_movie_rating(client_id: str, access_token: str, tmdb_id: int) -
         resp.raise_for_status()
 
 
+async def get_user_lists(client_id: str, access_token: str) -> list[dict]:
+    """Fetch the authenticated user's personal lists.
+
+    Returns list of: {name, description, slug, item_count, ...}
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(
+            f"{TRAKT_BASE}/users/me/lists",
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def get_list_items(client_id: str, access_token: str, list_slug: str) -> list[dict]:
+    """Fetch items in a user's personal list.
+
+    Returns list of: {type, movie: {title, ids: {tmdb}}, show: {title, ids: {tmdb}}}
+    """
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get(
+            f"{TRAKT_BASE}/users/me/lists/{list_slug}/items",
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def get_watchlist(client_id: str, access_token: str) -> list[dict]:
+    """Fetch the user's watchlist (movies + shows combined).
+
+    Returns list of: {type, movie: {title, ids: {tmdb}}, show: {title, ids: {tmdb}}}
+    """
+    async def _fetch(kind: str) -> list:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(
+                f"{TRAKT_BASE}/sync/watchlist/{kind}",
+                headers=_headers(client_id, access_token),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    movies, shows = await asyncio.gather(_fetch("movies"), _fetch("shows"))
+    return movies + shows
+
+
+async def add_to_watchlist(client_id: str, access_token: str, media_type: str, tmdb_id: int) -> None:
+    """Add a movie or show to the user's watchlist. media_type must be 'movies' or 'shows'."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/watchlist",
+            json={media_type: [{"ids": {"tmdb": tmdb_id}}]},
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def remove_from_watchlist(client_id: str, access_token: str, media_type: str, tmdb_id: int) -> None:
+    """Remove a movie or show from the user's watchlist. media_type must be 'movies' or 'shows'."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/watchlist/remove",
+            json={media_type: [{"ids": {"tmdb": tmdb_id}}]},
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def add_to_list(client_id: str, access_token: str, list_slug: str, media_type: str, tmdb_id: int) -> None:
+    """Add a movie or show to a Trakt list.
+
+    media_type must be 'movies' or 'shows'.
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/users/me/lists/{list_slug}/items",
+            json={media_type: [{"ids": {"tmdb": tmdb_id}}]},
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def remove_from_list(client_id: str, access_token: str, list_slug: str, media_type: str, tmdb_id: int) -> None:
+    """Remove a movie or show from a Trakt list.
+
+    media_type must be 'movies' or 'shows'.
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/users/me/lists/{list_slug}/items/remove",
+            json={media_type: [{"ids": {"tmdb": tmdb_id}}]},
+            headers=_headers(client_id, access_token),
+        )
+
+
 async def set_show_rating(
     client_id: str, access_token: str, tmdb_id: int, rating: float
 ) -> None:
