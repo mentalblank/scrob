@@ -558,8 +558,19 @@ if (me.totp_enabled) {
           </div>
         </form>
       </section>
+ 
+       <!-- Blocklist -->
+       <section>
+         <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Blocklist</h2>
+         <p class="text-sm text-zinc-400 mb-4">Items you've hidden from explore pages. Unblock them to see them again.</p>
+         <div id="blocklist-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+           <div class="col-span-full py-8 text-center text-zinc-500 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800">
+              Loading blocklist...
+           </div>
+         </div>
+       </section>
 
-      <!-- Appearance -->
+       <!-- Appearance -->
       <section>
         <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Appearance</h2>
         <div class="space-y-6">
@@ -1104,6 +1115,76 @@ if (me.totp_enabled) {
       }
     } catch {
       // Non-fatal — status badges stay hidden
+    }
+  }
+
+  async function loadBlocklist() {
+    const container = document.getElementById('blocklist-container');
+    if (!container) return;
+    try {
+      const res = await fetch('/api/proxy/media/blocklist', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to load blocklist');
+      const data = await res.json();
+      if (!data.length) {
+        container.innerHTML = `
+          <div class="col-span-full py-8 text-center text-zinc-500 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800">
+            No items in blocklist.
+          </div>
+        `;
+        return;
+      }
+      container.innerHTML = data.map(item => `
+        <div class="flex items-center justify-between p-4 bg-zinc-900 border border-zinc-800 rounded-xl group hover:border-zinc-700 transition-all" data-block-id="${item.tmdb_id}" data-block-type="${item.media_type}">
+          <div class="flex items-center gap-3 overflow-hidden">
+            <div class="w-10 h-14 bg-zinc-800 rounded overflow-hidden shrink-0">
+               <div class="w-full h-full flex items-center justify-center text-xs text-zinc-600 font-bold uppercase">${item.media_type[0]}</div>
+            </div>
+            <div class="flex flex-col overflow-hidden">
+              <span class="text-sm font-medium text-zinc-200 truncate">TMDB ID: ${item.tmdb_id}</span>
+              <span class="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">${item.media_type}</span>
+            </div>
+          </div>
+          <button type="button" class="unblock-btn text-xs bg-zinc-800 hover:bg-red-900/30 text-zinc-400 hover:text-red-400 px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-red-700/50 transition-all cursor-pointer">
+            Unblock
+          </button>
+        </div>
+      `).join('');
+
+      container.querySelectorAll('.unblock-btn').forEach(btn => {
+        btn.onclick = async () => {
+          const row = btn.closest('[data-block-id]');
+          const tmdbId = row.dataset.blockId;
+          const mediaType = row.dataset.blockType;
+          btn.disabled = true;
+          btn.textContent = '...';
+          try {
+            const delRes = await fetch(`/api/proxy/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (delRes.ok) {
+              row.remove();
+              if (!container.children.length) {
+                container.innerHTML = `
+                  <div class="col-span-full py-8 text-center text-zinc-500 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800">
+                    No items in blocklist.
+                  </div>
+                `;
+              }
+            } else {
+              btn.disabled = false;
+              btn.textContent = 'Unblock';
+            }
+          } catch {
+            btn.disabled = false;
+            btn.textContent = 'Unblock';
+          }
+        };
+      });
+    } catch (e) {
+      container.innerHTML = `<div class="col-span-full py-8 text-center text-red-500 bg-red-500/5 rounded-2xl border border-red-500/20">${esc(e.message)}</div>`;
     }
   }
 
@@ -2090,6 +2171,7 @@ if (me.totp_enabled) {
   setupCollapsibleRows();
   checkConnections();
   loadSyncWarnings();
+  loadBlocklist();
   loadLastSynced();
 
   document.addEventListener('astro:after-swap', () => {
@@ -2104,8 +2186,10 @@ if (me.totp_enabled) {
     setupCollapsibleRows();
     checkConnections();
     loadSyncWarnings();
+    loadBlocklist();
     loadLastSynced();
   });
+
 
   async function loadLastSynced() {
     const appData = document.getElementById('app-data') as HTMLElement | null;

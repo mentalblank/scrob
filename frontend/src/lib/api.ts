@@ -61,8 +61,8 @@ async function patch<T>(path: string, body?: unknown, token?: string): Promise<T
   return request<T>(path, "PATCH", undefined, body, token);
 }
 
-async function del<T>(path: string, token?: string): Promise<T> {
-  return request<T>(path, "DELETE", undefined, undefined, token);
+async function del<T>(path: string, params?: Record<string, string | number | boolean | undefined>, token?: string): Promise<T> {
+  return request<T>(path, "DELETE", params, undefined, token);
 }
 
 // Shared sub-types
@@ -797,6 +797,15 @@ export const api = {
 
     tmdbList: (params: { type: string; category?: string; page?: number; genre?: string; year?: number; min_rating?: number; status?: string }, token?: string) =>
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/tmdb/list", params, token),
+
+    getBlocklist: (token?: string) =>
+      get<{ tmdb_id: number; media_type: string }[]>("/media/blocklist", undefined, token),
+
+    block: (tmdbId: number, mediaType: string, token?: string) =>
+      post<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType }, token),
+
+    unblock: (tmdbId: number, mediaType: string, token?: string) =>
+      del<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType }, token),
 
     search: (q: string, type?: string, page: number = 1, year?: number, token?: string) =>
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/search", { q, ...(type ? { type } : {}), page, ...(year ? { year } : {}) }, token),

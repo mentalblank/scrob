@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response
 from starlette.background import BackgroundTask
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, func, cast as sa_cast, Text
+from sqlalchemy import select, or_, and_, func, cast as sa_cast, Text, delete
 from sqlalchemy.orm import joinedload
 
 from db import get_db
@@ -26,6 +26,7 @@ from dependencies import get_current_user
 from models.users import User, UserSettings
 from models.show import Show as ShowModel
 from models.global_settings import GlobalSettings
+from models.blocklist import BlocklistItem
 
 router = APIRouter()
 
@@ -817,6 +818,15 @@ async def search_media(
     except Exception as e:
         print(f"TMDB search error: {e}")
 
+    # Filter out blocked items
+    blocked_movies = await _get_blocked_ids(db, current_user.id, MediaType.movie)
+    blocked_series = await _get_blocked_ids(db, current_user.id, MediaType.series)
+    raw_results = [
+        res for res in raw_results
+        if not (res.get("media_type") == "movie" and res.get("id") in blocked_movies)
+        and not (res.get("media_type") == "tv" and res.get("id") in blocked_series)
+    ]
+
     # 2. Check which TMDB results are in the local library.
     # Must filter by media_type: TMDB movie/show IDs are in separate namespaces but the
     # integers can collide with episode tmdb_ids in the local DB, corrupting the map.
@@ -940,6 +950,14 @@ async def _sync_trending(
         return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
 
 
+async def _get_blocked_ids(db: AsyncSession, user_id: int, media_type: MediaType) -> set[int]:
+    query = select(BlocklistItem.tmdb_id).where(
+        BlocklistItem.user_id == user_id, BlocklistItem.media_type == media_type
+    )
+    result = await db.execute(query)
+    return {r[0] for r in result.all()}
+
+
 @router.get("/trending/movies")
 async def trending_movies(
     page: int = Query(1, ge=1),
@@ -949,6 +967,12 @@ async def trending_movies(
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     data = await _sync_trending(MediaType.movie, page, api_key=tmdb_key)
     tmdb_results = data.get("results", [])
+
+    if not tmdb_results:
+        return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
+
+    blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
+    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids]
 
     if not tmdb_results:
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
@@ -999,6 +1023,12 @@ async def trending_shows(
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     data = await _sync_trending(MediaType.series, page, api_key=tmdb_key)
     tmdb_results = data.get("results", [])
+
+    if not tmdb_results:
+        return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
+
+    blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
+    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids]
 
     if not tmdb_results:
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
@@ -1415,6 +1445,10 @@ async def get_tmdb_list(
                 data = await tmdb.get_popular_shows(page=page, api_key=tmdb_key)
 
         results = data.get("results", [])
+
+        blocked_ids = await _get_blocked_ids(db, current_user.id, type)
+        results = [r for r in results if r["id"] not in blocked_ids]
+
         tmdb_ids = [res["id"] for res in results]
 
         # Check local library
@@ -1556,6 +1590,10 @@ async def now_playing(
     try:
         data = await tmdb.get_now_playing(api_key=tmdb_key)
         results = data.get("results", [])
+
+        blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
+        results = [res for res in results if res.get("id") not in blocked_ids]
+
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
         items = _enrich_movie_list(results, lib)
@@ -1617,6 +1655,10 @@ async def upcoming_movies(
     try:
         data = await tmdb.get_upcoming_movies(api_key=tmdb_key)
         results = data.get("results", [])
+
+        blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
+        results = [res for res in results if res.get("id") not in blocked_ids]
+
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
         items = _enrich_movie_list(results, lib)
@@ -1637,6 +1679,10 @@ async def on_air_this_week(
     try:
         data = await tmdb.get_on_air_this_week(api_key=tmdb_key)
         results = data.get("results", [])
+
+        blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
+        results = [res for res in results if res.get("id") not in blocked_ids]
+
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _show_library_ids(db, current_user.id, ids)
         items = _enrich_show_list(results, lib)
@@ -1665,6 +1711,10 @@ async def hidden_gems(
                 api_key=tmdb_key,
             )
             results = data.get("results", [])
+
+            blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
+            results = [res for res in results if res.get("id") not in blocked_ids]
+
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _movie_library_ids(db, current_user.id, ids)
             items = _enrich_movie_list(results, lib)
@@ -1677,6 +1727,10 @@ async def hidden_gems(
                 api_key=tmdb_key,
             )
             results = data.get("results", [])
+
+            blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
+            results = [res for res in results if res.get("id") not in blocked_ids]
+
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _show_library_ids(db, current_user.id, ids)
             items = _enrich_show_list(results, lib)
@@ -1697,6 +1751,10 @@ async def top_rated_movies(
     try:
         data = await tmdb.get_top_rated_movies(api_key=tmdb_key)
         results = data.get("results", [])
+
+        blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
+        results = [res for res in results if res.get("id") not in blocked_ids]
+
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
         items = _enrich_movie_list(results, lib)
@@ -1717,6 +1775,10 @@ async def top_rated_shows(
     try:
         data = await tmdb.get_top_rated_shows(api_key=tmdb_key)
         results = data.get("results", [])
+
+        blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
+        results = [res for res in results if res.get("id") not in blocked_ids]
+
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _show_library_ids(db, current_user.id, ids)
         items = _enrich_show_list(results, lib)
@@ -3746,3 +3808,72 @@ async def pick_for_me(
 
     pick["sources"] = sources
     return pick
+
+
+# ── Blocklist ───────────────────────────────────────────────────────────────
+
+@router.get("/blocklist")
+async def get_blocklist(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all blocked items for the current user."""
+    q = select(BlocklistItem).where(BlocklistItem.user_id == current_user.id)
+    result = await db.execute(q)
+    blocked = result.scalars().all()
+    return [{"tmdb_id": b.tmdb_id, "media_type": b.media_type} for b in blocked]
+
+
+class BlockRequest(BaseModel):
+    tmdb_id: int
+    media_type: MediaType
+
+
+@router.post("/blocklist")
+async def block_item(
+    req: BlockRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Block a media item from appearing in explore pages."""
+    existing = await db.execute(
+        select(BlocklistItem).where(
+            BlocklistItem.user_id == current_user.id,
+            BlocklistItem.tmdb_id == req.tmdb_id,
+            BlocklistItem.media_type == req.media_type,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {"status": "already blocked"}
+
+    new_block = BlocklistItem(
+        user_id=current_user.id,
+        tmdb_id=req.tmdb_id,
+        media_type=req.media_type,
+    )
+    db.add(new_block)
+    await db.commit()
+    return {"status": "blocked"}
+
+
+@router.delete("/blocklist")
+async def unblock_item(
+    tmdb_id: int,
+    media_type: MediaType,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unblock a media item."""
+    q = select(BlocklistItem).where(
+        BlocklistItem.user_id == current_user.id,
+        BlocklistItem.tmdb_id == tmdb_id,
+        BlocklistItem.media_type == media_type,
+    )
+    result = await db.execute(q)
+    block = result.scalar_one_or_none()
+    if not block:
+        raise HTTPException(status_code=404, detail="Not blocked")
+
+    await db.delete(block)
+    await db.commit()
+    return {"status": "unblocked"}
