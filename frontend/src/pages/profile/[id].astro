@@ -226,6 +226,28 @@ function starFill(rating: number, star: number): "full" | "half" | "empty" {
           </a>
         </div>
 
+        {isOwner && (
+          <section id="profile-next-up-section" class="hidden">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                <span class="w-1 h-3.5 bg-blue-600 rounded-full"></span>
+                Next Up
+              </h2>
+              <a href="/next-up" class="text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-all flex items-center gap-1.5 group/all">
+                See All
+                <span class="group-hover/all:translate-x-0.5 transition-transform">→</span>
+              </a>
+            </div>
+            <div id="profile-next-up-grid" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
+              {Array.from({ length: 6 }).map(() => (
+                <div class="flex-shrink-0 w-48 animate-pulse rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800">
+                  <div class="aspect-[3/2] bg-zinc-800"></div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         <!-- ── Main content + sidebar ─────────────────────── -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
@@ -588,5 +610,63 @@ function starFill(rating: number, star: number): "full" | "half" | "empty" {
 
   setup();
   document.addEventListener('astro:after-swap', setup);
+
+  // ─── Next Up (owner only) ─────────────────────────────────────────────────
+  async function loadNextUp() {
+    const section = document.getElementById('profile-next-up-section');
+    const grid = document.getElementById('profile-next-up-grid');
+    if (!section || !grid) return;
+
+    const token = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+    if (!token) return;
+
+    try {
+      const res = await fetch('/api/proxy/history/next-up', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const items: any[] = data?.next_up ?? [];
+
+      if (items.length === 0) return; // keep section hidden
+
+      grid.innerHTML = items.slice(0, 12).map((item: any) => {
+        const href = item.show_tmdb_id && item.season_number != null && item.episode_number != null
+          ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
+          : item.show_tmdb_id
+            ? `/show/${item.show_tmdb_id}`
+            : `/media/${item.type}/${item.tmdb_id}`;
+        const raw = item.backdrop_path || item.show_backdrop_path || item.poster_path || item.show_poster_path;
+        const imageUrl = raw
+          ? (raw.startsWith('http') ? raw : `https://image.tmdb.org/t/p/w500${raw}`)
+          : null;
+        const sxe = item.season_number != null && item.episode_number != null
+          ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
+          : null;
+        const label = item.show_title ?? item.title ?? '';
+
+        return `<a href="${href}" class="flex-shrink-0 w-48 group relative block rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-0.5 active:scale-95 active:opacity-70">
+          <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
+            ${imageUrl
+              ? `<img src="${imageUrl}" alt="${label}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />`
+              : `<div class="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-zinc-900"><span class="text-2xl mb-1 opacity-30">📺</span><span class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">${label}</span></div>`
+            }
+            <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
+            <div class="absolute bottom-0 left-0 right-0 p-3">
+              <p class="text-[11px] font-bold text-white leading-snug truncate">${label}</p>
+              ${sxe ? `<p class="text-[10px] text-white/60 mt-0.5 truncate">${sxe}</p>` : ''}
+            </div>
+          </div>
+        </a>`;
+      }).join('');
+
+      section.classList.remove('hidden');
+    } catch {
+      // silently fail — section stays hidden
+    }
+  }
+
+  loadNextUp();
+  document.addEventListener('astro:after-swap', loadNextUp);
 </script>
 

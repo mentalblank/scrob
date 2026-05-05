@@ -304,10 +304,11 @@ async def get_next_up(
     current_user: User = Depends(get_current_user),
     limit: int | None = None,
 ):
-    """Next unwatched episode for each show the user is actively watching."""
-    # Step 1: Find the last watched / significantly-viewed episode per show
+    """Next unwatched episode for each show the user is actively watching, sorted by most recent activity."""
+    # Step 1: Find the last watched / significantly-viewed episode per show,
+    # also tracking the most recent watch timestamp for activity-date sorting.
     result = await db.execute(
-        select(Media.show_id, Media.season_number, Media.episode_number)
+        select(Media.show_id, Media.season_number, Media.episode_number, func.max(WatchEvent.watched_at).label("last_watched_at"))
         .join(WatchEvent, WatchEvent.media_id == Media.id)
         .where(
             WatchEvent.user_id == current_user.id,
@@ -315,15 +316,20 @@ async def get_next_up(
             Media.show_id.isnot(None),
             or_(WatchEvent.completed == True, WatchEvent.progress_percent >= 0.5),
         )
+        .group_by(Media.show_id, Media.season_number, Media.episode_number)
         .order_by(Media.show_id, desc(Media.season_number), desc(Media.episode_number))
     )
     rows = result.all()
 
-    # Keep only the furthest episode per show
+    # Keep only the furthest episode per show and track most recent activity date
     last_per_show: dict[int, tuple[int, int]] = {}
-    for show_id, season, episode in rows:
+    show_last_watched: dict[int, object] = {}  # show_id -> most recent watched_at
+    for show_id, season, episode, last_watched_at in rows:
         if show_id not in last_per_show:
             last_per_show[show_id] = (season, episode)
+        # Track the most recent watch date across all episodes for this show
+        if show_id not in show_last_watched or (last_watched_at and last_watched_at > show_last_watched[show_id]):
+            show_last_watched[show_id] = last_watched_at
 
     if not last_per_show:
         return {"next_up": []}
@@ -368,7 +374,13 @@ async def get_next_up(
     )
     completed_ids = {row[0] for row in completed_result.all()}
 
+    # Sort by most recent activity date (descending) before applying limit
     next_up = [m for m in next_per_show.values() if m.id not in completed_ids]
+    next_up.sort(
+        key=lambda m: show_last_watched.get(m.show_id) or "",
+        reverse=True,
+    )
+
     if limit is not None:
         next_up = next_up[:limit]
     
