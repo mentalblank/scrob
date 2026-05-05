@@ -73,11 +73,11 @@ jobs:
           build-args: |
             APP_VERSION=${{ needs.release.outputs.new_release_version }}
           tags: |
-            bellamy/scrob:latest
-            bellamy/scrob:main
-            bellamy/scrob:${{ needs.release.outputs.new_release_version }}
-            ghcr.io/ellite/scrob:latest
-            ghcr.io/ellite/scrob:main
-            ghcr.io/ellite/scrob:${{ needs.release.outputs.new_release_version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:main
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ needs.release.outputs.new_release_version }}
+            ghcr.io/${{ secrets.DOCKERHUB_USERNAME }}/scrob:latest
+            ghcr.io/${{ secrets.DOCKERHUB_USERNAME }}/scrob:main
+            ghcr.io/${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ needs.release.outputs.new_release_version }}
           cache-from: type=gha,scope=scrob-release
           cache-to: type=gha,mode=max,scope=scrob-release

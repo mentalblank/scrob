@@ -2,7 +2,7 @@ name: Branch build
 
 on:
   push:
-    branches-ignore: [main]
+    branches: [main]
 
 jobs:
   build:
@@ -47,7 +47,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.branch.outputs.tag }}-dev
           tags: |
-            bellamy/scrob:${{ steps.branch.outputs.tag }}
-            ghcr.io/ellite/scrob:${{ steps.branch.outputs.tag }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ steps.branch.outputs.tag }}
+            ghcr.io/${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ steps.branch.outputs.tag }}
           cache-from: type=gha,scope=scrob-${{ steps.branch.outputs.tag }}
           cache-to: type=gha,mode=max,scope=scrob-${{ steps.branch.outputs.tag }}
