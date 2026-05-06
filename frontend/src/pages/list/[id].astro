@@ -92,6 +92,15 @@ Astro.response.headers.set("Cache-Control", "no-store");
                   Edit
                 </button>
                 <button
+                  id="automation-list-btn"
+                  class="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 font-bold rounded-xl transition-all text-sm border border-blue-500/20 cursor-pointer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 0 1-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 0 0 6.16-12.12A14.98 14.98 0 0 0 9.63 8.41m5.96 5.96a14.96 14.96 0 0 1-12.12 6.16 14.96 14.96 0 0 1 6.16-12.12m5.96 5.96-5.96-5.96" />
+                  </svg>
+                  Automation
+                </button>
+                <button
                   id="delete-list-btn"
                   class="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold rounded-xl transition-all text-sm border border-red-500/20 cursor-pointer"
                 >
@@ -120,7 +129,24 @@ Astro.response.headers.set("Cache-Control", "no-store");
       <div id="edit-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
         <div id="edit-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
         <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
-          <h2 class="text-xl font-black text-zinc-100 mb-6">Edit List</h2>
+          <button type="button" id="edit-close-x" class="absolute top-6 right-6 p-2 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 rounded-xl transition-all cursor-pointer z-10" aria-label="Close modal">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+
+          <div class="flex items-center gap-5 mb-8">
+            <div class="p-3 bg-blue-500/10 rounded-2xl shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-blue-500">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-2xl font-black text-zinc-100 tracking-tight">Edit List</h2>
+              <p class="text-xs font-bold text-zinc-500 uppercase tracking-widest mt-1">Update name or description</p>
+            </div>
+          </div>
+
           <form id="edit-form" class="space-y-4">
             <div>
               <label for="edit-name" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Name</label>
@@ -141,39 +167,182 @@ Astro.response.headers.set("Cache-Control", "no-store");
                 class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
               >{list.description || ""}</textarea>
             </div>
+
+            <div id="edit-error" class="hidden text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"></div>
+            <div class="flex justify-end gap-3 pt-4 border-t border-zinc-800/50 mt-6">
+              <button type="button" id="edit-cancel-btn" class="px-6 py-2.5 text-zinc-500 hover:text-zinc-300 font-bold transition-all text-sm cursor-pointer">Cancel</button>
+              <button type="submit" id="edit-submit-btn" class="px-8 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all text-sm cursor-pointer shadow-lg shadow-blue-600/20 disabled:opacity-50">Save Changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Automation Modal -->
+      <div id="automation-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm hidden">
+        <div id="automation-backdrop" class="absolute inset-0"></div>
+        <div class="relative w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-3xl p-8 shadow-2xl overflow-hidden">
+          <button type="button" id="auto-close-x" class="absolute top-6 right-6 p-2 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 rounded-xl transition-all cursor-pointer z-10" aria-label="Close modal">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+
+          <div class="flex items-center gap-5 mb-8">
+            <div class="p-3 bg-blue-500/10 rounded-2xl shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-blue-500">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 0 1-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 0 0 6.16-12.12A14.98 14.98 0 0 0 9.63 8.41m5.96 5.96a14.96 14.96 0 0 1-12.12 6.16 14.96 14.96 0 0 1 6.16-12.12m5.96 5.96-5.96-5.96" />
+              </svg>
+            </div>
             <div>
-              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3 text-center">Privacy</label>
-              <div class="grid grid-cols-3 gap-2">
-                <label class="relative flex flex-col items-center p-3 rounded-xl border border-zinc-800 bg-zinc-950 cursor-pointer transition-all hover:bg-zinc-900 group">
-                  <input type="radio" name="edit-privacy" value="private" checked={list.privacy_level === "private"} class="sr-only peer" />
-                  <div class="absolute inset-0 rounded-xl border-2 border-transparent peer-checked:border-blue-600 transition-all"></div>
-                  <span class="text-[10px] font-black uppercase tracking-widest text-zinc-500 peer-checked:text-blue-400 mb-1">Private</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-zinc-400 peer-checked:text-blue-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
-                  </svg>
-                </label>
-                <label class="relative flex flex-col items-center p-3 rounded-xl border border-zinc-800 bg-zinc-950 cursor-pointer transition-all hover:bg-zinc-900 group">
-                  <input type="radio" name="edit-privacy" value="friends_only" checked={list.privacy_level === "friends_only"} class="sr-only peer" />
-                  <div class="absolute inset-0 rounded-xl border-2 border-transparent peer-checked:border-blue-600 transition-all"></div>
-                  <span class="text-[10px] font-black uppercase tracking-widest text-zinc-500 peer-checked:text-blue-400 mb-1">Friends</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-zinc-400 peer-checked:text-blue-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.998 5.998 0 0 0-12 0m12 0c0-1.723-.699-3.283-1.838-4.412m-1.148-1.148A5.988 5.988 0 0 1 12 12c-1.353 0-2.585.449-3.568 1.206m8.114-1.83c.915 0 1.656-.74 1.656-1.656V6.142c0-.915-.74-1.656-1.656-1.656H12M8.114 11.372A5.988 5.988 0 0 0 12 12c1.353 0 2.585-.449 3.568-1.206m-8.114 1.83a6.062 6.062 0 0 1-1.062-1.062m1.062 1.062c-1.139 1.129-1.838 2.689-1.838 4.412m3.114-10.43c0-.915.74-1.656 1.656-1.656h3.114c.915 0 1.656.74 1.656 1.656V6.142c0 .915-.74 1.656-1.656 1.656H12" />
-                  </svg>
-                </label>
-                <label class="relative flex flex-col items-center p-3 rounded-xl border border-zinc-800 bg-zinc-950 cursor-pointer transition-all hover:bg-zinc-900 group">
-                  <input type="radio" name="edit-privacy" value="public" checked={list.privacy_level === "public"} class="sr-only peer" />
-                  <div class="absolute inset-0 rounded-xl border-2 border-transparent peer-checked:border-blue-600 transition-all"></div>
-                  <span class="text-[10px] font-black uppercase tracking-widest text-zinc-500 peer-checked:text-blue-400 mb-1">Public</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-zinc-400 peer-checked:text-blue-500">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-.778.099-1.533.284-2.253" />
-                  </svg>
-                </label>
+              <h2 class="text-2xl font-black text-zinc-100 tracking-tight">Automation Settings</h2>
+              <p class="text-xs font-bold text-zinc-500 uppercase tracking-widest mt-1">Sonarr & Radarr Integration</p>
+            </div>
+          </div>
+
+          <form id="automation-form" class="space-y-6">
+            <div class="space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+              <!-- Radarr -->
+              <div class="space-y-4 p-5 bg-zinc-950/50 rounded-2xl border border-zinc-800/50">
+                <div class="flex items-center justify-between">
+                  <label class="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" id="auto-radarr-checkbox" checked={list.radarr_auto_add} class="w-5 h-5 rounded-lg border-zinc-800 bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-all" />
+                    <span class="text-sm font-black text-zinc-100 uppercase tracking-widest">Radarr (Movies)</span>
+                  </label>
+                  <div class="px-2 py-1 bg-zinc-800 rounded-md text-[9px] font-bold text-zinc-500 uppercase tracking-tighter">Auto-Add</div>
+                </div>
+                
+                <div id="auto-radarr-options" class={list.radarr_auto_add ? "space-y-4 pt-4 border-t border-zinc-800/50" : "hidden space-y-4 pt-4 border-t border-zinc-800/50"}>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Root Folder</label>
+                      <select id="auto-radarr-root" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                        {list.radarr_root_folder ? <option value={list.radarr_root_folder}>{list.radarr_root_folder}</option> : <option value="">Loading...</option>}
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Quality Profile</label>
+                      <select id="auto-radarr-quality" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                        {list.radarr_quality_profile ? <option value={list.radarr_quality_profile}>{list.radarr_quality_profile}</option> : <option value="">Loading...</option>}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Monitor</label>
+                    <select id="auto-radarr-monitor" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                      <option value="movieOnly" selected={list.radarr_monitor === "movieOnly"}>Movie Only</option>
+                      <option value="movieAndCollection" selected={list.radarr_monitor === "movieAndCollection"}>Movie and Collection</option>
+                      <option value="none" selected={list.radarr_monitor === "none"}>None</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Tags</label>
+                    <div id="auto-radarr-tags-container" class="space-y-3">
+                      <div id="auto-radarr-selected-tags" class="flex flex-wrap gap-1.5 min-h-[32px] p-2 bg-zinc-950 border border-zinc-800 rounded-xl">
+                        <span class="text-[10px] text-zinc-600 italic px-1">No tags selected</span>
+                      </div>
+                      <div class="space-y-2">
+                        <div class="relative group">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 group-focus-within:text-blue-500 transition-colors">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                          </svg>
+                          <input type="text" id="auto-radarr-tags-search" placeholder="Search or type tags..." class="w-full bg-zinc-900/50 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all" />
+                        </div>
+                        <div class="space-y-1.5">
+                          <p class="text-[9px] font-bold text-zinc-600 uppercase tracking-tight ml-1">Available Tags (Click to add)</p>
+                          <div id="auto-radarr-available-tags" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1 custom-scrollbar">
+                            <span class="text-[10px] text-zinc-500 italic">Loading tags...</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <input type="hidden" id="auto-radarr-tags-hidden" value={list.radarr_tags?.join(",") || ""} />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Sonarr -->
+              <div class="space-y-4 p-5 bg-zinc-950/50 rounded-2xl border border-zinc-800/50">
+                <div class="flex items-center justify-between">
+                  <label class="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" id="auto-sonarr-checkbox" checked={list.sonarr_auto_add} class="w-5 h-5 rounded-lg border-zinc-800 bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-all" />
+                    <span class="text-sm font-black text-zinc-100 uppercase tracking-widest">Sonarr (Shows)</span>
+                  </label>
+                  <div class="px-2 py-1 bg-zinc-800 rounded-md text-[9px] font-bold text-zinc-500 uppercase tracking-tighter">Auto-Add</div>
+                </div>
+                
+                <div id="auto-sonarr-options" class={list.sonarr_auto_add ? "space-y-4 pt-4 border-t border-zinc-800/50" : "hidden space-y-4 pt-4 border-t border-zinc-800/50"}>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Root Folder</label>
+                      <select id="auto-sonarr-root" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                        {list.sonarr_root_folder ? <option value={list.sonarr_root_folder}>{list.sonarr_root_folder}</option> : <option value="">Loading...</option>}
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Quality Profile</label>
+                      <select id="auto-sonarr-quality" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                        {list.sonarr_quality_profile ? <option value={list.sonarr_quality_profile}>{list.sonarr_quality_profile}</option> : <option value="">Loading...</option>}
+                      </select>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Series Type</label>
+                      <select id="auto-sonarr-type" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                        <option value="standard" selected={list.sonarr_series_type === "standard"}>Standard</option>
+                        <option value="daily" selected={list.sonarr_series_type === "daily"}>Daily</option>
+                        <option value="anime" selected={list.sonarr_series_type === "anime"}>Anime</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Monitor</label>
+                      <select id="auto-sonarr-monitor" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                        <option value="all" selected={list.sonarr_monitor === "all"}>All Episodes</option>
+                        <option value="future" selected={list.sonarr_monitor === "future"}>Future Episodes</option>
+                        <option value="missing" selected={list.sonarr_monitor === "missing"}>Missing Episodes</option>
+                        <option value="existing" selected={list.sonarr_monitor === "existing"}>Existing Episodes</option>
+                        <option value="pilot" selected={list.sonarr_monitor === "pilot"}>Pilot Episode</option>
+                        <option value="firstSeason" selected={list.sonarr_monitor === "firstSeason"}>First Season</option>
+                        <option value="lastSeason" selected={list.sonarr_monitor === "lastSeason"}>Last Season</option>
+                        <option value="none" selected={list.sonarr_monitor === "none"}>None</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Tags</label>
+                    <div id="auto-sonarr-tags-container" class="space-y-3">
+                      <div id="auto-sonarr-selected-tags" class="flex flex-wrap gap-1.5 min-h-[32px] p-2 bg-zinc-950 border border-zinc-800 rounded-xl">
+                        <span class="text-[10px] text-zinc-600 italic px-1">No tags selected</span>
+                      </div>
+                      <div class="space-y-2">
+                        <div class="relative group">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 group-focus-within:text-blue-500 transition-colors">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                          </svg>
+                          <input type="text" id="auto-sonarr-tags-search" placeholder="Search or type tags..." class="w-full bg-zinc-900/50 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all" />
+                        </div>
+                        <div class="space-y-1.5">
+                          <p class="text-[9px] font-bold text-zinc-600 uppercase tracking-tight ml-1">Available Tags (Click to add)</p>
+                          <div id="auto-sonarr-available-tags" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1 custom-scrollbar">
+                            <span class="text-[10px] text-zinc-500 italic">Loading tags...</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <input type="hidden" id="auto-sonarr-tags-hidden" value={list.sonarr_tags?.join(",") || ""} />
+                  </div>
+                  <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="checkbox" id="auto-sonarr-season-folder" checked={list.sonarr_season_folder} class="w-4 h-4 rounded-md border-zinc-800 bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-all" />
+                    <span class="text-xs font-bold text-zinc-400 group-hover:text-zinc-300 transition-colors uppercase tracking-wider">Use Season Folders</span>
+                  </label>
+                </div>
               </div>
             </div>
-            <div id="edit-error" class="hidden text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"></div>
-            <div class="flex gap-3 pt-2">
-              <button type="button" id="edit-cancel-btn" class="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all text-sm cursor-pointer">Cancel</button>
-              <button type="submit" id="edit-submit-btn" class="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all text-sm cursor-pointer disabled:opacity-50">Save Changes</button>
+
+            <div id="automation-error" class="hidden text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3"></div>
+            <div class="flex justify-end gap-3 pt-6 border-t border-zinc-800/50 mt-6">
+              <button type="button" id="auto-cancel-btn-footer" class="px-6 py-2.5 text-zinc-500 hover:text-zinc-300 font-bold transition-all text-sm cursor-pointer">Cancel</button>
+              <button type="submit" id="auto-submit-btn" class="px-8 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all text-sm cursor-pointer shadow-lg shadow-blue-600/20 disabled:opacity-50">Save Settings</button>
             </div>
           </form>
         </div>
@@ -301,7 +470,13 @@ Astro.response.headers.set("Cache-Control", "no-store");
   )}
 </Base>
 
-<script define:vars={{ token, listId: list?.id, apiKey: user?.api_key }}>
+<script define:vars={{ 
+  token, 
+  listId: list?.id, 
+  apiKey: user?.api_key,
+  initialRadarrTags: list.radarr_tags || [],
+  initialSonarrTags: list.sonarr_tags || []
+}}>
   // Reload when restored from bfcache so DOM mutations (newly added items) aren't lost.
 
   function esc(str) {
@@ -329,6 +504,217 @@ Astro.response.headers.set("Cache-Control", "no-store");
   }
   document.getElementById('edit-cancel-btn')?.addEventListener('click', closeEditModal);
   document.getElementById('edit-backdrop')?.addEventListener('click', closeEditModal);
+  document.getElementById('edit-close-x')?.addEventListener('click', closeEditModal);
+
+  // --- Automation Settings Modal ---
+  const automationModal = document.getElementById('automation-modal');
+  const automationForm = document.getElementById('automation-form');
+  const automationListBtn = document.getElementById('automation-list-btn');
+  const autoCancelBtn = document.getElementById('auto-cancel-btn');
+  const autoBackdrop = document.getElementById('automation-backdrop');
+  const autoSubmitBtn = document.getElementById('auto-submit-btn');
+  const autoError = document.getElementById('automation-error');
+
+  function openAutomationModal() {
+    automationModal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeAutomationModal() {
+    automationModal.classList.add('hidden');
+    document.body.style.overflow = '';
+    autoError.classList.add('hidden');
+  }
+
+  automationListBtn?.addEventListener('click', openAutomationModal);
+  document.getElementById('auto-cancel-btn-footer')?.addEventListener('click', closeAutomationModal);
+  document.getElementById('auto-close-x')?.addEventListener('click', closeAutomationModal);
+  autoBackdrop?.addEventListener('click', closeAutomationModal);
+
+  const radarrCheckbox = document.getElementById('auto-radarr-checkbox');
+  const radarrOptions = document.getElementById('auto-radarr-options');
+  const sonarrCheckbox = document.getElementById('auto-sonarr-checkbox');
+  const sonarrOptions = document.getElementById('auto-sonarr-options');
+
+  let selectedTagsRadarr = new Set(initialRadarrTags.map(id => id.toString()));
+  let selectedTagsSonarr = new Set(initialSonarrTags.map(id => id.toString()));
+
+  function updateTagUI(type) {
+    const selectedSet = type === 'radarr' ? selectedTagsRadarr : selectedTagsSonarr;
+    const selectedEl = document.getElementById(`auto-${type}-selected-tags`);
+    const hiddenInput = document.getElementById(`auto-${type}-tags-hidden`);
+    const searchInput = document.getElementById(`auto-${type}-tags-search`);
+    const status = connectionsStatus?.[type];
+    
+    if (!status || !selectedEl || !hiddenInput) return;
+
+    // Update hidden input
+    hiddenInput.value = Array.from(selectedSet).join(',');
+
+    // Render selected tags
+    if (selectedSet.size === 0) {
+      selectedEl.innerHTML = '<span class="text-[10px] text-zinc-600 italic px-1">No tags selected</span>';
+    } else {
+      selectedEl.innerHTML = Array.from(selectedSet).map(id => {
+        const tag = status.tags?.find(t => t.id.toString() === id.toString());
+        const label = tag ? tag.label : id;
+        return `
+          <div class="flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded-lg group/tag">
+            <span class="text-[10px] font-bold text-blue-400 uppercase tracking-tight">${label}</span>
+            <button type="button" class="text-blue-500/50 hover:text-blue-400 cursor-pointer" onclick="toggleTag('${type}', '${id}')">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-2.5 h-2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Update available tags (highlight selected and filter by search)
+    const availableEl = document.getElementById(`auto-${type}-available-tags`);
+    if (availableEl && status.tags) {
+      const query = searchInput?.value?.toLowerCase() || '';
+      const filtered = status.tags.filter(t => t.label.toLowerCase().includes(query));
+      
+      if (filtered.length === 0) {
+        availableEl.innerHTML = '<span class="text-[10px] text-zinc-600 italic px-1">No matching tags</span>';
+      } else {
+        availableEl.innerHTML = filtered.map(t => {
+          const isSelected = selectedSet.has(t.id.toString());
+          return `
+            <button type="button" 
+              onclick="toggleTag('${type}', '${t.id}')"
+              class="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-tight transition-all cursor-pointer
+                ${isSelected 
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
+                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 border border-zinc-700'}">
+              ${t.label}
+            </button>
+          `;
+        }).join('');
+      }
+    }
+  }
+
+  window.toggleTag = (type, id) => {
+    const selectedSet = type === 'radarr' ? selectedTagsRadarr : selectedTagsSonarr;
+    const idStr = id.toString();
+    if (selectedSet.has(idStr)) {
+      selectedSet.delete(idStr);
+    } else {
+      selectedSet.add(idStr);
+    }
+    updateTagUI(type);
+  };
+
+  ['radarr', 'sonarr'].forEach(type => {
+    document.getElementById(`auto-${type}-tags-search`)?.addEventListener('input', () => updateTagUI(type));
+  });
+
+  let connectionsStatus = null;
+  async function fetchAutomationProfiles(type) {
+    try {
+      if (!connectionsStatus) {
+        const res = await fetch('/api/proxy/auth/connection-status', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        connectionsStatus = await res.json();
+      }
+
+      const status = connectionsStatus[type];
+      if (!status || !status.configured) {
+        const optionsEl = document.getElementById(`auto-${type}-options`);
+        optionsEl.innerHTML = `<p class="text-[10px] text-red-400 p-2">${type.charAt(0).toUpperCase() + type.slice(1)} is not configured in your settings.</p>`;
+        return;
+      }
+
+      const rootSelect = document.getElementById(`auto-${type}-root`);
+      const profileSelect = document.getElementById(`auto-${type}-quality`);
+      
+      // Current values from list
+      const currentRoot = type === 'radarr' ? "{list.radarr_root_folder}" : "{list.sonarr_root_folder}";
+      const currentProfile = type === 'radarr' ? "{list.radarr_quality_profile}" : "{list.sonarr_quality_profile}";
+
+      if (rootSelect) {
+        rootSelect.innerHTML = status.root_folders.map(f => `<option value="${f.path}" ${f.path === currentRoot ? 'selected' : ''}>${f.path} (${(f.freeSpace / 1024 / 1024 / 1024).toFixed(1)} GB free)</option>`).join('');
+      }
+      if (profileSelect) {
+        profileSelect.innerHTML = status.quality_profiles.map(p => `<option value="${p.id}" ${p.id == currentProfile ? 'selected' : ''}>${p.name}</option>`).join('');
+      }
+      
+      updateTagUI(type);
+    } catch (err) {
+      console.error(`Failed to fetch ${type} profiles`, err);
+    }
+  }
+
+  radarrCheckbox?.addEventListener('change', () => {
+    const isChecked = radarrCheckbox.checked;
+    radarrOptions.classList.toggle('hidden', !isChecked);
+    if (isChecked) fetchAutomationProfiles('radarr');
+  });
+
+  sonarrCheckbox?.addEventListener('change', () => {
+    const isChecked = sonarrCheckbox.checked;
+    sonarrOptions.classList.toggle('hidden', !isChecked);
+    if (isChecked) fetchAutomationProfiles('sonarr');
+  });
+
+  // Fetch initial if enabled
+  if (radarrCheckbox?.checked) fetchAutomationProfiles('radarr');
+  if (sonarrCheckbox?.checked) fetchAutomationProfiles('sonarr');
+
+  automationForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const payload = { 
+      radarr_auto_add: radarrCheckbox.checked,
+      sonarr_auto_add: sonarrCheckbox.checked,
+    };
+
+    if (radarrCheckbox.checked) {
+      payload.radarr_root_folder = document.getElementById('auto-radarr-root').value;
+      payload.radarr_quality_profile = parseInt(document.getElementById('auto-radarr-quality').value);
+      payload.radarr_monitor = document.getElementById('auto-radarr-monitor').value;
+      payload.radarr_tags = Array.from(selectedTagsRadarr).map(id => parseInt(id));
+      if (payload.radarr_tags.length === 0) payload.radarr_tags = null;
+    }
+
+    if (sonarrCheckbox.checked) {
+      payload.sonarr_root_folder = document.getElementById('auto-sonarr-root').value;
+      payload.sonarr_quality_profile = parseInt(document.getElementById('auto-sonarr-quality').value);
+      payload.sonarr_series_type = document.getElementById('auto-sonarr-type').value;
+      payload.sonarr_monitor = document.getElementById('auto-sonarr-monitor').value;
+      payload.sonarr_season_folder = document.getElementById('auto-sonarr-season-folder').checked;
+      payload.sonarr_tags = Array.from(selectedTagsSonarr).map(id => parseInt(id));
+      if (payload.sonarr_tags.length === 0) payload.sonarr_tags = null;
+    }
+
+    autoSubmitBtn.disabled = true;
+    autoSubmitBtn.textContent = 'Saving...';
+    autoError.classList.add('hidden');
+
+    try {
+      const res = await fetch(`/api/proxy/lists/${listId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to update automation settings');
+      }
+      closeAutomationModal();
+      window.showToast?.('Automation settings saved', 'success');
+    } catch (err) {
+      autoError.textContent = err.message;
+      autoError.classList.remove('hidden');
+    } finally {
+      autoSubmitBtn.disabled = false;
+      autoSubmitBtn.textContent = 'Save Settings';
+    }
+  });
 
   editForm?.addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -233,6 +233,20 @@ export interface UserList {
   created_at: string;
   updated_at: string;
   preview_posters: { url: string; adult: boolean }[];
+  
+  radarr_auto_add: boolean;
+  radarr_root_folder: string | null;
+  radarr_quality_profile: number | null;
+  radarr_tags: number[] | null;
+  radarr_monitor: string | null;
+  
+  sonarr_auto_add: boolean;
+  sonarr_root_folder: string | null;
+  sonarr_quality_profile: number | null;
+  sonarr_tags: number[] | null;
+  sonarr_series_type: string | null;
+  sonarr_season_folder: boolean;
+  sonarr_monitor: string | null;
 }
 
 export interface PublicList extends UserList {
@@ -936,11 +950,11 @@ export const api = {
       get<{ lists: UserList[] }>("/lists", undefined, token),
     getPublic: (token: string) =>
       get<{ lists: PublicList[] }>("/lists/public", undefined, token),
-    create: (body: { name: string; description?: string; privacy_level?: PrivacyLevel }, token: string) =>
+    create: (body: Partial<UserList>, token: string) =>
       post<UserList>("/lists", body, token),
     get: (id: number, token: string) =>
       get<ListDetail>(`/lists/${id}`, undefined, token),
-    update: (id: number, body: { name?: string; description?: string; privacy_level?: PrivacyLevel }, token: string) =>
+    update: (id: number, body: Partial<UserList>, token: string) =>
       patch<UserList>(`/lists/${id}`, body, token),
     delete: (id: number, token: string) =>
       del<{ message: string }>(`/lists/${id}`, token),

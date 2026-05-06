@@ -73,6 +73,8 @@ async def add_series(
     monitored: bool = True,
     search_for_missing_episodes: bool = True,
     season_folder: bool = True,
+    series_type: str = "standard",
+    monitor: str = "all",
 ) -> Dict[str, Any]:
     """Add a series to Sonarr."""
     try:
@@ -101,10 +103,12 @@ async def add_series(
                 "rootFolderPath": root_folder,
                 "qualityProfileId": quality_profile_id,
                 "seasonFolder": season_folder,
+                "seriesType": series_type,
                 "tags": tags or [],
                 "monitored": monitored,
                 "addOptions": {
-                    "searchForMissingEpisodes": search_for_missing_episodes
+                    "searchForMissingEpisodes": search_for_missing_episodes,
+                    "monitor": monitor
                 }
             }
 

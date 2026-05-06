@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, Enum as SQLEnum
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, Enum as SQLEnum, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, PrivacyLevel
@@ -20,6 +20,22 @@ class List(Base):
 
     user  : Mapped["User"]         = relationship(back_populates="lists")
     items : Mapped[list["ListItem"]] = relationship(back_populates="list", cascade="all, delete-orphan")
+
+    # Radarr integration
+    radarr_auto_add        : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    radarr_root_folder     : Mapped[Optional[str]] = mapped_column(String(500))
+    radarr_quality_profile : Mapped[Optional[int]] = mapped_column(Integer)
+    radarr_tags            : Mapped[Optional[list[int]]] = mapped_column(JSON)
+    radarr_monitor         : Mapped[Optional[str]] = mapped_column(String(50))
+
+    # Sonarr integration
+    sonarr_auto_add         : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    sonarr_root_folder      : Mapped[Optional[str]] = mapped_column(String(500))
+    sonarr_quality_profile  : Mapped[Optional[int]] = mapped_column(Integer)
+    sonarr_tags             : Mapped[Optional[list[int]]] = mapped_column(JSON)
+    sonarr_series_type      : Mapped[Optional[str]] = mapped_column(String(50)) # standard | daily | anime
+    sonarr_season_folder    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    sonarr_monitor          : Mapped[Optional[str]] = mapped_column(String(50))
 
 
 class ListItem(Base):

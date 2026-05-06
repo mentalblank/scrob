@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
+from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,12 +24,44 @@ class ListCreate(BaseModel):
     name: str
     description: Optional[str] = None
     privacy_level: PrivacyLevel = PrivacyLevel.private
+    
+    # Radarr integration
+    radarr_auto_add: bool = False
+    radarr_root_folder: Optional[str] = None
+    radarr_quality_profile: Optional[int] = None
+    radarr_tags: Optional[list[int]] = None
+    radarr_monitor: Optional[str] = None
+
+    # Sonarr integration
+    sonarr_auto_add: bool = False
+    sonarr_root_folder: Optional[str] = None
+    sonarr_quality_profile: Optional[int] = None
+    sonarr_tags: Optional[list[int]] = None
+    sonarr_series_type: Optional[str] = None
+    sonarr_season_folder: bool = True
+    sonarr_monitor: Optional[str] = None
 
 
 class ListUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     privacy_level: Optional[PrivacyLevel] = None
+    
+    # Radarr integration
+    radarr_auto_add: Optional[bool] = None
+    radarr_root_folder: Optional[str] = None
+    radarr_quality_profile: Optional[int] = None
+    radarr_tags: Optional[list[int]] = None
+    radarr_monitor: Optional[str] = None
+
+    # Sonarr integration
+    sonarr_auto_add: Optional[bool] = None
+    sonarr_root_folder: Optional[str] = None
+    sonarr_quality_profile: Optional[int] = None
+    sonarr_tags: Optional[list[int]] = None
+    sonarr_series_type: Optional[str] = None
+    sonarr_season_folder: Optional[bool] = None
+    sonarr_monitor: Optional[str] = None
 
 
 class ListItemAdd(BaseModel):
@@ -38,26 +71,44 @@ class ListItemAdd(BaseModel):
 
 def _format_list(lst: ListModel) -> dict:
     preview_posters: list[dict] = []
-    for item in sorted(lst.items, key=lambda x: (x.sort_order, x.added_at)):
-        if len(preview_posters) >= 3:
-            break
-        try:
-            poster = item.media.poster_path
-            if not poster and item.media.show:
-                poster = item.media.show.poster_path
-            if poster:
-                preview_posters.append({"url": poster, "adult": item.media.adult})
-        except Exception:
-            pass
+    # Only attempt to get posters if items relationship is loaded and not empty
+    if "items" in lst.__dict__ and lst.items:
+        for item in sorted(lst.items, key=lambda x: (x.sort_order, x.added_at)):
+            if len(preview_posters) >= 3:
+                break
+            try:
+                # Safer check for media relationship
+                if "media" in item.__dict__:
+                    poster = item.media.poster_path
+                    if not poster and "show" in item.media.__dict__ and item.media.show:
+                        poster = item.media.show.poster_path
+                    if poster:
+                        preview_posters.append({"url": poster, "adult": item.media.adult})
+            except Exception:
+                pass
     return {
         "id": lst.id,
         "name": lst.name,
         "description": lst.description,
         "privacy_level": lst.privacy_level,
-        "item_count": len(lst.items),
-        "created_at": lst.created_at.isoformat(),
-        "updated_at": lst.updated_at.isoformat(),
+        "item_count": len(lst.items) if "items" in lst.__dict__ else 0,
+        "created_at": lst.created_at.isoformat() if lst.created_at else datetime.now().isoformat(),
+        "updated_at": lst.updated_at.isoformat() if lst.updated_at else datetime.now().isoformat(),
         "preview_posters": preview_posters,
+        
+        "radarr_auto_add": lst.radarr_auto_add,
+        "radarr_root_folder": lst.radarr_root_folder,
+        "radarr_quality_profile": lst.radarr_quality_profile,
+        "radarr_tags": lst.radarr_tags,
+        "radarr_monitor": lst.radarr_monitor,
+        
+        "sonarr_auto_add": lst.sonarr_auto_add,
+        "sonarr_root_folder": lst.sonarr_root_folder,
+        "sonarr_quality_profile": lst.sonarr_quality_profile,
+        "sonarr_tags": lst.sonarr_tags,
+        "sonarr_series_type": lst.sonarr_series_type,
+        "sonarr_season_folder": lst.sonarr_season_folder,
+        "sonarr_monitor": lst.sonarr_monitor,
     }
 
 
@@ -143,20 +194,23 @@ async def create_list(
         name=body.name,
         description=body.description,
         privacy_level=body.privacy_level,
+        radarr_auto_add=body.radarr_auto_add,
+        radarr_root_folder=body.radarr_root_folder,
+        radarr_quality_profile=body.radarr_quality_profile,
+        radarr_tags=body.radarr_tags,
+        radarr_monitor=body.radarr_monitor,
+        sonarr_auto_add=body.sonarr_auto_add,
+        sonarr_root_folder=body.sonarr_root_folder,
+        sonarr_quality_profile=body.sonarr_quality_profile,
+        sonarr_tags=body.sonarr_tags,
+        sonarr_series_type=body.sonarr_series_type,
+        sonarr_season_folder=body.sonarr_season_folder,
+        sonarr_monitor=body.sonarr_monitor,
     )
     db.add(lst)
     await db.commit()
     await db.refresh(lst)
-    return {
-        "id": lst.id,
-        "name": lst.name,
-        "description": lst.description,
-        "privacy_level": lst.privacy_level,
-        "item_count": 0,
-        "created_at": lst.created_at.isoformat(),
-        "updated_at": lst.updated_at.isoformat(),
-        "preview_posters": [],
-    }
+    return _format_list(lst)
 
 
 @router.get("/{list_id}")
@@ -239,6 +293,32 @@ async def update_list(
         lst.description = body.description
     if body.privacy_level is not None:
         lst.privacy_level = body.privacy_level
+        
+    if body.radarr_auto_add is not None:
+        lst.radarr_auto_add = body.radarr_auto_add
+    if body.radarr_root_folder is not None:
+        lst.radarr_root_folder = body.radarr_root_folder
+    if body.radarr_quality_profile is not None:
+        lst.radarr_quality_profile = body.radarr_quality_profile
+    if body.radarr_tags is not None:
+        lst.radarr_tags = body.radarr_tags
+    if body.radarr_monitor is not None:
+        lst.radarr_monitor = body.radarr_monitor
+        
+    if body.sonarr_auto_add is not None:
+        lst.sonarr_auto_add = body.sonarr_auto_add
+    if body.sonarr_root_folder is not None:
+        lst.sonarr_root_folder = body.sonarr_root_folder
+    if body.sonarr_quality_profile is not None:
+        lst.sonarr_quality_profile = body.sonarr_quality_profile
+    if body.sonarr_tags is not None:
+        lst.sonarr_tags = body.sonarr_tags
+    if body.sonarr_series_type is not None:
+        lst.sonarr_series_type = body.sonarr_series_type
+    if body.sonarr_season_folder is not None:
+        lst.sonarr_season_folder = body.sonarr_season_folder
+    if body.sonarr_monitor is not None:
+        lst.sonarr_monitor = body.sonarr_monitor
 
     await db.commit()
 
@@ -278,7 +358,8 @@ async def add_list_item(
     list_result = await db.execute(
         select(ListModel).where(ListModel.id == list_id, ListModel.user_id == current_user.id)
     )
-    if not list_result.scalar_one_or_none():
+    list_obj = list_result.scalar_one_or_none()
+    if not list_obj:
         raise HTTPException(status_code=404, detail="List not found")
 
     media_result = await db.execute(
@@ -355,6 +436,66 @@ async def add_list_item(
     item = ListItem(list_id=list_id, media_id=media.id)
     db.add(item)
     await db.commit()
+
+    # --- Sonarr/Radarr Auto-Add ---
+    if body.media_type in (MediaType.movie, MediaType.series):
+        # We already have list_obj from above
+        
+        from models.users import UserSettings
+        from models.global_settings import GlobalSettings
+        from routers.media import _effective_radarr, _effective_sonarr, _get_global_settings
+        
+        settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+        settings = settings_q.scalar_one_or_none()
+        gs = await _get_global_settings(db)
+        
+        if body.media_type == MediaType.movie and list_obj.radarr_auto_add:
+            radarr_cfg = _effective_radarr(settings, gs)
+            if radarr_cfg:
+                from core import radarr
+                try:
+                    await radarr.add_movie(
+                        url=radarr_cfg.radarr_url,
+                        token=radarr_cfg.radarr_token,
+                        tmdb_id=body.tmdb_id,
+                        title=media.title,
+                        root_folder=list_obj.radarr_root_folder or radarr_cfg.radarr_root_folder,
+                        quality_profile_id=list_obj.radarr_quality_profile or radarr_cfg.radarr_quality_profile,
+                        tags=list_obj.radarr_tags,
+                        monitored=list_obj.radarr_monitor != "none" if list_obj.radarr_monitor else True,
+                        monitor=list_obj.radarr_monitor or "movieOnly",
+                        # search_for_movie defaults to True in add_movie
+                    )
+                except Exception as e:
+                    print(f"Radarr auto-add failed: {e}")
+
+        elif body.media_type == MediaType.series and list_obj.sonarr_auto_add:
+            sonarr_cfg = _effective_sonarr(settings, gs)
+            if sonarr_cfg:
+                from core import sonarr
+                try:
+                    # Need TVDB ID for Sonarr
+                    tvdb_id = (media.tmdb_data or {}).get("external_ids", {}).get("tvdb_id")
+                    if not tvdb_id:
+                        from core import tmdb as tmdb_core
+                        ext_ids = await tmdb_core.get_external_ids(body.tmdb_id, "tv", api_key=api_key)
+                        tvdb_id = ext_ids.get("tvdb_id")
+                    
+                    if tvdb_id:
+                        await sonarr.add_series(
+                            url=sonarr_cfg.sonarr_url,
+                            token=sonarr_cfg.sonarr_token,
+                            tvdb_id=tvdb_id,
+                            root_folder=list_obj.sonarr_root_folder or sonarr_cfg.sonarr_root_folder,
+                            quality_profile_id=list_obj.sonarr_quality_profile or sonarr_cfg.sonarr_quality_profile,
+                            tags=list_obj.sonarr_tags,
+                            monitored=list_obj.sonarr_monitor != "none" if list_obj.sonarr_monitor else True,
+                            season_folder=list_obj.sonarr_season_folder,
+                            series_type=list_obj.sonarr_series_type or "standard",
+                            monitor=list_obj.sonarr_monitor or "all",
+                        )
+                except Exception as e:
+                    print(f"Sonarr auto-add failed: {e}")
 
     item_result = await db.execute(
         select(ListItem)

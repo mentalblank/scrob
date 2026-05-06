@@ -72,7 +72,8 @@ async def add_movie(
     quality_profile_id: int,
     tags: Optional[List[int]] = None,
     monitored: bool = True,
-    search_for_movie: bool = True
+    search_for_movie: bool = True,
+    monitor: str = "movieOnly"
 ) -> Dict[str, Any]:
     """Add a movie to Radarr."""
     try:
@@ -103,7 +104,8 @@ async def add_movie(
                 "tags": tags or [],
                 "monitored": monitored,
                 "addOptions": {
-                    "searchForMovie": search_for_movie
+                    "searchForMovie": search_for_movie,
+                    "monitor": monitor
                 }
             }
 
