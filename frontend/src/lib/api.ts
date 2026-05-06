@@ -459,6 +459,7 @@ export interface MediaItem {
   poster_path: string | null;
   backdrop_path?: string | null;
   release_date?: string | null;
+  first_air_date?: string | null;
   tmdb_rating?: number | null;
   season_number?: number | null;
   episode_number?: number | null;
@@ -585,6 +586,7 @@ export interface Show {
   poster_path: string | null;
   backdrop_path: string | null;
   tmdb_rating: number;
+  first_air_date: string | null;
   genres: string[];
   in_library: boolean;
   watched: boolean;

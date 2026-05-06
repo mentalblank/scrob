@@ -29,6 +29,8 @@ from dependencies import get_current_user
 from sqlalchemy.orm import selectinload
 from fastapi import File, UploadFile
 
+from sqlalchemy.orm.attributes import flag_modified
+
 logger = logging.getLogger(__name__)
 
 
@@ -382,7 +384,15 @@ async def update_user_settings(
 
     for field, value in update_data.items():
         if hasattr(settings, field):
-            setattr(settings, field, value)
+            if field == "preferences" and value is not None:
+                # Merge preferences bag rather than total overwrite
+                current_prefs = dict(settings.preferences or {})
+                if isinstance(value, dict):
+                    current_prefs.update(value)
+                settings.preferences = current_prefs
+                flag_modified(settings, "preferences")
+            else:
+                setattr(settings, field, value)
 
     await db.commit()
     await db.refresh(settings)

@@ -15,7 +15,11 @@ from models.collection import Collection, CollectionFile
 from models.base import MediaType
 from models.show import Show as ShowModel
 from models.users import User
-from routers.media import format_media, get_user_tmdb_key, get_user_content_language, check_tmdb_key, enrich_with_state, refresh_technical_data, _extract_show_content_rating, get_where_to_watch
+from routers.media import (
+    format_media, get_user_tmdb_key, get_user_content_language, check_tmdb_key,
+    enrich_with_state, refresh_technical_data, _extract_show_content_rating,
+    get_where_to_watch, _get_blocked_ids, _get_content_filters, _is_content_filtered
+)
 
 from dependencies import get_current_user
 from core import tmdb
@@ -504,6 +508,11 @@ async def get_show_recommendations(
     try:
         data = await tmdb.get_show(series_tmdb_id, api_key=tmdb_key)
         recs_raw = data.get("recommendations", {}).get("results", [])[:12]
+        
+        blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
+        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+        recs_raw = [res for res in recs_raw if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+
         recommendations = [
             {
                 "id": None,

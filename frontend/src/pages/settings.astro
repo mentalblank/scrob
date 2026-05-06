@@ -1908,7 +1908,6 @@ if (me.totp_enabled) {
       try {
         const saves = [];
         const appData = document.getElementById('app-data') as HTMLElement;
-        const currentPreferences = JSON.parse(appData.dataset.preferences || '{}');
 
         // Gather general settings
         const formData = new FormData(form);
@@ -1961,7 +1960,6 @@ if (me.totp_enabled) {
         });
 
         const updatedPreferences = {
-          ...currentPreferences,
           explore_filters: visibilityFilters
         };
 
