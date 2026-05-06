@@ -1,6 +1,7 @@
 ---
 import Base from "../../../../layouts/Base.astro";
 import ActionBar from "../../../../components/ActionBar.astro";
+import VisibilityFilters from "../../../../components/VisibilityFilters.astro";
 import CommentsSection from "../../../../components/CommentsSection.astro";
 import EpisodeCard from "../../../../components/EpisodeCard.astro";
 import ProgressStrip from "../../../../components/ProgressStrip.astro";
@@ -212,11 +213,12 @@ const showProgress = progressPct > 0;
         />
 
         <div class="space-y-12">
-          <div class="border-b border-zinc-900 pb-6 mb-8">
+          <div class="border-b border-zinc-900 pb-6 mb-8 flex items-center justify-between">
             <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase flex items-center gap-3">
               <span class="w-1.5 h-6 bg-blue-600 rounded-full"></span>
               Episodes
             </h2>
+            <VisibilityFilters />
           </div>
           
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

@@ -52,6 +52,9 @@ const showProgress = progressPct > 0;
   data-media-type={item.type}
   data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : ""}
   data-season={item.season_number != null ? String(item.season_number) : ""}
+  data-watched={String(watched)}
+  data-collected={String(inLibrary)}
+  data-listed={String(inLists.length > 0)}
 >
   {href ? (
     <a href={href} class="block">

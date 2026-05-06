@@ -49,6 +49,9 @@ const {
   data-show-tmdb-id={showTmdbId ? String(showTmdbId) : ""}
   data-season={seasonNumber != null ? String(seasonNumber) : ""}
   data-episode-number={episodeNumber != null ? String(episodeNumber) : ""}
+  data-watched={String(watched)}
+  data-collected={String(inLibrary)}
+  data-listed={String(inLists.length > 0)}
 >
   <!-- Poster -->
   <a href={href} class="block">
