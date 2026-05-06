@@ -631,6 +631,13 @@ export interface ProfileRatedItem {
   user_rating: number;
 }
 
+export interface ContentFilters {
+  blocked_genres: string[];
+  blocked_keywords: string[];
+  blocked_regexes: string[];
+  available_genres: string[];
+}
+
 export interface UserSearchResult {
   id: number;
   username: string;
@@ -1026,5 +1033,16 @@ export const api = {
       patch<AdminUser>(`/admin/users/${userId}/toggle-admin`, undefined, token),
     deleteUser: (userId: number, token: string) =>
       del<{ status: string }>(`/admin/users/${userId}`, token),
+  },
+
+  contentFilters: {
+    get: (token: string) =>
+      get<ContentFilters>("/media/content-filters", undefined, token),
+    putGenres: (genres: string[], token: string) =>
+      put<{ status: string; blocked_genres: string[] }>("/media/content-filters/genres", { genres }, token),
+    putKeywords: (keywords: string[], token: string) =>
+      put<{ status: string; blocked_keywords: string[] }>("/media/content-filters/keywords", { keywords }, token),
+    putRegexes: (regexes: string[], token: string) =>
+      put<{ status: string; blocked_regexes: string[] }>("/media/content-filters/regexes", { regexes }, token),
   },
 };

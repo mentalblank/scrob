@@ -14,6 +14,8 @@ const hasTmdbKey = !!settings.tmdb_api_key;
 const traktConfigured    = !!(settings.trakt_connected || settings.trakt_client_id);
 const radarrConfigured   = !!(settings.radarr_url && settings.radarr_token);
 const sonarrConfigured   = !!(settings.sonarr_url && settings.sonarr_token);
+let contentFilters = { blocked_genres: [] as string[], blocked_keywords: [] as string[], blocked_regexes: [] as string[] };
+try { contentFilters = await api.contentFilters.get(token!); } catch {}
 let backupCodes: TotpBackupCode[] = [];
 if (me.totp_enabled) {
   try {
@@ -568,6 +570,22 @@ if (me.totp_enabled) {
           <a href="/blocklist" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm font-medium transition-all active:scale-95">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
             Manage Blocklist
+          </a>
+        </div>
+
+        <!-- Content filter summary chips -->
+        <div class="flex flex-wrap gap-2 mt-4">
+          <a href="/blocklist?tab=genres" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_genres.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17"/></svg>
+            {contentFilters.blocked_genres.length > 0 ? `${contentFilters.blocked_genres.length} genre filter${contentFilters.blocked_genres.length !== 1 ? 's' : ''}` : 'No genre filters'}
+          </a>
+          <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_keywords.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/></svg>
+            {contentFilters.blocked_keywords.length > 0 ? `${contentFilters.blocked_keywords.length} keyword filter${contentFilters.blocked_keywords.length !== 1 ? 's' : ''}` : 'No keyword filters'}
+          </a>
+          <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_regexes.length > 0 ? 'bg-violet-900/30 border-violet-700/50 text-violet-300 hover:bg-violet-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="m9 9 6 6m0-6-6 6"/></svg>
+            {contentFilters.blocked_regexes.length > 0 ? `${contentFilters.blocked_regexes.length} regex filter${contentFilters.blocked_regexes.length !== 1 ? 's' : ''}` : 'No regex filters'}
           </a>
         </div>
         

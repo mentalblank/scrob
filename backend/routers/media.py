@@ -823,10 +823,12 @@ async def search_media(
     # Filter out blocked items
     blocked_movies = await _get_blocked_ids(db, current_user.id, MediaType.movie)
     blocked_series = await _get_blocked_ids(db, current_user.id, MediaType.series)
+    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
     raw_results = [
         res for res in raw_results
         if not (res.get("media_type") == "movie" and res.get("id") in blocked_movies)
         and not (res.get("media_type") == "tv" and res.get("id") in blocked_series)
+        and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)
     ]
 
     # 2. Check which TMDB results are in the local library.
@@ -960,6 +962,67 @@ async def _get_blocked_ids(db: AsyncSession, user_id: int, media_type: MediaType
     return {r[0] for r in result.all()}
 
 
+# ── Content-filter helpers ───────────────────────────────────────────────────
+
+# Combined genre name → TMDB ID map (movie + TV)
+_ALL_GENRE_ID_MAP: dict[str, int] = {**MOVIE_GENRE_IDS, **TV_GENRE_IDS}
+# Reverse: numeric genre ID → name, used when filtering raw TMDB list results
+_GENRE_ID_TO_NAME: dict[int, str] = {v: k for k, v in _ALL_GENRE_ID_MAP.items()}
+
+
+async def _get_content_filters(db: AsyncSession, user_id: int) -> tuple[set[str], list[str], list[str]]:
+    """Return (blocked_genre_names, blocked_keywords, blocked_regexes) from user preferences."""
+    q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    settings = q.scalar_one_or_none()
+    prefs: dict = (settings.preferences or {}) if settings else {}
+    cf = prefs.get("content_filters", {})
+    return (
+        {g.lower() for g in cf.get("blocked_genres", [])},
+        [k.lower() for k in cf.get("blocked_keywords", [])],
+        cf.get("blocked_regexes", []),
+    )
+
+
+def _is_content_filtered(
+    item: dict,
+    blocked_genres: set[str],
+    blocked_keywords: list[str],
+    blocked_regexes: list[str],
+) -> bool:
+    """Return True if item should be hidden due to a content filter rule."""
+    import re as _re
+
+    title = (item.get("title") or item.get("name") or "").lower()
+
+    # Genre check: TMDB list results use numeric genre_ids; detail views may use string genres
+    if blocked_genres:
+        item_genre_ids: list[int] = item.get("genre_ids") or []
+        resolved: set[str] = {_GENRE_ID_TO_NAME[gid].lower() for gid in item_genre_ids if gid in _GENRE_ID_TO_NAME}
+        raw_genres = item.get("genres") or []
+        for g in raw_genres:
+            if isinstance(g, dict):
+                resolved.add((g.get("name") or "").lower())
+            elif isinstance(g, str):
+                resolved.add(g.lower())
+        if resolved & blocked_genres:
+            return True
+
+    # Keyword check (case-insensitive substring)
+    for kw in blocked_keywords:
+        if kw and kw in title:
+            return True
+
+    # Regex check (invalid patterns are silently skipped)
+    for pat in blocked_regexes:
+        try:
+            if pat and _re.search(pat, title, _re.IGNORECASE):
+                return True
+        except _re.error:
+            pass
+
+    return False
+
+
 @router.get("/trending/movies")
 async def trending_movies(
     page: int = Query(1, ge=1),
@@ -974,7 +1037,8 @@ async def trending_movies(
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
 
     blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids]
+    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
     if not tmdb_results:
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
@@ -1030,7 +1094,8 @@ async def trending_shows(
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
 
     blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids]
+    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
     if not tmdb_results:
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
@@ -1449,7 +1514,8 @@ async def get_tmdb_list(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, type)
-        results = [r for r in results if r["id"] not in blocked_ids]
+        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+        results = [r for r in results if r["id"] not in blocked_ids and not _is_content_filtered(r, cf_genres, cf_kw, cf_re)]
 
         tmdb_ids = [res["id"] for res in results]
 
@@ -1594,7 +1660,8 @@ async def now_playing(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-        results = [res for res in results if res.get("id") not in blocked_ids]
+        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
@@ -1659,7 +1726,8 @@ async def upcoming_movies(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-        results = [res for res in results if res.get("id") not in blocked_ids]
+        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
@@ -1683,7 +1751,8 @@ async def on_air_this_week(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-        results = [res for res in results if res.get("id") not in blocked_ids]
+        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _show_library_ids(db, current_user.id, ids)
@@ -1715,7 +1784,8 @@ async def hidden_gems(
             results = data.get("results", [])
 
             blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-            results = [res for res in results if res.get("id") not in blocked_ids]
+            cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _movie_library_ids(db, current_user.id, ids)
@@ -1731,7 +1801,8 @@ async def hidden_gems(
             results = data.get("results", [])
 
             blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-            results = [res for res in results if res.get("id") not in blocked_ids]
+            cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _show_library_ids(db, current_user.id, ids)
@@ -1755,7 +1826,8 @@ async def top_rated_movies(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-        results = [res for res in results if res.get("id") not in blocked_ids]
+        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
@@ -1779,7 +1851,8 @@ async def top_rated_shows(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-        results = [res for res in results if res.get("id") not in blocked_ids]
+        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _show_library_ids(db, current_user.id, ids)
@@ -3898,3 +3971,94 @@ async def unblock_item(
     await db.delete(block)
     await db.commit()
     return {"status": "unblocked"}
+
+
+# ── Content Filters (genre / keyword / regex) ───────────────────────────────
+
+@router.get("/content-filters")
+async def get_content_filters(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the user's active content filter rules and the known genre list."""
+    blocked_genres, blocked_keywords, blocked_regexes = await _get_content_filters(db, current_user.id)
+    return {
+        "blocked_genres": sorted(blocked_genres),
+        "blocked_keywords": blocked_keywords,
+        "blocked_regexes": blocked_regexes,
+        "available_genres": sorted(set(list(MOVIE_GENRE_IDS.keys()) + list(TV_GENRE_IDS.keys()))),
+    }
+
+
+class GenreFilterRequest(BaseModel):
+    genres: list[str]
+
+class KeywordFilterRequest(BaseModel):
+    keywords: list[str]
+
+class RegexFilterRequest(BaseModel):
+    regexes: list[str]
+
+
+async def _patch_content_filters(db: AsyncSession, user_id: int, update: dict) -> None:
+    """Merge `update` into the user's preferences.content_filters, creating settings row if absent."""
+    q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    settings = q.scalar_one_or_none()
+    if not settings:
+        settings = UserSettings(user_id=user_id, preferences={})
+        db.add(settings)
+    prefs = dict(settings.preferences or {})
+    cf = dict(prefs.get("content_filters", {}))
+    cf.update(update)
+    prefs["content_filters"] = cf
+    settings.preferences = prefs
+    await db.commit()
+
+
+@router.put("/content-filters/genres")
+async def update_genre_filters(
+    req: GenreFilterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the blocked genre list."""
+    # Validate against known genres
+    known = set(list(MOVIE_GENRE_IDS.keys()) + list(TV_GENRE_IDS.keys()))
+    valid = [g for g in req.genres if g in known]
+    await _patch_content_filters(db, current_user.id, {"blocked_genres": valid})
+    return {"status": "ok", "blocked_genres": valid}
+
+
+@router.put("/content-filters/keywords")
+async def update_keyword_filters(
+    req: KeywordFilterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the blocked keyword list."""
+    cleaned = [k.strip() for k in req.keywords if k.strip()]
+    await _patch_content_filters(db, current_user.id, {"blocked_keywords": cleaned})
+    return {"status": "ok", "blocked_keywords": cleaned}
+
+
+@router.put("/content-filters/regexes")
+async def update_regex_filters(
+    req: RegexFilterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the blocked regex list. Invalid patterns are rejected with a 422."""
+    import re as _re
+    validated: list[str] = []
+    for pat in req.regexes:
+        pat = pat.strip()
+        if not pat:
+            continue
+        try:
+            _re.compile(pat)
+            validated.append(pat)
+        except _re.error as e:
+            raise HTTPException(status_code=422, detail=f"Invalid regex '{pat}': {e}")
+    await _patch_content_filters(db, current_user.id, {"blocked_regexes": validated})
+    return {"status": "ok", "blocked_regexes": validated}
+
