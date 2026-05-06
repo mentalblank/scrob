@@ -50,6 +50,7 @@ const originalLanguage = show?.original_language
   : null;
 const trailerYoutubeId = show?.trailer_youtube_id ?? null;
 const tmdbShowUrl = `https://www.themoviedb.org/tv/${id}`;
+const logoPath = show?.logo_path ?? null;
 ---
 
 <Base title={show?.title || "Show Details"}>
@@ -112,7 +113,20 @@ const tmdbShowUrl = `https://www.themoviedb.org/tv/${id}`;
 
           <!-- Info -->
           <div class="flex-1 min-w-0 pt-4">
-            <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none">{show.title}</h1>
+            {logoPath ? (
+              <div class="mb-4">
+                <img
+                  src={logoPath}
+                  alt={show.title}
+                  class="max-h-28 max-w-xs md:max-w-sm object-contain drop-shadow-2xl"
+                  loading="eager"
+                  decoding="async"
+                />
+                <h1 class="sr-only">{show.title}</h1>
+              </div>
+            ) : (
+              <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none">{show.title}</h1>
+            )}
 
             {show.tagline && (
               <p class="text-xl italic text-zinc-400 mb-8 font-light leading-relaxed">"{show.tagline}"</p>

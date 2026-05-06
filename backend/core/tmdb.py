@@ -295,3 +295,56 @@ async def get_movie_watch_providers(movie_id: int, api_key: str = None) -> dict:
 
 async def get_show_watch_providers(show_id: int, api_key: str = None) -> dict:
     return await _get(f"{TMDB_BASE}/tv/{show_id}/watch/providers", headers=get_headers(api_key))
+
+
+async def get_movie_images(tmdb_id: int, api_key: str = None) -> dict:
+    """Fetch all images (backdrops, logos, posters) for a movie."""
+    return await _get(f"{TMDB_BASE}/movie/{tmdb_id}/images", headers=get_headers(api_key))
+
+
+async def get_tv_images(tmdb_id: int, api_key: str = None) -> dict:
+    """Fetch all images (backdrops, logos, posters) for a TV show."""
+    return await _get(f"{TMDB_BASE}/tv/{tmdb_id}/images", headers=get_headers(api_key))
+
+
+async def get_tv_season_images(tmdb_id: int, season_number: int, api_key: str = None) -> dict:
+    """Fetch all images for a specific TV season."""
+    return await _get(
+        f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}/images",
+        headers=get_headers(api_key),
+    )
+
+
+def pick_image(items: list[dict], preferred_lang: str | None = None, size: str = "original") -> str | None:
+    """
+    Select the best image from a TMDB image array using the priority:
+      1. No Language (iso_639_1 == null) — studio-supplied, clean, no text overlay
+      2. User's preferred language (iso_639_1 == preferred_lang)
+      3. Any image (highest vote_average in the remaining set)
+
+    Within each tier, the image with the highest vote_average is chosen.
+    """
+    if not items:
+        return None
+
+    def best_in(candidates: list[dict]) -> dict | None:
+        if not candidates:
+            return None
+        return max(candidates, key=lambda x: (x.get("vote_average") or 0, x.get("vote_count") or 0))
+
+    # Tier 1: No Language
+    no_lang = [i for i in items if i.get("iso_639_1") is None]
+    winner = best_in(no_lang)
+
+    # Tier 2: User's preferred language
+    if not winner and preferred_lang:
+        user_lang = [i for i in items if i.get("iso_639_1") == preferred_lang]
+        winner = best_in(user_lang)
+
+    # Tier 3: Any
+    if not winner:
+        winner = best_in(items)
+
+    if not winner:
+        return None
+    return poster_url(winner["file_path"], size=size)

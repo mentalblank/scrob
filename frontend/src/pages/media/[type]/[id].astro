@@ -40,6 +40,7 @@ const trailerYoutubeId = item?.trailer_youtube_id ?? null;
 const tmdbUrl = isEpisode
   ? (item?.show_tmdb_id ? `https://www.themoviedb.org/tv/${item.show_tmdb_id}` : null)
   : `https://www.themoviedb.org/movie/${item?.tmdb_id}`;
+const logoPath = item?.logo_path ?? null;
 ---
 
 <Base title={item?.title || "Media Details"}>
@@ -109,7 +110,20 @@ const tmdbUrl = isEpisode
               </div>
             )}
             
-            <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none">{item.title}</h1>
+            {logoPath ? (
+              <div class="mb-3">
+                <img
+                  src={logoPath}
+                  alt={item.title}
+                  class="max-h-28 max-w-xs md:max-w-sm object-contain drop-shadow-2xl"
+                  loading="eager"
+                  decoding="async"
+                />
+                <h1 class="sr-only">{item.title}</h1>
+              </div>
+            ) : (
+              <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none">{item.title}</h1>
+            )}
 
             {item.tagline && (
               <p class="text-xl italic text-zinc-400 mb-8 font-light leading-relaxed">"{item.tagline}"</p>

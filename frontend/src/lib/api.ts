@@ -389,8 +389,10 @@ export interface UserSettings {
   trakt_connected: boolean;
   trakt_sync_watched: boolean;
   trakt_sync_ratings: boolean;
+  trakt_sync_lists: boolean;
   trakt_push_watched: boolean;
   trakt_push_ratings: boolean;
+  trakt_push_lists: boolean;
 
   preferences: UserPreferences | null;
   blur_explicit: boolean;
@@ -509,6 +511,7 @@ export interface MediaItem {
   remaining_duration?: number;
   progress_percent?: number;
   trailer_youtube_id?: string | null;
+  logo_path?: string | null;
 }
 
 export interface SubtitleTrack {
@@ -606,6 +609,7 @@ export interface Show {
   last_air_date: string | null;
   where_to_watch?: { type: string; name: string; logo: string | null }[];
   trailer_youtube_id?: string | null;
+  logo_path?: string | null;
 }
 
 export interface ProfileWatchedItem {
@@ -749,6 +753,8 @@ export const api = {
       post<{ id: number; email: string; username: string }>("/auth/register", body),
     registrationStatus: () =>
       get<{ enabled: boolean; smtp_configured: boolean }>("/auth/registration-status"),
+    hasUsers: () =>
+      get<{ has_users: boolean }>("/auth/has-users"),
     activateEmail: (token: string) =>
       post<{ success: boolean }>(`/auth/activate/${token}`, undefined),
     forgotPassword: (email: string) =>

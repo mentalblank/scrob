@@ -501,6 +501,17 @@ async def get_user_tmdb_key(db: AsyncSession, user_id: int) -> str | None:
     return gs.tmdb_api_key if gs else None
 
 
+async def get_user_content_language(db: AsyncSession, user_id: int) -> str:
+    """Return the user's preferred content language for TMDB image selection.
+    Defaults to 'en' if none is configured in profile settings."""
+    result = await db.execute(
+        select(UserProfileData).where(UserProfileData.user_id == user_id)
+    )
+    profile = result.scalar_one_or_none()
+    lang = getattr(profile, "content_language", None) if profile else None
+    return lang or "en"
+
+
 def _effective_radarr(user_settings: UserSettings | None, global_settings: GlobalSettings | None):
     """Return the settings object whose Radarr config is fully configured, user first."""
     for s in (user_settings, global_settings):
@@ -3368,12 +3379,15 @@ async def get_media_details(
     if not check_tmdb_key(tmdb_key):
         raise HTTPException(status_code=404, detail="TMDB API Key not configured")
 
+    user_lang = await get_user_content_language(db, current_user.id)
+
     try:
         # 1. Fetch from TMDB
         if type == MediaType.movie:
-            data, videos_data = await asyncio.gather(
+            data, videos_data, images_data = await asyncio.gather(
                 tmdb.get_movie(tmdb_id, api_key=tmdb_key),
                 tmdb.get_movie_videos(tmdb_id, api_key=tmdb_key),
+                tmdb.get_movie_images(tmdb_id, api_key=tmdb_key),
             )
             trailer_youtube_id = next(
                 (
@@ -3390,6 +3404,9 @@ async def get_media_details(
                     None,
                 ),
             )
+            # Pick best backdrop + logo using No Language → user lang → any priority
+            picked_backdrop = tmdb.pick_image(images_data.get("backdrops", []), preferred_lang=user_lang, size="original")
+            picked_logo = tmdb.pick_image(images_data.get("logos", []), preferred_lang=user_lang, size="w500")
         elif type == MediaType.episode:
             # Look up the episode in the local DB to find its show context
             ep_result = await db.execute(
@@ -3414,11 +3431,19 @@ async def get_media_details(
             if show is None:
                 raise HTTPException(status_code=404, detail="Show not found for this episode")
 
-            ep_data = await tmdb.get_episode(
-                show.tmdb_id, local_ep.season_number, local_ep.episode_number, api_key=tmdb_key
+            ep_data, ep_show_images = await asyncio.gather(
+                tmdb.get_episode(
+                    show.tmdb_id, local_ep.season_number, local_ep.episode_number, api_key=tmdb_key
+                ),
+                tmdb.get_tv_images(show.tmdb_id, api_key=tmdb_key),
             )
             ep_state: dict = {"tmdb_id": tmdb_id, "type": "episode"}
             await enrich_with_state(db, current_user.id, [ep_state])
+
+            # Pick best backdrop + logo for the parent show
+            ep_backdrop = tmdb.pick_image(ep_show_images.get("backdrops", []), preferred_lang=user_lang, size="original") or show.backdrop_path
+            ep_logo = tmdb.pick_image(ep_show_images.get("logos", []), preferred_lang=user_lang, size="w500")
+
             # Check local info for library tags
             library_info = None
             if local_ep:
@@ -3447,7 +3472,8 @@ async def get_media_details(
                 "title": ep_data.get("name") or local_ep.title,
                 "overview": ep_data.get("overview"),
                 "poster_path": tmdb.poster_url(ep_data.get("still_path"), size="w780"),
-                "backdrop_path": show.backdrop_path,
+                "backdrop_path": ep_backdrop,
+                "logo_path": ep_logo,
                 "release_date": ep_data.get("air_date"),
                 "tmdb_rating": ep_data.get("vote_average"),
                 "runtime": ep_data.get("runtime"),
@@ -3456,7 +3482,7 @@ async def get_media_details(
                 "show_title": show.title,
                 "show_tmdb_id": show.tmdb_id,
                 "show_poster_path": show.poster_path,
-                "show_backdrop_path": show.backdrop_path,
+                "show_backdrop_path": ep_backdrop,
                 "cast": [
                     {
                         "tmdb_id": c.get("id"),
@@ -3573,9 +3599,8 @@ async def get_media_details(
             "original_title": data.get("original_title") or data.get("original_name"),
             "overview": data.get("overview"),
             "poster_path": tmdb.poster_url(data.get("poster_path")),
-            "backdrop_path": tmdb.poster_url(
-                data.get("backdrop_path"), size="original"
-            ),
+            "backdrop_path": picked_backdrop or tmdb.poster_url(data.get("backdrop_path"), size="original"),
+            "logo_path": picked_logo,
             "release_date": data.get("release_date") or data.get("first_air_date"),
             "tmdb_rating": data.get("vote_average"),
             "tagline": data.get("tagline"),

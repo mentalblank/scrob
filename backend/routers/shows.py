@@ -15,7 +15,7 @@ from models.collection import Collection, CollectionFile
 from models.base import MediaType
 from models.show import Show as ShowModel
 from models.users import User
-from routers.media import format_media, get_user_tmdb_key, check_tmdb_key, enrich_with_state, refresh_technical_data, _extract_show_content_rating, get_where_to_watch
+from routers.media import format_media, get_user_tmdb_key, get_user_content_language, check_tmdb_key, enrich_with_state, refresh_technical_data, _extract_show_content_rating, get_where_to_watch
 
 from dependencies import get_current_user
 from core import tmdb
@@ -162,13 +162,16 @@ async def get_show(
         recommendations = []
         cast = []
         tmdb_extra: dict | None = None
+        tv_images: dict = {}  # Will be populated if TMDB key is available
         api_key = await get_user_tmdb_key(db, current_user.id)
+        user_lang = await get_user_content_language(db, current_user.id)
         trailer_youtube_id: str | None = None
         if check_tmdb_key(api_key):
             try:
-                tmdb_extra, videos_data = await asyncio.gather(
+                tmdb_extra, videos_data, tv_images = await asyncio.gather(
                     tmdb.get_show(series_tmdb_id, api_key=api_key),
                     tmdb.get_tv_videos(series_tmdb_id, api_key=api_key),
+                    tmdb.get_tv_images(series_tmdb_id, api_key=api_key),
                 )
                 # Extract first official YouTube trailer
                 trailer_youtube_id = next(
@@ -231,6 +234,10 @@ async def get_show(
                 ]
             except Exception:
                 pass
+
+        # Pick best backdrop + logo using No Language → user lang → any priority
+        picked_backdrop = tmdb.pick_image(tv_images.get("backdrops", []), preferred_lang=user_lang, size="original")
+        picked_logo = tmdb.pick_image(tv_images.get("logos", []), preferred_lang=user_lang, size="w500")
 
         state_item: dict = {"tmdb_id": series_tmdb_id, "type": "series"}
         # Pass last_episode_to_air from the already-fetched tmdb_extra so enrich_with_state
@@ -347,6 +354,8 @@ async def get_show(
 
         return {
             **format_show(show),
+            "backdrop_path": picked_backdrop or show.backdrop_path,
+            "logo_path": picked_logo,
             "seasons_meta": enhanced_seasons_meta,
             "original_language": (show.tmdb_data or {}).get("original_language") or (tmdb_extra or {}).get("original_language"),
             "age_rating": _extract_show_content_rating(tmdb_extra) if tmdb_extra else None,
@@ -374,10 +383,13 @@ async def get_show(
             status_code=404, detail="Show not found and TMDB key not configured"
         )
 
+    user_lang = await get_user_content_language(db, current_user.id)
+
     try:
-        data, videos_data = await asyncio.gather(
+        data, videos_data, tv_images = await asyncio.gather(
             tmdb.get_show(series_tmdb_id, api_key=api_key),
             tmdb.get_tv_videos(series_tmdb_id, api_key=api_key),
+            tmdb.get_tv_images(series_tmdb_id, api_key=api_key),
         )
         trailer_youtube_id_tmdb = next(
             (
@@ -394,6 +406,10 @@ async def get_show(
                 None,
             ),
         )
+
+        # Pick best backdrop + logo using No Language → user lang → any priority
+        picked_backdrop = tmdb.pick_image(tv_images.get("backdrops", []), preferred_lang=user_lang, size="original")
+        picked_logo = tmdb.pick_image(tv_images.get("logos", []), preferred_lang=user_lang, size="w500")
 
         cast = [
             {
@@ -431,7 +447,8 @@ async def get_show(
             "original_title": data.get("original_name"),
             "overview": data.get("overview"),
             "poster_path": tmdb.poster_url(data.get("poster_path")),
-            "backdrop_path": tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
+            "backdrop_path": picked_backdrop or tmdb.poster_url(data.get("backdrop_path"), size="original"),
+            "logo_path": picked_logo,
             "tmdb_rating": data.get("vote_average"),
             "status": data.get("status"),
             "tagline": data.get("tagline"),
@@ -470,6 +487,7 @@ async def get_show(
         }
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"TMDB Show not found: {e}")
+
 
 
 @router.get("/{series_tmdb_id}/recommendations")
