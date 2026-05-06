@@ -255,7 +255,7 @@ export interface ListDetail extends UserList {
 
 // Main types
 
-export type MediaType = "movie" | "series" | "episode" | "person" | "collection";
+export type MediaType = "movie" | "series" | "season" | "episode" | "person" | "collection";
 
 export interface UserProfile {
   id: number;

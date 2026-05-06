@@ -14,6 +14,7 @@ const year = item.release_date?.slice(0, 4) ?? null;
 const rating = item.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
 const isEpisode = item.type === "episode";
 const isSeries = item.type === "series" || (item.type === "episode" && !item.season_number && !item.id);
+const isSeason = item.type === "season";
 const sxe = isEpisode && item.season_number != null && item.episode_number != null
   ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
   : null;
@@ -24,6 +25,8 @@ const href = isPerson
     ? `/collection/${item.tmdb_id}`
     : isSeries && item.tmdb_id
     ? `/show/${item.tmdb_id}`
+    : isSeason && item.show_tmdb_id && item.season_number != null
+      ? `/show/${item.show_tmdb_id}/season/${item.season_number}`
     : isEpisode && item.show_tmdb_id && item.season_number != null && item.episode_number != null
       ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
       : isEpisode && item.show_tmdb_id
@@ -50,7 +53,7 @@ const isPartialWatched = !watched && (
 );
 const isPartialCollected = item.type === 'series' && collectionPct > 0 && collectionPct < 100;
 
-const progressPct = item.type === 'series' && item.total_episodes_count 
+const progressPct = (item.type === 'series' || item.type === 'season') && item.total_episodes_count 
   ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
   : (item.progress_percent ?? 0);
 const showProgress = progressPct > 0;
@@ -178,17 +181,18 @@ const showProgress = progressPct > 0;
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{sxe}</span>}
+            {isSeason && item.total_episodes_count && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{item.total_episodes_count} Episodes</span>}
             {isPerson && item.known_for_department && (
               <span class="text-[11px] font-medium text-zinc-500 tracking-wide truncate">{item.known_for_department}</span>
             )}
-            {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-500 tracking-wide">{year}</span>}
+            {year && !sxe && !isPerson && !isSeason && <span class="text-[11px] font-medium text-zinc-500 tracking-wide">{year}</span>}
           </div>
           <div class="flex items-center gap-2">
             {showProgress && (
               <span class="text-xs font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
             )}
             <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
-              {isPerson ? 'Person' : isCollection ? 'Collection' : isSeries ? 'Show' : (item.type === 'episode' ? 'Episode' : item.type)}
+              {isPerson ? 'Person' : isCollection ? 'Collection' : isSeries ? 'Show' : isSeason ? 'Season' : (item.type === 'episode' ? 'Episode' : item.type)}
             </span>
           </div>
         </div>
