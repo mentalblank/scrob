@@ -180,6 +180,12 @@ html.light #now-playing-section {
   padding-top: 0;
 }
 
+@media (min-width: 768px) {
+  #now-playing-section:not(:empty) + main {
+    padding-top: 2rem; /* Offset the md:-mt-8 in index.astro */
+  }
+}
+
 /* ── ActionBar buttons — light mode ───────────────────────────────────────────
    All states use solid named colours — no transparency, no Tailwind opacity classes.
    Inactive base: gray (zinc variable remap handles this automatically).
@@ -251,8 +257,8 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
-nav, div, a, button, input, span {
-  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+nav, div, a, button, input, span, main {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, padding-top 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* ── Scrollbar utilities ────────────────────────────────────────────────── */
