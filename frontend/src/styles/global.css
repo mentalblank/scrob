@@ -176,9 +176,6 @@ html.light #now-playing-section {
   display: none;
 }
 
-#now-playing-section:not(:empty) + main {
-  padding-top: 0;
-}
 
 @media (min-width: 768px) {
   #now-playing-section:not(:empty) + main {

@@ -1,4 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import gzip
+import io
+import json
+import struct
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import delete, func
@@ -8,6 +15,7 @@ from models.users import User
 from models.global_settings import GlobalSettings
 from dependencies import require_admin
 from core.url_validator import validate_service_url
+from core.backup import asyncpg_conn, restore_backup
 import schemas
 
 router = APIRouter()
@@ -99,10 +107,12 @@ async def delete_user(
     current_user: User = Depends(require_admin),
 ):
     if user_id == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot delete your own account from the admin panel.",
-        )
+        count_result = await db.execute(select(func.count()).select_from(User))
+        if count_result.scalar_one() > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot delete your own account while other users exist.",
+            )
 
     result = await db.execute(select(User).where(User.id == user_id))
     target = result.scalar_one_or_none()
@@ -112,3 +122,69 @@ async def delete_user(
     await db.execute(delete(User).where(User.id == user_id))
     await db.commit()
     return {"status": "deleted"}
+
+
+@router.get("/backup")
+async def backup_database(_: User = Depends(require_admin)):
+    conn = await asyncpg_conn()
+    try:
+        rows = await conn.fetch(
+            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename != 'alembic_version'"
+        )
+        tables = [r["tablename"] for r in rows]
+
+        buf = io.BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+            header = json.dumps({"version": 1, "tables": tables}).encode()
+            gz.write(struct.pack(">I", len(header)))
+            gz.write(header)
+            for table in tables:
+                data_buf = io.BytesIO()
+                await conn.copy_from_table(table, output=data_buf, format="binary")
+                data = data_buf.getvalue()
+                name_bytes = table.encode()
+                gz.write(struct.pack(">H", len(name_bytes)))
+                gz.write(name_bytes)
+                gz.write(struct.pack(">Q", len(data)))
+                gz.write(data)
+
+        payload = buf.getvalue()
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"scrob_backup_{timestamp}.bak"
+        return Response(
+            content=payload,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(payload)),
+            },
+        )
+    finally:
+        await conn.close()
+
+
+@router.post("/restore")
+async def restore_database(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    if not (file.filename or "").endswith(".bak"):
+        raise HTTPException(status_code=400, detail="Only .bak backup files are accepted.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    # Release the SQLAlchemy session's open transaction before the raw asyncpg
+    # TRUNCATE. get_current_user (via require_admin) holds ACCESS SHARE on `users`
+    # for the duration of the transaction; TRUNCATE needs ACCESS EXCLUSIVE on all
+    # tables and would deadlock waiting for that lock to be released.
+    await db.rollback()
+
+    try:
+        await restore_backup(content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"status": "restored"}

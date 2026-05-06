@@ -94,8 +94,10 @@ class UserSettings(BaseModel):
     trakt_connected: Optional[bool] = None  # read-only, derived from token presence
     trakt_sync_watched: Optional[bool] = None
     trakt_sync_ratings: Optional[bool] = None
+    trakt_sync_lists: Optional[bool] = None
     trakt_push_watched: Optional[bool] = None
     trakt_push_ratings: Optional[bool] = None
+    trakt_push_lists: Optional[bool] = None
 
     preferences: Optional[dict] = None
     blur_explicit: Optional[bool] = None

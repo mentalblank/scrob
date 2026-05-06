@@ -6,6 +6,8 @@ let error = "";
 let pendingEmailConfirmation = false;
 
 const { enabled: registrationEnabled } = await api.auth.registrationStatus().catch(() => ({ enabled: false }));
+const { has_users: hasUsers } = await api.auth.hasUsers().catch(() => ({ has_users: true }));
+
 if (!registrationEnabled) {
   return Astro.redirect("/login");
 }
@@ -180,7 +182,53 @@ if (Astro.request.method === "POST") {
     </div>
     )}
   </div>
+
+  {!hasUsers && (
+    <div class="max-w-md mx-auto mt-4 mb-12">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="flex-1 border-t border-zinc-800"></div>
+        <span class="text-xs text-zinc-600">or restore from backup</span>
+        <div class="flex-1 border-t border-zinc-800"></div>
+      </div>
+      <div class="p-6 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl">
+        <h2 class="font-semibold text-zinc-100 mb-1">Restore Database</h2>
+        <p class="text-sm text-zinc-400 mb-4">Upload a <code class="text-zinc-300">.bak</code> file to restore a previous installation.</p>
+        <div class="flex flex-col gap-3">
+          <input id="bootstrap-restore-file" type="file" accept=".bak"
+            class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
+          <button id="bootstrap-restore-btn" disabled
+            class="w-full px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+            Restore Database
+          </button>
+        </div>
+        <div id="bootstrap-restore-error" class="hidden mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"></div>
+      </div>
+    </div>
+  )}
 </Base>
+
+<!-- Bootstrap Restore Confirmation Modal -->
+<div id="bootstrap-restore-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div id="bootstrap-restore-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+    <h2 class="text-xl font-black text-zinc-100 mb-2">Restore Database?</h2>
+    <p class="text-sm text-zinc-400 mb-1">Restoring from:</p>
+    <p id="bootstrap-restore-modal-filename" class="text-sm text-zinc-100 font-medium mb-4 break-all"></p>
+    <div class="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 mb-6">
+      <p class="text-sm text-red-400 font-medium">All existing data will be permanently overwritten. This cannot be undone.</p>
+    </div>
+    <div class="flex gap-3">
+      <button type="button" id="bootstrap-restore-cancel-btn"
+        class="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        Cancel
+      </button>
+      <button type="button" id="bootstrap-restore-confirm-btn"
+        class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        Restore
+      </button>
+    </div>
+  </div>
+</div>
 
 <script>
   function setupPasswordToggles() {
@@ -209,4 +257,53 @@ if (Astro.request.method === "POST") {
 
   setupPasswordToggles();
   document.addEventListener('astro:after-swap', setupPasswordToggles);
+
+  // ── Bootstrap restore ──
+  const bootstrapFile = document.getElementById('bootstrap-restore-file') as HTMLInputElement | null;
+  const bootstrapBtn = document.getElementById('bootstrap-restore-btn') as HTMLButtonElement | null;
+  const bootstrapModal = document.getElementById('bootstrap-restore-modal');
+
+  if (bootstrapFile && bootstrapBtn && bootstrapModal) {
+    function openModal() {
+      const file = bootstrapFile!.files?.[0];
+      if (!file) return;
+      document.getElementById('bootstrap-restore-modal-filename')!.textContent = file.name;
+      bootstrapModal!.classList.remove('hidden');
+    }
+    function closeModal() {
+      bootstrapModal!.classList.add('hidden');
+    }
+
+    bootstrapFile.addEventListener('change', () => {
+      bootstrapBtn!.disabled = !bootstrapFile.files?.length;
+    });
+    bootstrapBtn.addEventListener('click', openModal);
+    document.getElementById('bootstrap-restore-cancel-btn')?.addEventListener('click', closeModal);
+    document.getElementById('bootstrap-restore-modal-backdrop')?.addEventListener('click', closeModal);
+
+    document.getElementById('bootstrap-restore-confirm-btn')?.addEventListener('click', async () => {
+      const file = bootstrapFile.files?.[0];
+      if (!file) return;
+      closeModal();
+      bootstrapBtn!.disabled = true;
+      bootstrapBtn!.textContent = 'Restoring…';
+      document.getElementById('bootstrap-restore-error')!.classList.add('hidden');
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch('/api/proxy/auth/bootstrap-restore', { method: 'POST', body: fd });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Restore failed');
+        }
+        window.location.href = '/login?restored=true';
+      } catch (err: unknown) {
+        const errEl = document.getElementById('bootstrap-restore-error')!;
+        errEl.textContent = err instanceof Error ? err.message : 'Restore failed';
+        errEl.classList.remove('hidden');
+        bootstrapBtn!.disabled = false;
+        bootstrapBtn!.textContent = 'Restore Database';
+      }
+    });
+  }
 </script>

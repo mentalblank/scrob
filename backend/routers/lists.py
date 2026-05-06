@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Response
 from datetime import datetime
 from pydantic import BaseModel
@@ -11,11 +12,14 @@ from models.lists import List as ListModel, ListItem
 from models.media import Media
 from models.base import MediaType, PrivacyLevel
 from models.show import Show as ShowModel
+from models.users import UserSettings
 from dependencies import get_current_user
 from models.users import User
 from routers.media import enrich_with_state
 from core.config import settings as app_settings
 from xml.sax.saxutils import escape
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -348,6 +352,63 @@ async def delete_list(
     return {"message": "List deleted"}
 
 
+def _trakt_media_type(media_type: MediaType) -> Optional[str]:
+    if media_type == MediaType.movie:
+        return "movies"
+    if media_type == MediaType.series:
+        return "shows"
+    return None
+
+
+async def _push_list_item_to_trakt(
+    db: AsyncSession,
+    user_id: int,
+    list_trakt_slug: str,
+    media: Media,
+    remove: bool = False,
+) -> None:
+    trakt_type = _trakt_media_type(media.media_type)
+    if not trakt_type or not media.tmdb_id:
+        return
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    settings = settings_result.scalar_one_or_none()
+    if (
+        not settings
+        or not settings.trakt_push_lists
+        or not settings.trakt_access_token
+        or not settings.trakt_client_id
+    ):
+        return
+
+    from core import trakt as trakt_client
+    try:
+        if list_trakt_slug == "__watchlist__":
+            if remove:
+                await trakt_client.remove_from_watchlist(
+                    settings.trakt_client_id, settings.trakt_access_token,
+                    trakt_type, media.tmdb_id,
+                )
+            else:
+                await trakt_client.add_to_watchlist(
+                    settings.trakt_client_id, settings.trakt_access_token,
+                    trakt_type, media.tmdb_id,
+                )
+        else:
+            if remove:
+                await trakt_client.remove_from_list(
+                    settings.trakt_client_id, settings.trakt_access_token,
+                    list_trakt_slug, trakt_type, media.tmdb_id,
+                )
+            else:
+                await trakt_client.add_to_list(
+                    settings.trakt_client_id, settings.trakt_access_token,
+                    list_trakt_slug, trakt_type, media.tmdb_id,
+                )
+    except Exception as exc:
+        logger.warning("Failed to push list item to Trakt (slug=%s, remove=%s): %s", list_trakt_slug, remove, exc)
+
+
 @router.post("/{list_id}/items", status_code=201)
 async def add_list_item(
     list_id: int,
@@ -439,16 +500,14 @@ async def add_list_item(
 
     # --- Sonarr/Radarr Auto-Add ---
     if body.media_type in (MediaType.movie, MediaType.series):
-        # We already have list_obj from above
-        
         from models.users import UserSettings
         from models.global_settings import GlobalSettings
         from routers.media import _effective_radarr, _effective_sonarr, _get_global_settings
-        
+
         settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
         settings = settings_q.scalar_one_or_none()
         gs = await _get_global_settings(db)
-        
+
         if body.media_type == MediaType.movie and list_obj.radarr_auto_add:
             radarr_cfg = _effective_radarr(settings, gs)
             if radarr_cfg:
@@ -464,7 +523,6 @@ async def add_list_item(
                         tags=list_obj.radarr_tags,
                         monitored=list_obj.radarr_monitor != "none" if list_obj.radarr_monitor else True,
                         monitor=list_obj.radarr_monitor or "movieOnly",
-                        # search_for_movie defaults to True in add_movie
                     )
                 except Exception as e:
                     print(f"Radarr auto-add failed: {e}")
@@ -474,13 +532,12 @@ async def add_list_item(
             if sonarr_cfg:
                 from core import sonarr
                 try:
-                    # Need TVDB ID for Sonarr
                     tvdb_id = (media.tmdb_data or {}).get("external_ids", {}).get("tvdb_id")
                     if not tvdb_id:
                         from core import tmdb as tmdb_core
                         ext_ids = await tmdb_core.get_external_ids(body.tmdb_id, "tv", api_key=api_key)
                         tvdb_id = ext_ids.get("tvdb_id")
-                    
+
                     if tvdb_id:
                         await sonarr.add_series(
                             url=sonarr_cfg.sonarr_url,
@@ -496,6 +553,10 @@ async def add_list_item(
                         )
                 except Exception as e:
                     print(f"Sonarr auto-add failed: {e}")
+
+    # --- Trakt Sync Push ---
+    if list_obj.trakt_slug:
+        await _push_list_item_to_trakt(db, current_user.id, list_obj.trakt_slug, media, remove=False)
 
     item_result = await db.execute(
         select(ListItem)
@@ -516,6 +577,7 @@ async def remove_list_item(
 ):
     result = await db.execute(
         select(ListItem)
+        .options(selectinload(ListItem.media))
         .join(ListModel, ListModel.id == ListItem.list_id)
         .where(
             ListItem.id == item_id,
@@ -526,8 +588,19 @@ async def remove_list_item(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    list_result = await db.execute(
+        select(ListModel).where(ListModel.id == list_id)
+    )
+    lst = list_result.scalar_one_or_none()
+    media = item.media
+
     await db.delete(item)
     await db.commit()
+
+    if lst and lst.trakt_slug and media:
+        await _push_list_item_to_trakt(db, current_user.id, lst.trakt_slug, media, remove=True)
+
     return {"message": "Item removed"}
 
 
