@@ -1,13 +1,11 @@
 ---
 import Base from "../../layouts/Base.astro";
 import MediaCard from "../../components/MediaCard.astro";
-import MediaListCard from "../../components/MediaListCard.astro";
-import ViewToggle from "../../components/ViewToggle.astro";
 import Pagination from "../../components/Pagination.astro";
 import { api } from "../../lib/api";
 export const prerender = false;
 
-const viewPreference = Astro.cookies.get("media_view_preference")?.value === "list" ? "list" : "grid";
+
 
 const sort = Astro.url.searchParams.get("sort") ?? "title";
 const genre = Astro.url.searchParams.get("genre") ?? "";
@@ -92,7 +90,6 @@ const baseUrl = `/collection/movies?${baseParams.toString()}`;
         </a>
       )}
     </div>
-    <ViewToggle currentView={viewPreference} />
   </div>
 
   {data.results.length === 0 ? (
@@ -108,15 +105,9 @@ const baseUrl = `/collection/movies?${baseParams.toString()}`;
     </div>
   ) : (
     <>
-      {viewPreference === "list" ? (
-        <div class="flex flex-col gap-4">
-          {data.results.map(item => <MediaListCard item={{...item, in_library: true}} />)}
-        </div>
-      ) : (
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-          {data.results.map(item => <MediaCard item={{...item, in_library: true}} />)}
-        </div>
-      )}
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        {data.results.map(item => <MediaCard item={{...item, in_library: true}} />)}
+      </div>
 
       <Pagination
         currentPage={data.page}

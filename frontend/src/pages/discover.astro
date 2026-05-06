@@ -427,6 +427,11 @@ function skeletonWide() {
     const watched = item.watched ?? false;
     const inLibrary = item.in_library ?? false;
     const listed = (item.in_lists ?? []).length > 0;
+    const progressPct = item.type === 'series' && item.total_episodes_count 
+      ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
+      : (item.progress_percent ?? 0);
+    const showProgress = progressPct > 0;
+
     return `<div class="flex-shrink-0 w-40 group relative" data-card 
       data-tmdb-id="${esc(item.tmdb_id)}" 
       data-media-type="${esc(item.type)}"
@@ -450,9 +455,14 @@ function skeletonWide() {
               <circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>
             </svg>
           </button>
+          ${showProgress ? `
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+              <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
+            </div>
+          ` : ''}
         </div>
         <p class="text-sm font-bold text-zinc-500 dark:text-zinc-300 truncate group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors leading-snug">${esc(item.title)}</p>
-        <p class="text-xs text-zinc-500 mt-0.5">${rating ? '★ ' + esc(rating) : ''}${rating && year ? ' · ' : ''}${esc(year)}</p>
+        <p class="text-xs text-zinc-500 mt-0.5">${rating ? '★ ' + esc(rating) : ''}${rating && year ? ' · ' : ''}${esc(year)}${showProgress ? ` · ${Math.round(progressPct)}%` : ''}</p>
       </a>
     </div>`;
   }
@@ -467,6 +477,11 @@ function skeletonWide() {
     const watched = item.watched ?? false;
     const inLibrary = item.in_library ?? false;
     const listed = (item.in_lists ?? []).length > 0;
+    const progressPct = item.type === 'series' && item.total_episodes_count 
+      ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
+      : (item.progress_percent ?? 0);
+    const showProgress = progressPct > 0;
+
     return `<div class="flex-shrink-0 w-56 group relative" data-card 
       data-tmdb-id="${esc(item.tmdb_id)}" 
       data-media-type="${esc(item.type)}"
@@ -490,9 +505,14 @@ function skeletonWide() {
               <circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>
             </svg>
           </button>
+          ${showProgress ? `
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+              <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
+            </div>
+          ` : ''}
           <div class="absolute bottom-0 left-0 right-0 p-3">
             <p class="text-sm font-bold text-white leading-snug line-clamp-2">${esc(item.title)}</p>
-            ${meta ? `<p class="text-xs text-white/60 mt-0.5">${esc(meta)}</p>` : ''}
+            ${meta ? `<p class="text-xs text-white/60 mt-0.5">${esc(meta)}${showProgress ? ` · ${Math.round(progressPct)}%` : ''}</p>` : ''}
           </div>
         </div>
       </a>

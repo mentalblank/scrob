@@ -143,6 +143,7 @@ async def get_show(
         }
 
         seasons: dict = {}
+        all_ep_formatted = []
         for ep in episodes:
             s_num = ep.season_number or 0
             season_poster = (
@@ -151,6 +152,10 @@ async def get_show(
             ep_formatted = format_media(ep)
             ep_formatted["poster_path"] = ep.poster_path or season_poster
             seasons.setdefault(s_num, []).append(ep_formatted)
+            all_ep_formatted.append(ep_formatted)
+
+        if all_ep_formatted:
+            await enrich_with_state(db, current_user.id, all_ep_formatted)
 
         # Fetch networks + recommendations from TMDB if key is available
         networks = []

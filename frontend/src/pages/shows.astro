@@ -1,14 +1,12 @@
 ---
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
-import MediaListCard from "../components/MediaListCard.astro";
-import ViewToggle from "../components/ViewToggle.astro";
 import VisibilityFilters from "../components/VisibilityFilters.astro";
 import Pagination from "../components/Pagination.astro";
 import { api, type MediaItem } from "../lib/api";
 export const prerender = false;
 
-const viewPreference = Astro.cookies.get("media_view_preference")?.value === "list" ? "list" : "grid";
+
 
 const category = Astro.url.searchParams.get("category") ?? "popular";
 const genre = Astro.url.searchParams.get("genre") ?? "";
@@ -141,19 +139,12 @@ const baseUrl = `/shows?${baseParams.toString()}`;
         </div>
         <div class="flex items-center gap-2">
           <VisibilityFilters />
-          <ViewToggle currentView={viewPreference} />
         </div>
       </div>
 
-      {viewPreference === "list" ? (
-        <div class="flex flex-col gap-4">
-          {data.results.map(item => <MediaListCard item={item} />)}
-        </div>
-      ) : (
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-          {data.results.map(item => <MediaCard item={item} />)}
-        </div>
-      )}
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        {data.results.map(item => <MediaCard item={item} />)}
+      </div>
 
       <Pagination
         currentPage={data.page}

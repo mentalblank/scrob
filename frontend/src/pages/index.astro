@@ -328,6 +328,10 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           const inLists = item.in_lists ?? [];
           const inLibrary = item.in_library ?? false;
           const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
+          const progressPct = isSeries && item.total_episodes_count 
+            ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
+            : (item.progress_percent ?? 0);
+          const showProgress = progressPct > 0;
           const collectStyle = isSeries && collectionPct > 0
             ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
             : '';
@@ -359,6 +363,11 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
                   </svg>
                 </button>
                 ${rating ? `<div class="absolute top-2 right-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
+                ${showProgress ? `
+                  <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+                    <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
+                  </div>
+                ` : ''}
               </div>
             </a>
             <div class="grid grid-cols-3 flex-shrink-0">
@@ -396,7 +405,10 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
                 <div class="flex items-center gap-2">
                   ${year ? `<span class="text-[11px] font-medium text-zinc-500 tracking-wide">${esc(year)}</span>` : ''}
                 </div>
-                <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">${typeLabel}</span>
+                <div class="flex items-center gap-2">
+                  ${showProgress ? `<span class="text-[10px] font-bold text-zinc-500 tabular-nums">${Math.round(progressPct)}%</span>` : ''}
+                  <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">${typeLabel}</span>
+                </div>
               </div>
             </a>
           </div>`;

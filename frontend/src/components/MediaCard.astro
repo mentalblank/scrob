@@ -49,6 +49,11 @@ const isPartialWatched = !watched && (
   ((item.progress_percent ?? 0) > 0)
 );
 const isPartialCollected = item.type === 'series' && collectionPct > 0 && collectionPct < 100;
+
+const progressPct = item.type === 'series' && item.total_episodes_count 
+  ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
+  : (item.progress_percent ?? 0);
+const showProgress = progressPct > 0;
 ---
 
 <div
@@ -112,6 +117,12 @@ const isPartialCollected = item.type === 'series' && collectionPct > 0 && collec
             {item.library.resolution}
           </div>
         )}
+
+        {showProgress && (
+          <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+            <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
+          </div>
+        )}
       </div>
     </a>
   ) : (
@@ -136,6 +147,12 @@ const isPartialCollected = item.type === 'series' && collectionPct > 0 && collec
             <span class="text-xs leading-none">★</span> {rating}
           </div>
         )}
+
+        {showProgress && (
+          <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+            <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
+          </div>
+        )}
       </div>
     </div>
   )}
@@ -158,18 +175,23 @@ const isPartialCollected = item.type === 'series' && collectionPct > 0 && collec
         <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</h3>
       ) : null}
       <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">{item.title}</h3>
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{sxe}</span>}
-          {isPerson && item.known_for_department && (
-            <span class="text-[11px] font-medium text-zinc-500 tracking-wide truncate">{item.known_for_department}</span>
-          )}
-          {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-500 tracking-wide">{year}</span>}
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{sxe}</span>}
+            {isPerson && item.known_for_department && (
+              <span class="text-[11px] font-medium text-zinc-500 tracking-wide truncate">{item.known_for_department}</span>
+            )}
+            {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-500 tracking-wide">{year}</span>}
+          </div>
+          <div class="flex items-center gap-2">
+            {showProgress && (
+              <span class="text-xs font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+            )}
+            <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
+              {isPerson ? 'Person' : isCollection ? 'Collection' : isSeries ? 'Show' : (item.type === 'episode' ? 'Episode' : item.type)}
+            </span>
+          </div>
         </div>
-        <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
-          {isPerson ? 'Person' : isCollection ? 'Collection' : isSeries ? 'Show' : (item.type === 'episode' ? 'Episode' : item.type)}
-        </span>
-      </div>
     </a>
   ) : (
     <div class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
@@ -177,15 +199,20 @@ const isPartialCollected = item.type === 'series' && collectionPct > 0 && collec
         <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</h3>
       ) : null}
       <h3 class="text-sm font-bold text-zinc-500 truncate leading-tight mb-1">{item.title}</h3>
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide">{sxe}</span>}
-          {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-400 tracking-wide">{year}</span>}
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide">{sxe}</span>}
+            {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-400 tracking-wide">{year}</span>}
+          </div>
+          <div class="flex items-center gap-2">
+            {showProgress && (
+              <span class="text-xs font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+            )}
+            <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
+              {item.type === 'episode' ? 'Episode' : item.type}
+            </span>
+          </div>
         </div>
-        <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
-          {item.type === 'episode' ? 'Episode' : item.type}
-        </span>
-      </div>
     </div>
   )}
 </div>

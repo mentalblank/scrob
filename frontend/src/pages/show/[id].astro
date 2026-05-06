@@ -3,11 +3,14 @@ import Base from "../../layouts/Base.astro";
 import MediaRow from "../../components/MediaRow.astro";
 import ActionBar from "../../components/ActionBar.astro";
 import CommentsSection from "../../components/CommentsSection.astro";
+import GridCard from "../../components/GridCard.astro";
+import ProgressStrip from "../../components/ProgressStrip.astro";
 import { api, type Show } from "../../lib/api";
 export const prerender = false;
 
 const { id } = Astro.params;
 const { token } = Astro.locals;
+
 Astro.response.headers.set("Cache-Control", "no-store");
 
 let show: Show | null = null;
@@ -26,6 +29,17 @@ if (!show && !error) {
 const seasons = Object.entries(show?.seasons ?? {}).sort(
   ([a], [b]) => Number(a.replace("season_", "")) - Number(b.replace("season_", ""))
 );
+
+// Progress stats
+const allEpisodes = Object.values(show?.seasons ?? {}).flat();
+const watchedEpisodesCount = allEpisodes.filter(e => e.watched).length;
+const totalEpisodesCount = show?.seasons_meta?.reduce((acc, s) => acc + s.episode_count, 0) || allEpisodes.length;
+const remainingEpisodesCount = totalEpisodesCount - watchedEpisodesCount;
+const remainingDuration = allEpisodes
+  .filter(e => !e.watched)
+  .reduce((acc, e) => acc + (e.runtime || 0), 0);
+const overallProgress = totalEpisodesCount > 0 ? (watchedEpisodesCount / totalEpisodesCount) * 100 : 0;
+const showProgress = overallProgress > 0; // Show progress even if 100% to match GridCard behavior
 
 const year = show?.first_air_date?.slice(0, 4) ?? null;
 const rating = show?.tmdb_rating ? show.tmdb_rating.toFixed(1) : null;
@@ -71,24 +85,27 @@ const originalLanguage = show?.original_language
 
         <div class="flex flex-col md:flex-row gap-8 lg:gap-12">
           <!-- Poster -->
-          <div class="w-64 shrink-0 mx-auto md:mx-0">
-            <div class="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative" data-adult={show.adult ? "true" : undefined}>
-              {show.poster_path ? (
-                <img
-                  src={show.poster_path}
-                  alt={show.title}
-                  class="w-full h-full object-cover"
-                  loading="eager"
-                  decoding="async"
-                />
-              ) : (
-                <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
-                  <span class="text-4xl mb-2">📺</span>
-                  <span class="text-sm font-medium">No Poster Available</span>
-                </div>
-              )}
+            <div class="w-full md:w-1/3 lg:w-1/4 shrink-0">
+              <div class="aspect-[2/3] rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative group/poster">
+                {show.poster_path ? (
+                  <img
+                    src={show.poster_path}
+                    alt={show.title}
+                    class="w-full h-full object-cover transition-transform duration-700 group-hover/poster:scale-110"
+                  />
+                ) : (
+                  <div class="w-full h-full bg-zinc-900 flex flex-col items-center justify-center text-zinc-500 gap-2">
+                    <span class="text-5xl">📺</span>
+                    <span class="text-xs font-bold uppercase tracking-widest">No Poster</span>
+                  </div>
+                )}
+                {showProgress && (
+                  <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+                    <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${overallProgress}%`}></div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
           <!-- Info -->
           <div class="flex-1 min-w-0 pt-4">
@@ -122,6 +139,14 @@ const originalLanguage = show?.original_language
                     {show.status}
                   </span>
                 )}
+                <span class="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
+                  Show
+                </span>
+                {showProgress && (
+                  <span class="text-xs font-bold text-blue-500 tabular-nums bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                    {Math.round(overallProgress)}%
+                  </span>
+                )}
                 {originalLanguage && (
                   <span class="flex items-center gap-1.5 font-medium text-zinc-400">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 text-zinc-500">
@@ -135,18 +160,32 @@ const originalLanguage = show?.original_language
             </div>
 
             <div class="mb-6">
-              <ActionBar
-                tmdbId={Number(id)}
-                mediaType="series"
-                watched={show.watched ?? false}
-                inLists={show.in_lists ?? []}
-                inLibrary={show.in_library ?? false}
-                collectionPct={show.collection_pct ?? 0}
-                showTmdbId={Number(id)}
-                isMonitored={show.is_monitored ?? false}
-                requestEnabled={show.request_enabled ?? false}
-                userRating={show.user_rating ?? null}
-              />
+                <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+                    <div class="flex-1">
+                        <ActionBar
+                          tmdbId={Number(id)}
+                          mediaType="series"
+                          watched={show.watched ?? false}
+                          inLists={show.in_lists ?? []}
+                          inLibrary={show.in_library ?? false}
+                          collectionPct={show.collection_pct ?? 0}
+                          showTmdbId={Number(id)}
+                          isMonitored={show.is_monitored ?? false}
+                          requestEnabled={show.request_enabled ?? false}
+                          userRating={show.user_rating ?? null}
+                        />
+                    </div>
+                    {showProgress && (
+                      <div class="w-full lg:w-64">
+                        <ProgressStrip
+                          watchedEpisodesCount={watchedEpisodesCount}
+                          totalEpisodesCount={totalEpisodesCount}
+                          remainingDuration={remainingDuration}
+                          className="mt-0"
+                        />
+                      </div>
+                    )}
+                </div>
             </div>
 
             {show.in_library && (
@@ -215,62 +254,35 @@ const originalLanguage = show?.original_language
             <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase">Seasons</h2>
           </div>
           
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {(show.seasons_meta || seasons.map(([k]) => ({ season_number: Number(k.replace("season_","")), name: `Season ${k.replace("season_","")}`, overview: null, poster_path: null, episode_count: 0, air_date: null }))).map((s) => {
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+              {(show.seasons_meta || seasons.map(([k]) => ({ season_number: Number(k.replace("season_","")), name: `Season ${k.replace("season_","")}`, overview: null, poster_path: null, episode_count: 0, air_date: null }))).map((s) => {
                 const seasonNum = s.season_number;
                 const episodes = show.seasons?.[`season_${seasonNum}`] || [];
                 const poster = s.poster_path || show.poster_path;
                 const seasonState = show.season_states?.[seasonNum] ?? { watched: false, in_library: episodes.length > 0, collection_pct: 0, user_rating: null };
+                const watchedCount = episodes.filter(e => e.watched).length;
+                const progressPct = episodes.length > 0 ? (watchedCount / episodes.length) * 100 : (seasonState.watched ? 100 : 0);
 
                 return (
-                  <div class="group/season bg-zinc-900/50 border border-zinc-800 rounded-3xl p-5 hover:bg-zinc-800/60 hover:border-blue-500/50 transition-all duration-300 hover:shadow-2xl hover:shadow-blue-900/10">
-                    <a href={`/show/${show.tmdb_id}/season/${seasonNum}`} class="flex gap-6 block mb-4 active:opacity-70 transition-opacity duration-100">
-                        <div class="w-28 shrink-0">
-                            <div class="aspect-[2/3] rounded-2xl overflow-hidden border border-zinc-800 shadow-lg group-hover/season:ring-2 group-hover/season:ring-blue-500/50 transition-all duration-500">
-                                {poster ? (
-                                    <img src={poster} alt={s.name} class="w-full h-full object-cover group-hover/season:scale-110 transition-transform duration-700" />
-                                ) : (
-                                    <div class="w-full h-full bg-zinc-900 flex flex-col items-center justify-center text-zinc-500 gap-1">
-                                        <span class="text-3xl">📺</span>
-                                        <span class="text-[10px] font-bold uppercase tracking-widest">No Poster</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div class="flex-1 py-2">
-                            <div class="flex items-start justify-between gap-4 mb-1">
-                                <h3 class="text-xl font-black text-zinc-100 group-hover/season:text-blue-400 transition-colors">{s.name || `Season ${seasonNum}`}</h3>
-                                {s.tmdb_rating != null && s.tmdb_rating > 0 && (
-                                    <div class="bg-zinc-950 border border-zinc-800 px-2 py-1 rounded-xl flex items-center gap-1.5 shrink-0 shadow-sm">
-                                        <span class="text-yellow-400 text-xs">★</span>
-                                        <span class="text-zinc-100 text-xs font-bold">{s.tmdb_rating.toFixed(1)}</span>
-                                    </div>
-                                )}
-                            </div>
-                            <div class="flex items-center gap-2 mb-3">
-                                <span class="text-[10px] font-black text-zinc-500 uppercase tracking-widest bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">
-                                    {s.episode_count || episodes.length} Episodes
-                                </span>
-                            </div>
-                            <p class="text-xs text-zinc-400 line-clamp-3 leading-relaxed opacity-80">{s.overview || "No overview available."}</p>
-                        </div>
-                    </a>
-                    <ActionBar
-                      tmdbId={Number(id)}
-                      mediaType="series"
-                      watched={seasonState.watched}
-                      inLists={[]}
-                      inLibrary={seasonState.in_library}
-                      collectionPct={seasonState.collection_pct}
-                      seasonNumber={seasonNum}
-                      hideRequest={true}
-                      hideLists={true}
-                      userRating={seasonState.user_rating ?? null}
-                    />
-                  </div>
-                )
-            })}
-          </div>
+                  <GridCard
+                    href={`/show/${show.tmdb_id}/season/${seasonNum}`}
+                    posterSrc={poster}
+                    title={s.name || `Season ${seasonNum}`}
+                    showTitle={show.title}
+                    meta={`${s.episode_count || episodes.length} Episodes`}
+                    progressPct={progressPct}
+                    tmdbId={Number(id)}
+                    mediaType="series"
+                    showTmdbId={Number(id)}
+                    seasonNumber={seasonNum}
+                    watched={seasonState.watched}
+                    inLibrary={seasonState.in_library}
+                    collectionPct={seasonState.collection_pct}
+                    isSeries={true}
+                  />
+                );
+              })}
+            </div>
         </div>
 
         <!-- Cast -->

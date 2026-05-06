@@ -465,6 +465,8 @@ async def enrich_with_state(
             pct = show_pct.get(tid, 0)
             item["collection_pct"] = pct
             item["in_library"] = pct > 0
+            item["watched_episodes_count"] = show_watched_count_map.get(tid, 0)
+            item["total_episodes_count"] = show_aired_count.get(tid, 0)
         elif t == "episode":
             item["watched"] = tid in watched_episodes
             in_lib = tid in collected_ep_ids

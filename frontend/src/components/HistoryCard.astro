@@ -12,85 +12,100 @@ const date = new Date(watched_at);
 const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const isEpisode = media.type === 'episode';
-const title = isEpisode ? (media.show_title || media.title) : media.title;
+const title = isEpisode ? media.title : media.title;
+const showTitle = isEpisode ? (media.show_title || media.title) : null;
 const year = media.release_date?.slice(0, 4);
 
-// For episodes, use show poster as requested
-const rawPoster = isEpisode ? (media.show_poster_path || media.poster_path) : media.poster_path;
-const posterPath = rawPoster
-  ? (rawPoster.startsWith('http') ? rawPoster : `https://image.tmdb.org/t/p/w500${rawPoster}`)
+// Episodes: use episode still (poster_path in this context). Movies: use backdrop.
+const rawImage = isEpisode 
+  ? (media.poster_path ?? media.show_backdrop_path ?? media.show_poster_path)
+  : (media.backdrop_path ?? media.poster_path);
+
+const imageUrl = rawImage
+  ? (rawImage.startsWith('http') ? rawImage : `https://image.tmdb.org/t/p/w780${rawImage}`)
   : null;
 
 const href = isEpisode
   ? `/show/${media.show_tmdb_id}/season/${media.season_number}/${media.episode_number}`
   : `/media/movie/${media.tmdb_id}`;
+
+const sxe = isEpisode && media.season_number != null && media.episode_number != null
+  ? `S${String(media.season_number).padStart(2, "0")}E${String(media.episode_number).padStart(2, "0")}`
+  : null;
+
+const progressPct = event.progress_percent ? event.progress_percent * 100 : 0;
+const showProgress = !event.completed && progressPct > 0;
 ---
 
-<a href={href} class="flex gap-5 p-4 bg-zinc-900/40 hover:bg-zinc-800/60 border border-zinc-800/50 hover:border-blue-500/30 rounded-2xl transition-all duration-300 group shadow-sm hover:shadow-xl hover:shadow-blue-900/10 active:opacity-70">
-  <!-- Poster -->
-  <div class="w-20 shrink-0 aspect-[2/3] rounded-xl overflow-hidden bg-zinc-950 shadow-2xl ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
-    {posterPath ? (
-      <img 
-        src={posterPath} 
-        alt={title} 
-        class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-        loading="lazy"
-        decoding="async"
-      />
-    ) : (
-      <div class="w-full h-full flex flex-col items-center justify-center text-xs text-zinc-700 p-2 text-center bg-zinc-900">
-        <span class="text-xl mb-1 opacity-20">🎬</span>
-        <span class="font-bold uppercase tracking-tighter truncate w-full">{title}</span>
-      </div>
-    )}
-  </div>
+<div class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70">
+  <a href={href} class="block">
+    <!-- Backdrop/Still container: 3:2 -->
+    <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={title}
+          class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          loading="lazy"
+          decoding="async"
+        />
+      ) : (
+        <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-[#18181b]">
+          <span class="text-3xl mb-2 opacity-30">{isEpisode ? '📺' : '🎬'}</span>
+          <span class="text-xs font-bold uppercase tracking-widest text-[#52525b]">{showTitle ?? title}</span>
+        </div>
+      )}
 
-  <!-- Content -->
-  <div class="flex flex-col justify-center min-w-0 flex-1 py-1">
-    <div class="flex items-start justify-between gap-4">
-      <div class="min-w-0 flex-1">
-        <p class="text-lg font-black text-zinc-100 group-hover:text-blue-400 transition-colors truncate tracking-tight leading-tight mb-1">
-          {title}
-        </p>
-        
-        {isEpisode ? (
-          <p class="text-xs font-bold text-zinc-400 flex items-center gap-2">
-            <span class="text-blue-500 tracking-tighter uppercase bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
-              S{media.season_number?.toString().padStart(2, '0')}E{media.episode_number?.toString().padStart(2, '0')}
-            </span>
-            <span class="truncate font-medium text-zinc-500">{media.title}</span>
-          </p>
-        ) : (
-          <p class="text-xs font-bold text-zinc-500 uppercase tracking-widest">
-            {year}
-          </p>
-        )}
-      </div>
-      
-      <div class="text-xs font-bold text-zinc-400 bg-zinc-950/50 border border-zinc-800 px-2 py-1 rounded-lg shrink-0 uppercase tracking-wider">
+      <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+
+      <!-- Time badge -->
+      <div class="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg uppercase tracking-wider">
         {timeString}
       </div>
+
+      {sxe && (
+        <div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">
+          {sxe}
+        </div>
+      )}
+
+      {showProgress && (
+        <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+          <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
+        </div>
+      )}
+      
+      {event.completed && (
+        <div class="absolute bottom-2 right-2 bg-green-500/80 backdrop-blur-md p-1 rounded-full shadow-lg border border-green-400/30">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-white">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+      )}
     </div>
-    
-    <!-- Progress bar if not completed -->
-    {!event.completed && event.progress_percent > 0 ? (
-      <div class="mt-4">
-        <div class="flex items-center justify-between text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1.5">
-          <span>Watching</span>
-          <span>{Math.round(event.progress_percent * 100)}%</span>
-        </div>
-        <div class="w-full bg-zinc-950 h-1.5 rounded-full overflow-hidden border border-zinc-800/50">
-          <div 
-            class="bg-blue-600 h-full rounded-full shadow-[0_0_8px_rgba(37,99,235,0.4)]" 
-            style={`width: ${event.progress_percent * 100}%`}
-          ></div>
-        </div>
-      </div>
-    ) : (
-      <div class="mt-4 flex items-center gap-1.5">
-        <span class="w-1.5 h-1.5 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
-        <span class="text-xs font-bold text-zinc-400 uppercase tracking-widest">Completed</span>
-      </div>
+  </a>
+
+  <!-- Info -->
+  <a href={href} class="block p-4 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+    {showTitle && (
+      <p class="text-[11px] font-medium text-zinc-400 truncate mb-0.5 uppercase tracking-wider">{showTitle}</p>
     )}
-  </div>
-</a>
+    <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors leading-tight">
+      {title}
+    </h3>
+    <div class="flex items-center justify-between mt-2">
+      <div class="flex items-center gap-2">
+        {!isEpisode && year && <span class="text-[11px] font-bold text-zinc-500 tracking-wide">{year}</span>}
+        {isEpisode && sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{sxe}</span>}
+      </div>
+      {showProgress && (
+        <span class="text-[10px] font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+      )}
+      {!isEpisode && !showProgress && (
+        <span class="text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
+          Movie
+        </span>
+      )}
+    </div>
+  </a>
+</div>

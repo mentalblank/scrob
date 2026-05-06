@@ -72,7 +72,7 @@ const baseUrl = `/history${type ? `?type=${type}` : ""}`;
             <h2 class="text-lg font-bold text-zinc-100 mb-4 sticky-top-safe py-2 bg-zinc-950/80 backdrop-blur-md z-10 flex items-center gap-3 border-b border-zinc-800/50">
               {date}
             </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {groupedHistory[date].map((event) => (
                 <HistoryCard event={event} />
               ))}

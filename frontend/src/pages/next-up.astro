@@ -1,12 +1,10 @@
 ---
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
-import MediaListCard from "../components/MediaListCard.astro";
-import ViewToggle from "../components/ViewToggle.astro";
 import { api, type MediaItem } from "../lib/api";
 export const prerender = false;
 
-const viewPreference = Astro.cookies.get("media_view_preference")?.value === "list" ? "list" : "grid";
+
 
 const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
@@ -23,12 +21,9 @@ try {
 ---
 
 <Base title="Next Up">
-  <div class="flex items-center justify-between mb-8">
-    <div>
-      <h1 class="text-3xl font-bold text-zinc-100 mb-2">Next Up</h1>
-      <p class="text-zinc-500">Continue where you left off</p>
-    </div>
-    <ViewToggle currentView={viewPreference} />
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-zinc-100 mb-2">Next Up</h1>
+    <p class="text-zinc-500">Continue where you left off</p>
   </div>
 
   {error && (
@@ -44,19 +39,11 @@ try {
     </div>
   )}
 
-  {viewPreference === "list" ? (
-    <div class="flex flex-col gap-4">
-      {nextUp.map((item) => (
-        <MediaListCard item={item} />
-      ))}
-    </div>
-  ) : (
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-      {nextUp.map((item) => (
-        <MediaCard item={item} />
-      ))}
-    </div>
-  )}
+  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+    {nextUp.map((item) => (
+      <MediaCard item={item} />
+    ))}
+  </div>
 </Base>
 
 <script>

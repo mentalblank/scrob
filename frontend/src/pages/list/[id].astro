@@ -1,14 +1,12 @@
 ---
 import Base from "../../layouts/Base.astro";
 import MediaCard from "../../components/MediaCard.astro";
-import MediaListCard from "../../components/MediaListCard.astro";
-import ViewToggle from "../../components/ViewToggle.astro";
 import ListCard from "../../components/ListCard.astro";
 import VisibilityFilters from "../../components/VisibilityFilters.astro";
 import { api, type ListDetail, type UserList, type PublicList, type MediaItem } from "../../lib/api";
 export const prerender = false;
 
-const viewPreference = Astro.cookies.get("media_view_preference")?.value === "list" ? "list" : "grid";
+
 
 const { id } = Astro.params;
 const { token, user } = Astro.locals;
@@ -231,7 +229,6 @@ Astro.response.headers.set("Cache-Control", "no-store");
           <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest">Items</h2>
           <div class="flex items-center gap-4">
             <VisibilityFilters />
-            <ViewToggle currentView={viewPreference} />
           </div>
         </div>
         {list.items.length === 0 ? (
@@ -240,14 +237,10 @@ Astro.response.headers.set("Cache-Control", "no-store");
             <p class="text-zinc-500">{list.is_owner ? "This list is empty. Search above to add movies and shows." : "This list is empty."}</p>
           </div>
         ) : (
-          <div id="items-grid" class={viewPreference === "list" ? "flex flex-col gap-4" : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6"}>
+          <div id="items-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
             {list.items.map((entry) => (
               <div class="relative group/item" data-item-id={entry.id}>
-                {viewPreference === "list" ? (
-                  <MediaListCard item={entry.media} />
-                ) : (
-                  <MediaCard item={entry.media} />
-                )}
+                <MediaCard item={entry.media} />
                 {list.is_owner && (
                   <button
                     class="remove-item-btn absolute top-2 right-2 bg-red-600/90 hover:bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg cursor-pointer z-10 transition-colors"
@@ -263,7 +256,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
             ))}
           </div>
         )}
-        {list.items.length === 0 && <div id="items-grid" class={`hidden ${viewPreference === 'list' ? 'flex flex-col gap-4' : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6'}`}></div>}
+        {list.items.length === 0 && <div id="items-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6 hidden"></div>}
       </div>
 
       <!-- Other Lists -->
@@ -636,6 +629,11 @@ Astro.response.headers.set("Cache-Control", "no-store");
         </button>
       </div>` : '';
 
+    const progressPct = isSeries && media.total_episodes_count 
+      ? ((media.watched_episodes_count ?? 0) / media.total_episodes_count * 100)
+      : (media.progress_percent ?? 0);
+    const showProgress = !isPerson && progressPct > 0;
+
     return `
       <div
         class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1"
@@ -656,6 +654,11 @@ Astro.response.headers.set("Cache-Control", "no-store");
             }
             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
             ${rating ? `<div class="absolute top-2 right-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
+            ${showProgress ? `
+              <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+                <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
+              </div>
+            ` : ''}
           </div>
         </a>
         ${actionBar}
@@ -663,7 +666,10 @@ Astro.response.headers.set("Cache-Control", "no-store");
           <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">${esc(media.title)}</h3>
           <div class="flex items-center justify-between">
             ${year ? `<span class="text-[11px] font-medium text-zinc-500 tracking-wide">${esc(year)}</span>` : '<span></span>'}
-            <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">${isSeries ? 'Show' : esc(media.type)}</span>
+            <div class="flex items-center gap-2">
+              ${showProgress ? `<span class="text-[10px] font-bold text-zinc-500 tabular-nums">${Math.round(progressPct)}%</span>` : ''}
+              <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">${isSeries ? 'Show' : esc(media.type)}</span>
+            </div>
           </div>
         </a>
       </div>`;
@@ -715,9 +721,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
       if (!grid) {
         grid = document.createElement('div');
         grid.id = 'items-grid';
-        grid.className = document.cookie.includes('media_view_preference=list') 
-          ? 'flex flex-col gap-4' 
-          : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6';
+        grid.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6';
         emptyState?.parentNode?.insertBefore(grid, emptyState);
       }
       emptyState?.classList.add('hidden');

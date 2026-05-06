@@ -1,0 +1,104 @@
+---
+import CardActionBar from "./CardActionBar.astro";
+
+interface Props {
+  href: string;
+  posterSrc: string | null;
+  title: string;
+  showTitle?: string;
+  meta?: string;
+  progressPct?: number;
+  // ActionBar props
+  tmdbId: number;
+  mediaType: string;
+  showTmdbId?: number;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  watched: boolean;
+  inLists?: number[];
+  inLibrary: boolean;
+  collectionPct: number;
+  isSeries: boolean;
+}
+
+const {
+  href,
+  posterSrc,
+  title,
+  showTitle,
+  meta,
+  progressPct = 0,
+  tmdbId,
+  mediaType,
+  showTmdbId,
+  seasonNumber,
+  episodeNumber,
+  watched,
+  inLists = [],
+  inLibrary,
+  collectionPct,
+  isSeries,
+} = Astro.props;
+---
+
+<div
+  class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70"
+  data-card
+  data-tmdb-id={String(tmdbId)}
+  data-media-type={mediaType}
+  data-show-tmdb-id={showTmdbId ? String(showTmdbId) : ""}
+  data-season={seasonNumber != null ? String(seasonNumber) : ""}
+  data-episode-number={episodeNumber != null ? String(episodeNumber) : ""}
+>
+  <!-- Poster -->
+  <a href={href} class="block">
+    <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
+      {posterSrc ? (
+        <img
+          src={posterSrc}
+          alt={title}
+          class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+          loading="lazy"
+          decoding="async"
+        />
+      ) : (
+        <div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center">
+          <span class="text-3xl mb-2 opacity-30">🎬</span>
+          <span class="text-xs font-bold uppercase tracking-widest">{title}</span>
+        </div>
+      )}
+
+      <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+
+      <!-- Progress bar -->
+      <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+        <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
+      </div>
+    </div>
+  </a>
+
+  <!-- Quick Action Buttons -->
+  <CardActionBar
+    watched={watched}
+    inLists={inLists}
+    inLibrary={inLibrary}
+    collectionPct={collectionPct}
+    isSeries={isSeries}
+  />
+
+  <!-- Info -->
+  <a href={href} class="p-4 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+    {showTitle && (
+      <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{showTitle}</h3>
+    )}
+    <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">
+      {title}
+    </h3>
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        {meta && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{meta}</span>}
+      </div>
+      <span class="text-xs font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+    </div>
+  </a>
+</div>
