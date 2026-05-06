@@ -3298,7 +3298,25 @@ async def get_media_details(
     try:
         # 1. Fetch from TMDB
         if type == MediaType.movie:
-            data = await tmdb.get_movie(tmdb_id, api_key=tmdb_key)
+            data, videos_data = await asyncio.gather(
+                tmdb.get_movie(tmdb_id, api_key=tmdb_key),
+                tmdb.get_movie_videos(tmdb_id, api_key=tmdb_key),
+            )
+            trailer_youtube_id = next(
+                (
+                    v["key"]
+                    for v in videos_data.get("results", [])
+                    if v.get("type") == "Trailer" and v.get("site") == "YouTube" and v.get("official")
+                ),
+                next(
+                    (
+                        v["key"]
+                        for v in videos_data.get("results", [])
+                        if v.get("type") == "Trailer" and v.get("site") == "YouTube"
+                    ),
+                    None,
+                ),
+            )
         elif type == MediaType.episode:
             # Look up the episode in the local DB to find its show context
             ep_result = await db.execute(
@@ -3507,6 +3525,7 @@ async def get_media_details(
                 for c in data.get("credits", {}).get("cast", [])[:12]
             ],
             "where_to_watch": where_to_watch,
+            "trailer_youtube_id": trailer_youtube_id,
         }
     except Exception as e:
         if isinstance(e, HTTPException):

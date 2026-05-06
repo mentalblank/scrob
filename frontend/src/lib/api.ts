@@ -508,6 +508,7 @@ export interface MediaItem {
   remaining_episodes_count?: number;
   remaining_duration?: number;
   progress_percent?: number;
+  trailer_youtube_id?: string | null;
 }
 
 export interface SubtitleTrack {
@@ -604,6 +605,7 @@ export interface Show {
   first_air_date: string | null;
   last_air_date: string | null;
   where_to_watch?: { type: string; name: string; logo: string | null }[];
+  trailer_youtube_id?: string | null;
 }
 
 export interface ProfileWatchedItem {

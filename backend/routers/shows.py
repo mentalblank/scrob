@@ -163,9 +163,29 @@ async def get_show(
         cast = []
         tmdb_extra: dict | None = None
         api_key = await get_user_tmdb_key(db, current_user.id)
+        trailer_youtube_id: str | None = None
         if check_tmdb_key(api_key):
             try:
-                tmdb_extra = await tmdb.get_show(series_tmdb_id, api_key=api_key)
+                tmdb_extra, videos_data = await asyncio.gather(
+                    tmdb.get_show(series_tmdb_id, api_key=api_key),
+                    tmdb.get_tv_videos(series_tmdb_id, api_key=api_key),
+                )
+                # Extract first official YouTube trailer
+                trailer_youtube_id = next(
+                    (
+                        v["key"]
+                        for v in videos_data.get("results", [])
+                        if v.get("type") == "Trailer" and v.get("site") == "YouTube" and v.get("official")
+                    ),
+                    next(
+                        (
+                            v["key"]
+                            for v in videos_data.get("results", [])
+                            if v.get("type") == "Trailer" and v.get("site") == "YouTube"
+                        ),
+                        None,
+                    ),
+                )
                 networks = [
                     {
                         "id": n["id"],
@@ -344,6 +364,7 @@ async def get_show(
             "cast": cast,
             "networks": networks,
             "where_to_watch": where_to_watch,
+            "trailer_youtube_id": trailer_youtube_id,
         }
 
     # 2. If not local, fetch from TMDB
@@ -354,7 +375,25 @@ async def get_show(
         )
 
     try:
-        data = await tmdb.get_show(series_tmdb_id, api_key=api_key)
+        data, videos_data = await asyncio.gather(
+            tmdb.get_show(series_tmdb_id, api_key=api_key),
+            tmdb.get_tv_videos(series_tmdb_id, api_key=api_key),
+        )
+        trailer_youtube_id_tmdb = next(
+            (
+                v["key"]
+                for v in videos_data.get("results", [])
+                if v.get("type") == "Trailer" and v.get("site") == "YouTube" and v.get("official")
+            ),
+            next(
+                (
+                    v["key"]
+                    for v in videos_data.get("results", [])
+                    if v.get("type") == "Trailer" and v.get("site") == "YouTube"
+                ),
+                None,
+            ),
+        )
 
         cast = [
             {
@@ -427,6 +466,7 @@ async def get_show(
             "seasons": {},
             "season_states": {},
             "where_to_watch": where_to_watch,
+            "trailer_youtube_id": trailer_youtube_id_tmdb,
         }
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"TMDB Show not found: {e}")

@@ -274,6 +274,10 @@ async def get_movie_videos(tmdb_id: int, api_key: str = None) -> dict:
     return await _get(f"{TMDB_BASE}/movie/{tmdb_id}/videos", headers=get_headers(api_key))
 
 
+async def get_tv_videos(tmdb_id: int, api_key: str = None) -> dict:
+    return await _get(f"{TMDB_BASE}/tv/{tmdb_id}/videos", headers=get_headers(api_key))
+
+
 async def find_by_external_id(external_id: str, source: str, api_key: str = None) -> dict:
     """Find a movie or TV show by an external ID (imdb_id, tvdb_id, etc.)."""
     return await _get(f"{TMDB_BASE}/find/{external_id}", headers=get_headers(api_key), params={"external_source": source})
