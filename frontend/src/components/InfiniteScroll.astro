@@ -97,6 +97,15 @@ const {
            if (nextPage + 1 > totalPages) {
              this.observer.disconnect();
              this.sentinel.innerHTML = '';
+           } else {
+             // If the sentinel is still in view (e.g. because everything we loaded is hidden),
+             // load the next page immediately.
+             setTimeout(() => {
+               const rect = this.sentinel.getBoundingClientRect();
+               if (rect.top < window.innerHeight + 600) {
+                 this.loadMore();
+               }
+             }, 50); // Small delay to allow CSS/layout to update
            }
         } else {
            // No content returned, stop
