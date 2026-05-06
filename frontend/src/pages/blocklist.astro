@@ -1,0 +1,136 @@
+---
+import Base from "../layouts/Base.astro";
+import MediaCard from "../components/MediaCard.astro";
+import { api, type MediaItem } from "../lib/api";
+
+const { token } = Astro.locals;
+if (!token) {
+  return Astro.redirect("/login");
+}
+
+let blockedItems: MediaItem[] = [];
+let error = "";
+
+try {
+  const blocklist = await api.media.getBlocklist(token);
+  
+  if (blocklist && blocklist.length > 0) {
+    // Fetch details for each item in parallel
+    const detailPromises = blocklist.map(item => {
+      // Use the correct detail endpoint based on media type
+      if (item.media_type === 'series') {
+        return api.shows.get(item.tmdb_id, token)
+          .then(show => ({
+            ...show,
+            type: 'series' as const,
+            release_date: show.first_air_date // Map for MediaCard consistency
+          }))
+          .catch(err => {
+            console.error(`Failed to fetch details for series:${item.tmdb_id}`, err);
+            return null;
+          });
+      }
+
+      return api.media.get(item.media_type, item.tmdb_id, token)
+        .catch(err => {
+          console.error(`Failed to fetch details for ${item.media_type}:${item.tmdb_id}`, err);
+          return null;
+        });
+    });
+    
+    const results = await Promise.all(detailPromises);
+    blockedItems = results.filter((item): item is MediaItem => item !== null);
+  }
+} catch (e: any) {
+  error = e.message;
+}
+---
+
+<Base title="Blocklist">
+  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+  <div class="mb-8">
+    <div class="flex items-center gap-4 mb-4">
+      <a href="/settings" class="p-2 hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-zinc-100 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      </a>
+      <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">Blocklist</h1>
+    </div>
+    <p class="text-zinc-400">Items you've hidden from your explore pages. Unblock them to see them again.</p>
+  </div>
+
+  {error && (
+    <div class="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 mb-8">
+      {error}
+    </div>
+  )}
+
+  {blockedItems.length === 0 ? (
+    <div class="flex flex-col items-center justify-center py-20 bg-zinc-900/30 border border-dashed border-zinc-800 rounded-3xl">
+      <span class="text-4xl mb-4">🛡️</span>
+      <h2 class="text-xl font-bold text-zinc-100 mb-2">Blocklist is empty</h2>
+      <p class="text-zinc-500">Items you block will appear here.</p>
+    </div>
+  ) : (
+    <div id="blocklist-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+      {blockedItems.map(item => (
+        <div class="relative group/blocked" data-tmdb-id={item.tmdb_id} data-media-type={item.type}>
+          <MediaCard item={item} />
+          <div class="absolute inset-x-0 top-0 p-2 flex justify-end opacity-0 group-hover/blocked:opacity-100 transition-opacity z-20 pointer-events-none">
+            <button
+              data-action="unblock-direct"
+              class="pointer-events-auto bg-zinc-900/90 backdrop-blur-md border border-zinc-700 hover:border-red-500/50 hover:bg-red-500/20 text-zinc-100 hover:text-red-400 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xl cursor-pointer flex items-center gap-1.5"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              Unblock
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+</Base>
+
+<script>
+  // Handle unblock action
+  document.addEventListener('click', async (e) => {
+    const btn = (e.target as HTMLElement).closest('[data-action="unblock-direct"]') as HTMLButtonElement;
+    if (!btn) return;
+
+    const container = btn.closest('[data-tmdb-id]') as HTMLElement;
+    const tmdbId = container.dataset.tmdbId;
+    const mediaType = container.dataset.mediaType;
+
+    if (!tmdbId || !mediaType) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full"></span>';
+
+    const token = (window as any).__AUTH_TOKEN__ || (document.getElementById('app-data') as HTMLElement)?.dataset.token;
+
+    try {
+      const res = await fetch(`/api/proxy/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (res.ok) {
+        container.remove();
+        
+        // If grid is empty, refresh to show empty state
+        const grid = document.getElementById('blocklist-grid');
+        if (grid && grid.children.length === 0) {
+          window.location.reload();
+        }
+      } else {
+        throw new Error('Failed to unblock');
+      }
+    } catch (err) {
+      console.error(err);
+      btn.disabled = false;
+      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Unblock';
+      if ((window as any).showToast) (window as any).showToast('Failed to unblock item', 'error');
+    }
+  });
+</script>
