@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
-import Pagination from "../components/Pagination.astro";
+import InfiniteScroll from "../components/InfiniteScroll.astro";
 import { api, type MediaItem, type UserSearchResult } from "../lib/api";
 
 
@@ -187,7 +187,7 @@ const tabs: [string | undefined, string][] = [
   )}
 
   {!isUserSearch && (
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+    <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
       {results.map((item) => (
         <MediaCard item={item} />
       ))}
@@ -195,7 +195,12 @@ const tabs: [string | undefined, string][] = [
   )}
 
   {!isUserSearch && totalPages > 1 && (
-    <Pagination currentPage={page} totalPages={totalPages} baseUrl={baseUrl} />
+    <InfiniteScroll
+      type="search"
+      currentPage={page}
+      totalPages={totalPages}
+      params={{ q, media_type: type, year }}
+    />
   )}
 </Base>
 

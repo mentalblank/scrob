@@ -1,0 +1,166 @@
+---
+interface Props {
+  type: string;
+  currentPage: number;
+  totalPages: number;
+  params?: Record<string, any>;
+  targetSelector?: string;
+  isHistory?: boolean;
+}
+
+const { 
+  type, 
+  currentPage, 
+  totalPages, 
+  params = {}, 
+  targetSelector = "#media-grid",
+  isHistory = false
+} = Astro.props;
+---
+
+<div 
+  id="infinite-scroll-sentinel" 
+  class="w-full py-12 flex justify-center items-center"
+  data-type={type}
+  data-next-page={currentPage + 1}
+  data-total-pages={totalPages}
+  data-params={JSON.stringify(params)}
+  data-target={targetSelector}
+  data-is-history={isHistory ? "true" : "false"}
+>
+  {currentPage < totalPages && (
+    <div class="loading-spinner flex items-center gap-3 text-zinc-500 font-medium">
+      <div class="animate-spin rounded-full h-6 w-6 border-2 border-zinc-700 border-t-blue-500"></div>
+      <span>Loading more…</span>
+    </div>
+  )}
+</div>
+
+<script>
+  class InfiniteScroll {
+    sentinel: HTMLElement;
+    observer: IntersectionObserver;
+    loading = false;
+
+    constructor(sentinel: HTMLElement) {
+      this.sentinel = sentinel;
+      this.observer = new IntersectionObserver(this.handleIntersect.bind(this), {
+        rootMargin: '600px', // Start loading well before reaching the bottom
+      });
+      this.observer.observe(this.sentinel);
+    }
+
+    async handleIntersect(entries: IntersectionObserverEntry[]) {
+      const entry = entries[0];
+      if (entry.isIntersecting && !this.loading) {
+        await this.loadMore();
+      }
+    }
+
+    async loadMore() {
+      const nextPage = parseInt(this.sentinel.dataset.nextPage || '1');
+      const totalPages = parseInt(this.sentinel.dataset.totalPages || '0');
+      
+      if (nextPage > totalPages) {
+        this.observer.disconnect();
+        this.sentinel.innerHTML = '';
+        return;
+      }
+
+      this.loading = true;
+      const type = this.sentinel.dataset.type;
+      const params = JSON.parse(this.sentinel.dataset.params || '{}');
+      const targetSelector = this.sentinel.dataset.target || '#media-grid';
+      const isHistory = this.sentinel.dataset.isHistory === "true";
+
+      const queryParams = new URLSearchParams({
+        type: type!,
+        page: nextPage.toString(),
+        ...params
+      });
+
+      try {
+        const res = await fetch(`/partials/media-grid?${queryParams.toString()}`);
+        if (!res.ok) throw new Error();
+        const html = await res.text();
+        
+        const target = document.querySelector(targetSelector);
+        if (target && html.trim()) {
+           if (isHistory) {
+              this.appendHistory(target, html);
+           } else {
+              target.insertAdjacentHTML('beforeend', html);
+           }
+           
+           this.sentinel.dataset.nextPage = (nextPage + 1).toString();
+           
+           if (nextPage + 1 > totalPages) {
+             this.observer.disconnect();
+             this.sentinel.innerHTML = '';
+           }
+        } else {
+           // No content returned, stop
+           this.observer.disconnect();
+           this.sentinel.innerHTML = '';
+        }
+      } catch (e) {
+        console.error('Failed to load more items:', e);
+      } finally {
+        this.loading = false;
+      }
+    }
+
+    appendHistory(target: Element, html: string) {
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      const cards = temp.querySelectorAll('[data-watched-at]');
+      
+      cards.forEach(card => {
+        const watchedAt = card.getAttribute('data-watched-at');
+        if (!watchedAt) return;
+        
+        const dateObj = new Date(watchedAt);
+        const dateStr = dateObj.toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric'
+        });
+        
+        // Find or create group
+        let group = target.querySelector(`[data-history-date="${dateStr}"]`);
+        if (!group) {
+          const groupHtml = `
+            <div class="relative mb-10" data-history-date="${dateStr}">
+              <h2 class="text-lg font-bold text-zinc-100 mb-4 sticky top-[72px] py-2 bg-zinc-950/80 backdrop-blur-md z-10 flex items-center gap-3 border-b border-zinc-800/50">
+                ${dateStr}
+              </h2>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 history-grid">
+              </div>
+            </div>
+          `;
+          target.insertAdjacentHTML('beforeend', groupHtml);
+          group = target.querySelector(`[data-history-date="${dateStr}"]`);
+        }
+        
+        const grid = group?.querySelector('.history-grid');
+        if (grid) {
+          grid.appendChild(card);
+        }
+      });
+    }
+  }
+
+  // Initialize
+  const init = () => {
+    const sentinel = document.getElementById('infinite-scroll-sentinel');
+    if (sentinel && !sentinel.dataset.initialized) {
+      new InfiniteScroll(sentinel);
+      sentinel.dataset.initialized = "true";
+    }
+  };
+
+  init();
+  // For Astro view transitions if enabled
+  document.addEventListener('astro:page-load', init);
+</script>

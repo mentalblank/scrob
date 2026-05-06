@@ -1,0 +1,104 @@
+---
+import MediaCard from "../../components/MediaCard.astro";
+import HistoryCard from "../../components/HistoryCard.astro";
+import { api } from "../../lib/api";
+
+export const prerender = false;
+
+const { token } = Astro.locals;
+const page = Number(Astro.url.searchParams.get("page") || 1);
+const type = Astro.url.searchParams.get("type");
+
+let items = [];
+let isHistory = false;
+
+try {
+  if (type === "shows") {
+    const category = Astro.url.searchParams.get("category") || "popular";
+    const genre = Astro.url.searchParams.get("genre");
+    const year = Astro.url.searchParams.get("year");
+    const minRating = Astro.url.searchParams.get("min_rating");
+    const status = Astro.url.searchParams.get("status");
+    
+    const data = await api.media.tmdbList({
+      type: "series",
+      category,
+      page,
+      ...(genre ? { genre } : {}),
+      ...(year ? { year: Number(year) } : {}),
+      ...(minRating ? { min_rating: Number(minRating) } : {}),
+      ...(status ? { status } : {}),
+    }, token);
+    items = data.results;
+  } else if (type === "movies") {
+    const category = Astro.url.searchParams.get("category") || "popular";
+    const genre = Astro.url.searchParams.get("genre");
+    const year = Astro.url.searchParams.get("year");
+    const minRating = Astro.url.searchParams.get("min_rating");
+    
+    const data = await api.media.tmdbList({
+      type: "movie",
+      category,
+      page,
+      ...(genre ? { genre } : {}),
+      ...(year ? { year: Number(year) } : {}),
+      ...(minRating ? { min_rating: Number(minRating) } : {}),
+    }, token);
+    items = data.results;
+  } else if (type === "trending_shows") {
+    const data = await api.media.trendingShows(page, token);
+    items = data.results;
+  } else if (type === "trending_movies") {
+    const data = await api.media.trendingMovies(page, token);
+    items = data.results;
+  } else if (type === "airing_today") {
+    const data = await api.media.onAirToday(page, token);
+    items = data.results;
+  } else if (type === "search") {
+    const q = Astro.url.searchParams.get("q") || "";
+    const mediaType = Astro.url.searchParams.get("media_type") || undefined;
+    const year = Astro.url.searchParams.get("year") ? Number(Astro.url.searchParams.get("year")) : undefined;
+    const data = await api.media.search(q, mediaType, page, year, token);
+    items = data.results;
+  } else if (type === "collection_shows") {
+    const sort = Astro.url.searchParams.get("sort") || "title";
+    const genre = Astro.url.searchParams.get("genre");
+    const year = Astro.url.searchParams.get("year");
+    const status = Astro.url.searchParams.get("status");
+    
+    const data = await api.shows.list({
+      sort,
+      page,
+      ...(genre ? { genre } : {}),
+      ...(year ? { year: Number(year) } : {}),
+      ...(status ? { status } : {}),
+    }, token);
+    items = data.results.map(i => ({...i, type: 'series', in_library: true}));
+  } else if (type === "collection_movies") {
+    const sort = Astro.url.searchParams.get("sort") || "title";
+    const genre = Astro.url.searchParams.get("genre");
+    const year = Astro.url.searchParams.get("year");
+    
+    const data = await api.movies.list({
+      sort,
+      page,
+      ...(genre ? { genre } : {}),
+      ...(year ? { year: Number(year) } : {}),
+    }, token);
+    items = data.results.map(i => ({...i, type: 'movie', in_library: true}));
+  } else if (type === "history") {
+    const historyType = Astro.url.searchParams.get("history_type") || undefined;
+    const data = await api.history.list({ page, page_size: 40, type: historyType }, token);
+    items = data.results;
+    isHistory = true;
+  }
+} catch (e) {
+  console.error(`Partial fetch failed for ${type}:`, e);
+}
+---
+
+{isHistory ? (
+  items.map((event) => <HistoryCard event={event} />)
+) : (
+  items.map((item) => <MediaCard item={item} />)
+)}
