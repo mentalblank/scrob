@@ -1043,6 +1043,104 @@ const bottomNavItem = (active: boolean) =>
               if (eBtn) updateButtonUI(eBtn, nowWatched);
             });
           }
+
+          // Next Up refresh logic: when an episode is marked as watched in a "Next Up" context,
+          // fetch the next episode for that series and replace the card.
+          if (mediaType === 'episode' && nowWatched) {
+            const nextUpContainer = card.closest('[data-next-up-grid], [data-next-up-list], [data-next-up-hero]');
+            if (nextUpContainer) {
+              const showId = card.dataset.showTmdbId || card.dataset.tmdbId;
+              if (showId) {
+                // DASHBOARD CASE: Refresh the whole section to update hero, backdrop, and order.
+                const dashboardSection = card.closest('#dashboard-next-up');
+                if (dashboardSection) {
+                  dashboardSection.style.opacity = '0.7';
+                  dashboardSection.style.pointerEvents = 'none';
+
+                  try {
+                    const res = await fetch('/partials/dashboard-next-up', {
+                      headers: { 'Authorization': `Bearer ${TOKEN()}` }
+                    });
+                    if (res.ok) {
+                      const html = (await res.text()).trim();
+                      if (html) {
+                        const temp = document.createElement('div');
+                        temp.innerHTML = html;
+                        const newSection = temp.firstElementChild as HTMLElement;
+                        if (newSection) {
+                          // Fade out old, fade in new
+                          dashboardSection.style.transition = 'opacity 0.3s ease';
+                          dashboardSection.style.opacity = '0';
+                          setTimeout(() => {
+                            dashboardSection.replaceWith(newSection);
+                            newSection.style.opacity = '0';
+                            requestAnimationFrame(() => {
+                              newSection.style.transition = 'opacity 0.5s ease';
+                              newSection.style.opacity = '1';
+                            });
+                          }, 300);
+                        }
+                      } else {
+                        dashboardSection.remove();
+                      }
+                    }
+                  } catch (e) {
+                    console.error('Dashboard refresh failed:', e);
+                    dashboardSection.style.opacity = '1';
+                    dashboardSection.style.pointerEvents = 'auto';
+                  }
+                  return;
+                }
+
+                // NEXT-UP GRID CASE: Refresh just this card or remove it.
+                card.style.opacity = '0.5';
+                card.style.pointerEvents = 'none';
+
+                try {
+                  const res = await fetch(`/partials/next-up-item?show_tmdb_id=${showId}`, {
+                    headers: { 'Authorization': `Bearer ${TOKEN()}` }
+                  });
+                  if (res.ok) {
+                    const html = (await res.text()).trim();
+                    const temp = document.createElement('div');
+                    temp.innerHTML = html;
+                    const newCard = temp.firstElementChild as HTMLElement;
+                    
+                    if (newCard) {
+                      card.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                      card.style.transform = 'scale(0.9) translateY(10px)';
+                      card.style.opacity = '0';
+                      
+                      setTimeout(() => {
+                        if (newCard.hasAttribute('data-remove-card')) {
+                          const wrapper = card.closest('.flex-shrink-0');
+                          (wrapper || card).remove();
+                          
+                          // If the grid is now empty, refresh the whole page
+                          if (nextUpContainer.children.length === 0 && nextUpContainer.id === 'next-up-grid') {
+                            location.reload();
+                          }
+                        } else {
+                          card.replaceWith(newCard);
+                          newCard.style.opacity = '0';
+                          newCard.style.transform = 'scale(1.1)';
+                          requestAnimationFrame(() => {
+                            newCard.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+                            newCard.style.opacity = '1';
+                            newCard.style.transform = 'scale(1)';
+                          });
+                        }
+                      }, 400);
+                    }
+                  }
+                } catch (e) {
+                  console.error('Next Up refresh failed:', e);
+                  card.style.opacity = '1';
+                  card.style.pointerEvents = 'auto';
+                }
+              }
+            }
+          }
         } catch { /* ignore */ }
 
       } else if (action === 'list') {

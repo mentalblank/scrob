@@ -1,0 +1,24 @@
+---
+import MediaCard from "../../components/MediaCard.astro";
+import { api } from "../../lib/api";
+
+export const prerender = false;
+
+const { token } = Astro.locals;
+const showTmdbId = Astro.url.searchParams.get("show_tmdb_id");
+
+if (!showTmdbId) {
+  return new Response("Missing show_tmdb_id", { status: 400 });
+}
+
+let item = null;
+
+try {
+  const data = await api.history.nextUp(token);
+  item = data.next_up.find(i => String(i.show_tmdb_id) === showTmdbId || String(i.tmdb_id) === showTmdbId);
+} catch (e) {
+  console.error("Failed to fetch next up item:", e);
+}
+---
+
+{item ? <MediaCard item={item} /> : <div class="hidden" data-remove-card></div>}

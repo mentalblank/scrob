@@ -1,0 +1,104 @@
+---
+import MediaCard from "../../components/MediaCard.astro";
+import ActionBar from "../../components/ActionBar.astro";
+import { api } from "../../lib/api";
+
+export const prerender = false;
+
+const { token } = Astro.locals;
+let nextUp = [];
+
+try {
+  const data = await api.history.nextUp(token, 10);
+  nextUp = data?.next_up ?? [];
+} catch (e) {
+  console.error("Failed to fetch next up for partial:", e);
+}
+
+if (nextUp.length === 0) {
+  return new Response("", { status: 200 }); // Empty if no next up
+}
+
+const hero = nextUp[0];
+const heroHref = hero.show_tmdb_id && hero.season_number != null && hero.episode_number != null
+  ? `/show/${hero.show_tmdb_id}/season/${hero.season_number}/${hero.episode_number}`
+  : `/media/${hero.type}/${hero.tmdb_id}`;
+const episodeLabel = hero.season_number != null && hero.episode_number != null
+  ? `S${hero.season_number} E${hero.episode_number}`
+  : null;
+const rawBackdrop = hero.backdrop_path || hero.show_backdrop_path;
+const heroBackdrop = rawBackdrop
+  ? (rawBackdrop.startsWith('http') ? rawBackdrop : `https://image.tmdb.org/t/p/w1280${rawBackdrop}`)
+  : null;
+---
+
+<section class="relative md:-mt-8 mb-16" id="dashboard-next-up">
+  <div class="absolute top-0 left-1/2 -translate-x-1/2 w-screen overflow-hidden pointer-events-none" style="height: 100%; mask-image: linear-gradient(to bottom, black 70%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);">
+    {heroBackdrop ? (
+      <img
+        src={heroBackdrop}
+        alt={hero.title}
+        class="w-full h-full object-cover"
+        loading="eager"
+        decoding="async"
+      />
+    ) : (
+      <div class="w-full h-full bg-zinc-900"></div>
+    )}
+    <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-transparent"></div>
+    <div class="absolute inset-0 bg-gradient-to-r from-zinc-950/80 via-transparent to-transparent"></div>
+  </div>
+
+  <div class="relative aspect-[16/9] sm:aspect-[21/8] md:aspect-[21/5] flex flex-col">
+    <div class="flex items-center justify-between pt-8 pb-0">
+      <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
+        <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
+        Next Up
+      </h2>
+      <a href="/next-up" class="text-sm font-bold uppercase tracking-widest text-zinc-400 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
+        See All
+        <span class="group-hover/all:translate-x-1 transition-transform">→</span>
+      </a>
+    </div>
+
+    <div class="flex-1 flex flex-col justify-end pb-6 sm:pb-8">
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <a href={heroHref} class="block max-w-2xl group">
+          {episodeLabel && (
+            <span class="inline-block text-xs font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full mb-3">
+              {episodeLabel}
+            </span>
+          )}
+          <h3 class="text-2xl sm:text-4xl font-black text-zinc-100 leading-tight mb-1 drop-shadow-lg group-hover:text-blue-200 transition-colors">
+            {hero.show_title ?? hero.title}
+          </h3>
+          {hero.show_title && (
+            <p class="text-sm sm:text-base text-zinc-300 font-medium truncate">{hero.title}</p>
+          )}
+        </a>
+
+        <div class="shrink-0 scale-90 md:scale-100 origin-left" data-next-up-hero>
+          <ActionBar
+            tmdbId={hero.tmdb_id}
+            mediaType={hero.type}
+            watched={hero.watched ?? false}
+            inLists={hero.in_lists ?? []}
+            inLibrary={hero.in_library ?? false}
+            collectionPct={hero.collection_pct ?? (hero.in_library ? 100 : 0)}
+            showTmdbId={hero.show_tmdb_id ?? undefined}
+            seasonNumber={hero.season_number ?? undefined}
+            episodeNumber={hero.episode_number ?? undefined}
+            isMonitored={hero.is_monitored}
+            requestEnabled={hero.request_enabled}
+            userRating={hero.user_rating}
+            mediaId={hero.id}
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div data-next-up-list class="relative flex gap-3 overflow-x-auto pb-3 scrollbar-none pt-6 -mx-6 px-6 md:mx-0 md:px-0">
+    {nextUp.map((item) => <div class="flex-shrink-0 w-40"><MediaCard item={item} /></div>)}
+  </div>
+</section>

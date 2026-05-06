@@ -39,7 +39,7 @@ try {
     </div>
   )}
 
-  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+  <div id="next-up-grid" data-next-up-grid class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
     {nextUp.map((item) => (
       <MediaCard item={item} />
     ))}
