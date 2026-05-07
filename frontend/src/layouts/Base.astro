@@ -72,6 +72,35 @@ const bottomNavItem = (active: boolean) =>
     } else {
       document.documentElement.removeAttribute('data-accent');
     }
+
+    // TMDB image fallback — registered here (head, inline) so the capture-phase
+    // listener is active before any <img> tags are parsed and start loading.
+    (function () {
+      var svgIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.25"><rect width="20" height="20" x="2" y="2" rx="2.18" ry="2.18"/><line x1="7" x2="7" y1="2" y2="22"/><line x1="17" x2="17" y1="2" y2="22"/><line x1="2" x2="22" y1="7" y2="7"/><line x1="2" x2="22" y1="12" y2="12"/><line x1="2" x2="22" y1="17" y2="17"/></svg>';
+      function applyFallback(img) {
+        if (!img.src.includes('image.tmdb.org')) return;
+        img.style.display = 'none';
+        // Decorative images (alt="") — just hide, no placeholder needed
+        if (!img.alt) return;
+        var parent = img.parentElement;
+        if (!parent || parent.querySelector('.tmdb-img-fallback')) return;
+        // Ensure parent is a positioning context so absolute inset-0 stays contained
+        if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+        var fb = document.createElement('div');
+        fb.className = 'tmdb-img-fallback';
+        fb.innerHTML = svgIcon;
+        parent.appendChild(fb);
+      }
+      document.addEventListener('error', function (e) {
+        if (e.target && e.target.tagName === 'IMG') applyFallback(e.target);
+      }, true);
+      // Safety net: catch images that already failed by the time DOM is ready
+      document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('img').forEach(function (img) {
+          if (img.complete && img.naturalWidth === 0 && img.src) applyFallback(img);
+        });
+      });
+    })();
   </script>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen overflow-x-hidden">
