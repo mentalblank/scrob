@@ -565,13 +565,18 @@ async def sync_items(
                 if file_entry:
                     existing_file, existing_media_id, existing_media_obj = file_entry
                     if sync_collection:
-                        # Update quality metadata in-place on the CollectionFile
+                        # Update quality metadata in-place on the CollectionFile.
+                        # Never overwrite language lists with empty — bulk endpoints (e.g. Plex
+                        # /library/sections/all) often omit Part.Stream data, so an empty result
+                        # means "not available here", not "no languages".
                         existing_file.resolution = quality.get("resolution")
                         existing_file.video_codec = quality.get("video_codec")
                         existing_file.audio_codec = quality.get("audio_codec")
                         existing_file.audio_channels = quality.get("audio_channels")
-                        existing_file.audio_languages = quality.get("audio_languages")
-                        existing_file.subtitle_languages = quality.get("subtitle_languages")
+                        if quality.get("audio_languages"):
+                            existing_file.audio_languages = quality["audio_languages"]
+                        if quality.get("subtitle_languages"):
+                            existing_file.subtitle_languages = quality["subtitle_languages"]
                         existing_file.file_path = quality.get("file_path")
                         if connection_id is not None:
                             existing_file.connection_id = connection_id
@@ -633,8 +638,10 @@ async def sync_items(
                             existing_alt_file.video_codec = quality.get("video_codec")
                             existing_alt_file.audio_codec = quality.get("audio_codec")
                             existing_alt_file.audio_channels = quality.get("audio_channels")
-                            existing_alt_file.audio_languages = quality.get("audio_languages")
-                            existing_alt_file.subtitle_languages = quality.get("subtitle_languages")
+                            if quality.get("audio_languages"):
+                                existing_alt_file.audio_languages = quality["audio_languages"]
+                            if quality.get("subtitle_languages"):
+                                existing_alt_file.subtitle_languages = quality["subtitle_languages"]
                             existing_alt_file.file_path = quality.get("file_path")
                             if connection_id is not None:
                                 existing_alt_file.connection_id = connection_id
@@ -1154,6 +1161,41 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             await db.commit()
 
 
+async def _backfill_plex_languages(db: AsyncSession, user_id: int, connection_id: int, p_url: str, p_token: str) -> int:
+    """Fetch full item detail from Plex for any CollectionFiles that have no language data yet."""
+    result = await db.execute(
+        select(CollectionFile)
+        .join(Collection, Collection.id == CollectionFile.collection_id)
+        .where(
+            Collection.user_id == user_id,
+            CollectionFile.source == CollectionSource.plex,
+            CollectionFile.connection_id == connection_id,
+            CollectionFile.source_id.isnot(None),
+            (CollectionFile.audio_languages == None) | (CollectionFile.audio_languages == []),
+        )
+    )
+    files = result.scalars().all()
+    if not files:
+        return 0
+
+    sem = asyncio.Semaphore(10)
+
+    async def _fetch(cf: CollectionFile):
+        async with sem:
+            item = await plex.get_item(p_url, p_token, cf.source_id)
+            if not item:
+                return
+            quality = plex.extract_quality(item.get("Media", []))
+            if quality.get("audio_languages"):
+                cf.audio_languages = quality["audio_languages"]
+            if quality.get("subtitle_languages"):
+                cf.subtitle_languages = quality["subtitle_languages"]
+
+    await asyncio.gather(*[_fetch(cf) for cf in files])
+    await db.commit()
+    return len(files)
+
+
 async def run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
     async with _sync_semaphore:
         await _run_plex_sync(user_id, job_id, movie_limit, show_limit, connection_id)
@@ -1352,6 +1394,9 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     )
                     all_warnings.extend(w)
 
+            backfilled = await _backfill_plex_languages(db, user_id, conn.id, p_url, p_token)
+            if backfilled:
+                print(f"Plex sync job {job_id}: backfilled language data for {backfilled} file(s).")
             print(f"Plex sync job {job_id} completed. Stats: {stats}")
             await _fan_out_changes_to_other_connections(db, user_id, conn.id, _new_watched, _new_ratings, settings=settings)
             await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.completed, stats=stats, warnings=all_warnings or None))

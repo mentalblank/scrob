@@ -1158,13 +1158,14 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
 
             payload_key = data.get("plex_rating_key")
             recent_keys = {str(it.get("ratingKey")) for it in recent_items}
-            if payload_key and str(payload_key) not in recent_keys:
-                payload_item = None
-                if conn:
-                    payload_item = await plex_client.get_item(conn.url, conn.token, payload_key)
+            if payload_key:
+                payload_item = await plex_client.get_item(conn.url, conn.token, payload_key) if conn else None
                 if payload_item:
+                    # Always prefer the individually-fetched item — bulk recentlyAdded
+                    # omits Part.Stream data so audio/subtitle languages would be empty.
+                    recent_items = [it for it in recent_items if str(it.get("ratingKey")) != str(payload_key)]
                     recent_items.insert(0, payload_item)
-                else:
+                elif str(payload_key) not in recent_keys:
                     recent_items = []
 
             if recent_items:
@@ -1216,7 +1217,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
             else:
                 media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
                 quality = data.get("quality") or {}
-                if not quality.get("resolution") and conn:
+                if (not quality.get("resolution") or not quality.get("audio_languages")) and conn:
                     item = await plex_client.get_item(conn.url, conn.token, data["plex_rating_key"])
                     if item:
                         quality = plex_client.extract_quality(item.get("Media", []))
@@ -1243,7 +1244,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                 return {"status": "ignored", "reason": "could not identify media"}
 
             quality = data.get("quality") or {}
-            if not quality.get("resolution") and conn:
+            if (not quality.get("resolution") or not quality.get("audio_languages")) and conn:
                 import core.plex as plex_client
                 item = await plex_client.get_item(conn.url, conn.token, data["plex_rating_key"])
                 if item:
