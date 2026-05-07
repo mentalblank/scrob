@@ -58,11 +58,19 @@ async def list_shows(
 ):
     offset = (page - 1) * page_size
 
-    # A show is "in the user's collection" if they have at least one episode collected
+    # A show is "in the user's collection" if they have at least one countable episode
+    # collected — same criteria used by enrich_with_state for the percentage calculation.
     user_show_ids = (
         select(Media.show_id)
         .join(Collection, Collection.media_id == Media.id)
-        .where(Collection.user_id == current_user.id, Media.show_id.isnot(None))
+        .where(
+            Collection.user_id == current_user.id,
+            Media.show_id.isnot(None),
+            Media.media_type == MediaType.episode,
+            Media.season_number.isnot(None),
+            Media.season_number != 0,
+            Media.episode_number.isnot(None),
+        )
         .distinct()
         .subquery()
     )
