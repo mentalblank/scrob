@@ -402,7 +402,7 @@ async def enrich_with_state(
             ) + last_ep_num
             show_aired_count[tid] = aired_total
             collected = collected_map.get(tid, 0)
-            show_pct[tid] = int((collected / aired_total) * 100) if aired_total > 0 else 0
+            show_pct[tid] = min(100, int((collected / aired_total) * 100)) if aired_total > 0 else 0
 
         # Now we can accurately set watched_shows
         watched_shows = {
