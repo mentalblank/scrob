@@ -236,6 +236,7 @@ class AdminUser(BaseModel):
     username   : str
     email      : str
     is_admin   : bool
+    api_key    : str
     created_at : datetime
 
     class Config:

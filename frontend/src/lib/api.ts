@@ -274,6 +274,7 @@ export interface AdminUser {
   username: string;
   email: string;
   is_admin: boolean;
+  api_key: string;
   created_at: string;
 }
 
