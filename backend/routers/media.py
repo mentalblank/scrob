@@ -452,6 +452,18 @@ async def enrich_with_state(
         for tmdb_id, media_type, rating_val in ratings_q.all():
             user_ratings[(tmdb_id, media_type.value)] = rating_val
 
+    # --- Blocked state ---
+    blocked_ids: dict[str, set[int]] = {"movie": set(), "series": set(), "episode": set()}
+    if all_tmdb_ids:
+        block_q = await db.execute(
+            select(BlocklistItem.tmdb_id, BlocklistItem.media_type)
+            .where(BlocklistItem.user_id == user_id, BlocklistItem.tmdb_id.in_(all_tmdb_ids))
+        )
+        for tid, mtype in block_q.all():
+            blocked_ids[mtype.value].add(tid)
+
+    cf_genres, cf_kw, cf_re = await _get_content_filters(db, user_id)
+
     # --- Apply to items ---
     for item in items:
         tid = item.get("tmdb_id")
@@ -482,6 +494,12 @@ async def enrich_with_state(
         item["is_monitored"] = monitored_status.get(tid, False)
         item["request_enabled"] = request_enabled_map.get(tid, False)
         item["user_rating"] = user_ratings.get((tid, t))
+
+        # Blocked status: individual or global filter
+        is_blocked = tid in blocked_ids.get(t, set())
+        if not is_blocked:
+            is_blocked = _is_content_filtered(item, cf_genres, cf_kw, cf_re)
+        item["is_blocked"] = is_blocked
 
     return items
 
@@ -1358,11 +1376,15 @@ async def get_person_details(
                     "character": c.get("character"),
                     "popularity": c.get("popularity", 0),
                     "adult": c.get("adult", False),
+                    "genre_ids": c.get("genre_ids"),
+                    "overview": c.get("overview"),
                 }
             )
         formatted_credits.sort(key=lambda x: x["popularity"], reverse=True)
-        top_credits = formatted_credits[:40]
-        await enrich_with_state(db, current_user.id, top_credits)
+        # Take more to allow for filtering blocked items
+        candidate_credits = formatted_credits[:100]
+        await enrich_with_state(db, current_user.id, candidate_credits)
+        top_credits = [c for c in candidate_credits if not c.get("is_blocked")][:40]
 
         # Which of the user's lists contain this person?
         user_list_ids_q = await db.execute(select(UserList.id).where(UserList.user_id == current_user.id))
@@ -3536,6 +3558,7 @@ async def get_media_details(
                 "watched": ep_state.get("watched", False),
                 "in_lists": ep_state.get("in_lists", []),
                 "user_rating": ep_state.get("user_rating"),
+                "is_blocked": ep_state.get("is_blocked", False),
                 "library": library_info,
             }
         else:
@@ -3630,6 +3653,7 @@ async def get_media_details(
             "watched": state_item.get("watched", False),
             "in_lists": state_item.get("in_lists", []),
             "user_rating": state_item.get("user_rating"),
+            "is_blocked": state_item.get("is_blocked", False),
             "in_library": state_item.get("in_library", local_info["in_library"]),
             "collection_pct": state_item.get("collection_pct", 100 if local_info["in_library"] else 0),
             "is_monitored": state_item.get("is_monitored", False),

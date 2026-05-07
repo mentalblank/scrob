@@ -902,9 +902,8 @@ const bottomNavItem = (active: boolean) =>
       if (!card) return;
 
       const action = btn.dataset.action;
-      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'block'];
+      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'block', 'block-item'];
       if (!action || !mediaActions.includes(action)) return;
-
       e.preventDefault();
       e.stopPropagation();
 
@@ -927,6 +926,46 @@ const bottomNavItem = (active: boolean) =>
           card.style.transform = 'scale(0.9)';
           card.style.pointerEvents = 'none';
           setTimeout(() => card.remove(), 300);
+        } catch { /* ignore */ }
+        return;
+      }
+
+      if (action === 'block-item') {
+        const isBlocked = btn.dataset.blocked === 'true';
+        const title = card.querySelector('h1')?.textContent || card.querySelector('h3')?.textContent || 'this item';
+        
+        let confirmed = true;
+        if (!isBlocked) {
+          confirmed = await showConfirm(
+            "Don't show this again?",
+            `Hide "${title}" from your explore pages.`
+          );
+        }
+        if (!confirmed) return;
+
+        try {
+          if (isBlocked) {
+            await apiFetch(`/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
+            (window as any).showToast('Unblocked successfully', 'success');
+          } else {
+            await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType });
+            (window as any).showToast('Blocked successfully', 'success');
+          }
+          
+          const nowBlocked = !isBlocked;
+          btn.dataset.blocked = String(nowBlocked);
+          btn.dataset.state = nowBlocked ? 'active' : 'inactive';
+          btn.title = nowBlocked ? 'Unblock this item' : 'Block this item';
+          const labelEl = btn.querySelector('span');
+          if (labelEl) labelEl.textContent = nowBlocked ? 'Blocked' : 'Block';
+          
+          if (nowBlocked) {
+            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-red-400/50', 'hover:text-red-400');
+            btn.classList.add('bg-red-500/50', 'text-red-300', 'hover:bg-red-400/50');
+          } else {
+            btn.classList.remove('bg-red-500/50', 'text-red-300', 'hover:bg-red-400/50');
+            btn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-red-400/50', 'hover:text-red-400');
+          }
         } catch { /* ignore */ }
         return;
       }
