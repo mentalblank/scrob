@@ -365,6 +365,7 @@ export interface UserSettings {
   trakt_sync_watched: boolean;
   trakt_sync_ratings: boolean;
   trakt_sync_lists: boolean;
+  trakt_watchlist_split: boolean;
   trakt_push_watched: boolean;
   trakt_push_ratings: boolean;
   trakt_push_lists: boolean;

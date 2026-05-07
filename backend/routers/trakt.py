@@ -521,77 +521,199 @@ async def run_trakt_sync(user_id: int, job_id: int):
 
             # ── Lists (watchlist + personal lists) ───────────────────────────
             if settings.trakt_sync_lists:
-                # Watchlist uses a sentinel slug so the push path can route correctly
-                WATCHLIST_SLUG = "__watchlist__"
+                WATCHLIST_SLUG         = "__watchlist__"
+                WATCHLIST_MOVIES_SLUG  = "__watchlist_movies__"
+                WATCHLIST_SHOWS_SLUG   = "__watchlist_shows__"
+                split_watchlist = getattr(settings, "trakt_watchlist_split", False)
+
                 print(f"  Fetching watchlist from Trakt...")
                 watchlist_items = await trakt_client.get_watchlist(client_id, access_token)
                 print(f"  {len(watchlist_items)} watchlist items fetched from Trakt")
 
-                wl_result = await db.execute(
-                    select(ListModel).where(
-                        ListModel.user_id == user_id,
-                        ListModel.trakt_slug == WATCHLIST_SLUG,
-                    )
-                )
-                watchlist = wl_result.scalar_one_or_none()
-                if not watchlist:
-                    watchlist = ListModel(user_id=user_id, name="Trakt - Watchlist", trakt_slug=WATCHLIST_SLUG)
-                    db.add(watchlist)
-                    await db.flush()
-                    stats["lists"] += 1
+                if split_watchlist:
+                    # ── Split mode: two lists keyed by media type ─────────────
+                    async def _get_or_create_split_list(slug: str, name: str) -> ListModel:
+                        r = await db.execute(
+                            select(ListModel).where(ListModel.user_id == user_id, ListModel.trakt_slug == slug)
+                        )
+                        lst = r.scalar_one_or_none()
+                        if not lst:
+                            lst = ListModel(user_id=user_id, name=name, trakt_slug=slug)
+                            db.add(lst)
+                            await db.flush()
+                            stats["lists"] += 1
+                        return lst
 
-                wl_items_result = await db.execute(
-                    select(ListItem.media_id).where(ListItem.list_id == watchlist.id)
-                )
-                wl_existing_ids: set[int] = {row[0] for row in wl_items_result}
+                    movies_list = await _get_or_create_split_list(WATCHLIST_MOVIES_SLUG, "Trakt - Watchlist (Movies)")
+                    shows_list  = await _get_or_create_split_list(WATCHLIST_SHOWS_SLUG,  "Trakt - Watchlist (Shows)")
 
-                for entry in watchlist_items:
-                    item_type = entry.get("type")
-                    media: Media | None = None
-                    try:
-                        if item_type == "movie":
-                            movie_data = entry.get("movie", {})
-                            tmdb_id_item = movie_data.get("ids", {}).get("tmdb")
-                            if not tmdb_id_item:
-                                continue
-                            async with db.begin_nested():
-                                media = await _get_or_create_movie_media(db, tmdb_id_item, movie_data.get("title", ""), api_key)
-                        elif item_type == "show":
-                            show_data = entry.get("show", {})
-                            tmdb_id_item = show_data.get("ids", {}).get("tmdb")
-                            if not tmdb_id_item:
-                                continue
-                            async with db.begin_nested():
-                                r2 = await db.execute(
-                                    select(Media).where(Media.tmdb_id == tmdb_id_item, Media.media_type == MediaType.series)
+                    movies_existing = {row[0] for row in (await db.execute(
+                        select(ListItem.media_id).where(ListItem.list_id == movies_list.id)
+                    )).all()}
+                    shows_existing  = {row[0] for row in (await db.execute(
+                        select(ListItem.media_id).where(ListItem.list_id == shows_list.id)
+                    )).all()}
+
+                    # Reconcile: remove items no longer on Trakt watchlist
+                    trakt_movie_tmdb_ids = {
+                        e.get("movie", {}).get("ids", {}).get("tmdb")
+                        for e in watchlist_items if e.get("type") == "movie"
+                    } - {None}
+                    trakt_show_tmdb_ids = {
+                        e.get("show", {}).get("ids", {}).get("tmdb")
+                        for e in watchlist_items if e.get("type") == "show"
+                    } - {None}
+
+                    # Remove stale movies
+                    if movies_existing:
+                        stale_movies_result = await db.execute(
+                            select(Media).where(
+                                Media.id.in_(movies_existing),
+                                Media.tmdb_id.notin_(trakt_movie_tmdb_ids),
+                            )
+                        )
+                        for stale in stale_movies_result.scalars():
+                            await db.execute(
+                                ListItem.__table__.delete().where(
+                                    ListItem.list_id == movies_list.id,
+                                    ListItem.media_id == stale.id,
                                 )
-                                media = r2.scalar_one_or_none()
-                                if not media:
-                                    from core import tmdb
-                                    d = await tmdb.get_show(tmdb_id_item, api_key=api_key)
-                                    media = Media(
-                                        tmdb_id=tmdb_id_item,
-                                        media_type=MediaType.series,
-                                        title=d.get("name") or show_data.get("title", ""),
-                                        poster_path=tmdb.poster_url(d.get("poster_path")),
-                                        backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
-                                        release_date=d.get("first_air_date"),
-                                        tmdb_rating=d.get("vote_average"),
-                                        overview=d.get("overview"),
-                                        adult=d.get("adult", False),
-                                    )
-                                    db.add(media)
-                                    await db.flush()
-                        else:
-                            continue
+                            )
+                            movies_existing.discard(stale.id)
 
-                        if media and media.id not in wl_existing_ids:
-                            db.add(ListItem(list_id=watchlist.id, media_id=media.id))
-                            wl_existing_ids.add(media.id)
-                            stats["list_items"] += 1
-                    except Exception as exc:
-                        logger.warning("Error processing Trakt watchlist item (%s): %s", item_type, exc)
-                        stats["errors"] += 1
+                    # Remove stale shows
+                    if shows_existing:
+                        stale_shows_result = await db.execute(
+                            select(Media).where(
+                                Media.id.in_(shows_existing),
+                                Media.tmdb_id.notin_(trakt_show_tmdb_ids),
+                            )
+                        )
+                        for stale in stale_shows_result.scalars():
+                            await db.execute(
+                                ListItem.__table__.delete().where(
+                                    ListItem.list_id == shows_list.id,
+                                    ListItem.media_id == stale.id,
+                                )
+                            )
+                            shows_existing.discard(stale.id)
+
+                    for entry in watchlist_items:
+                        item_type = entry.get("type")
+                        media: Media | None = None
+                        try:
+                            if item_type == "movie":
+                                movie_data = entry.get("movie", {})
+                                tmdb_id_item = movie_data.get("ids", {}).get("tmdb")
+                                if not tmdb_id_item:
+                                    continue
+                                async with db.begin_nested():
+                                    media = await _get_or_create_movie_media(db, tmdb_id_item, movie_data.get("title", ""), api_key)
+                                if media and media.id not in movies_existing:
+                                    db.add(ListItem(list_id=movies_list.id, media_id=media.id))
+                                    movies_existing.add(media.id)
+                                    stats["list_items"] += 1
+                            elif item_type == "show":
+                                show_data = entry.get("show", {})
+                                tmdb_id_item = show_data.get("ids", {}).get("tmdb")
+                                if not tmdb_id_item:
+                                    continue
+                                async with db.begin_nested():
+                                    r2 = await db.execute(
+                                        select(Media).where(Media.tmdb_id == tmdb_id_item, Media.media_type == MediaType.series)
+                                    )
+                                    media = r2.scalar_one_or_none()
+                                    if not media:
+                                        from core import tmdb
+                                        d = await tmdb.get_show(tmdb_id_item, api_key=api_key)
+                                        media = Media(
+                                            tmdb_id=tmdb_id_item,
+                                            media_type=MediaType.series,
+                                            title=d.get("name") or show_data.get("title", ""),
+                                            poster_path=tmdb.poster_url(d.get("poster_path")),
+                                            backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
+                                            release_date=d.get("first_air_date"),
+                                            tmdb_rating=d.get("vote_average"),
+                                            overview=d.get("overview"),
+                                            adult=d.get("adult", False),
+                                        )
+                                        db.add(media)
+                                        await db.flush()
+                                if media and media.id not in shows_existing:
+                                    db.add(ListItem(list_id=shows_list.id, media_id=media.id))
+                                    shows_existing.add(media.id)
+                                    stats["list_items"] += 1
+                        except Exception as exc:
+                            logger.warning("Error processing Trakt watchlist item (%s): %s", item_type, exc)
+                            stats["errors"] += 1
+
+                else:
+                    # ── Unified mode: one list for movies + shows ─────────────
+                    wl_result = await db.execute(
+                        select(ListModel).where(
+                            ListModel.user_id == user_id,
+                            ListModel.trakt_slug == WATCHLIST_SLUG,
+                        )
+                    )
+                    watchlist = wl_result.scalar_one_or_none()
+                    if not watchlist:
+                        watchlist = ListModel(user_id=user_id, name="Trakt - Watchlist", trakt_slug=WATCHLIST_SLUG)
+                        db.add(watchlist)
+                        await db.flush()
+                        stats["lists"] += 1
+
+                    wl_items_result = await db.execute(
+                        select(ListItem.media_id).where(ListItem.list_id == watchlist.id)
+                    )
+                    wl_existing_ids: set[int] = {row[0] for row in wl_items_result}
+
+                    for entry in watchlist_items:
+                        item_type = entry.get("type")
+                        media: Media | None = None
+                        try:
+                            if item_type == "movie":
+                                movie_data = entry.get("movie", {})
+                                tmdb_id_item = movie_data.get("ids", {}).get("tmdb")
+                                if not tmdb_id_item:
+                                    continue
+                                async with db.begin_nested():
+                                    media = await _get_or_create_movie_media(db, tmdb_id_item, movie_data.get("title", ""), api_key)
+                            elif item_type == "show":
+                                show_data = entry.get("show", {})
+                                tmdb_id_item = show_data.get("ids", {}).get("tmdb")
+                                if not tmdb_id_item:
+                                    continue
+                                async with db.begin_nested():
+                                    r2 = await db.execute(
+                                        select(Media).where(Media.tmdb_id == tmdb_id_item, Media.media_type == MediaType.series)
+                                    )
+                                    media = r2.scalar_one_or_none()
+                                    if not media:
+                                        from core import tmdb
+                                        d = await tmdb.get_show(tmdb_id_item, api_key=api_key)
+                                        media = Media(
+                                            tmdb_id=tmdb_id_item,
+                                            media_type=MediaType.series,
+                                            title=d.get("name") or show_data.get("title", ""),
+                                            poster_path=tmdb.poster_url(d.get("poster_path")),
+                                            backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
+                                            release_date=d.get("first_air_date"),
+                                            tmdb_rating=d.get("vote_average"),
+                                            overview=d.get("overview"),
+                                            adult=d.get("adult", False),
+                                        )
+                                        db.add(media)
+                                        await db.flush()
+                            else:
+                                continue
+
+                            if media and media.id not in wl_existing_ids:
+                                db.add(ListItem(list_id=watchlist.id, media_id=media.id))
+                                wl_existing_ids.add(media.id)
+                                stats["list_items"] += 1
+                        except Exception as exc:
+                            logger.warning("Error processing Trakt watchlist item (%s): %s", item_type, exc)
+                            stats["errors"] += 1
 
                 await db.commit()
 

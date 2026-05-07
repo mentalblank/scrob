@@ -95,6 +95,7 @@ class UserSettings(BaseModel):
     trakt_sync_watched: Optional[bool] = None
     trakt_sync_ratings: Optional[bool] = None
     trakt_sync_lists: Optional[bool] = None
+    trakt_watchlist_split: Optional[bool] = None
     trakt_push_watched: Optional[bool] = None
     trakt_push_ratings: Optional[bool] = None
     trakt_push_lists: Optional[bool] = None
