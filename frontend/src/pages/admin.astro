@@ -40,7 +40,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       <form id="global-settings-form" class="space-y-3">
 
         <!-- TMDB -->
-        <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
           <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="tmdb-body">
             <div class="flex items-center gap-3 pointer-events-none">
               <span class="w-2 h-2 bg-blue-500 rounded-full shrink-0"></span>
@@ -61,7 +61,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                     id="tmdb_api_key"
                     value={globalSettings.tmdb_api_key ?? ""}
                     placeholder="eyJhbGciOiJIUzI1NiJ9..."
-                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   />
                   <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle visibility">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -75,7 +75,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </div>
 
         <!-- Radarr -->
-        <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
           <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="radarr-body">
             <div class="flex items-center gap-3 pointer-events-none">
               <span class="w-2 h-2 bg-yellow-500 rounded-full shrink-0"></span>
@@ -99,13 +99,13 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                 <div class="space-y-2">
                   <label for="radarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
                   <input type="url" name="radarr_url" id="radarr_url" placeholder="http://192.168.1.100:7878" value={globalSettings.radarr_url ?? ""}
-                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                 </div>
                 <div class="space-y-2">
                   <label for="radarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
                   <div class="relative group/field">
                     <input type="password" name="radarr_token" id="radarr_token" value={globalSettings.radarr_token ?? ""}
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle visibility">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
@@ -117,7 +117,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                 <div class="space-y-2">
                   <label for="radarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
                   <select name="radarr_root_folder" id="radarr_root_folder"
-                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                     <option value="">-- Select Folder --</option>
                     {globalSettings.radarr_root_folder && <option value={globalSettings.radarr_root_folder} selected>{globalSettings.radarr_root_folder}</option>}
                   </select>
@@ -125,14 +125,14 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                 <div class="space-y-2">
                   <label for="radarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
                   <select name="radarr_quality_profile" id="radarr_quality_profile"
-                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                     <option value="">-- Select Profile --</option>
                     {globalSettings.radarr_quality_profile && <option value={globalSettings.radarr_quality_profile} selected>Profile ID: {globalSettings.radarr_quality_profile}</option>}
                   </select>
                 </div>
                 <div class="space-y-2">
                   <label class="block text-sm font-medium text-zinc-400">Tags</label>
-                  <div id="radarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                  <div id="radarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
                     <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
                     {globalSettings.radarr_tags?.map((tid: number) => (
                       <input type="hidden" name="radarr_tags" value={tid} />
@@ -145,7 +145,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </div>
 
         <!-- Sonarr -->
-        <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
           <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="sonarr-body">
             <div class="flex items-center gap-3 pointer-events-none">
               <span class="w-2 h-2 bg-sky-500 rounded-full shrink-0"></span>
@@ -169,13 +169,13 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                 <div class="space-y-2">
                   <label for="sonarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
                   <input type="url" name="sonarr_url" id="sonarr_url" placeholder="http://192.168.1.100:8989" value={globalSettings.sonarr_url ?? ""}
-                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                 </div>
                 <div class="space-y-2">
                   <label for="sonarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
                   <div class="relative group/field">
                     <input type="password" name="sonarr_token" id="sonarr_token" value={globalSettings.sonarr_token ?? ""}
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle visibility">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
@@ -187,7 +187,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                 <div class="space-y-2">
                   <label for="sonarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
                   <select name="sonarr_root_folder" id="sonarr_root_folder"
-                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                     <option value="">-- Select Folder --</option>
                     {globalSettings.sonarr_root_folder && <option value={globalSettings.sonarr_root_folder} selected>{globalSettings.sonarr_root_folder}</option>}
                   </select>
@@ -195,21 +195,21 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                 <div class="space-y-2">
                   <label for="sonarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
                   <select name="sonarr_quality_profile" id="sonarr_quality_profile"
-                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                     <option value="">-- Select Profile --</option>
                     {globalSettings.sonarr_quality_profile && <option value={globalSettings.sonarr_quality_profile} selected>Profile ID: {globalSettings.sonarr_quality_profile}</option>}
                   </select>
                 </div>
                 <div class="space-y-2">
                   <label class="block text-sm font-medium text-zinc-400">Tags</label>
-                  <div id="sonarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                  <div id="sonarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
                     <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
                     {globalSettings.sonarr_tags?.map((tid: number) => (
                       <input type="hidden" name="sonarr_tags" value={tid} />
                     ))}
                   </div>
                 </div>
-                <label class="flex items-center justify-between gap-3 p-3 bg-zinc-900 border border-zinc-800 rounded-lg cursor-pointer hover:bg-zinc-800/60 transition-colors">
+                <label class="flex items-center justify-between gap-3 p-3 bg-zinc-950 border border-zinc-800 rounded-lg cursor-pointer hover:bg-zinc-800/60 transition-colors">
                   <span class="text-sm text-zinc-300">Use season folders</span>
                   <input type="checkbox" name="sonarr_season_folder" id="sonarr_season_folder" value="true" class="sr-only peer" checked={globalSettings.sonarr_season_folder !== false} />
                   <div class="relative w-10 h-5 bg-zinc-700 peer-checked:bg-blue-600 rounded-full transition-colors pointer-events-none shrink-0 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5"></div>
@@ -287,7 +287,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                       <div>
                         <div class="text-xs text-zinc-500 mb-1">API Key</div>
                         <div class="flex items-center gap-2">
-                          <code class="user-api-key flex-1 block bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 font-mono break-all">{u.api_key}</code>
+                          <code class="user-api-key flex-1 block bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 font-mono break-all">{u.api_key}</code>
                           <button class="copy-api-key-btn shrink-0 p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 rounded-lg transition-colors cursor-pointer" title="Copy API key" aria-label="Copy API key">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                               <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.976a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />
