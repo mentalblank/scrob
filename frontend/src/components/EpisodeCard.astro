@@ -160,7 +160,14 @@ const showProgress = progressPct > 0;
       <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors leading-tight">
         {item.title}
       </h3>
-      {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">{sxe}</span>}
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">{sxe}</span>}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">EPISODE</span>
+        </div>
+      </div>
     </a>
   ) : (
     <div class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
@@ -170,7 +177,14 @@ const showProgress = progressPct > 0;
       <h3 class="text-sm font-bold text-zinc-500 truncate leading-tight">
         {item.title}
       </h3>
-      {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide mt-0.5 block">{sxe}</span>}
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide mt-0.5 block">{sxe}</span>}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">EPISODE</span>
+        </div>
+      </div>
     </div>
   )}
 </div>

@@ -89,26 +89,28 @@ const showProgress = !event.completed && progressPct > 0;
   </a>
 
   <!-- Info -->
-  <a href={href} class="block p-4 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+  <a href={href} class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
     {showTitle && (
-      <p class="text-[11px] font-medium text-zinc-400 truncate mb-0.5 uppercase tracking-wider">{showTitle}</p>
+      <p class="text-xs font-medium text-zinc-400 truncate mb-0.5">{showTitle}</p>
     )}
     <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors leading-tight">
       {title}
     </h3>
-    <div class="flex items-center justify-between mt-2">
+    <div class="flex items-center justify-between">
       <div class="flex items-center gap-2">
-        {!isEpisode && year && <span class="text-[11px] font-bold text-zinc-500 tracking-wide">{year}</span>}
-        {isEpisode && sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{sxe}</span>}
+        {!isEpisode && year && <span class="text-[11px] font-bold text-zinc-500 tracking-wide mt-0.5 block">{year}</span>}
+        {isEpisode && sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">{sxe}</span>}
       </div>
-      {showProgress && (
-        <span class="text-[10px] font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
-      )}
-      {!isEpisode && !showProgress && (
-        <span class="text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
-          Movie
-        </span>
-      )}
+      <div class="flex items-center gap-2">
+        {showProgress && (
+          <span class="text-[10px] font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+        )}
+        {isEpisode ? (
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">EPISODE</span>
+        ) : (
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">MOVIE</span>
+        )}
+      </div>
     </div>
   </a>
 </div>
