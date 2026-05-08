@@ -36,7 +36,7 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
 
   <div
     id="visibility-popover"
-    class="hidden absolute right-0 top-full mt-2 w-72 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden"
+    class="hidden absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-72 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden"
   >
     <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
       <span class="text-xs font-bold text-zinc-400 uppercase tracking-widest">Visibility Filters</span>
@@ -90,6 +90,29 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
 
   function togglePopover(show) {
     popover.classList.toggle('hidden', !show);
+    if (show) {
+      // Small delay to let the DOM update hidden state if needed for accurate measurements
+      requestAnimationFrame(() => {
+        const rect = popover.getBoundingClientRect();
+        const padding = 16; // 1rem
+        
+        if (rect.left < padding) {
+          // If off-screen to the left, align with the left edge of the screen (with padding)
+          // We calculate the offset relative to the parent container
+          const containerRect = container.getBoundingClientRect();
+          const offset = padding - containerRect.left;
+          popover.style.left = `${offset}px`;
+          popover.style.right = 'auto';
+        } else if (rect.right > window.innerWidth - padding) {
+          // If off-screen to the right, align with the right edge
+          popover.style.right = '0';
+          popover.style.left = 'auto';
+        }
+      });
+    } else {
+      popover.style.left = '';
+      popover.style.right = '';
+    }
   }
 
   btn?.addEventListener('click', (e) => {
