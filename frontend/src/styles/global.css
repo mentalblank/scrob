@@ -351,3 +351,14 @@ body[data-v-partial-collected="fade"] [data-card][data-partial-collected="true"]
 body[data-v-partial-collected="hide"] :is([data-card][data-partial-collected="true"], .group\/item:has([data-card][data-partial-collected="true"])) { display: none; }
 body[data-v-not-partial-collected="fade"] [data-card][data-partial-collected="false"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
 body[data-v-not-partial-collected="hide"] :is([data-card][data-partial-collected="false"], .group\/item:has([data-card][data-partial-collected="false"])) { display: none; }
+
+/* ── TMDB image fallback ────────────────────────────────────────────────── */
+.tmdb-img-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-card);
+  color: var(--color-text-dim);
+}

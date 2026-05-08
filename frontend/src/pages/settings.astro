@@ -59,7 +59,7 @@ if (me.totp_enabled) {
                   name="tmdb_api_key"
                   id="tmdb_api_key"
                   value={settings.tmdb_api_key || ""}
-                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
                 <button
                   type="button"
@@ -89,7 +89,7 @@ if (me.totp_enabled) {
               const typeColor = conn.type === "jellyfin" ? "bg-purple-500" : conn.type === "emby" ? "bg-green-500" : "bg-yellow-500";
               const typeLabel = conn.type === "jellyfin" ? "Jellyfin" : conn.type === "emby" ? "Emby" : "Plex";
               return (
-              <div class="border border-zinc-800 rounded-2xl overflow-hidden" data-connection-id={conn.id}>
+              <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden" data-connection-id={conn.id}>
                 <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target={`conn-body-${conn.id}`}>
                   <div class="flex items-center gap-3 pointer-events-none">
                     <span class={`w-2 h-2 ${typeColor} rounded-full shrink-0`}></span>
@@ -123,23 +123,23 @@ if (me.totp_enabled) {
                     <div class="space-y-4">
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Server URL</label>
-                        <input type="url" class="conn-url-input w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.url} data-conn-id={conn.id} />
+                        <input type="url" class="conn-url-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.url} data-conn-id={conn.id} />
                       </div>
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">{conn.type === "plex" ? "X-Plex-Token" : "API Token"}</label>
-                        <input type="password" class="conn-token-input w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.token} data-conn-id={conn.id} />
+                        <input type="password" class="conn-token-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.token} data-conn-id={conn.id} />
                       </div>
                       {conn.type !== "plex" && (
                         <div class="space-y-2">
                           <label class="block text-sm font-medium text-zinc-400">User ID</label>
-                          <input type="text" class="conn-user-id-input w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_user_id || ""} data-conn-id={conn.id} />
+                          <input type="text" class="conn-user-id-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_user_id || ""} data-conn-id={conn.id} />
                         </div>
                       )}
                       {conn.type === "plex" && (
                         <div class="space-y-2">
                           <label class="block text-sm font-medium text-zinc-400">Plex Username</label>
                           <p class="text-xs text-zinc-500">Required to attribute events when multiple users share a server.</p>
-                          <input type="text" class="conn-username-input w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_username || ""} data-conn-id={conn.id} />
+                          <input type="text" class="conn-username-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_username || ""} data-conn-id={conn.id} />
                         </div>
                       )}
                       <div class="space-y-2">
@@ -152,7 +152,7 @@ if (me.totp_enabled) {
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Webhook URL</label>
                         <div class="flex gap-2">
-                          <input type="text" readonly class="conn-webhook-url flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
+                          <input type="text" readonly class="conn-webhook-url flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
                           <button type="button" class="conn-copy-webhook px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer" data-conn-id={conn.id}>
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
                           </button>
@@ -165,7 +165,7 @@ if (me.totp_enabled) {
                     </div>
                     <!-- Right: Sync Preferences -->
                     <div class="space-y-4">
-                      <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">{typeLabel} → Scrob</p>
                         {[
                           { key: "sync_collection", label: "Collection status" },
@@ -179,7 +179,7 @@ if (me.totp_enabled) {
                           </label>
                         ))}
                       </div>
-                      <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → {typeLabel}</p>
                         {[
                           { key: "push_watched", label: "Watched status" },
@@ -191,7 +191,7 @@ if (me.totp_enabled) {
                           </label>
                         ))}
                       </div>
-                      <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Auto Sync</p>
                         <div class="flex items-center justify-between gap-4">
                           <label class="text-sm text-zinc-300">Sync interval</label>
@@ -212,7 +212,7 @@ if (me.totp_enabled) {
             </div>
 
             <!-- Add Connection button + form -->
-            <div class="border border-dashed border-zinc-700 rounded-2xl overflow-hidden">
+            <div class="bg-zinc-900 border border-dashed border-zinc-700 rounded-2xl overflow-hidden">
               <button type="button" id="add-connection-btn" class="w-full flex items-center justify-center gap-2 px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors text-zinc-400 hover:text-zinc-200">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                 <span class="font-medium">Add Connection</span>
@@ -222,11 +222,11 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="new-conn-name" class="block text-sm font-medium text-zinc-400">Name</label>
-                      <input type="text" id="new-conn-name" placeholder="e.g. Home Plex" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="text" id="new-conn-name" placeholder="e.g. Home Plex" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-type" class="block text-sm font-medium text-zinc-400">Server Type</label>
-                      <select id="new-conn-type" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
+                      <select id="new-conn-type" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
                         <option value="jellyfin">Jellyfin</option>
                         <option value="emby">Emby</option>
                         <option value="plex">Plex</option>
@@ -234,19 +234,19 @@ if (me.totp_enabled) {
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-url" class="block text-sm font-medium text-zinc-400">Server URL</label>
-                      <input type="url" id="new-conn-url" placeholder="http://192.168.1.100:8096" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="url" id="new-conn-url" placeholder="http://192.168.1.100:8096" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-token" class="block text-sm font-medium text-zinc-400">Token</label>
-                      <input type="password" id="new-conn-token" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="password" id="new-conn-token" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div id="new-conn-user-id-row" class="space-y-2">
                       <label for="new-conn-user-id" class="block text-sm font-medium text-zinc-400">User ID</label>
-                      <input type="text" id="new-conn-user-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="text" id="new-conn-user-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div id="new-conn-username-row" class="space-y-2 hidden">
                       <label for="new-conn-username" class="block text-sm font-medium text-zinc-400">Plex Username</label>
-                      <input type="text" id="new-conn-username" placeholder="e.g. john_doe" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="text" id="new-conn-username" placeholder="e.g. john_doe" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="flex gap-2">
                       <button type="button" id="create-connection-btn" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer">Add</button>
@@ -255,7 +255,7 @@ if (me.totp_enabled) {
                     </div>
                   </div>
                   <div class="space-y-4">
-                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                    <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                       <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Server → Scrob</p>
                       {[
                         { id: "new-sync-collection", label: "Collection status", defaultOn: true },
@@ -269,7 +269,7 @@ if (me.totp_enabled) {
                         </label>
                       ))}
                     </div>
-                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                    <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                       <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Server</p>
                       {[
                         { id: "new-push-watched", label: "Watched status" },
@@ -281,7 +281,7 @@ if (me.totp_enabled) {
                         </label>
                       ))}
                     </div>
-                    <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                    <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                       <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Auto Sync</p>
                       <div class="flex items-center justify-between gap-4">
                         <label class="text-sm text-zinc-300">Sync interval</label>
@@ -303,7 +303,7 @@ if (me.totp_enabled) {
             <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2">Connections</h2>
 
             <!-- Trakt collapsible row -->
-            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+            <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="trakt-body">
                 <div class="flex items-center gap-3 pointer-events-none">
                   <span class="w-2 h-2 bg-red-500 rounded-full shrink-0"></span>
@@ -346,7 +346,7 @@ if (me.totp_enabled) {
                         id="trakt_client_id"
                         value={settings.trakt_client_id || ""}
                         placeholder="Your Trakt application Client ID"
-                        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                       />
                     </div>
                     <div class="space-y-2">
@@ -358,7 +358,7 @@ if (me.totp_enabled) {
                           id="trakt_client_secret"
                           value={settings.trakt_client_secret || ""}
                           placeholder="Your Trakt application Client Secret"
-                          class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                          class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                         />
                         <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -381,20 +381,31 @@ if (me.totp_enabled) {
                   <!-- Right: Sync Preferences (only if connected) -->
                   {settings.trakt_connected && (
                     <div class="space-y-4">
-                      <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Trakt → Scrob</p>
                         {[
                           { key: "trakt_sync_watched", label: "Watched history" },
                           { key: "trakt_sync_ratings", label: "Ratings" },
-                          { key: "trakt_sync_lists", label: "Lists" },
                         ].map(({ key, label }) => (
                           <label class="flex items-center gap-3 cursor-pointer group">
                             <input type="checkbox" name={key} id={key} checked={settings[key as keyof typeof settings] !== false} class="sync-pref-checkbox w-4 h-4 rounded accent-red-500 cursor-pointer" />
                             <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
                           </label>
                         ))}
+                        <div>
+                          <label class="flex items-center gap-3 cursor-pointer group">
+                            <input type="checkbox" name="trakt_sync_lists" id="trakt_sync_lists" checked={settings.trakt_sync_lists !== false} class="sync-pref-checkbox w-4 h-4 rounded accent-red-500 cursor-pointer" />
+                            <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">Lists</span>
+                          </label>
+                          <div id="trakt-watchlist-split-row" class:list={["ml-7 mt-2", !settings.trakt_sync_lists && "hidden"]}>
+                            <label class="flex items-center gap-3 cursor-pointer group">
+                              <input type="checkbox" name="trakt_watchlist_split" id="trakt_watchlist_split" checked={!!settings.trakt_watchlist_split} class="sync-pref-checkbox w-4 h-4 rounded accent-red-500 cursor-pointer" />
+                              <span class="text-sm text-zinc-400 group-hover:text-zinc-200 transition-colors">Split Watchlist into Movies / Shows</span>
+                            </label>
+                          </div>
+                        </div>
                       </div>
-                      <div class="bg-zinc-900 rounded-xl p-4 space-y-3">
+                      <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Trakt</p>
                         {[
                           { key: "trakt_push_watched", label: "Watched status" },
@@ -414,7 +425,7 @@ if (me.totp_enabled) {
             </div>
 
             <!-- Radarr collapsible row -->
-            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+            <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="radarr-body">
                 <div class="flex items-center gap-3 pointer-events-none">
                   <span class="w-2 h-2 bg-yellow-500 rounded-full shrink-0"></span>
@@ -437,12 +448,12 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="radarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
-                      <input type="url" name="radarr_url" id="radarr_url" placeholder="http://192.168.1.100:7878" value={settings.radarr_url || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="url" name="radarr_url" id="radarr_url" placeholder="http://192.168.1.100:7878" value={settings.radarr_url || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="radarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
                       <div class="relative group/field">
-                        <input type="password" name="radarr_token" id="radarr_token" value={settings.radarr_token || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <input type="password" name="radarr_token" id="radarr_token" value={settings.radarr_token || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                         <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
@@ -453,21 +464,21 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="radarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
-                      <select name="radarr_root_folder" id="radarr_root_folder" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                      <select name="radarr_root_folder" id="radarr_root_folder" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                         <option value="">-- Select Folder --</option>
                         {settings.radarr_root_folder && <option value={settings.radarr_root_folder} selected>{settings.radarr_root_folder}</option>}
                       </select>
                     </div>
                     <div class="space-y-2">
                       <label for="radarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
-                      <select name="radarr_quality_profile" id="radarr_quality_profile" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                      <select name="radarr_quality_profile" id="radarr_quality_profile" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                         <option value="">-- Select Profile --</option>
                         {settings.radarr_quality_profile && <option value={settings.radarr_quality_profile} selected>Profile ID: {settings.radarr_quality_profile}</option>}
                       </select>
                     </div>
                     <div class="space-y-2">
                       <label class="block text-sm font-medium text-zinc-400">Tags</label>
-                      <div id="radarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                      <div id="radarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
                         <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
                         {settings.radarr_tags?.map(tid => (
                           <input type="hidden" name="radarr_tags" value={tid} />
@@ -480,7 +491,7 @@ if (me.totp_enabled) {
             </div>
 
             <!-- Sonarr collapsible row -->
-            <div class="border border-zinc-800 rounded-2xl overflow-hidden">
+            <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="sonarr-body">
                 <div class="flex items-center gap-3 pointer-events-none">
                   <span class="w-2 h-2 bg-sky-500 rounded-full shrink-0"></span>
@@ -503,12 +514,12 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="sonarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
-                      <input type="url" name="sonarr_url" id="sonarr_url" placeholder="http://192.168.1.100:8989" value={settings.sonarr_url || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="url" name="sonarr_url" id="sonarr_url" placeholder="http://192.168.1.100:8989" value={settings.sonarr_url || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="sonarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
                       <div class="relative group/field">
-                        <input type="password" name="sonarr_token" id="sonarr_token" value={settings.sonarr_token || ""} class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <input type="password" name="sonarr_token" id="sonarr_token" value={settings.sonarr_token || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                         <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
@@ -519,28 +530,28 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="sonarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
-                      <select name="sonarr_root_folder" id="sonarr_root_folder" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                      <select name="sonarr_root_folder" id="sonarr_root_folder" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                         <option value="">-- Select Folder --</option>
                         {settings.sonarr_root_folder && <option value={settings.sonarr_root_folder} selected>{settings.sonarr_root_folder}</option>}
                       </select>
                     </div>
                     <div class="space-y-2">
                       <label for="sonarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
-                      <select name="sonarr_quality_profile" id="sonarr_quality_profile" class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                      <select name="sonarr_quality_profile" id="sonarr_quality_profile" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                         <option value="">-- Select Profile --</option>
                         {settings.sonarr_quality_profile && <option value={settings.sonarr_quality_profile} selected>Profile ID: {settings.sonarr_quality_profile}</option>}
                       </select>
                     </div>
                     <div class="space-y-2">
                       <label class="block text-sm font-medium text-zinc-400">Tags</label>
-                      <div id="sonarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                      <div id="sonarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
                         <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
                         {settings.sonarr_tags?.map(tid => (
                           <input type="hidden" name="sonarr_tags" value={tid} />
                         ))}
                       </div>
                     </div>
-                    <label class="flex items-center justify-between gap-3 p-3 bg-zinc-900 border border-zinc-800 rounded-lg cursor-pointer hover:bg-zinc-800/60 transition-colors">
+                    <label class="flex items-center justify-between gap-3 p-3 bg-zinc-950 border border-zinc-800 rounded-lg cursor-pointer hover:bg-zinc-800/60 transition-colors">
                       <span class="text-sm text-zinc-300">Use season folders</span>
                       <input type="checkbox" name="sonarr_season_folder" id="sonarr_season_folder" value="true" class="sr-only peer" checked={settings.sonarr_season_folder !== false} />
                       <div class="relative w-10 h-5 bg-zinc-700 peer-checked:bg-blue-600 rounded-full transition-colors pointer-events-none shrink-0 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5"></div>
@@ -703,7 +714,7 @@ if (me.totp_enabled) {
                   id="scrob_api_key"
                   readonly
                   value={me.api_key}
-                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
                 />
                 <button
                   type="button"
@@ -786,7 +797,7 @@ if (me.totp_enabled) {
                       inputmode="numeric"
                       maxlength="6"
                       placeholder="000000"
-                      class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
                   </div>
                   <div class="flex gap-3">
@@ -859,7 +870,7 @@ if (me.totp_enabled) {
                     id="totp-disable-code"
                     autocomplete="one-time-code"
                     placeholder="000000 or XXXX-XXXX"
-                    class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   />
                 </div>
                 <button
@@ -913,7 +924,7 @@ if (me.totp_enabled) {
                   name="current_password"
                   id="current_password"
                   required
-                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
                 <button
                   type="button"
@@ -933,7 +944,7 @@ if (me.totp_enabled) {
                   name="new_password"
                   id="new_password"
                   required
-                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
                 <button
                   type="button"
@@ -953,7 +964,7 @@ if (me.totp_enabled) {
                   name="confirm_password"
                   id="confirm_password"
                   required
-                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
                 <button
                   type="button"
@@ -1898,6 +1909,15 @@ if (me.totp_enabled) {
     const saveBtn = document.getElementById('save-settings-btn');
     if (!form || !saveBtn) return;
 
+    // Show/hide the watchlist split sub-option based on the Lists checkbox
+    const syncListsCb = document.getElementById('trakt_sync_lists') as HTMLInputElement | null;
+    const splitRow = document.getElementById('trakt-watchlist-split-row');
+    if (syncListsCb && splitRow) {
+      syncListsCb.addEventListener('change', () => {
+        splitRow.classList.toggle('hidden', !syncListsCb.checked);
+      });
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       
@@ -1933,7 +1953,7 @@ if (me.totp_enabled) {
 
         // Collect boolean checkboxes (Trakt sync prefs + app preferences)
         const syncKeys = [
-          'trakt_sync_watched', 'trakt_sync_ratings', 'trakt_sync_lists',
+          'trakt_sync_watched', 'trakt_sync_ratings', 'trakt_sync_lists', 'trakt_watchlist_split',
           'trakt_push_watched', 'trakt_push_ratings', 'trakt_push_lists',
           'blur_explicit',
         ] as const;

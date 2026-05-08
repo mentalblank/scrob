@@ -62,11 +62,19 @@ async def list_shows(
 ):
     offset = (page - 1) * page_size
 
-    # A show is "in the user's collection" if they have at least one episode collected
+    # A show is "in the user's collection" if they have at least one countable episode
+    # collected — same criteria used by enrich_with_state for the percentage calculation.
     user_show_ids = (
         select(Media.show_id)
         .join(Collection, Collection.media_id == Media.id)
-        .where(Collection.user_id == current_user.id, Media.show_id.isnot(None))
+        .where(
+            Collection.user_id == current_user.id,
+            Media.show_id.isnot(None),
+            Media.media_type == MediaType.episode,
+            Media.season_number.isnot(None),
+            Media.season_number != 0,
+            Media.episode_number.isnot(None),
+        )
         .distinct()
         .subquery()
     )
@@ -333,7 +341,7 @@ async def get_show(
             # to be consistent with how total is calculated (unique episodes in season).
             season_states[sn] = {
                 "in_library": collected > 0,
-                "collection_pct": int((collected / total) * 100) if total > 0 else 0,
+                "collection_pct": min(100, int((collected / total) * 100)) if total > 0 else 0,
                 "watched": watched >= total if total > 0 else False,
                 "user_rating": season_ratings.get(sn),
             }
@@ -591,6 +599,11 @@ async def get_show_season(
             # Bulk fetch watched state and ratings for episodes in this season
             tmdb_episodes = tmdb_data.get("episodes", [])
             total_in_season = len(tmdb_episodes)
+            today_str = date.today().isoformat()
+            total_aired_in_season = sum(
+                1 for ep in tmdb_episodes
+                if ep.get("air_date") and ep["air_date"] <= today_str
+            )
             season_ep_tmdb_ids = [
                 ep.get("id") for ep in tmdb_episodes if ep.get("id")
             ]
@@ -788,12 +801,13 @@ async def get_show_season(
                 collected_in_season = coll_q.scalar_one()
 
             season_in_library = collected_in_season > 0
-            season_collection_pct = int((collected_in_season / total_in_season) * 100) if total_in_season > 0 else 0
+            aired_denom = total_aired_in_season if total_aired_in_season > 0 else total_in_season
+            season_collection_pct = min(100, int((collected_in_season / aired_denom) * 100)) if aired_denom > 0 else 0
 
             # Count unique episodes in this season that have been watched
             # episodes list contains "watched": True/False for each episode.
             watched_count = sum(1 for ep in episodes if ep.get("watched"))
-            season_watched = watched_count >= total_in_season if total_in_season > 0 else False
+            season_watched = watched_count >= aired_denom if aired_denom > 0 else False
 
             # Season user rating (stored against show's Media row with season_number)
             season_user_rating = None

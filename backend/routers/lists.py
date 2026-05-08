@@ -383,7 +383,7 @@ async def _push_list_item_to_trakt(
 
     from core import trakt as trakt_client
     try:
-        if list_trakt_slug == "__watchlist__":
+        if list_trakt_slug in ("__watchlist__", "__watchlist_movies__", "__watchlist_shows__"):
             if remove:
                 await trakt_client.remove_from_watchlist(
                     settings.trakt_client_id, settings.trakt_access_token,
