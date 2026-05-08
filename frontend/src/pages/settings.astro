@@ -5,10 +5,11 @@ import { api } from "../lib/api";
 import type { TotpBackupCode } from "../lib/api";
 
 const { token } = Astro.locals;
-const [settings, me, connections] = await Promise.all([
+const [settings, me, connections, scrobbleConnections] = await Promise.all([
   api.auth.getSettings(token!),
   api.auth.me(token!),
   api.auth.getConnections(token!),
+  api.auth.getScrobbleConnections(token!),
 ]);
 const hasTmdbKey = !!settings.tmdb_api_key;
 const traktConfigured    = !!(settings.trakt_connected || settings.trakt_client_id);
@@ -294,6 +295,124 @@ if (me.totp_enabled) {
               </div>
             </div>
 
+          </div>
+
+          <!-- ======== SCROBBLE-ONLY CONNECTIONS SECTION ======== -->
+          <div class="space-y-3 mt-8">
+            <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2">Scrobble-only Connections</h2>
+            <p class="text-sm text-zinc-500">Webhook-only connections for scrobbling. No URL or token needed — just pick your server type and enter your username or user ID so events can be attributed to you.</p>
+
+            <div id="scrobble-connections-list" class="space-y-2">
+            {scrobbleConnections.map((conn) => {
+              const typeColor = conn.type === "jellyfin" ? "bg-purple-500" : conn.type === "emby" ? "bg-green-500" : "bg-yellow-500";
+              const typeLabel = conn.type === "jellyfin" ? "Jellyfin" : conn.type === "emby" ? "Emby" : "Plex";
+              const identity = conn.type === "plex" ? conn.server_username : conn.server_user_id;
+              return (
+              <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden" data-scrobble-conn-id={conn.id}>
+                <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target={`scrobble-body-${conn.id}`}>
+                  <div class="flex items-center gap-3 pointer-events-none">
+                    <span class={`w-2 h-2 ${typeColor} rounded-full shrink-0`}></span>
+                    <div class="flex flex-col gap-0.5">
+                      <span class="font-medium text-zinc-200">{conn.name}</span>
+                      <span class="text-xs text-zinc-500">{typeLabel}{identity ? ` · ${identity}` : ' · Webhook only'}</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <div onclick="event.stopPropagation()">
+                      <button type="button" data-action="delete_scrobble_connection" data-conn-id={conn.id} data-conn-name={conn.name}
+                        class="js-action-btn text-sm bg-zinc-800 hover:bg-red-900/30 text-red-400 border border-zinc-700 hover:border-red-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                      >Delete</button>
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </div>
+                </div>
+                <div id={`scrobble-body-${conn.id}`} class="hidden border-t border-zinc-800 px-6 py-6">
+                  <div class="grid md:grid-cols-2 gap-6">
+                    <!-- Left: identity + webhook URL -->
+                    <div class="space-y-4">
+                      {conn.type === "plex" ? (
+                        <div class="space-y-2">
+                          <label class="block text-sm font-medium text-zinc-400">Plex Username</label>
+                          <p class="text-zinc-100 font-mono text-sm">{conn.server_username || <span class="text-zinc-600 italic">not set</span>}</p>
+                        </div>
+                      ) : (
+                        <div class="space-y-2">
+                          <label class="block text-sm font-medium text-zinc-400">User ID</label>
+                          <p class="text-zinc-100 font-mono text-sm">{conn.server_user_id || <span class="text-zinc-600 italic">not set</span>}</p>
+                        </div>
+                      )}
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-zinc-400">Webhook URL</label>
+                        <div class="flex gap-2">
+                          <input type="text" readonly class="scrobble-webhook-url flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
+                          <button type="button" class="scrobble-copy-webhook px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer" data-conn-id={conn.id}>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.991 1.08 1.991 2.25v12a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.75a2.25 2.25 0 011.991-2.25c.639-.074 1.28-.135 1.927-.184" /></svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Right: sync preferences -->
+                    <div class="space-y-3">
+                      <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Sync Preferences</p>
+                        {[
+                          { key: "sync_collection", label: "Add to collection" },
+                          { key: "sync_watched",    label: "Watch history" },
+                          { key: "sync_playback",   label: "Continue Watching" },
+                        ].map(({ key, label }) => (
+                          <label class="flex items-center gap-3 cursor-pointer group">
+                            <input type="checkbox" class="scrobble-pref-checkbox w-4 h-4 rounded cursor-pointer" data-conn-id={conn.id} data-pref={key} checked={!!conn[key as keyof typeof conn]} />
+                            <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <button type="button" data-action="save_scrobble_connection" data-conn-id={conn.id} class="js-action-btn text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer">Save</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              );
+            })}
+            </div>
+
+            <!-- Add Scrobble Connection form -->
+            <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="new-scrobble-conn-body">
+                <span class="font-medium text-zinc-300">+ Add Scrobble Connection</span>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </div>
+              <div id="new-scrobble-conn-body" class="hidden border-t border-zinc-800 px-6 py-6">
+                <div class="space-y-4 max-w-sm">
+                  <div class="space-y-2">
+                    <label for="new-scrobble-name" class="block text-sm font-medium text-zinc-400">Name</label>
+                    <input type="text" id="new-scrobble-name" placeholder="e.g. Home Plex" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                  </div>
+                  <div class="space-y-2">
+                    <label for="new-scrobble-type" class="block text-sm font-medium text-zinc-400">Server Type</label>
+                    <select id="new-scrobble-type" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
+                      <option value="jellyfin">Jellyfin</option>
+                      <option value="emby">Emby</option>
+                      <option value="plex">Plex</option>
+                    </select>
+                  </div>
+                  <div id="new-scrobble-user-id-row" class="space-y-2">
+                    <label for="new-scrobble-user-id" class="block text-sm font-medium text-zinc-400">User ID</label>
+                    <input type="text" id="new-scrobble-user-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    <p class="text-xs text-zinc-500">Your Jellyfin/Emby user ID, used to match webhook events to your account.</p>
+                  </div>
+                  <div id="new-scrobble-username-row" class="space-y-2 hidden">
+                    <label for="new-scrobble-username" class="block text-sm font-medium text-zinc-400">Plex Username</label>
+                    <input type="text" id="new-scrobble-username" placeholder="e.g. john_doe" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    <p class="text-xs text-zinc-500">Your Plex username, used to match webhook events to your account.</p>
+                  </div>
+                  <button type="button" id="create-scrobble-conn-btn" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer">Add Connection</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- ======== CONNECTIONS SECTION ======== -->
@@ -1289,6 +1408,41 @@ if (me.totp_enabled) {
             }
             showMessage('Connection saved!');
             return;
+          } else if (action === 'save_scrobble_connection') {
+            const connId = newBtn.getAttribute('data-conn-id');
+            const card = document.querySelector(`[data-scrobble-conn-id="${connId}"]`);
+            const body: Record<string, boolean> = {};
+            card?.querySelectorAll('.scrobble-pref-checkbox').forEach(el => {
+              const cb = el as HTMLInputElement;
+              const pref = cb.getAttribute('data-pref');
+              if (pref) body[pref] = cb.checked;
+            });
+            const res = await fetch(`/api/proxy/auth/scrobble-connections/${connId}`, {
+              method: 'PATCH',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            if (!res.ok) {
+              const err = await res.json();
+              throw new Error(err.detail || 'Failed to save');
+            }
+            showMessage('Saved.');
+            return;
+          } else if (action === 'delete_scrobble_connection') {
+            const connId = newBtn.getAttribute('data-conn-id');
+            const connName = newBtn.getAttribute('data-conn-name');
+            if (!confirm(`Delete scrobble connection "${connName}"? This cannot be undone.`)) return;
+            const delRes = await fetch(`/api/proxy/auth/scrobble-connections/${connId}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (!delRes.ok) {
+              const err = await delRes.json();
+              throw new Error(err.detail || 'Failed to delete scrobble connection');
+            }
+            document.querySelector(`[data-scrobble-conn-id="${connId}"]`)?.remove();
+            showMessage('Scrobble connection deleted.');
+            return;
           } else if (action === 'delete_connection') {
             const connId = newBtn.getAttribute('data-conn-id');
             const connName = newBtn.getAttribute('data-conn-name');
@@ -1824,6 +1978,81 @@ if (me.totp_enabled) {
     }
   }
 
+  function setupScrobbleConnections() {
+    const apiKey = (document.getElementById('scrob_api_key') as HTMLInputElement | null)?.value ?? '';
+
+    // Set webhook URLs and wire copy buttons for scrobble connection cards
+    document.querySelectorAll('[data-scrobble-conn-id]').forEach(card => {
+      const connId = card.getAttribute('data-scrobble-conn-id');
+      const webhookInput = card.querySelector('.scrobble-webhook-url') as HTMLInputElement | null;
+      const connType = webhookInput?.getAttribute('data-conn-type') ?? '';
+      if (webhookInput && connId && connType) {
+        webhookInput.value = `${window.location.origin}/api/proxy/webhooks/${connType}/scrobble/${connId}?api_key=${encodeURIComponent(apiKey)}`;
+      }
+      const copyBtn = card.querySelector('.scrobble-copy-webhook');
+      if (copyBtn && webhookInput) {
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(webhookInput.value);
+            flashCopied(copyBtn as HTMLElement);
+          } catch {
+            showMessage('Could not copy to clipboard', 'error');
+          }
+        });
+      }
+    });
+
+    // Show/hide user_id vs username based on new scrobble connection type
+    const scrobbleTypeSelect = document.getElementById('new-scrobble-type') as HTMLSelectElement | null;
+    const scrobbleUserIdRow = document.getElementById('new-scrobble-user-id-row');
+    const scrobbleUsernameRow = document.getElementById('new-scrobble-username-row');
+    const updateScrobbleTypeFields = () => {
+      const isPlex = scrobbleTypeSelect?.value === 'plex';
+      scrobbleUserIdRow?.classList.toggle('hidden', isPlex);
+      scrobbleUsernameRow?.classList.toggle('hidden', !isPlex);
+    };
+    scrobbleTypeSelect?.addEventListener('change', updateScrobbleTypeFields);
+    updateScrobbleTypeFields();
+
+    // Create scrobble connection button
+    const createScrobbleBtn = document.getElementById('create-scrobble-conn-btn');
+    if (createScrobbleBtn) {
+      createScrobbleBtn.addEventListener('click', async () => {
+        const name = (document.getElementById('new-scrobble-name') as HTMLInputElement)?.value.trim();
+        const type = scrobbleTypeSelect?.value ?? 'jellyfin';
+        const ui = (document.getElementById('new-scrobble-user-id') as HTMLInputElement)?.value.trim() || null;
+        const un = (document.getElementById('new-scrobble-username') as HTMLInputElement)?.value.trim() || null;
+        if (!name) { showMessage('Name is required.', 'error'); return; }
+
+        createScrobbleBtn.setAttribute('disabled', 'true');
+        const orig = createScrobbleBtn.textContent;
+        createScrobbleBtn.textContent = 'Adding…';
+
+        const body: Record<string, any> = { name, type };
+        if (type === 'plex') body.server_username = un;
+        else body.server_user_id = ui;
+
+        try {
+          const res = await fetch('/api/proxy/auth/scrobble-connections', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to create scrobble connection');
+          }
+          showMessage('Scrobble connection added! Reloading…');
+          setTimeout(() => window.location.reload(), 1000);
+        } catch (e: any) {
+          showMessage(e.message, 'error');
+          createScrobbleBtn.removeAttribute('disabled');
+          createScrobbleBtn.textContent = orig;
+        }
+      });
+    }
+  }
+
   function setupSettingsForm() {
     const form = document.getElementById('settings-form');
     const saveBtn = document.getElementById('save-settings-btn');
@@ -2084,6 +2313,7 @@ if (me.totp_enabled) {
   setupActions();
   setupPasswordToggles();
   setupConnections();
+  setupScrobbleConnections();
   setupSettingsForm();
   setupPasswordForm();
 

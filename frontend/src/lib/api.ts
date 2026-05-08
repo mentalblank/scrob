@@ -411,6 +411,31 @@ export interface MediaServerConnectionCreate {
 
 export type MediaServerConnectionUpdate = Partial<Omit<MediaServerConnectionCreate, "type">>;
 
+export interface ScrobbleConnection {
+  id: number;
+  user_id: number;
+  type: "jellyfin" | "emby" | "plex";
+  name: string;
+  server_user_id: string | null;
+  server_username: string | null;
+  sync_collection: boolean;
+  sync_watched: boolean;
+  sync_playback: boolean;
+  created_at: string;
+}
+
+export interface ScrobbleConnectionCreate {
+  type: "jellyfin" | "emby" | "plex";
+  name: string;
+  server_user_id?: string | null;
+  server_username?: string | null;
+  sync_collection?: boolean;
+  sync_watched?: boolean;
+  sync_playback?: boolean;
+}
+
+export type ScrobbleConnectionUpdate = Pick<ScrobbleConnectionCreate, "sync_collection" | "sync_watched" | "sync_playback">;
+
 export interface ServiceStatus {
   configured: boolean;
   connected: boolean;
@@ -738,6 +763,14 @@ export const api = {
       patch<MediaServerConnection>(`/auth/connections/${id}`, body, token),
     deleteConnection: (id: number, token: string) =>
       del<{ status: string }>(`/auth/connections/${id}`, token),
+    getScrobbleConnections: (token: string) =>
+      get<ScrobbleConnection[]>("/auth/scrobble-connections", undefined, token),
+    createScrobbleConnection: (body: ScrobbleConnectionCreate, token: string) =>
+      post<ScrobbleConnection>("/auth/scrobble-connections", body, token),
+    updateScrobbleConnection: (id: number, body: ScrobbleConnectionUpdate, token: string) =>
+      patch<ScrobbleConnection>(`/auth/scrobble-connections/${id}`, body, token),
+    deleteScrobbleConnection: (id: number, token: string) =>
+      del<{ status: string }>(`/auth/scrobble-connections/${id}`, token),
     testJellyfin: (url: string, token: string, jellyfinUserId: string | null, userToken: string) =>
       post<{ success: boolean; message: string }>(`/auth/test-jellyfin?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}${jellyfinUserId ? `&user_id=${encodeURIComponent(jellyfinUserId)}` : ""}`, undefined, userToken),
     testEmby: (url: string, token: string, embyUserId: string | null, userToken: string) =>

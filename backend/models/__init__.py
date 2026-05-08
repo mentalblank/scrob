@@ -2,6 +2,7 @@
 from .base import Base, UserRole, MediaType, CollectionSource
 from .users import User, UserSettings, TotpBackupCode
 from .connections import MediaServerConnection
+from .scrobble_connection import ScrobbleConnection
 from .profile import UserProfileData
 from .comments import Comment
 from .email_activation import EmailActivation
@@ -24,6 +25,7 @@ __all__ = [
     "UserRole", "MediaType", "CollectionSource",
     "User", "UserSettings", "TotpBackupCode",
     "MediaServerConnection",
+    "ScrobbleConnection",
     "UserProfileData",
     "Comment",
     "EmailActivation",

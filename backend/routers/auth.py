@@ -16,6 +16,7 @@ from db import get_db
 from models.users import User, UserSettings, TotpBackupCode
 from models.global_settings import GlobalSettings
 from models.connections import MediaServerConnection
+from models.scrobble_connection import ScrobbleConnection
 from models.email_activation import EmailActivation
 from models.password_reset import PasswordResetToken
 from core.security import verify_password, get_password_hash, create_access_token, ALGORITHM
@@ -482,6 +483,89 @@ async def delete_connection(
     await db.delete(conn)
     await db.commit()
     return {"status": "deleted"}
+
+
+# ── Scrobble-only connections ──────────────────────────────────────────────────
+
+@router.get("/scrobble-connections", response_model=list[schemas.ScrobbleConnectionResponse])
+async def list_scrobble_connections(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ScrobbleConnection)
+        .where(ScrobbleConnection.user_id == current_user.id)
+        .order_by(ScrobbleConnection.created_at)
+    )
+    return result.scalars().all()
+
+
+@router.post("/scrobble-connections", response_model=schemas.ScrobbleConnectionResponse, status_code=201)
+async def create_scrobble_connection(
+    body: schemas.ScrobbleConnectionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if body.type not in ("plex", "jellyfin", "emby"):
+        raise HTTPException(status_code=400, detail="type must be plex, jellyfin, or emby")
+    conn = ScrobbleConnection(
+        user_id=current_user.id,
+        type=body.type,
+        name=body.name,
+        server_user_id=body.server_user_id,
+        server_username=body.server_username,
+        sync_collection=body.sync_collection,
+        sync_watched=body.sync_watched,
+        sync_playback=body.sync_playback,
+    )
+    db.add(conn)
+    await db.commit()
+    await db.refresh(conn)
+    return conn
+
+
+@router.patch("/scrobble-connections/{connection_id}", response_model=schemas.ScrobbleConnectionResponse)
+async def update_scrobble_connection(
+    connection_id: int,
+    body: schemas.ScrobbleConnectionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ScrobbleConnection).where(
+            ScrobbleConnection.id == connection_id,
+            ScrobbleConnection.user_id == current_user.id,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Scrobble connection not found")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(conn, field, value)
+    await db.commit()
+    await db.refresh(conn)
+    return conn
+
+
+@router.delete("/scrobble-connections/{connection_id}")
+async def delete_scrobble_connection(
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ScrobbleConnection).where(
+            ScrobbleConnection.id == connection_id,
+            ScrobbleConnection.user_id == current_user.id,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Scrobble connection not found")
+    await db.delete(conn)
+    await db.commit()
+    return {"status": "deleted"}
+
 
 @router.post("/change-password")
 async def change_password(
