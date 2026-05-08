@@ -467,7 +467,14 @@ const bottomNavItem = (active: boolean) =>
                 <p class="text-xs font-semibold text-zinc-100 truncate leading-tight">${esc(title)}</p>
                 ${subtitle ? `<p class="text-[10px] text-zinc-400 truncate leading-tight mt-0.5">${esc(subtitle)}</p>` : ''}
               </div>
-              <span data-nppct="${sessionKey}" class="text-xs font-bold text-zinc-300 tabular-nums shrink-0">${esc(String(pct))}%</span>
+              <div class="flex items-center gap-3">
+                <span data-nppct="${sessionKey}" class="text-xs font-bold text-zinc-300 tabular-nums shrink-0">${esc(String(pct))}%</span>
+                <button onclick="event.preventDefault(); event.stopPropagation(); window.clearNowPlaying('${sessionKey}')"
+                        class="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                        title="Clear stuck session">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+              </div>
             </a>
             <div class="absolute bottom-0 left-0 right-0 bg-zinc-950/30" style="height:2px">
               <div data-npbar="${sessionKey}"
@@ -507,6 +514,19 @@ const bottomNavItem = (active: boolean) =>
         container.innerHTML = html;
       } catch { /* ignore */ }
     }
+
+    window.clearNowPlaying = async function(sessionKey) {
+      if (!await window.showConfirm('Clear session?', 'This will remove the now-playing entry from your dashboard. It does not stop playback on the source server.')) return;
+      try {
+        const res = await fetch(`/api/proxy/history/now-playing/${sessionKey}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${window.__AUTH_TOKEN__}` },
+        });
+        if (res.ok) {
+          pollNowPlaying();
+        }
+      } catch { /* ignore */ }
+    };
 
     if (window.__AUTH_TOKEN__) {
       const isHome = () => window.location.pathname === '/';

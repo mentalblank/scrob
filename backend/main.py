@@ -120,6 +120,17 @@ async def _auto_sync_scheduler():
                         print(f"Auto-sync: queuing {'full' if do_full else 'partial'} Trakt sync for user {user_id} (job {job.id})")
                         asyncio.create_task(run_trakt_sync(user_id, job.id, partial=do_partial))
 
+                # ── Cleanup Stuck Playback Sessions ──────────────────────────
+                from models.playback_session import PlaybackSession
+                from datetime import timedelta
+                cutoff = now - timedelta(hours=24)
+                del_res = await db.execute(
+                    delete(PlaybackSession).where(PlaybackSession.updated_at < cutoff)
+                )
+                if del_res.rowcount > 0:
+                    print(f"Cleanup: removed {del_res.rowcount} expired playback sessions (>24h old)")
+                await db.commit()
+
         except Exception as e:
             print(f"Auto-sync scheduler error: {e}")
             import traceback

@@ -824,3 +824,33 @@ async def unwatch_show(
     await db.commit()
     await _push_watch_state(db, current_user.id, episode_ids, watched=False)
     return {"status": "ok", "count": result.rowcount}
+
+
+@router.delete("/now-playing")
+async def clear_all_now_playing_sessions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Force-clear all now-playing sessions for the current user."""
+    await db.execute(
+        delete(PlaybackSession).where(PlaybackSession.user_id == current_user.id)
+    )
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/now-playing/{session_key}")
+async def delete_now_playing_session(
+    session_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Force-clear a specific 'stuck' now-playing session."""
+    await db.execute(
+        delete(PlaybackSession).where(
+            PlaybackSession.session_key == session_key,
+            PlaybackSession.user_id == current_user.id
+        )
+    )
+    await db.commit()
+    return {"status": "ok"}
