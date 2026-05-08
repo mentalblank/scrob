@@ -100,6 +100,11 @@ class UserSettings(BaseModel):
     trakt_push_ratings: Optional[bool] = None
     trakt_push_lists: Optional[bool] = None
 
+    trakt_full_sync_interval: Optional[int] = None
+    trakt_partial_sync_interval: Optional[int] = None
+    last_trakt_full_sync: Optional[datetime] = None
+    last_trakt_partial_sync: Optional[datetime] = None
+
     preferences: Optional[dict] = None
     blur_explicit: Optional[bool] = None
     show_comments: Optional[bool] = None
@@ -123,6 +128,7 @@ class MediaServerConnectionBase(BaseModel):
     push_watched: bool = False
     push_ratings: bool = False
     auto_sync_interval: Optional[int] = None
+    partial_sync_interval: Optional[int] = None
 
 
 class MediaServerConnectionCreate(MediaServerConnectionBase):
@@ -142,11 +148,14 @@ class MediaServerConnectionUpdate(BaseModel):
     push_watched: Optional[bool] = None
     push_ratings: Optional[bool] = None
     auto_sync_interval: Optional[int] = None
+    partial_sync_interval: Optional[int] = None
 
 
 class MediaServerConnectionResponse(MediaServerConnectionBase):
     id: int
     user_id: int
+    last_full_sync: Optional[datetime] = None
+    last_partial_sync: Optional[datetime] = None
     created_at: datetime
 
     class Config:

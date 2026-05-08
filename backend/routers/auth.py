@@ -438,6 +438,7 @@ async def create_connection(
         push_watched=body.push_watched,
         push_ratings=body.push_ratings,
         auto_sync_interval=body.auto_sync_interval,
+        partial_sync_interval=body.partial_sync_interval,
     )
     db.add(conn)
     await db.commit()
