@@ -207,6 +207,20 @@ async def find_episode_by_ids(url: str, token: str, series_tmdb_id: int, season:
         return None
 
 
+async def scan_libraries(url: str, token: str) -> bool:
+    """Trigger a full library scan on the server."""
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+            headers = {"X-Emby-Token": token}
+            r = await client.post(
+                f"{url.rstrip('/')}/Library/Refresh",
+                headers=headers,
+            )
+            return r.status_code < 400
+    except Exception:
+        return False
+
+
 async def mark_watched(url: str, token: str, user_id: str, item_id: str) -> bool:
     """Mark a Jellyfin item as played."""
     try:

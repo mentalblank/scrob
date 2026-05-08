@@ -12,4 +12,5 @@ from core.jellyfin import (
     mark_watched,
     mark_unwatched,
     set_rating,
+    scan_libraries,
 )

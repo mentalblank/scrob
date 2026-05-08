@@ -975,6 +975,8 @@ export const api = {
       get<{ libraries: { id?: string; key?: string; name: string; type: string; selected: boolean }[]; all_selected: boolean }>(`/sync/connection/${connectionId}/libraries`, undefined, token),
     saveConnectionLibraries: (connectionId: number, body: { library_ids?: string[]; library_keys?: string[] }, token: string) =>
       put<{ saved: number }>(`/sync/connection/${connectionId}/libraries`, body, token),
+    scanLibraries: (connectionId: number, token: string) =>
+      post<{ status: string; message: string }>(`/sync/connection/${connectionId}/scan`, undefined, token),
   },
 
   profile: {

@@ -146,6 +146,9 @@ if (me.totp_enabled) {
                         <div class={`conn-library-picker`} data-conn-id={conn.id} data-conn-type={conn.type}>
                           <div class="conn-libraries-list space-y-1 text-sm text-zinc-500 italic">Checking connection…</div>
                           <p class="text-xs text-zinc-400 mt-1">Leave all unchecked to sync every library.</p>
+                          <div class="mt-3">
+                            <button type="button" data-action="scan_libraries" data-conn-id={conn.id} class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer">Trigger library scan</button>
+                          </div>
                         </div>
                       </div>
                       <div class="space-y-2">
@@ -1458,6 +1461,9 @@ if (me.totp_enabled) {
             document.querySelector(`[data-connection-id="${connId}"]`)?.remove();
             showMessage('Connection deleted.');
             return;
+          } else if (action === 'scan_libraries') {
+            const connId = newBtn.getAttribute('data-conn-id');
+            url = `/api/proxy/sync/connection/${connId}/scan`;
           } else if (action === 'sync_connection') {
             const connId = newBtn.getAttribute('data-conn-id');
             url = `/api/proxy/sync/connection/${connId}`;
