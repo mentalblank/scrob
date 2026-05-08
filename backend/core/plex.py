@@ -189,8 +189,10 @@ async def get_libraries(url: str, token: str) -> List[Dict]:
     data = await _get(f"{url.rstrip('/')}/library/sections", token)
     return data.get("MediaContainer", {}).get("Directory", [])
 
-async def get_movies(url: str, token: str, section_id: str) -> List[Dict]:
+async def get_movies(url: str, token: str, section_id: str, min_timestamp: Optional[int] = None) -> List[Dict]:
     params = {"includeGuids": 1}
+    if min_timestamp:
+        params["updatedAt>>"] = min_timestamp
     data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 
@@ -199,8 +201,10 @@ async def get_shows(url: str, token: str, section_id: str) -> List[Dict]:
     data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 
-async def get_episodes(url: str, token: str, section_id: str) -> List[Dict]:
+async def get_episodes(url: str, token: str, section_id: str, min_timestamp: Optional[int] = None) -> List[Dict]:
     params = {"type": 4, "includeGuids": 1}
+    if min_timestamp:
+        params["updatedAt>>"] = min_timestamp
     data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 

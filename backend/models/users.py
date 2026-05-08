@@ -91,6 +91,12 @@ class UserSettings(Base):
     blur_explicit  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     show_comments  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     show_user_ratings : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    
+    # Sync scheduling
+    trakt_full_sync_interval    : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    trakt_partial_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_trakt_full_sync        : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_trakt_partial_sync     : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     user : Mapped["User"] = relationship(back_populates="settings")
 

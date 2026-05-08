@@ -106,7 +106,7 @@ if (me.totp_enabled) {
                     <div class="flex items-center gap-2" onclick="event.stopPropagation()">
                       <button type="button" data-action="sync_connection" data-conn-id={conn.id} data-conn-type={conn.type}
                         disabled={!hasTmdbKey}
-                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Sync ${conn.name}`}
+                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Sync ${conn.name} (Shift+Click for Partial)`}
                         class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
                       >Sync</button>
                       <button type="button" data-action="delete_connection" data-conn-id={conn.id} data-conn-name={conn.name}
@@ -192,16 +192,30 @@ if (me.totp_enabled) {
                           </label>
                         ))}
                       </div>
-                      <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
+                      <div class="bg-zinc-950 rounded-xl p-4 space-y-4">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Auto Sync</p>
-                        <div class="flex items-center justify-between gap-4">
-                          <label class="text-sm text-zinc-300">Sync interval</label>
-                          <select class="conn-auto-sync bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
-                            <option value="" selected={!conn.auto_sync_interval}>Disabled</option>
-                            {[6, 12, 24, 48].map(h => (
-                              <option value={String(h)} selected={conn.auto_sync_interval === h}>Every {h}h</option>
-                            ))}
-                          </select>
+                        <div class="space-y-3">
+                          <div class="flex items-center justify-between gap-4">
+                            <label class="text-sm text-zinc-300">Full Audit</label>
+                            <select class="conn-auto-sync bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
+                              <option value="" selected={!conn.auto_sync_interval}>Disabled</option>
+                              {[6, 12, 24, 48, 168].map(h => (
+                                <option value={String(h)} selected={conn.auto_sync_interval === h}>Every {h === 168 ? 'week' : h + 'h'}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div class="flex items-center justify-between gap-4">
+                            <div class="flex flex-col">
+                              <label class="text-sm text-zinc-300">Partial Sync</label>
+                              <span class="text-[10px] text-zinc-500 italic">Incremental changes only</span>
+                            </div>
+                            <select class="conn-partial-sync bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
+                              <option value="" selected={!conn.partial_sync_interval}>Disabled</option>
+                              {[1, 2, 4, 8, 12, 24].map(h => (
+                                <option value={String(h)} selected={conn.partial_sync_interval === h}>Every {h}h</option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -282,14 +296,23 @@ if (me.totp_enabled) {
                         </label>
                       ))}
                     </div>
-                    <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
+                    <div class="bg-zinc-950 rounded-xl p-4 space-y-4">
                       <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Auto Sync</p>
-                      <div class="flex items-center justify-between gap-4">
-                        <label class="text-sm text-zinc-300">Sync interval</label>
-                        <select id="new-auto-sync" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 cursor-pointer">
-                          <option value="">Disabled</option>
-                          {[6, 12, 24, 48].map(h => (<option value={String(h)}>Every {h}h</option>))}
-                        </select>
+                      <div class="space-y-3">
+                        <div class="flex items-center justify-between gap-4">
+                          <label class="text-sm text-zinc-300">Full Audit</label>
+                          <select id="new-auto-sync" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 cursor-pointer">
+                            <option value="">Disabled</option>
+                            {[6, 12, 24, 48, 168].map(h => (<option value={String(h)}>Every {h === 168 ? 'week' : h + 'h'}</option>))}
+                          </select>
+                        </div>
+                        <div class="flex items-center justify-between gap-4">
+                          <label class="text-sm text-zinc-300">Partial Sync</label>
+                          <select id="new-partial-sync" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 cursor-pointer">
+                            <option value="">Disabled</option>
+                            {[1, 2, 4, 8, 12, 24].map(h => (<option value={String(h)}>Every {h}h</option>))}
+                          </select>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -321,7 +344,7 @@ if (me.totp_enabled) {
                           type="button"
                           data-action="sync_trakt"
                           disabled={!hasTmdbKey}
-                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : ""}
+                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Shift+Click for Partial Sync"}
                           class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
                         >Sync</button>
                         <button type="button" id="trakt-disconnect-btn" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Disconnect</button>
@@ -418,6 +441,32 @@ if (me.totp_enabled) {
                             <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
                           </label>
                         ))}
+                      </div>
+                      <div class="bg-zinc-950 rounded-xl p-4 space-y-4">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Auto Sync</p>
+                        <div class="space-y-3">
+                          <div class="flex items-center justify-between gap-4">
+                            <label class="text-sm text-zinc-300">Full Audit</label>
+                            <select name="trakt_full_sync_interval" id="trakt_full_sync_interval" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all cursor-pointer">
+                              <option value="" selected={!settings.trakt_full_sync_interval}>Disabled</option>
+                              {[12, 24, 48, 168].map(h => (
+                                <option value={String(h)} selected={settings.trakt_full_sync_interval === h}>Every {h === 168 ? 'week' : h + 'h'}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div class="flex items-center justify-between gap-4">
+                            <div class="flex flex-col">
+                              <label class="text-sm text-zinc-300">Partial Sync</label>
+                              <span class="text-[10px] text-zinc-500 italic">History scrobble check</span>
+                            </div>
+                            <select name="trakt_partial_sync_interval" id="trakt_partial_sync_interval" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all cursor-pointer">
+                              <option value="" selected={!settings.trakt_partial_sync_interval}>Disabled</option>
+                              {[1, 2, 4, 8, 12, 24].map(h => (
+                                <option value={String(h)} selected={settings.trakt_partial_sync_interval === h}>Every {h}h</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1307,7 +1356,7 @@ if (me.totp_enabled) {
         btn.parentNode.replaceChild(newBtn, btn);
       }
       
-      newBtn.addEventListener('click', async () => {
+      newBtn.addEventListener('click', async (e) => {
         const action = newBtn.getAttribute('data-action');
         newBtn.disabled = true;
         const originalText = newBtn.textContent;
@@ -1357,6 +1406,10 @@ if (me.totp_enabled) {
                 const v = (card?.querySelector('.conn-auto-sync') as HTMLSelectElement)?.value;
                 return v ? parseInt(v) : null;
               })(),
+              partial_sync_interval: (() => {
+                const v = (card?.querySelector('.conn-partial-sync') as HTMLSelectElement)?.value;
+                return v ? parseInt(v) : null;
+              })(),
             };
             card?.querySelectorAll('.conn-pref-checkbox').forEach((cb: any) => {
               body[cb.getAttribute('data-pref')] = cb.checked;
@@ -1402,7 +1455,8 @@ if (me.totp_enabled) {
             return;
           } else if (action === 'sync_connection') {
             const connId = newBtn.getAttribute('data-conn-id');
-            url = `/api/proxy/sync/connection/${connId}`;
+            const isPartial = (e as MouseEvent).shiftKey;
+            url = `/api/proxy/sync/connection/${connId}${isPartial ? '?partial=true' : ''}`;
           } else if (action === 'test_radarr') {
             const u = document.getElementById('radarr_url').value;
             const t = document.getElementById('radarr_token').value;
@@ -1488,7 +1542,8 @@ if (me.totp_enabled) {
             showMessage('Sonarr connection successful and profiles fetched!');
             return;
           } else if (action === 'sync_trakt') {
-            url = `/api/proxy/trakt/sync`;
+            const isPartial = (e as MouseEvent).shiftKey;
+            url = `/api/proxy/trakt/sync${isPartial ? '?partial=true' : ''}`;
           }
 
           const res = await fetch(url, {
@@ -1914,6 +1969,10 @@ if (me.totp_enabled) {
             const v = (document.getElementById('new-auto-sync') as HTMLSelectElement)?.value;
             return v ? parseInt(v) : null;
           })(),
+          partial_sync_interval: (() => {
+            const v = (document.getElementById('new-partial-sync') as HTMLSelectElement)?.value;
+            return v ? parseInt(v) : null;
+          })(),
         };
         if (type === 'plex') body.server_username = un;
         else body.server_user_id = ui;
@@ -1984,6 +2043,8 @@ if (me.totp_enabled) {
 
           trakt_client_id: formData.get('trakt_client_id') || null,
           trakt_client_secret: formData.get('trakt_client_secret') || null,
+          trakt_full_sync_interval: formData.get('trakt_full_sync_interval') ? parseInt(formData.get('trakt_full_sync_interval') as string) : null,
+          trakt_partial_sync_interval: formData.get('trakt_partial_sync_interval') ? parseInt(formData.get('trakt_partial_sync_interval') as string) : null,
         };
 
         // Collect boolean checkboxes (Trakt sync prefs + app preferences)

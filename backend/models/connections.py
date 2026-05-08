@@ -30,6 +30,11 @@ class MediaServerConnection(Base):
     push_ratings     : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # Auto sync interval in hours (null = disabled)
-    auto_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # auto_sync_interval is treated as the Full Sync interval for backward compatibility
+    auto_sync_interval    : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    partial_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    last_full_sync        : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_partial_sync     : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     created_at       : Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)

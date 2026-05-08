@@ -820,12 +820,12 @@ async def sync_items(
     return all_warnings
 
 
-async def run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
+async def run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None, partial: bool = False):
     async with _sync_semaphore:
-        await _run_jellyfin_sync(user_id, job_id, movie_limit, show_limit, connection_id)
+        await _run_jellyfin_sync(user_id, job_id, movie_limit, show_limit, connection_id, partial)
 
 
-async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
+async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None, partial: bool = False):
     print(f"Starting Jellyfin sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -874,6 +874,14 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
             _new_watched: set[int] = set()
             _new_ratings: dict[int, float] = {}
 
+            # Determine min_date for partial sync
+            min_date = None
+            if partial:
+                last_sync = conn.last_partial_sync or conn.last_full_sync
+                if last_sync:
+                    # Jellyfin expects ISO 8601
+                    min_date = last_sync.isoformat()
+
             for lib in libraries:
                 lib_type = (lib.get("CollectionType") or "").lower()
                 lib_id = lib.get("Id")
@@ -881,7 +889,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                 print(f"  Processing library: {lib_name} ({lib_type})")
 
                 if lib_type == "movies":
-                    items = await jellyfin.get_movies(lib_id, j_url, j_token, j_user)
+                    items = await jellyfin.get_movies(lib_id, j_url, j_token, j_user, min_date=min_date)
 
                     if movie_limit:
                         items = items[:movie_limit]
@@ -957,7 +965,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                             "reason": "Unmatched on source — no TMDB ID available for the series",
                         })
 
-                    items = await jellyfin.get_episodes(lib_id, j_url, j_token, j_user)
+                    items = await jellyfin.get_episodes(lib_id, j_url, j_token, j_user, min_date=min_date)
                     filtered_episodes = [e for e in items if str(e.get("SeriesId")) in show_map]
 
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
@@ -974,6 +982,11 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                     all_warnings.extend(w)
 
             print(f"Jellyfin sync job {job_id} completed. Stats: {stats}")
+            if partial:
+                conn.last_partial_sync = datetime.utcnow()
+            else:
+                conn.last_full_sync = datetime.utcnow()
+                conn.last_partial_sync = conn.last_full_sync
             await _fan_out_changes_to_other_connections(db, user_id, conn.id, _new_watched, _new_ratings, settings=settings)
             await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.completed, stats=stats, warnings=all_warnings or None))
             await db.commit()
@@ -986,12 +999,12 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
             await db.commit()
 
 
-async def run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
+async def run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None, partial: bool = False):
     async with _sync_semaphore:
-        await _run_emby_sync(user_id, job_id, movie_limit, show_limit, connection_id)
+        await _run_emby_sync(user_id, job_id, movie_limit, show_limit, connection_id, partial)
 
 
-async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
+async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None, partial: bool = False):
     print(f"Starting Emby sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -1047,6 +1060,13 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             _new_watched: set[int] = set()
             _new_ratings: dict[int, float] = {}
 
+            # Determine min_date for partial sync
+            min_date = None
+            if partial:
+                last_sync = conn.last_partial_sync or conn.last_full_sync
+                if last_sync:
+                    min_date = last_sync.isoformat()
+
             for lib in libraries:
                 lib_type = (lib.get("CollectionType") or "").lower()
                 lib_id = lib.get("Id")
@@ -1054,7 +1074,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                 print(f"  Processing library: {lib_name} ({lib_type})")
 
                 if lib_type == "movies":
-                    items = await emby.get_movies(lib_id, e_url, e_token, e_user)
+                    items = await emby.get_movies(lib_id, e_url, e_token, e_user, min_date=min_date)
 
                     if movie_limit:
                         items = items[:movie_limit]
@@ -1132,7 +1152,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                             "reason": "Unmatched on source — no TMDB ID available for the series",
                         })
 
-                    items = await emby.get_episodes(lib_id, e_url, e_token, e_user)
+                    items = await emby.get_episodes(lib_id, e_url, e_token, e_user, min_date=min_date)
                     filtered_episodes = [e for e in items if str(e.get("SeriesId")) in show_map]
 
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
@@ -1149,6 +1169,11 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     all_warnings.extend(w)
 
             print(f"Emby sync job {job_id} completed. Stats: {stats}")
+            if partial:
+                conn.last_partial_sync = datetime.utcnow()
+            else:
+                conn.last_full_sync = datetime.utcnow()
+                conn.last_partial_sync = conn.last_full_sync
             await _fan_out_changes_to_other_connections(db, user_id, conn.id, _new_watched, _new_ratings, settings=settings)
             await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.completed, stats=stats, warnings=all_warnings or None))
             await db.commit()
@@ -1196,12 +1221,12 @@ async def _backfill_plex_languages(db: AsyncSession, user_id: int, connection_id
     return len(files)
 
 
-async def run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
+async def run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None, partial: bool = False):
     async with _sync_semaphore:
-        await _run_plex_sync(user_id, job_id, movie_limit, show_limit, connection_id)
+        await _run_plex_sync(user_id, job_id, movie_limit, show_limit, connection_id, partial)
 
 
-async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
+async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None, partial: bool = False):
     print(f"Starting Plex sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -1256,6 +1281,13 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             _new_watched: set[int] = set()
             _new_ratings: dict[int, float] = {}
 
+            # Determine min_timestamp for partial sync
+            min_timestamp = None
+            if partial:
+                last_sync = conn.last_partial_sync or conn.last_full_sync
+                if last_sync:
+                    min_timestamp = int(last_sync.timestamp())
+
             for lib in libraries:
                 lib_type = lib.get("type")
                 lib_key = lib.get("key")
@@ -1263,7 +1295,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                 print(f"  Processing library: {lib_title} ({lib_type})")
 
                 if lib_type == "movie":
-                    items = await plex.get_movies(p_url, p_token, lib_key)
+                    items = await plex.get_movies(p_url, p_token, lib_key, min_timestamp=min_timestamp)
                     if movie_limit:
                         items = items[:movie_limit]
 
@@ -1378,7 +1410,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         })
 
                     print(f"    Fetching episodes for {lib_title}...")
-                    items = await plex.get_episodes(p_url, p_token, lib_key)
+                    items = await plex.get_episodes(p_url, p_token, lib_key, min_timestamp=min_timestamp)
                     filtered_episodes = [i for i in items if str(i.get("grandparentRatingKey")) in show_map]
 
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
@@ -1398,6 +1430,11 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             if backfilled:
                 print(f"Plex sync job {job_id}: backfilled language data for {backfilled} file(s).")
             print(f"Plex sync job {job_id} completed. Stats: {stats}")
+            if partial:
+                conn.last_partial_sync = datetime.utcnow()
+            else:
+                conn.last_full_sync = datetime.utcnow()
+                conn.last_partial_sync = conn.last_full_sync
             await _fan_out_changes_to_other_connections(db, user_id, conn.id, _new_watched, _new_ratings, settings=settings)
             await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.completed, stats=stats, warnings=all_warnings or None))
             await db.commit()
@@ -1539,6 +1576,7 @@ async def save_connection_libraries(
 async def sync_connection(
     connection_id: int,
     background_tasks: BackgroundTasks,
+    partial: bool = Query(default=False),
     movie_limit: int = Query(default=0),
     show_limit: int = Query(default=0),
     db: AsyncSession = Depends(get_db),
@@ -1562,13 +1600,14 @@ async def sync_connection(
     await db.refresh(job)
 
     runner_map = {"jellyfin": run_jellyfin_sync, "emby": run_emby_sync, "plex": run_plex_sync}
-    background_tasks.add_task(runner_map[conn.type], current_user.id, job.id, movie_limit, show_limit, connection_id)
+    background_tasks.add_task(runner_map[conn.type], current_user.id, job.id, movie_limit, show_limit, connection_id, partial)
     return {"status": "started", "job_id": job.id, "message": f"{conn.type.capitalize()} sync is running in the background"}
 
 
 @router.post("/jellyfin")
 async def sync_jellyfin(
     background_tasks: BackgroundTasks,
+    partial: bool = Query(default=False),
     movie_limit: int = Query(default=0),
     show_limit: int = Query(default=0),
     db: AsyncSession = Depends(get_db),
@@ -1593,13 +1632,14 @@ async def sync_jellyfin(
     await db.commit()
     await db.refresh(job)
 
-    background_tasks.add_task(run_jellyfin_sync, current_user.id, job.id, movie_limit, show_limit)
+    background_tasks.add_task(run_jellyfin_sync, current_user.id, job.id, movie_limit, show_limit, None, partial)
     return {"status": "started", "job_id": job.id, "message": "Jellyfin sync is running in the background"}
 
 
 @router.post("/emby")
 async def sync_emby(
     background_tasks: BackgroundTasks,
+    partial: bool = Query(default=False),
     movie_limit: int = Query(default=0),
     show_limit: int = Query(default=0),
     db: AsyncSession = Depends(get_db),
@@ -1624,13 +1664,14 @@ async def sync_emby(
     await db.commit()
     await db.refresh(job)
 
-    background_tasks.add_task(run_emby_sync, current_user.id, job.id, movie_limit, show_limit)
+    background_tasks.add_task(run_emby_sync, current_user.id, job.id, movie_limit, show_limit, None, partial)
     return {"status": "started", "job_id": job.id, "message": "Emby sync is running in the background"}
 
 
 @router.post("/plex")
 async def sync_plex(
     background_tasks: BackgroundTasks,
+    partial: bool = Query(default=False),
     movie_limit: int = Query(default=0),
     show_limit: int = Query(default=0),
     db: AsyncSession = Depends(get_db),
@@ -1655,7 +1696,7 @@ async def sync_plex(
     await db.commit()
     await db.refresh(job)
 
-    background_tasks.add_task(run_plex_sync, current_user.id, job.id, movie_limit, show_limit)
+    background_tasks.add_task(run_plex_sync, current_user.id, job.id, movie_limit, show_limit, None, partial)
     return {"status": "started", "job_id": job.id, "message": "Plex sync is running in the background"}
 
 

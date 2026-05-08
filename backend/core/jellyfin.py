@@ -47,20 +47,24 @@ async def get_libraries(url: str, token: str, user_id: str) -> list:
     return data.get("Items", [])
 
 
-async def get_movies(library_id: str, url: str, token: str, user_id: str) -> list:
+async def get_movies(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
     all_items = []
     start = 0
     page_size = 500
 
     while True:
-        data = await _get(url, token, f"Users/{user_id}/Items", params={
+        params = {
             "ParentId": library_id,
             "IncludeItemTypes": "Movie",
             "Recursive": True,
             "Fields": "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData",
             "Limit": page_size,
             "StartIndex": start,
-        })
+        }
+        if min_date:
+            params["MinDateLastSaved"] = min_date
+
+        data = await _get(url, token, f"Users/{user_id}/Items", params=params)
         items = data.get("Items", [])
         all_items.extend(items)
 
@@ -81,20 +85,24 @@ async def get_shows(library_id: str, url: str, token: str, user_id: str) -> list
     })
     return data.get("Items", [])
 
-async def get_episodes(library_id: str, url: str, token: str, user_id: str) -> list:
+async def get_episodes(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
     all_items = []
     start = 0
     page_size = 500
 
     while True:
-        data = await _get(url, token, f"Users/{user_id}/Items", params={
+        params = {
             "ParentId": library_id,
             "IncludeItemTypes": "Episode",
             "Recursive": True,
             "Fields": "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,RunTimeTicks,PremiereDate,UserData",
             "Limit": page_size,
             "StartIndex": start,
-        })
+        }
+        if min_date:
+            params["MinDateLastSaved"] = min_date
+
+        data = await _get(url, token, f"Users/{user_id}/Items", params=params)
         items = data.get("Items", [])
         all_items.extend(items)
 

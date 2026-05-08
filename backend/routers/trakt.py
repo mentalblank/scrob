@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -245,7 +245,7 @@ async def _get_or_create_episode_media(
         return None
 
 
-async def run_trakt_sync(user_id: int, job_id: int):
+async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
     print(f"Starting Trakt sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -308,7 +308,71 @@ async def run_trakt_sync(user_id: int, job_id: int):
             _new_watched: set[int] = set()
             _new_ratings: dict[int, float] = {}
 
-            # ── Watched Movies ────────────────────────────────────────────────
+            if partial:
+                print(f"  Performing partial Trakt sync...")
+                # Get last successful sync time
+                last_sync = settings.last_trakt_partial_sync or settings.last_trakt_full_sync
+                history = await trakt_client.get_history(client_id, access_token, start_at=last_sync)
+                print(f"  Fetched {len(history)} history items from Trakt")
+                
+                await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=len(history)))
+                await db.commit()
+
+                # Pre-load existing watch events
+                we_res = await db.execute(select(WatchEvent.media_id).where(WatchEvent.user_id == user_id))
+                existing_watched = {row[0] for row in we_res}
+
+                for entry in history:
+                    item_type = entry.get("type")
+                    watched_at_str = entry.get("watched_at")
+                    watched_at = None
+                    if watched_at_str:
+                        from dateutil import parser as dt_parser
+                        dt = dt_parser.isoparse(watched_at_str)
+                        if dt.tzinfo:
+                            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                        watched_at = dt
+
+                    if item_type == "movie":
+                        movie_data = entry.get("movie", {})
+                        tmdb_id = movie_data.get("ids", {}).get("tmdb")
+                        if not tmdb_id: continue
+                        media = await _get_or_create_movie_media(db, tmdb_id, movie_data.get("title", ""), api_key)
+                        if media and media.id not in existing_watched:
+                            db.add(WatchEvent(user_id=user_id, media_id=media.id, watched_at=watched_at or datetime.utcnow(), completed=True))
+                            existing_watched.add(media.id)
+                            _new_watched.add(media.id)
+                            stats["movies"] += 1
+                    
+                    elif item_type == "episode":
+                        show_data = entry.get("show", {})
+                        ep_data = entry.get("episode", {})
+                        show_tmdb_id = show_data.get("ids", {}).get("tmdb")
+                        if not show_tmdb_id: continue
+                        show = await _get_or_create_show(db, show_tmdb_id, show_data.get("title", ""), api_key)
+                        if not show: continue
+                        
+                        season_num = ep_data.get("season")
+                        ep_num = ep_data.get("number")
+                        media = await _get_or_create_episode_media(db, show.id, season_num, ep_num, api_key, show_tmdb_id)
+                        if media and media.id not in existing_watched:
+                            db.add(WatchEvent(user_id=user_id, media_id=media.id, watched_at=watched_at or datetime.utcnow(), completed=True))
+                            existing_watched.add(media.id)
+                            _new_watched.add(media.id)
+                            stats["episodes"] += 1
+                
+                await db.commit()
+                # Update partial sync timestamp
+                settings.last_trakt_partial_sync = datetime.utcnow()
+                await db.commit()
+                
+                print(f"Trakt partial sync job {job_id} completed. Stats: {stats}")
+                await _fan_out_changes_to_other_connections(db, user_id, None, _new_watched, _new_ratings, settings=settings)
+                await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(status=SyncStatus.completed, stats=stats))
+                await db.commit()
+                return
+
+            # ── Full Sync Logic (original) ───────────────────────────────────
             if sync_watched:
                 print(f"  Fetching watched movies from Trakt...")
                 watched_movies = await trakt_client.get_watched_movies(client_id, access_token)
@@ -818,6 +882,8 @@ async def run_trakt_sync(user_id: int, job_id: int):
                 f"Lists: {stats['lists']} new, {stats['list_items']} items added. "
                 f"Errors: {stats['errors']}."
             )
+            settings.last_trakt_full_sync = datetime.utcnow()
+            settings.last_trakt_partial_sync = settings.last_trakt_full_sync
             from routers.sync import _fan_out_changes_to_other_connections
             await _fan_out_changes_to_other_connections(db, user_id, None, _new_watched, _new_ratings, settings=settings)
             await db.execute(
@@ -842,6 +908,7 @@ async def run_trakt_sync(user_id: int, job_id: int):
 @router.post("/sync")
 async def sync_trakt(
     background_tasks: BackgroundTasks,
+    partial: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -866,5 +933,5 @@ async def sync_trakt(
     await db.commit()
     await db.refresh(job)
 
-    background_tasks.add_task(run_trakt_sync, current_user.id, job.id)
+    background_tasks.add_task(run_trakt_sync, current_user.id, job.id, partial)
     return {"status": "started", "job_id": job.id, "message": "Trakt sync is running in the background"}

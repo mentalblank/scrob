@@ -8,6 +8,7 @@ Rate limits: 1000 requests per 5 minutes per user.
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -166,6 +167,29 @@ async def get_ratings(client_id: str, access_token: str) -> dict:
         _fetch("/sync/ratings/shows"),
     )
     return {"movies": movies, "shows": shows}
+
+
+async def get_history(
+    client_id: str, access_token: str, start_at: Optional[datetime] = None
+) -> list[dict]:
+    """Fetch user's playback history.
+    
+    If start_at is provided, only items watched after that date are returned.
+    Returns list of: {id, watched_at, action, type, movie: {...}, show: {...}, season: {...}, episode: {...}}
+    """
+    params = {"limit": 100}
+    if start_at:
+        # Trakt expects ISO 8601 with Z for UTC
+        params["start_at"] = start_at.isoformat() + "Z"
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get(
+            f"{TRAKT_BASE}/sync/history",
+            headers=_headers(client_id, access_token),
+            params=params,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 
 # ── Outbound Push ─────────────────────────────────────────────────────────────

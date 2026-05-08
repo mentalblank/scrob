@@ -21,69 +21,104 @@ from models.base import CollectionSource
 async def _auto_sync_scheduler():
     from db import async_sessionmaker
     from models.connections import MediaServerConnection
+    from models.users import UserSettings
     from routers.sync import run_jellyfin_sync, run_emby_sync, run_plex_sync
+    from routers.trakt import run_trakt_sync
     from datetime import datetime, timezone
 
     CHECK_INTERVAL = 300  # seconds between scheduler ticks
 
-    source_map = {"jellyfin": CollectionSource.jellyfin, "emby": CollectionSource.emby, "plex": CollectionSource.plex}
-    runner_map = {"jellyfin": run_jellyfin_sync, "emby": run_emby_sync, "plex": run_plex_sync}
+    ms_source_map = {"jellyfin": CollectionSource.jellyfin, "emby": CollectionSource.emby, "plex": CollectionSource.plex}
+    ms_runner_map = {"jellyfin": run_jellyfin_sync, "emby": run_emby_sync, "plex": run_plex_sync}
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
         try:
             async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
             async with async_session() as db:
-                result = await db.execute(
+                now = datetime.utcnow()
+
+                # ── Media Server Connections ─────────────────────────────────
+                res = await db.execute(
                     select(MediaServerConnection).where(
-                        MediaServerConnection.auto_sync_interval.isnot(None)
+                        (MediaServerConnection.auto_sync_interval.isnot(None)) |
+                        (MediaServerConnection.partial_sync_interval.isnot(None))
                     )
                 )
-                connections = result.scalars().all()
-
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                connections = res.scalars().all()
 
                 for conn in connections:
                     user_id = conn.user_id
-                    source = source_map.get(conn.type)
-                    run_fn = runner_map.get(conn.type)
-                    if not source or not run_fn:
-                        continue
+                    source = ms_source_map.get(conn.type)
+                    run_fn = ms_runner_map.get(conn.type)
+                    if not source or not run_fn: continue
 
-                    # Skip if a sync is already pending or running for this user+source
-                    active_q = await db.execute(
-                        select(SyncJob).where(
-                            SyncJob.user_id == user_id,
-                            SyncJob.source == source,
-                            SyncJob.status.in_([SyncStatus.pending, SyncStatus.running]),
-                        )
+                    # Check for active job
+                    active_q = await db.execute(select(SyncJob).where(
+                        SyncJob.user_id == user_id, SyncJob.source == source,
+                        SyncJob.status.in_([SyncStatus.pending, SyncStatus.running])
+                    ))
+                    if active_q.scalar_one_or_none(): continue
+
+                    do_full = False
+                    do_partial = False
+
+                    if conn.auto_sync_interval:
+                        last = conn.last_full_sync
+                        if not last or (now - last).total_seconds() / 3600 >= conn.auto_sync_interval:
+                            do_full = True
+                    
+                    if not do_full and conn.partial_sync_interval:
+                        last = conn.last_partial_sync or conn.last_full_sync
+                        if not last or (now - last).total_seconds() / 3600 >= conn.partial_sync_interval:
+                            do_partial = True
+
+                    if do_full or do_partial:
+                        job = SyncJob(user_id=user_id, source=source, status=SyncStatus.pending)
+                        db.add(job)
+                        await db.commit()
+                        print(f"Auto-sync: queuing {'full' if do_full else 'partial'} {conn.type} sync for user {user_id} (job {job.id})")
+                        asyncio.create_task(run_fn(user_id, job.id, 0, 0, conn.id, partial=do_partial))
+
+                # ── Trakt Sync ───────────────────────────────────────────────
+                res = await db.execute(
+                    select(UserSettings).where(
+                        (UserSettings.trakt_full_sync_interval.isnot(None)) |
+                        (UserSettings.trakt_partial_sync_interval.isnot(None))
                     )
-                    if active_q.scalar_one_or_none():
-                        continue
+                )
+                settings_list = res.scalars().all()
 
-                    # Find the last completed or failed sync for this user+source+connection
-                    last_q = await db.execute(
-                        select(SyncJob).where(
-                            SyncJob.user_id == user_id,
-                            SyncJob.source == source,
-                            SyncJob.status.in_([SyncStatus.completed, SyncStatus.failed]),
-                        ).order_by(SyncJob.updated_at.desc()).limit(1)
-                    )
-                    last_job = last_q.scalar_one_or_none()
+                for settings in settings_list:
+                    if not settings.trakt_access_token: continue
+                    user_id = settings.user_id
+                    
+                    # Check for active Trakt job
+                    active_q = await db.execute(select(SyncJob).where(
+                        SyncJob.user_id == user_id, SyncJob.source == CollectionSource.trakt,
+                        SyncJob.status.in_([SyncStatus.pending, SyncStatus.running])
+                    ))
+                    if active_q.scalar_one_or_none(): continue
 
-                    if last_job:
-                        elapsed_hours = (now - last_job.updated_at).total_seconds() / 3600
-                        if elapsed_hours < conn.auto_sync_interval:
-                            continue
+                    do_full = False
+                    do_partial = False
 
-                    job = SyncJob(user_id=user_id, source=source, status=SyncStatus.pending)
-                    db.add(job)
-                    await db.flush()
-                    job_id = job.id
-                    await db.commit()
+                    if settings.trakt_full_sync_interval:
+                        last = settings.last_trakt_full_sync
+                        if not last or (now - last).total_seconds() / 3600 >= settings.trakt_full_sync_interval:
+                            do_full = True
+                    
+                    if not do_full and settings.trakt_partial_sync_interval:
+                        last = settings.last_trakt_partial_sync or settings.last_trakt_full_sync
+                        if not last or (now - last).total_seconds() / 3600 >= settings.trakt_partial_sync_interval:
+                            do_partial = True
 
-                    print(f"Auto-sync: queuing {conn.type} sync for user {user_id}, connection {conn.id} (job {job_id})")
-                    asyncio.create_task(run_fn(user_id, job_id, 0, 0, conn.id))
+                    if do_full or do_partial:
+                        job = SyncJob(user_id=user_id, source=CollectionSource.trakt, status=SyncStatus.pending)
+                        db.add(job)
+                        await db.commit()
+                        print(f"Auto-sync: queuing {'full' if do_full else 'partial'} Trakt sync for user {user_id} (job {job.id})")
+                        asyncio.create_task(run_trakt_sync(user_id, job.id, partial=do_partial))
 
         except Exception as e:
             print(f"Auto-sync scheduler error: {e}")
