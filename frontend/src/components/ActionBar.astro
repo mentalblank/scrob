@@ -17,6 +17,7 @@ interface Props {
   userRating?: number | null;
   isBlocked?: boolean;
   listOnly?: boolean;
+  hideBlock?: boolean;
 }
 
 const {
@@ -37,6 +38,7 @@ const {
   userRating = null,
   isBlocked = false,
   listOnly = false,
+  hideBlock = false,
 } = Astro.props;
 
 const isSeries = mediaType === "series";
@@ -181,7 +183,7 @@ const requestCls  = isMonitored
     )}
 
     <!-- Block (red) -->
-    {!listOnly && (
+    {!listOnly && !hideBlock && (
       <button
         data-action="block-item"
         data-blocked={String(isBlocked)}
