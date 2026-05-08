@@ -11,6 +11,7 @@ if (!token) {
 const tab = Astro.url.searchParams.get("tab") ?? "items";
 
 let blockedItems: MediaItem[] = [];
+let blockedItemsCount = 0;
 let filters: ContentFilters = { blocked_genres: [], blocked_keywords: [], blocked_regexes: [], available_genres: [] };
 let error = "";
 
@@ -19,10 +20,11 @@ try {
     api.media.getBlocklist(token),
     api.contentFilters.get(token),
   ]);
-
+  
+  blockedItemsCount = blocklist?.length || 0;
   filters = cf;
 
-  if (blocklist && blocklist.length > 0) {
+  if (tab === "items" && blocklist && blocklist.length > 0) {
     const detailPromises = blocklist.map(item => {
       if (item.media_type === 'series') {
         return api.shows.get(item.tmdb_id, token)
@@ -63,7 +65,7 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
   )}
 
   <!-- Tab Bar -->
-  <div class="flex gap-1 p-1 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-fit mb-8">
+  <div class="flex items-center gap-1 p-1 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-fit max-w-full mb-8 overflow-x-auto no-scrollbar">
     {[
       { id: "items",    label: "Blocked Items",       icon: "M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" },
       { id: "genres",   label: "Genre Filters",       icon: "M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17" },
@@ -71,12 +73,12 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
     ].map(t => (
       <a
         href={`/blocklist?tab=${t.id}`}
-        class={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${tab === t.id ? "bg-zinc-700 text-zinc-100 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
+        class={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all shrink-0 ${tab === t.id ? "bg-zinc-700 text-zinc-100 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d={t.icon}/></svg>
         {t.label}
-        {t.id === "items" && blockedItems.length > 0 && (
-          <span class="ml-1 bg-zinc-600 text-zinc-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{blockedItems.length}</span>
+        {t.id === "items" && blockedItemsCount > 0 && (
+          <span class="ml-1 bg-zinc-600 text-zinc-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{blockedItemsCount}</span>
         )}
         {t.id === "genres" && filters.blocked_genres.length > 0 && (
           <span class="ml-1 bg-rose-900/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{filters.blocked_genres.length}</span>

@@ -279,6 +279,15 @@ nav, div, a, button, input, span, main {
   pointer-events: none; /* Prevent link clicks while dragging */
 }
 
+/* Hide scrollbar but allow scrolling */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
 /* ── Explicit content blur ──────────────────────────────────────────────── */
 html.blur-explicit [data-adult="true"] img {
   filter: blur(24px);
