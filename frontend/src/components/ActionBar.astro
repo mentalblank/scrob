@@ -18,6 +18,7 @@ interface Props {
   isBlocked?: boolean;
   listOnly?: boolean;
   hideBlock?: boolean;
+  hideRate?: boolean;
 }
 
 const {
@@ -39,7 +40,14 @@ const {
   isBlocked = false,
   listOnly = false,
   hideBlock = false,
+  hideRate = false,
 } = Astro.props;
+
+const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false";
+const effectivelyHideRate = hideRate || !showUserRatings;
+
+const isSeasonOrEpisode = seasonNumber != null || episodeNumber != null;
+const effectivelyHideBlock = hideBlock || isSeasonOrEpisode;
 
 const isSeries = mediaType === "series";
 const showRequest = !hideRequest && requestEnabled && (mediaType === "movie" || mediaType === "series");
@@ -125,7 +133,7 @@ const requestCls  = isMonitored
     )}
 
     <!-- Rate (amber) -->
-    {!listOnly && (
+    {!listOnly && !effectivelyHideRate && (
       <button
         data-action="rate"
         data-user-rating={userRating != null ? String(userRating) : ""}
@@ -183,7 +191,7 @@ const requestCls  = isMonitored
     )}
 
     <!-- Block (red) -->
-    {!listOnly && !hideBlock && (
+    {!listOnly && !effectivelyHideBlock && (
       <button
         data-action="block-item"
         data-blocked={String(isBlocked)}

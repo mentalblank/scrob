@@ -96,6 +96,9 @@ function starFill(rating: number, star: number): "full" | "half" | "empty" {
   if (rating >= star * 2 - 1) return "half";
   return "empty";
 }
+
+const showComments = Astro.cookies.get("show_comments")?.value !== "false";
+const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false";
 ---
 
 <Base title={profile ? `${profile.display_name}'s Profile` : "Profile"}>
@@ -214,10 +217,12 @@ function starFill(rating: number, star: number): "full" | "half" | "empty" {
             <p class="text-3xl font-black text-zinc-100 tracking-tight">{profile.total_collected}</p>
             <p class="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">Items Collected</p>
           </div>
-          <div class="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 text-center">
-            <p class="text-3xl font-black text-zinc-100 tracking-tight">{profile.total_rated}</p>
-            <p class="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">Items Rated</p>
-          </div>
+          {showUserRatings && (
+            <div class="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 text-center">
+              <p class="text-3xl font-black text-zinc-100 tracking-tight">{profile.total_rated}</p>
+              <p class="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">Items Rated</p>
+            </div>
+          )}
         </div>
         <div class="flex justify-center">
           <a href={`/stats/${profile.id}`} class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200">
@@ -320,7 +325,7 @@ function starFill(rating: number, star: number): "full" | "half" | "empty" {
             )}
 
             <!-- Top Rated Movies -->
-            {profile.top_rated_movies.length > 0 && (
+            {showUserRatings && profile.top_rated_movies.length > 0 && (
               <section>
                 <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
                   <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
@@ -352,7 +357,7 @@ function starFill(rating: number, star: number): "full" | "half" | "empty" {
             )}
 
             <!-- Top Rated Shows -->
-            {profile.top_rated_shows.length > 0 && (
+            {showUserRatings && profile.top_rated_shows.length > 0 && (
               <section>
                 <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
                   <span class="w-1 h-3.5 bg-yellow-400 rounded-full"></span>
@@ -384,7 +389,7 @@ function starFill(rating: number, star: number): "full" | "half" | "empty" {
             )}
 
             <!-- Recent Comments -->
-            {profile.recent_comments.length > 0 && (
+            {showComments && profile.recent_comments.length > 0 && (
               <section>
                 <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
                   <span class="w-1 h-3.5 bg-purple-500 rounded-full"></span>

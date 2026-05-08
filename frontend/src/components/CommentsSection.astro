@@ -23,7 +23,10 @@ try {
 } catch (e) {
   console.error("Failed to load comments", e);
 }
+
+const showComments = Astro.cookies.get("show_comments")?.value !== "false";
 ---
+{showComments ? (
 
 <div class="mt-24 border-zinc-900 pt-16 mb-20">
   <div class="flex items-center justify-between mb-10">
@@ -371,3 +374,6 @@ try {
 
   attachListeners();
 </script>
+) : (
+  <div class="mt-24"></div>
+)}

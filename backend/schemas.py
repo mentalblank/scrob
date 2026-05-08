@@ -102,6 +102,8 @@ class UserSettings(BaseModel):
 
     preferences: Optional[dict] = None
     blur_explicit: Optional[bool] = None
+    show_comments: Optional[bool] = None
+    show_user_ratings: Optional[bool] = None
 
     class Config:
         from_attributes = True

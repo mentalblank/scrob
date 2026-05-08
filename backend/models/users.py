@@ -89,6 +89,8 @@ class UserSettings(Base):
 
     preferences    : Mapped[Optional[dict]] = mapped_column(JSON)
     blur_explicit  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    show_comments  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    show_user_ratings : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     user : Mapped["User"] = relationship(back_populates="settings")
 

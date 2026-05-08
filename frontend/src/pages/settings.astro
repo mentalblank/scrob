@@ -10,6 +10,7 @@ const [settings, me, connections] = await Promise.all([
   api.auth.me(token!),
   api.auth.getConnections(token!),
 ]);
+
 const hasTmdbKey = !!settings.tmdb_api_key;
 const traktConfigured    = !!(settings.trakt_connected || settings.trakt_client_id);
 const radarrConfigured   = !!(settings.radarr_url && settings.radarr_token);
@@ -648,6 +649,40 @@ if (me.totp_enabled) {
                 id="blur-explicit-toggle"
                 class="sr-only peer"
                 checked={settings.blur_explicit !== false}
+              />
+              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            </label>
+          </div>
+
+          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+            <div>
+              <p class="text-sm font-semibold text-zinc-100 mb-1">Show comments</p>
+              <p class="text-xs text-zinc-400">Show user comments on media detail pages site-wide.</p>
+            </div>
+            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+              <input
+                type="checkbox"
+                name="show_comments"
+                id="show-comments-toggle"
+                class="sr-only peer"
+                checked={settings.show_comments !== false}
+              />
+              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            </label>
+          </div>
+
+          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+            <div>
+              <p class="text-sm font-semibold text-zinc-100 mb-1">Show user ratings</p>
+              <p class="text-xs text-zinc-400">Show ratings from users of this app. TMDB ratings will still be visible.</p>
+            </div>
+            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+              <input
+                type="checkbox"
+                name="show_user_ratings"
+                id="show-user-ratings-toggle"
+                class="sr-only peer"
+                checked={settings.show_user_ratings !== false}
               />
               <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
             </label>
@@ -1955,7 +1990,7 @@ if (me.totp_enabled) {
         const syncKeys = [
           'trakt_sync_watched', 'trakt_sync_ratings', 'trakt_sync_lists', 'trakt_watchlist_split',
           'trakt_push_watched', 'trakt_push_ratings', 'trakt_push_lists',
-          'blur_explicit',
+          'blur_explicit', 'show_comments', 'show_user_ratings'
         ] as const;
         const syncPrefs: Record<string, boolean> = {};
         for (const key of syncKeys) {
@@ -1969,6 +2004,18 @@ if (me.totp_enabled) {
           const val = blurEl.checked ? 'true' : 'false';
           document.cookie = `blur_explicit=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
           document.documentElement.classList.toggle('blur-explicit', blurEl.checked);
+        }
+        const commentsEl = form.querySelector<HTMLInputElement>('[name="show_comments"]');
+        if (commentsEl) {
+          const val = commentsEl.checked ? 'true' : 'false';
+          document.cookie = `show_comments=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
+          document.documentElement.classList.toggle('show-comments', commentsEl.checked);
+        }
+        const ratingsEl = form.querySelector<HTMLInputElement>('[name="show_user_ratings"]');
+        if (ratingsEl) {
+          const val = ratingsEl.checked ? 'true' : 'false';
+          document.cookie = `show_user_ratings=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
+          document.documentElement.classList.toggle('show-user-ratings', ratingsEl.checked);
         }
 
         // Gather visibility filters
@@ -2198,6 +2245,42 @@ if (me.totp_enabled) {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ blur_explicit: blurToggle.checked }),
+      });
+    });
+  }
+  const showCommentsToggle = document.getElementById('show-comments-toggle') as HTMLInputElement | null;
+  if (showCommentsToggle) {
+    const val = showCommentsToggle.checked ? 'true' : 'false';
+    document.cookie = `show_comments=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
+    document.documentElement.classList.toggle('show-comments', showCommentsToggle.checked);
+
+    showCommentsToggle.addEventListener('change', async () => {
+      const v = showCommentsToggle.checked ? 'true' : 'false';
+      document.cookie = `show_comments=${v}; path=/; SameSite=Lax; Max-Age=31536000`;
+      document.documentElement.classList.toggle('show-comments', showCommentsToggle.checked);
+      const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+      await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ show_comments: showCommentsToggle.checked }),
+      });
+    });
+  }
+  const ratingsToggle = document.getElementById('show-user-ratings-toggle') as HTMLInputElement | null;
+  if (ratingsToggle) {
+    const val = ratingsToggle.checked ? 'true' : 'false';
+    document.cookie = `show_user_ratings=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
+    document.documentElement.classList.toggle('show-user-ratings', ratingsToggle.checked);
+
+    ratingsToggle.addEventListener('change', async () => {
+      const v = ratingsToggle.checked ? 'true' : 'false';
+      document.cookie = `show_user_ratings=${v}; path=/; SameSite=Lax; Max-Age=31536000`;
+      document.documentElement.classList.toggle('show-user-ratings', ratingsToggle.checked);
+      const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+      await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ show_user_ratings: ratingsToggle.checked }),
       });
     });
   }

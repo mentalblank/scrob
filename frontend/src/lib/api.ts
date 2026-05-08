@@ -39,7 +39,7 @@ async function request<T>(
     try {
       const errorJson = await res.json();
       errorDetail = errorJson.detail || JSON.stringify(errorJson);
-    } catch (e) {}
+    } catch (e) { }
     throw new Error(`API ${res.status}: ${path} ${errorDetail}`);
   }
   return res.json();
@@ -233,13 +233,13 @@ export interface UserList {
   created_at: string;
   updated_at: string;
   preview_posters: { url: string; adult: boolean }[];
-  
+
   radarr_auto_add: boolean;
   radarr_root_folder: string | null;
   radarr_quality_profile: number | null;
   radarr_tags: number[] | null;
   radarr_monitor: string | null;
-  
+
   sonarr_auto_add: boolean;
   sonarr_root_folder: string | null;
   sonarr_quality_profile: number | null;
@@ -398,6 +398,8 @@ export interface UserSettings {
 
   preferences: UserPreferences | null;
   blur_explicit: boolean;
+  show_comments: boolean;
+  show_user_ratings: boolean;
 }
 
 export interface MediaServerConnection {

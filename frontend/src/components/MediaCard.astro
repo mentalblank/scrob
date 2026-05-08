@@ -4,9 +4,10 @@ import CardActionBar from "./CardActionBar.astro";
 
 interface Props {
   item: MediaItem;
+  hideBlock?: boolean;
 }
 
-const { item } = Astro.props;
+const { item, hideBlock = false } = Astro.props;
 
 const isPerson = item.type === "person";
 const isCollection = item.type === "collection";
@@ -80,7 +81,7 @@ const showProgress = progressPct > 0;
     <a href={href} class="block">
       <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300" data-adult={item.adult ? "true" : undefined}>
         <!-- Block button -->
-        {showActionBar && (
+        {showActionBar && !hideBlock && (
           <button
             data-action="block"
             title="Don't show this again"
