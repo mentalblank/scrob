@@ -3,14 +3,16 @@
   <h1>Scrob</h1>
   <p>Open-source, self-hosted media tracking — your personal Letterboxd + Trakt.</p>
 
-  [![GitHub Stars](https://img.shields.io/github/stars/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/stargazers)
-  [![Docker Pulls](https://img.shields.io/docker/pulls/bellamy/scrob?style=flat-square)](https://hub.docker.com/r/bellamy/scrob)
-  [![GitHub Contributors](https://img.shields.io/github/contributors/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/graphs/contributors)
-  [![GitHub Sponsors](https://img.shields.io/github/sponsors/ellite?style=flat-square)](https://github.com/sponsors/ellite)
-  [![Latest Release](https://img.shields.io/github/v/release/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/releases/latest)
+  [![Docker Pulls](https://img.shields.io/docker/pulls/mentalblank/scrob?style=flat-square)](https://hub.docker.com/r/mentalblank/scrob)
+  [![GitHub Contributors](https://img.shields.io/github/contributors/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/graphs/contributors)
+  [![Latest Release](https://img.shields.io/github/v/release/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/releases/latest)
+  
 </div>
 
 ---
+
+> [!NOTE]
+> This is a fork of the original [ellite/scrob](https://github.com/ellite/scrob) project, maintained by [mentalblank](https://github.com/mentalblank).
 
 Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks your watch history, ratings, and personal lists, and lets you push your activity back to your media server - all from a clean, app-like web interface that installs as a PWA on any device.
 
@@ -43,15 +45,18 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 - **Real-time scrobbling**: Webhooks from Jellyfin, Plex, Emby, and Kodi update your watch state as you play — no manual sync needed.
 - **Trakt integration**: Sync your watched history and ratings from Trakt, and push Scrob activity back to Trakt automatically.
 - **Watch history & ratings**: Track every movie and episode you've watched. Rate them on a 10-point scale with optional reviews.
+- **Content Filtering**: Robust blocklist management for genres, keywords, and regex patterns to filter your explore and discovery pages.
 - **Season ratings**: Rate individual seasons separately from the overall show.
 - **Personal lists**: Create and curate lists of movies and shows. Mark them public to share with other users on the same instance.
 - **Comments**: Leave comments on movies, shows, seasons, and episodes.
 - **Social**: Follow other users and see their activity.
 - **TMDB integration**: Rich metadata for every title — posters, backdrops, cast, crew, trailers, collections, and more.
+- **Trailers & Logos**: Play trailers directly in the UI and enjoy a premium cinematic feel with TMDB logo support.
 - **Search**: Search TMDB across movies, shows, people, and collections, merged with your local library data.
+- **Infinite Scroll & Layouts**: Experience smooth navigation with infinite scrolling and toggle between Grid or List layouts for any media view.
 - **Pick a Movie / Pick a Show**: Get a suggestion on what to watch next from your library or your streaming services based on your preferences.
 - **Trending & Airing Today**: Daily trending movies and shows from TMDB, plus episodes airing today filtered to your collection.
-- **Continue Watching & Next Up**: Dashboard cards showing in-progress items and the next episode to watch in each series.
+- **Continue Watching & Next Up**: Dashboard cards showing in-progress items and the next episode to watch, featuring visual progress bars.
 - **Season & episode tracking**: Detailed season views with per-episode watched state and progress.
 - **Cast & crew pages**: Full filmography for any person, linked to your library.
 - **Radarr & Sonarr integration**: Add movies and shows to Radarr/Sonarr directly from the Scrob UI.
@@ -107,12 +112,12 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 
 ### Docker Compose
 
-> Images are hosted on **Docker Hub** (`bellamy/scrob`). A mirror is also available on GHCR (`ghcr.io/ellite/scrob`) if you prefer.
+> Images are hosted on **Docker Hub** (`mentalblank/scrob`). A mirror is also available on GHCR (`ghcr.io/mentalblank/scrob`) if you prefer.
 
 1. Download the compose file:
 
 ```bash
-curl -o docker-compose.yaml https://raw.githubusercontent.com/ellite/scrob/main/docker-compose.yaml
+curl -o docker-compose.yaml https://raw.githubusercontent.com/mentalblank/scrob/main/docker-compose.yaml
 ```
 
 2. Edit `docker-compose.yaml` and replace the required values:
@@ -137,7 +142,7 @@ services:
 
   scrob:
     container_name: scrob
-    image: bellamy/scrob:latest
+    image: mentalblank/scrob:main
     restart: unless-stopped
     depends_on:
       scrob-db:
@@ -342,8 +347,8 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## Contributors
 
-<a href="https://github.com/ellite/scrob/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ellite/scrob" />
+<a href="https://github.com/mentalblank/scrob/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=mentalblank/scrob" />
 </a>
 
 ## Development
@@ -360,7 +365,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 ### Setup
 
 ```bash
-git clone https://github.com/ellite/scrob.git
+git clone https://github.com/mentalblank/scrob.git
 cd scrob
 
 # Start a local database
@@ -394,9 +399,9 @@ The frontend dev server starts on `http://localhost:4321` and proxies API calls 
 
 ## License
 
-Scrob is licensed under the [GNU General Public License v3.0](LICENSE).
+Scrob is licensed under the [GNU General Public License v3.0](LICENSE.md).
 
-You are free to use, modify, and distribute Scrob, provided that any derivative works are also released under the GPLv3.
+You are free to use, modify, and distribute Scrob, provided that any derivative works are also released under the GPLv3. See the [Changelog](CHANGELOG.md) for a record of modifications in this fork.
 
 ## Links
 
