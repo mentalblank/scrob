@@ -75,14 +75,43 @@ async def get_movies(library_id: str, url: str, token: str, user_id: str, min_da
 
     return all_items
 
-async def get_shows(library_id: str, url: str, token: str, user_id: str) -> list:
-    data = await _get(url, token, f"Users/{user_id}/Items", params={
-        "ParentId": library_id,
-        "IncludeItemTypes": "Series",
-        "Recursive": True,
-        "Fields": "ProviderIds",
-        "Limit": 2000,
-    })
+async def get_shows(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
+    all_items = []
+    start = 0
+    page_size = 500
+
+    while True:
+        params = {
+            "ParentId": library_id,
+            "IncludeItemTypes": "Series",
+            "Recursive": True,
+            "Fields": "ProviderIds",
+            "Limit": page_size,
+            "StartIndex": start,
+        }
+        if min_date:
+            params["MinDateLastSaved"] = min_date
+
+        data = await _get(url, token, f"Users/{user_id}/Items", params=params)
+        items = data.get("Items", [])
+        all_items.extend(items)
+
+        total = data.get("TotalRecordCount", 0)
+        start += page_size
+        if start >= total:
+            break
+
+    return all_items
+
+async def get_items_by_ids(url: str, token: str, user_id: str, item_ids: List[str]) -> List[Dict]:
+    """Fetch specific items by their IDs in one batch call."""
+    if not item_ids:
+        return []
+    params = {
+        "Ids": ",".join(item_ids),
+        "Fields": "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData",
+    }
+    data = await _get(url, token, f"Users/{user_id}/Items", params=params)
     return data.get("Items", [])
 
 async def get_episodes(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:

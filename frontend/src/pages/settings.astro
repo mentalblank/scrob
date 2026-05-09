@@ -107,9 +107,14 @@ if (me.totp_enabled) {
                     <div class="flex items-center gap-2" onclick="event.stopPropagation()">
                       <button type="button" data-action="sync_connection" data-conn-id={conn.id} data-conn-type={conn.type}
                         disabled={!hasTmdbKey}
-                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Sync ${conn.name} (Shift+Click for Partial)`}
+                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Full sync of ${conn.name}`}
                         class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
-                      >Sync</button>
+                      >Full Sync</button>
+                      <button type="button" data-action="sync_connection" data-conn-id={conn.id} data-conn-type={conn.type} data-partial="true"
+                        disabled={!hasTmdbKey}
+                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Partial sync of ${conn.name}`}
+                        class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
+                      >Partial Sync</button>
                       <button type="button" data-action="delete_connection" data-conn-id={conn.id} data-conn-name={conn.name}
                         class="js-action-btn text-sm bg-zinc-800 hover:bg-red-900/30 text-red-400 border border-zinc-700 hover:border-red-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                       >Delete</button>
@@ -466,9 +471,17 @@ if (me.totp_enabled) {
                           type="button"
                           data-action="sync_trakt"
                           disabled={!hasTmdbKey}
-                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Shift+Click for Partial Sync"}
+                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Full library audit and sync"}
                           class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
-                        >Sync</button>
+                        >Full Sync</button>
+                        <button
+                          type="button"
+                          data-action="sync_trakt"
+                          data-partial="true"
+                          disabled={!hasTmdbKey}
+                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Quick incremental sync (history check)"}
+                          class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
+                        >Partial Sync</button>
                         <button type="button" id="trakt-disconnect-btn" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Disconnect</button>
                       </>
                     ) : (
@@ -1615,7 +1628,7 @@ if (me.totp_enabled) {
             url = `/api/proxy/sync/connection/${connId}/scan`;
           } else if (action === 'sync_connection') {
             const connId = newBtn.getAttribute('data-conn-id');
-            const isPartial = (e as MouseEvent).shiftKey;
+            const isPartial = (e as MouseEvent).shiftKey || newBtn.getAttribute('data-partial') === 'true';
             url = `/api/proxy/sync/connection/${connId}${isPartial ? '?partial=true' : ''}`;
           } else if (action === 'test_radarr') {
             const u = document.getElementById('radarr_url').value;
@@ -1702,7 +1715,7 @@ if (me.totp_enabled) {
             showMessage('Sonarr connection successful and profiles fetched!');
             return;
           } else if (action === 'sync_trakt') {
-            const isPartial = (e as MouseEvent).shiftKey;
+            const isPartial = (e as MouseEvent).shiftKey || newBtn.getAttribute('data-partial') === 'true';
             url = `/api/proxy/trakt/sync${isPartial ? '?partial=true' : ''}`;
           }
 

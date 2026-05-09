@@ -246,6 +246,7 @@ async def _get_or_create_episode_media(
 
 
 async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
+    from routers.sync import _fan_out_changes_to_other_connections
     print(f"Starting Trakt sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -354,7 +355,7 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
                         
                         season_num = ep_data.get("season")
                         ep_num = ep_data.get("number")
-                        media = await _get_or_create_episode_media(db, show.id, season_num, ep_num, api_key, show_tmdb_id)
+                        media = await _get_or_create_episode_media(db, show.id, show_tmdb_id, season_num, ep_num, api_key)
                         if media and media.id not in existing_watched:
                             db.add(WatchEvent(user_id=user_id, media_id=media.id, watched_at=watched_at or datetime.utcnow(), completed=True))
                             existing_watched.add(media.id)
@@ -884,7 +885,6 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
             )
             settings.last_trakt_full_sync = datetime.utcnow()
             settings.last_trakt_partial_sync = settings.last_trakt_full_sync
-            from routers.sync import _fan_out_changes_to_other_connections
             await _fan_out_changes_to_other_connections(db, user_id, None, _new_watched, _new_ratings, settings=settings)
             await db.execute(
                 update(SyncJob).where(SyncJob.id == job_id).values(

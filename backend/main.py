@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from core.limiter import limiter
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from models.sync import SyncJob, SyncStatus
 from models.base import CollectionSource
 

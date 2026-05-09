@@ -2,7 +2,7 @@ import asyncio
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, cast, String
 from sqlalchemy.dialects.postgresql import insert
 
 from db import get_db, engine
@@ -232,7 +232,8 @@ async def batch_enrich_items(
                 d = await tmdb.get_season(stid, sn, api_key=api_key)
                 season_data[(stid, sn)] = {ep["episode_number"]: ep for ep in d.get("episodes", [])}
             except Exception as e:
-                print(f"  Failed to fetch show={stid} season={sn}: {e}")
+                show_title = show_title_map.get(stid, f"ID {stid}")
+                print(f"  Failed to fetch '{show_title}' Season {sn} from TMDB (404 Not Found). This usually means your local season numbering doesn't match TMDB.")
                 season_data[(stid, sn)] = {}
                 failed_season_keys.add((stid, sn))
 
@@ -941,9 +942,23 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                     all_warnings.extend(w)
 
                 elif lib_type in ("tvshows", "tv"):
-                    shows = await jellyfin.get_shows(lib_id, j_url, j_token, j_user)
-                    if show_limit:
-                        shows = shows[:show_limit]
+                    if partial:
+                        print(f"    Fetching recently updated shows and episodes...")
+                        shows = await jellyfin.get_shows(lib_id, j_url, j_token, j_user, min_date=min_date)
+                        items = await jellyfin.get_episodes(lib_id, j_url, j_token, j_user, min_date=min_date)
+                        
+                        needed_show_ids = {str(e.get("SeriesId")) for e in items if e.get("SeriesId")}
+                        existing_show_ids = {str(s.get("Id")) for s in shows}
+                        missing_show_ids = list(needed_show_ids - existing_show_ids)
+                        if missing_show_ids:
+                            print(f"    Fetching {len(missing_show_ids)} parent shows for updated episodes...")
+                            extra_shows = await jellyfin.get_items_by_ids(j_url, j_token, j_user, missing_show_ids)
+                            shows.extend(extra_shows)
+                    else:
+                        shows = await jellyfin.get_shows(lib_id, j_url, j_token, j_user)
+                        if show_limit:
+                            shows = shows[:show_limit]
+                        items = None # Fetch later
 
                     series_tmdb_map = {
                         s.get("Id"): get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
@@ -965,7 +980,8 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                             "reason": "Unmatched on source — no TMDB ID available for the series",
                         })
 
-                    items = await jellyfin.get_episodes(lib_id, j_url, j_token, j_user, min_date=min_date)
+                    if items is None:
+                        items = await jellyfin.get_episodes(lib_id, j_url, j_token, j_user, min_date=min_date)
                     filtered_episodes = [e for e in items if str(e.get("SeriesId")) in show_map]
 
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
@@ -1126,9 +1142,23 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     all_warnings.extend(w)
 
                 elif lib_type in ("tvshows", "tv"):
-                    shows = await emby.get_shows(lib_id, e_url, e_token, e_user)
-                    if show_limit:
-                        shows = shows[:show_limit]
+                    if partial:
+                        print(f"    Fetching recently updated shows and episodes...")
+                        shows = await emby.get_shows(lib_id, e_url, e_token, e_user, min_date=min_date)
+                        items = await emby.get_episodes(lib_id, e_url, e_token, e_user, min_date=min_date)
+                        
+                        needed_show_ids = {str(e.get("SeriesId")) for e in items if e.get("SeriesId")}
+                        existing_show_ids = {str(s.get("Id")) for s in shows}
+                        missing_show_ids = list(needed_show_ids - existing_show_ids)
+                        if missing_show_ids:
+                            print(f"    Fetching {len(missing_show_ids)} parent shows for updated episodes...")
+                            extra_shows = await emby.get_items_by_ids(e_url, e_token, e_user, missing_show_ids)
+                            shows.extend(extra_shows)
+                    else:
+                        shows = await emby.get_shows(lib_id, e_url, e_token, e_user)
+                        if show_limit:
+                            shows = shows[:show_limit]
+                        items = None # Fetch later
 
                     series_tmdb_map = {
                         s.get("Id"): get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
@@ -1152,7 +1182,8 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                             "reason": "Unmatched on source — no TMDB ID available for the series",
                         })
 
-                    items = await emby.get_episodes(lib_id, e_url, e_token, e_user, min_date=min_date)
+                    if items is None:
+                        items = await emby.get_episodes(lib_id, e_url, e_token, e_user, min_date=min_date)
                     filtered_episodes = [e for e in items if str(e.get("SeriesId")) in show_map]
 
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
@@ -1196,7 +1227,7 @@ async def _backfill_plex_languages(db: AsyncSession, user_id: int, connection_id
             CollectionFile.source == CollectionSource.plex,
             CollectionFile.connection_id == connection_id,
             CollectionFile.source_id.isnot(None),
-            (CollectionFile.audio_languages == None) | (CollectionFile.audio_languages == []),
+            (CollectionFile.audio_languages.is_(None)) | (cast(CollectionFile.audio_languages, String) == '[]'),
         )
     )
     files = result.scalars().all()
@@ -1346,9 +1377,23 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     all_warnings.extend(w)
 
                 elif lib_type == "show":
-                    shows = await plex.get_shows(p_url, p_token, lib_key)
-                    if show_limit:
-                        shows = shows[:show_limit]
+                    if partial:
+                        print(f"    Fetching recently updated shows and episodes...")
+                        shows = await plex.get_shows(p_url, p_token, lib_key, min_timestamp=min_timestamp)
+                        items = await plex.get_episodes(p_url, p_token, lib_key, min_timestamp=min_timestamp)
+                        
+                        needed_show_keys = {str(e.get("grandparentRatingKey")) for e in items if e.get("grandparentRatingKey")}
+                        existing_show_keys = {str(s.get("ratingKey")) for s in shows}
+                        missing_show_keys = list(needed_show_keys - existing_show_keys)
+                        if missing_show_keys:
+                            print(f"    Fetching {len(missing_show_keys)} parent shows for updated episodes...")
+                            extra_shows = await plex.get_items_by_ids(p_url, p_token, lib_key, missing_show_keys)
+                            shows.extend(extra_shows)
+                    else:
+                        shows = await plex.get_shows(p_url, p_token, lib_key)
+                        if show_limit:
+                            shows = shows[:show_limit]
+                        items = None # Fetch later
 
                     series_tmdb_map = {
                         s.get("ratingKey"): plex.extract_tmdb_id(s.get("Guid", []))
@@ -1410,7 +1455,8 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         })
 
                     print(f"    Fetching episodes for {lib_title}...")
-                    items = await plex.get_episodes(p_url, p_token, lib_key, min_timestamp=min_timestamp)
+                    if items is None:
+                        items = await plex.get_episodes(p_url, p_token, lib_key, min_timestamp=min_timestamp)
                     filtered_episodes = [i for i in items if str(i.get("grandparentRatingKey")) in show_map]
 
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
