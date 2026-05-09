@@ -59,7 +59,7 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 - **Continue Watching & Next Up**: Dashboard cards showing in-progress items and the next episode to watch, featuring visual progress bars.
 - **Season & episode tracking**: Detailed season views with per-episode watched state and progress.
 - **Cast & crew pages**: Full filmography for any person, linked to your library.
-- **Radarr & Sonarr integration**: Add movies and shows to Radarr/Sonarr directly from the Scrob UI.
+- **Radarr & Sonarr integration**: Add movies and shows to Radarr/Sonarr directly from the Scrob UI, and auto-import from personal lists.
 - **Two-Factor Authentication**: TOTP-based 2FA with backup codes, managed from the settings page.
 - **OIDC / SSO**: Authenticate with any OpenID Connect provider (Authelia, Authentik, Keycloak, etc.).
 - **Progressive Web App**: Install Scrob on any device — Android, iOS, or desktop — for a native app feel.
