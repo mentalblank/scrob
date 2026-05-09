@@ -161,6 +161,32 @@ class MediaServerConnectionResponse(MediaServerConnectionBase):
     class Config:
         from_attributes = True
 
+class ScrobbleConnectionCreate(BaseModel):
+    type: str
+    name: str
+    server_user_id: Optional[str] = None
+    server_username: Optional[str] = None
+    sync_collection: bool = True
+    sync_watched: bool = True
+    sync_playback: bool = True
+
+
+class ScrobbleConnectionUpdate(BaseModel):
+    sync_collection: Optional[bool] = None
+    sync_watched: Optional[bool] = None
+    sync_playback: Optional[bool] = None
+
+
+class ScrobbleConnectionResponse(ScrobbleConnectionCreate):
+    id: int
+    user_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+
 class PasswordUpdate(BaseModel):
     current_password: Optional[str] = None
     new_password: str

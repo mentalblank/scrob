@@ -1,7 +1,7 @@
 """add comments and ratings toggles
 
 Revision ID: cb25424a7781
-Revises: f1a2b3c4d5e6
+Revises: b2c3d4e5f6a7
 Create Date: 2026-05-08 19:44:01.253817
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'cb25424a7781'
-down_revision: Union[str, Sequence[str], None] = 'f1a2b3c4d5e6'
+down_revision: Union[str, Sequence[str], None] = 'b2c3d4e5f6a7'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

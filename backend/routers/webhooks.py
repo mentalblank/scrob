@@ -16,6 +16,7 @@ from models.ratings import Rating
 from models.users import User, UserSettings
 from models.global_settings import GlobalSettings
 from models.connections import MediaServerConnection
+from models.scrobble_connection import ScrobbleConnection
 from models.base import MediaType, CollectionSource
 from models.playback_session import PlaybackSession
 from models.playback_progress import PlaybackProgress
@@ -50,6 +51,16 @@ async def _get_connection_by_id(db: AsyncSession, user_id: int, connection_id: i
         select(MediaServerConnection).where(
             MediaServerConnection.id == connection_id,
             MediaServerConnection.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _get_scrobble_connection_by_id(db: AsyncSession, user_id: int, connection_id: int) -> ScrobbleConnection | None:
+    result = await db.execute(
+        select(ScrobbleConnection).where(
+            ScrobbleConnection.id == connection_id,
+            ScrobbleConnection.user_id == user_id,
         )
     )
     return result.scalar_one_or_none()
@@ -510,6 +521,16 @@ async def jellyfin_webhook(
     return await _handle_jellyfin_webhook(request, db, api_key)
 
 
+@router.post("/jellyfin/scrobble/{connection_id}")
+async def jellyfin_scrobble_webhook(
+    connection_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_jellyfin_scrobble_webhook(request, db, api_key, connection_id, source="jellyfin")
+
+
 @router.post("/jellyfin/{connection_id}")
 async def jellyfin_webhook_connection(
     connection_id: int,
@@ -620,6 +641,85 @@ async def _handle_emby_webhook(request: Request, db: AsyncSession, api_key: str,
     return {"status": "ok", "event": notification_type, "title": data["title"]}
 
 
+async def _handle_jellyfin_scrobble_webhook(
+    request: Request, db: AsyncSession, api_key: str, connection_id: int, source: str
+):
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    body = await request.body()
+    if not body:
+        return {"status": "ignored", "reason": "empty body"}
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ignored", "reason": "invalid JSON"}
+
+    data = parse_jellyfin_payload(payload)
+    if not data:
+        return {"status": "ignored"}
+
+    conn = await _get_scrobble_connection_by_id(db, user.id, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Scrobble connection not found")
+
+    notification_type = data["notification_type"]
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    settings = settings_result.scalar_one_or_none()
+    tmdb_key = await _get_tmdb_key(db, settings)
+
+    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key)
+    session_key = f"{source}:scrobble:{user.id}:{data['session_id']}"
+
+    if media is None:
+        return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
+
+    coll_source = CollectionSource.jellyfin if source == "jellyfin" else CollectionSource.emby
+
+    if notification_type in ("PlaybackStart", "PlaybackProgress", "PlaybackStop", "MarkPlayed", "playback.start", "playback.progress", "playback.stop", "item.markplayed"):
+        if conn.sync_collection:
+            await _ensure_collection_entry(
+                db, user.id, media.id, coll_source, data["jellyfin_id"], data.get("quality"),
+                connection_id=None,
+            )
+
+    if notification_type in ("PlaybackStart", "playback.start"):
+        if conn.sync_playback:
+            session = await _get_or_open_session(db, session_key, source, user.id, media.id)
+            session.state = "playing"
+            await db.commit()
+
+    elif notification_type in ("PlaybackProgress", "playback.progress"):
+        if conn.sync_playback:
+            session = await _get_or_open_session(db, session_key, source, user.id, media.id)
+            session.state = "paused" if data["is_paused"] else "playing"
+            session.progress_percent = data["progress_percent"]
+            session.progress_seconds = data["progress_seconds"]
+            session.updated_at = datetime.utcnow()
+            await db.commit()
+
+    elif notification_type in ("PlaybackStop", "playback.stop"):
+        session = await _close_session(db, session_key)
+        if conn.sync_playback:
+            progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
+            progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
+            if conn.sync_watched and progress_percent > 0.05:
+                await _write_watch_event(db, user.id, media.id, progress_percent, progress_seconds, progress_percent >= 0.90)
+            await db.commit()
+
+    elif notification_type in ("MarkPlayed", "item.markplayed"):
+        await _close_session(db, session_key)
+        if conn.sync_watched:
+            await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
+            await db.commit()
+
+    return {"status": "ok", "event": notification_type, "title": data["title"]}
+
+
 @router.post("/emby")
 async def emby_webhook(
     request: Request,
@@ -627,6 +727,16 @@ async def emby_webhook(
     api_key: str = Query(..., description="Scrob user API key"),
 ):
     return await _handle_emby_webhook(request, db, api_key)
+
+
+@router.post("/emby/scrobble/{connection_id}")
+async def emby_scrobble_webhook(
+    connection_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_jellyfin_scrobble_webhook(request, db, api_key, connection_id, source="emby")
 
 
 @router.post("/emby/{connection_id}")
@@ -1283,6 +1393,121 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
     return {"status": "ok", "event": event, "title": data["title"]}
 
 
+async def _handle_plex_scrobble_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int):
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    try:
+        form = await request.form()
+    except Exception as e:
+        return {"status": "error", "reason": f"form parse failed: {e}"}
+
+    raw_payload = form.get("payload")
+    if not raw_payload:
+        return {"status": "ignored", "reason": "no payload field"}
+
+    try:
+        payload = json.loads(str(raw_payload))
+    except (json.JSONDecodeError, TypeError):
+        return {"status": "ignored", "reason": "invalid JSON"}
+
+    event = payload.get("event", "unknown")
+
+    data = parse_plex_payload(payload)
+    if not data:
+        return {"status": "ignored"}
+
+    conn = await _get_scrobble_connection_by_id(db, user.id, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Scrobble connection not found")
+
+    account_title = data.get("account_title", "")
+    if account_title and conn.server_username:
+        if account_title.lower() != conn.server_username.strip().lower():
+            return {"status": "ignored", "reason": f"event for plex user '{account_title}' does not match connection '{conn.server_username}'"}
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    settings = settings_result.scalar_one_or_none()
+    tmdb_key = await _get_tmdb_key(db, settings)
+
+    session_key = f"plex:scrobble:{user.id}:{data['session_key']}"
+
+    if event in ("media.play", "media.resume", "media.pause", "media.stop", "media.scrobble"):
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=None)
+        if media is None:
+            return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
+
+    if event == "media.play":
+        if conn.sync_playback:
+            session = await _get_or_open_session(db, session_key, "plex", user.id, media.id)
+            session.state = "playing"
+            session.updated_at = datetime.utcnow()
+            if data["progress_percent"] > 0:
+                session.progress_percent = data["progress_percent"]
+                session.progress_seconds = data["progress_seconds"]
+            if not media.runtime and data.get("duration_ms"):
+                media.runtime = max(1, round(data["duration_ms"] / 60000))
+            await db.commit()
+
+    elif event == "media.resume":
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=None)
+        if media is None:
+            return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
+        if conn.sync_playback:
+            session = await _get_or_open_session(db, session_key, "plex", user.id, media.id)
+            session.state = "playing"
+            session.progress_percent = data["progress_percent"]
+            session.progress_seconds = data["progress_seconds"]
+            session.updated_at = datetime.utcnow()
+            if not media.runtime and data.get("duration_ms"):
+                media.runtime = max(1, round(data["duration_ms"] / 60000))
+            await db.commit()
+
+    elif event == "media.pause":
+        if conn.sync_playback:
+            result = await db.execute(
+                select(PlaybackSession).where(PlaybackSession.session_key == session_key)
+            )
+            session = result.scalar_one_or_none()
+            if session:
+                session.state = "paused"
+                session.progress_percent = data["progress_percent"]
+                session.progress_seconds = data["progress_seconds"]
+                session.updated_at = datetime.utcnow()
+                await db.commit()
+
+    elif event == "media.stop":
+        session = await _close_session(db, session_key)
+        if conn.sync_playback:
+            progress_percent = data["progress_percent"] or (session.progress_percent if session else 0.0)
+            progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
+            if conn.sync_watched and progress_percent > 0.05:
+                await _write_watch_event(db, user.id, media.id, progress_percent, progress_seconds, progress_percent >= 0.90)
+        if conn.sync_collection:
+            quality = data.get("quality")
+            await _ensure_collection_entry(
+                db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality,
+                connection_id=None,
+            )
+        await db.commit()
+
+    elif event == "media.scrobble":
+        await _close_session(db, session_key)
+        if conn.sync_watched:
+            await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
+        if conn.sync_collection:
+            quality = data.get("quality")
+            await _ensure_collection_entry(
+                db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality,
+                connection_id=None,
+            )
+        await db.commit()
+
+    return {"status": "ok", "event": event, "title": data["title"]}
+
+
 @router.post("/plex")
 async def plex_webhook(
     request: Request,
@@ -1290,6 +1515,16 @@ async def plex_webhook(
     api_key: str = Query(..., description="Scrob user API key"),
 ):
     return await _handle_plex_webhook(request, db, api_key)
+
+
+@router.post("/plex/scrobble/{connection_id}")
+async def plex_scrobble_webhook(
+    connection_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    return await _handle_plex_scrobble_webhook(request, db, api_key, connection_id)
 
 
 @router.post("/plex/{connection_id}")

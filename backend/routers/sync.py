@@ -1521,6 +1521,36 @@ async def get_connection_libraries(
         raise HTTPException(status_code=502, detail=f"Could not reach server: {e}")
 
 
+@router.post("/connection/{connection_id}/scan")
+async def trigger_library_scan(
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conn = await _get_connection_or_404(db, connection_id, current_user.id)
+
+    try:
+        if conn.type in ("jellyfin", "emby"):
+            client = jellyfin if conn.type == "jellyfin" else emby
+            ok = await client.scan_libraries(conn.url, conn.token)
+        elif conn.type == "plex":
+            sel_result = await db.execute(
+                select(PlexLibrarySelection).where(PlexLibrarySelection.connection_id == conn.id)
+            )
+            selected_keys = [row.library_key for row in sel_result.scalars().all()]
+            ok = await plex.scan_libraries(conn.url, conn.token, selected_keys)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown connection type: {conn.type}")
+
+        if not ok:
+            raise HTTPException(status_code=502, detail="Library scan request failed")
+        return {"status": "ok", "message": "Library scan triggered successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach server: {e}")
+
+
 @router.put("/connection/{connection_id}/libraries")
 async def save_connection_libraries(
     connection_id: int,

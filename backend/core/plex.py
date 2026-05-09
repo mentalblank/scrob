@@ -253,6 +253,26 @@ async def mark_unwatched(url: str, token: str, rating_key: str) -> bool:
     except Exception:
         return False
 
+async def scan_libraries(url: str, token: str, section_keys: list[str]) -> bool:
+    """Trigger a library scan on the given section keys. Scans all sections if list is empty."""
+    try:
+        if not section_keys:
+            libraries = await get_libraries(url, token)
+            section_keys = [lib["key"] for lib in libraries]
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+            headers = {"X-Plex-Token": token, "Accept": "application/json"}
+            for key in section_keys:
+                r = await client.get(
+                    f"{url.rstrip('/')}/library/sections/{key}/refresh",
+                    headers=headers,
+                )
+                if r.status_code >= 400:
+                    return False
+        return True
+    except Exception:
+        return False
+
+
 async def set_rating(url: str, token: str, rating_key: str, rating: float) -> bool:
     """Set a star rating on a Plex item (0–10 scale)."""
     try:
