@@ -4005,21 +4005,27 @@ async def pick_for_me(
 
     pick = random.choice(all_candidates)
 
-    # ── Fetch genres from local DB for the picked item ─────────────────────
-    if not pick.get("genres"):
-        if type == "movie":
-            genres_q = await db.execute(
-                select(Media.tmdb_data).where(
-                    Media.tmdb_id == pick["tmdb_id"], Media.media_type == MediaType.movie
-                ).limit(1)
-            )
-        else:
-            genres_q = await db.execute(
-                select(ShowModel.tmdb_data).where(ShowModel.tmdb_id == pick["tmdb_id"]).limit(1)
-            )
-        row = genres_q.scalar_one_or_none()
-        if row:
-            pick["genres"] = (row or {}).get("genres", [])
+    # ── Fetch local object for the picked item (to find local sources) ─────
+    local_media = None
+    local_show = None
+    if type == "movie":
+        m_res = await db.execute(
+            select(Media).where(Media.tmdb_id == pick["tmdb_id"], Media.media_type == MediaType.movie)
+        )
+        local_media = m_res.scalar_one_or_none()
+    else:
+        s_res = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == pick["tmdb_id"]))
+        local_show = s_res.scalar_one_or_none()
+
+    # Use local data for overview/genres if missing
+    if local_media:
+        if not pick.get("overview"): pick["overview"] = local_media.overview
+        if not pick.get("genres") and local_media.tmdb_data:
+            pick["genres"] = local_media.tmdb_data.get("genres", [])
+    elif local_show:
+        if not pick.get("overview"): pick["overview"] = local_show.overview
+        if not pick.get("genres") and local_show.tmdb_data:
+            pick["genres"] = local_show.tmdb_data.get("genres", [])
 
     # ── Enrich pick: overview + genres + watch providers ───────────────────
     if check_tmdb_key(tmdb_key):
@@ -4038,12 +4044,20 @@ async def pick_for_me(
             pick["sources"] = await get_where_to_watch(
                 db, current_user.id, pick["tmdb_id"],
                 MediaType.movie if type == "movie" else MediaType.series,
+                media=local_media,
+                show=local_show,
                 tmdb_key=tmdb_key
             )
         except Exception:
             pick["sources"] = []
     else:
-        pick["sources"] = []
+        # No TMDB key, but we might still have local sources
+        pick["sources"] = await get_where_to_watch(
+            db, current_user.id, pick["tmdb_id"],
+            MediaType.movie if type == "movie" else MediaType.series,
+            media=local_media,
+            show=local_show
+        )
 
     return pick
 
