@@ -163,7 +163,7 @@ const baseUrl = `/shows?${baseParams.toString()}`;
   )}
 </Base>
 
-<script define:vars={{ category, genre, year, minRating, status }}>
+<script define:vars={{ category, genre, year, minRating, status, providerId, providerName }}>
   function navigate() {
     const params = new URLSearchParams();
     params.set("category", category);

@@ -19,6 +19,7 @@ try {
     const year = Astro.url.searchParams.get("year");
     const minRating = Astro.url.searchParams.get("min_rating");
     const status = Astro.url.searchParams.get("status");
+    const providerId = Astro.url.searchParams.get("provider_id");
     
     const data = await api.media.tmdbList({
       type: "series",
@@ -28,6 +29,7 @@ try {
       ...(year ? { year: Number(year) } : {}),
       ...(minRating ? { min_rating: Number(minRating) } : {}),
       ...(status ? { status } : {}),
+      ...(providerId ? { provider_id: Number(providerId) } : {}),
     }, token);
     items = data.results;
   } else if (type === "movies") {
@@ -35,6 +37,7 @@ try {
     const genre = Astro.url.searchParams.get("genre");
     const year = Astro.url.searchParams.get("year");
     const minRating = Astro.url.searchParams.get("min_rating");
+    const providerId = Astro.url.searchParams.get("provider_id");
     
     const data = await api.media.tmdbList({
       type: "movie",
@@ -43,6 +46,7 @@ try {
       ...(genre ? { genre } : {}),
       ...(year ? { year: Number(year) } : {}),
       ...(minRating ? { min_rating: Number(minRating) } : {}),
+      ...(providerId ? { provider_id: Number(providerId) } : {}),
     }, token);
     items = data.results;
   } else if (type === "trending_shows") {

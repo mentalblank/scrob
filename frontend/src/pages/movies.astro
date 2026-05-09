@@ -151,7 +151,7 @@ const baseUrl = `/movies?${baseParams.toString()}`;
   )}
 </Base>
 
-<script define:vars={{ category, genre, year, minRating }}>
+<script define:vars={{ category, genre, year, minRating, providerId, providerName }}>
   function navigate() {
     const params = new URLSearchParams();
     params.set("category", category);
