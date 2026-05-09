@@ -209,35 +209,38 @@ const logoPath = show?.logo_path ?? null;
                 </div>
             </div>
 
-            {show.in_library && (
-              <div class="mb-8">
-                <button
-                  id="refresh-metadata-btn"
-                  class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
-                >
-                  <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                    <path d="M21 3v5h-5"/>
-                    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                    <path d="M8 16H3v5"/>
-                  </svg>
-                  <span id="refresh-label">Refresh Metadata</span>
-                </button>
+            {(show.in_library || trailerYoutubeId) && (
+              <div class="mb-8 flex flex-wrap gap-2">
+                {show.in_library && (
+                  <button
+                    id="refresh-metadata-btn"
+                    class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
+                  >
+                    <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                      <path d="M21 3v5h-5"/>
+                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                      <path d="M8 16H3v5"/>
+                    </svg>
+                    <span id="refresh-label">Refresh Metadata</span>
+                  </button>
+                )}
+                {trailerYoutubeId && (
+                  <button
+                    id="trailer-btn"
+                    class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-red-600/80 hover:bg-red-500/90 border border-red-500/30 hover:border-red-400/60 rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-red-900/20"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M21.543 6.498C22 8.28 22 12 22 12s0 3.72-.457 5.502c-.254.985-.997 1.76-1.938 2.022C17.896 20 12 20 12 20s-5.893 0-7.605-.476c-.945-.266-1.687-1.04-1.938-2.022C2 15.72 2 12 2 12s0-3.72.457-5.502c.254-.985.997-1.76 1.938-2.022C6.107 4 12 4 12 4s5.896 0 7.605.476c.945.266 1.687 1.04 1.938 2.022ZM10 15.5l6-3.5-6-3.5v7Z"/>
+                    </svg>
+                    View Trailer
+                  </button>
+                )}
               </div>
             )}
 
             {trailerYoutubeId && (
               <div class="mb-8">
-                <button
-                  id="trailer-btn"
-                  class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-red-600/80 hover:bg-red-500/90 border border-red-500/30 hover:border-red-400/60 rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-red-900/20"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M21.543 6.498C22 8.28 22 12 22 12s0 3.72-.457 5.502c-.254.985-.997 1.76-1.938 2.022C17.896 20 12 20 12 20s-5.893 0-7.605-.476c-.945-.266-1.687-1.04-1.938-2.022C2 15.72 2 12 2 12s0-3.72.457-5.502c.254-.985.997-1.76 1.938-2.022C6.107 4 12 4 12 4s5.896 0 7.605.476c.945.266 1.687 1.04 1.938 2.022ZM10 15.5l6-3.5-6-3.5v7Z"/>
-                  </svg>
-                  View Trailer
-                </button>
-
                 <dialog
                   id="trailer-dialog"
                   data-youtube-id={trailerYoutubeId}
@@ -292,25 +295,63 @@ const logoPath = show?.logo_path ?? null;
             )}
 
             <!-- Where to Watch -->
-            {show.where_to_watch && show.where_to_watch.length > 0 && (
-              <div class="mb-8">
-                <h2 class="text-sm font-black text-zinc-500 mb-3 uppercase tracking-widest">Where to Watch</h2>
-                <div class="flex flex-wrap gap-2">
-                  {show.where_to_watch.map(s => (
-                    <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg">
-                      {s.logo ? (
-                        <img src={s.logo} alt={s.name} class="w-5 h-5 rounded object-cover" />
-                      ) : (
-                        <span class="text-zinc-400 text-xs">
-                          {s.type === "plex" ? "🟡" : s.type === "jellyfin" ? "🟣" : s.type === "emby" ? "🟢" : "▶"}
-                        </span>
-                      )}
-                      <span class="text-zinc-300 text-xs font-semibold">{s.name}</span>
-                    </div>
-                  ))}
+            {show.where_to_watch && show.where_to_watch.length > 0 && (() => {
+              const subscribed = show.where_to_watch.filter(s => s.is_subscribed);
+              const others = show.where_to_watch.filter(s => !s.is_subscribed);
+              
+              return (
+                <div class="mb-10">
+                  <h2 class="text-sm font-black text-zinc-500 mb-4 uppercase tracking-widest flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v2"/><path d="M2 12V4"/><path d="M22 12V4"/><path d="M2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6"/><path d="M2 12h20"/><path d="M7 15h.01"/><path d="M11 15h.01"/><path d="M15 15h.01"/><path d="M19 15h.01"/><path d="M7 18h.01"/><path d="M11 18h.01"/><path d="M15 18h.01"/><path d="M19 18h.01"/></svg>
+                    Where to Watch
+                  </h2>
+                  
+                  <div class="space-y-6">
+                    {subscribed.length > 0 && (
+                      <div class="space-y-3">
+                        <p class="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Your Services</p>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                          {subscribed.map(s => (
+                            <div class="flex items-center gap-2.5 p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-xl hover:border-blue-500/30 transition-colors group">
+                              {s.logo ? (
+                                <img src={s.logo} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
+                              ) : (
+                                <div class="w-6 h-6 bg-zinc-800 rounded-md flex items-center justify-center text-[10px]">
+                                  {s.type === "plex" ? "🟡" : s.type === "jellyfin" ? "🟣" : s.type === "emby" ? "🟢" : "▶"}
+                                </div>
+                              )}
+                              <div class="min-w-0">
+                                <p class="text-zinc-200 text-xs font-bold truncate group-hover:text-blue-400 transition-colors">{s.name}</p>
+                                <p class="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter truncate">{s.category === 'flatrate' ? 'Stream' : s.category === 'local' ? 'Local' : s.category}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {others.length > 0 && (
+                      <div class="space-y-3">
+                        <p class="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">{subscribed.length > 0 ? "Other Options" : "Available On"}</p>
+                        <div class="flex flex-wrap gap-2">
+                          {others.map(s => (
+                            <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/40 border border-zinc-800/50 rounded-lg hover:border-zinc-700 transition-colors group">
+                              {s.logo ? (
+                                <img src={s.logo} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                              ) : (
+                                <span class="text-[10px]">▶</span>
+                              )}
+                              <span class="text-zinc-400 text-[11px] font-medium group-hover:text-zinc-200 transition-colors">{s.name}</span>
+                              <span class="text-[9px] text-zinc-600 font-bold uppercase ml-1">{s.category === 'flatrate' ? 'Stream' : s.category}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 

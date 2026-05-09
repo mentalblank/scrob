@@ -348,3 +348,21 @@ def pick_image(items: list[dict], preferred_lang: str | None = None, size: str =
     if not winner:
         return None
     return poster_url(winner["file_path"], size=size)
+async def get_watch_providers(type: str = "movie", region: str = "US", api_key: str = None) -> list[dict]:
+    """Fetch available watch providers for a specific region from TMDB."""
+    path = "movie" if type == "movie" else "tv"
+    res = await _get(
+        f"{TMDB_BASE}/watch/providers/{path}",
+        headers=get_headers(api_key),
+        params={"watch_region": region},
+    )
+    return res.get("results", [])
+
+async def get_tv_genre_list(api_key: str = None) -> dict:
+    return await _get(f"{TMDB_BASE}/genre/tv/list", headers=get_headers(api_key))
+
+async def get_languages(api_key: str = None) -> list[dict]:
+    return await _get(f"{TMDB_BASE}/configuration/languages", headers=get_headers(api_key))
+
+async def get_countries(api_key: str = None) -> list[dict]:
+    return await _get(f"{TMDB_BASE}/configuration/countries", headers=get_headers(api_key))

@@ -6,12 +6,17 @@ export const prerender = false;
 
 const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
-const [settings, profileData] = await Promise.all([
+const profileData = await api.profile.get(token!).catch(() => null);
+const watchRegion: string = profileData?.country ?? 'US';
+const [settings, movieGenresRes, tvGenresRes, providersRes] = await Promise.all([
   api.auth.getSettings(token!),
-  api.profile.get(token!).catch(() => null),
+  api.media.getGenres("movie", token!).catch(() => ({ genres: [] })),
+  api.media.getGenres("tv", token!).catch(() => ({ genres: [] })),
+  api.media.getWatchProviders("movie", watchRegion, token!).catch(() => ({ results: [] })),
 ]);
 const hasTmdbKey = !!settings?.has_effective_tmdb_key;
-const watchRegion: string = profileData?.country ?? 'US';
+const allProviders = providersRes.results || [];
+const PROVIDER_NAMES = Object.fromEntries(allProviders.map(p => [String(p.provider_id), p.provider_name]));
 const hasProfileData = !!(
   profileData?.country ||
   (profileData?.movie_genres?.length ?? 0) > 0 ||
@@ -22,12 +27,7 @@ const hasProfileData = !!(
 const topMovieGenres = (profileData?.movie_genres ?? []).slice(0, 3);
 const topShowGenres  = (profileData?.show_genres  ?? []).slice(0, 3);
 
-const PROVIDER_NAMES: Record<string, string> = {
-  "8": "Netflix", "9": "Prime Video", "337": "Disney+",
-  "350": "Apple TV+", "1899": "Max", "15": "Hulu",
-};
-
-const userServices = (profileData?.streaming_services ?? []).filter(id => id in PROVIDER_NAMES);
+const userServices = (profileData?.streaming_services ?? []);
 const hasMediaServer = !!(settings?.plex_url || settings?.jellyfin_url || settings?.emby_url);
 const canPick = hasTmdbKey && (userServices.length > 0 || hasMediaServer);
 
@@ -45,39 +45,25 @@ if (canPick) {
   } catch { /* no backdrop, fallback to gradient */ }
 }
 
-const MOVIE_GENRES = [
-  { label: "Action", emoji: "💥" },
-  { label: "Adventure", emoji: "🗺️" },
-  { label: "Animation", emoji: "🎨" },
-  { label: "Comedy", emoji: "😂" },
-  { label: "Crime", emoji: "🔍" },
-  { label: "Documentary", emoji: "🎥" },
-  { label: "Drama", emoji: "🎭" },
-  { label: "Fantasy", emoji: "🧙" },
-  { label: "Horror", emoji: "👻" },
-  { label: "Mystery", emoji: "🕵️" },
-  { label: "Romance", emoji: "💕" },
-  { label: "Science Fiction", emoji: "🚀" },
-  { label: "Thriller", emoji: "😰" },
-  { label: "War", emoji: "⚔️" },
-  { label: "Western", emoji: "🤠" },
-];
+const EMOJIS: Record<string, string> = {
+  "Action": "💥", "Adventure": "🗺️", "Animation": "🎨", "Comedy": "😂",
+  "Crime": "🔍", "Documentary": "🎥", "Drama": "🎭", "Family": "👪",
+  "Fantasy": "🧙", "History": "📜", "Horror": "👻", "Music": "🎵",
+  "Mystery": "🕵️", "Romance": "💕", "Science Fiction": "🚀", "TV Movie": "📺",
+  "Thriller": "😰", "War": "⚔️", "Western": "🤠",
+  "Action & Adventure": "💥", "Kids": "🧸", "News": "📰", "Reality": "📺",
+  "Sci-Fi & Fantasy": "🚀", "Soap": "🧼", "Talk": "🗣️", "War & Politics": "⚔️",
+};
 
-const TV_GENRES = [
-  { label: "Action & Adventure", emoji: "💥" },
-  { label: "Animation", emoji: "🎨" },
-  { label: "Comedy", emoji: "😂" },
-  { label: "Crime", emoji: "🔍" },
-  { label: "Documentary", emoji: "🎥" },
-  { label: "Drama", emoji: "🎭" },
-  { label: "Kids", emoji: "🧸" },
-  { label: "Mystery", emoji: "🕵️" },
-  { label: "Reality", emoji: "📺" },
-  { label: "Sci-Fi & Fantasy", emoji: "🚀" },
-  { label: "Thriller", emoji: "😰" },
-  { label: "War & Politics", emoji: "⚔️" },
-  { label: "Western", emoji: "🤠" },
-];
+const MOVIE_GENRES = (movieGenresRes?.genres || []).map(g => ({
+  label: g.name,
+  emoji: EMOJIS[g.name] || "🎬"
+}));
+
+const TV_GENRES = (tvGenresRes?.genres || []).map(g => ({
+  label: g.name,
+  emoji: EMOJIS[g.name] || "📺"
+}));
 
 // Poster skeleton (2:3, for movies)
 function skeleton() {
@@ -302,13 +288,19 @@ function skeletonWide() {
         ? userServices.map((id, i) => (
             <Fragment>
               <section data-section class="mb-6">
-                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On {PROVIDER_NAMES[id]}</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">On {PROVIDER_NAMES[id]}</h2>
+                  <a href={`/movies?provider_id=${id}&provider_name=${encodeURIComponent(PROVIDER_NAMES[id])}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id={`streaming-movie-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-10">
-                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">{PROVIDER_NAMES[id]} Shows</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">{PROVIDER_NAMES[id]} Shows</h2>
+                  <a href={`/shows?provider_id=${id}&provider_name=${encodeURIComponent(PROVIDER_NAMES[id])}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id={`streaming-show-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeletonWide()} />
                 </div>
@@ -318,25 +310,37 @@ function skeletonWide() {
         : !hasProfileData && (
             <Fragment>
               <section data-section class="mb-6">
-                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On Netflix</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">On Netflix</h2>
+                  <a href="/movies?provider_id=8&provider_name=Netflix" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id="fallback-movie-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-10">
-                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Netflix Shows</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">Netflix Shows</h2>
+                  <a href="/shows?provider_id=8&provider_name=Netflix" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id="fallback-show-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeletonWide()} />
                 </div>
               </section>
               <section data-section class="mb-6">
-                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On Prime Video</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">On Prime Video</h2>
+                  <a href="/movies?provider_id=9&provider_name=Prime%20Video" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id="fallback-movie-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-10">
-                <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Disney+ Shows</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">Disney+ Shows</h2>
+                  <a href="/shows?provider_id=337&provider_name=Disney%2B" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id="fallback-show-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeletonWide()} />
                 </div>
@@ -690,13 +694,22 @@ function skeletonWide() {
     }
 
     function sourceLabel(src) {
-      const icons = { plex: '🟡', jellyfin: '🟣', emby: '🟢' };
-      const names = { plex: 'Plex', jellyfin: 'Jellyfin', emby: 'Emby' };
-      if (src.type === 'media_server') {
-        const icon = icons[src.name] || '💾';
-        return `<span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm font-medium text-zinc-200">${icon} Watch on ${names[src.name] || src.name}</span>`;
+      if (src.is_subscribed) {
+        return `<div class="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+          ${src.logo 
+            ? `<img src="${esc(src.logo)}" alt="" class="w-4 h-4 rounded-sm object-cover" />` 
+            : `<span class="text-[10px]">${src.type === 'plex' ? '🟡' : src.type === 'jellyfin' ? '🟣' : src.type === 'emby' ? '🟢' : '▶'}</span>`
+          }
+          <span class="text-blue-200 text-xs font-bold leading-none">${esc(src.name)}</span>
+        </div>`;
       }
-      return `<span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm font-medium text-zinc-200">▶ ${esc(src.name)}</span>`;
+      return `<div class="flex items-center gap-1.5 px-2 py-1 bg-zinc-800/40 border border-zinc-700/30 rounded-lg group">
+        ${src.logo 
+          ? `<img src="${esc(src.logo)}" alt="" class="w-3 h-3 rounded-xs object-cover opacity-60" />` 
+          : `<span class="text-[8px]">▶</span>`
+        }
+        <span class="text-zinc-500 text-[10px] font-bold uppercase tracking-tight">${esc(src.name)}</span>
+      </div>`;
     }
 
     function showResult(data) {
@@ -737,9 +750,18 @@ function skeletonWide() {
 
       const sourcesEl = document.getElementById('pick-sources');
       const sources = data.sources || [];
-      sourcesEl.innerHTML = sources.length
-        ? sources.map(sourceLabel).join('')
-        : '<span class="text-sm text-zinc-500">No streaming source found</span>';
+      const subscribed = sources.filter(s => s.is_subscribed);
+      const others = sources.filter(s => !s.is_subscribed);
+      
+      let html = '';
+      if (subscribed.length > 0) {
+        html += `<div class="w-full mb-1"><p class="text-[10px] font-black text-blue-400 uppercase tracking-[0.1em] mb-2">Available on your services</p><div class="flex flex-wrap gap-2">${subscribed.map(sourceLabel).join('')}</div></div>`;
+      }
+      if (others.length > 0) {
+        html += `<div class="w-full mt-2"><p class="text-[10px] font-black text-zinc-600 uppercase tracking-[0.1em] mb-2">${subscribed.length > 0 ? 'Other options' : 'Available on'}</p><div class="flex flex-wrap gap-2">${others.map(sourceLabel).join('')}</div></div>`;
+      }
+      
+      sourcesEl.innerHTML = html || '<span class="text-sm text-zinc-500">No streaming source found</span>';
 
       const viewLink = document.getElementById('pick-view-link');
       if (data.type === 'series') {

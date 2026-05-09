@@ -1512,6 +1512,7 @@ async def get_tmdb_list(
     year: int | None = Query(None),
     min_rating: float | None = Query(None),
     status: str | None = Query(None),
+    provider_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1525,15 +1526,24 @@ async def get_tmdb_list(
             "top_rated": "vote_average.desc",
             "trending": "popularity.desc",
         }
-        has_filters = bool(genre or year or min_rating or status)
+        has_filters = bool(genre or year or min_rating or status or provider_id)
 
         if has_filters:
             sort_by = category_sort_map.get(category, "popularity.desc")
+            
+            # Use user's region if available
+            region = "US"
+            profile_q = await db.execute(select(UserProfileData).where(UserProfileData.user_id == current_user.id))
+            profile = profile_q.scalar_one_or_none()
+            if profile and profile.country:
+                region = profile.country
+
             if type == MediaType.movie:
                 genre_id = MOVIE_GENRE_IDS.get(genre) if genre else None
                 data = await tmdb.discover_movies(
                     page=page, genre_id=genre_id, year=year,
                     min_rating=min_rating, sort_by=sort_by, api_key=tmdb_key,
+                    watch_provider_id=provider_id, watch_region=region
                 )
             else:
                 genre_id = TV_GENRE_IDS.get(genre) if genre else None
@@ -1542,6 +1552,7 @@ async def get_tmdb_list(
                     page=page, genre_id=genre_id, year=year,
                     min_rating=min_rating, sort_by=sort_by,
                     status=status_id, api_key=tmdb_key,
+                    watch_provider_id=provider_id, watch_region=region
                 )
         elif type == MediaType.movie:
             if category == "top_rated":
@@ -2083,6 +2094,73 @@ async def streaming(
     except Exception:
         return {"results": []}
 
+
+
+
+@router.get("/genres")
+async def get_genres(
+    type: str = Query("movie"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        return {"genres": []}
+    try:
+        if type == "movie":
+            return await tmdb.get_genre_list(api_key=tmdb_key)
+        else:
+            return await tmdb.get_tv_genre_list(api_key=tmdb_key)
+    except Exception:
+        return {"genres": []}
+
+
+@router.get("/languages")
+async def get_languages(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        return []
+    try:
+        return await tmdb.get_languages(api_key=tmdb_key)
+    except Exception:
+        return []
+
+
+@router.get("/countries")
+async def get_countries(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        return []
+    try:
+        return await tmdb.get_countries(api_key=tmdb_key)
+    except Exception:
+        return []
+
+@router.get("/watch-providers")
+async def get_watch_providers(
+    type: str = Query("movie"),
+    region: str = Query("US"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        return {"results": []}
+    try:
+        providers = await tmdb.get_watch_providers(type=type, region=region, api_key=tmdb_key)
+        # Normalize logo paths
+        for p in providers:
+            if p.get("logo_path"):
+                p["logo_path"] = tmdb.poster_url(p["logo_path"], size="w154")
+        return {"results": providers}
+    except Exception:
+        return {"results": []}
 
 @router.get("/new-episodes")
 async def new_episodes(
@@ -2752,7 +2830,7 @@ async def get_where_to_watch(
         )
         for cf, conn in files_q.all():
             name = conn.name if conn else cf.source.value.title()
-            _add({"type": cf.source.value, "name": name, "logo": None})
+            _add({"type": cf.source.value, "name": name, "logo": None, "category": "local", "is_subscribed": True})
 
     elif media_type == MediaType.series and show:
         files_q = await db.execute(
@@ -2769,7 +2847,7 @@ async def get_where_to_watch(
         )
         for _cid, src, conn_name in files_q.all():
             name = conn_name if conn_name else src.value.title()
-            _add({"type": src.value, "name": name, "logo": None})
+            _add({"type": src.value, "name": name, "logo": None, "category": "local", "is_subscribed": True})
 
     # ── TMDB streaming providers ──────────────────────────────────────────────
     if tmdb_key and check_tmdb_key(tmdb_key):
@@ -2789,12 +2867,29 @@ async def get_where_to_watch(
                 providers_data = await tmdb.get_show_watch_providers(tmdb_id, api_key=tmdb_key)
 
             country_data = (providers_data.get("results") or {}).get(country, {})
-            for p in country_data.get("flatrate", []):
-                pid = p.get("provider_id")
-                if user_streaming_ids and pid not in user_streaming_ids:
-                    continue
-                logo = tmdb.poster_url(p.get("logo_path"), size="w92") if p.get("logo_path") else None
-                _add({"type": "streaming", "name": p.get("provider_name"), "logo": logo})
+            
+            # Combine all available categories
+            for category in ["flatrate", "buy", "rent"]:
+                for p in country_data.get(category, []):
+                    pid = p.get("provider_id")
+                    logo = tmdb.poster_url(p.get("logo_path"), size="w92") if p.get("logo_path") else None
+                    
+                    # If user has NOT selected any services, treat all flatrate as 'subscribed'
+                    is_subscribed = False
+                    if category == "flatrate":
+                        if not user_streaming_ids or pid in user_streaming_ids:
+                            is_subscribed = True
+                    elif user_streaming_ids and pid in user_streaming_ids:
+                        # Even for buy/rent, if it's one of their main services, mark it
+                        is_subscribed = True
+
+                    _add({
+                        "type": "streaming", 
+                        "name": p.get("provider_name"), 
+                        "logo": logo,
+                        "category": category,
+                        "is_subscribed": is_subscribed
+                    })
         except Exception:
             pass
 
@@ -3926,8 +4021,7 @@ async def pick_for_me(
         if row:
             pick["genres"] = (row or {}).get("genres", [])
 
-    # ── Enrich pick: overview + watch providers ────────────────────────────
-    sources: list[dict] = []
+    # ── Enrich pick: overview + genres + watch providers ───────────────────
     if check_tmdb_key(tmdb_key):
         try:
             if not pick.get("overview") or not pick.get("genres"):
@@ -3935,65 +4029,22 @@ async def pick_for_me(
                     details = await tmdb.get_movie(pick["tmdb_id"], api_key=tmdb_key)
                 else:
                     details = await tmdb.get_show(pick["tmdb_id"], api_key=tmdb_key)
+                
                 if not pick.get("overview"):
                     pick["overview"] = details.get("overview")
                 if not pick.get("genres"):
                     pick["genres"] = [g["name"] for g in details.get("genres", [])]
 
-            if type == "movie":
-                providers_data = await tmdb.get_movie_watch_providers(pick["tmdb_id"], api_key=tmdb_key)
-            else:
-                providers_data = await tmdb.get_show_watch_providers(pick["tmdb_id"], api_key=tmdb_key)
-
-            region_providers = providers_data.get("results", {}).get(region, {})
-            flatrate = region_providers.get("flatrate", [])
-            str_streaming_ids = [str(s) for s in streaming_ids]
-            for p in flatrate:
-                if str(p.get("provider_id", "")) in str_streaming_ids:
-                    sources.append({
-                        "type": "streaming",
-                        "name": p.get("provider_name"),
-                        "logo": f"https://image.tmdb.org/t/p/w45{p['logo_path']}" if p.get("logo_path") else None,
-                    })
+            pick["sources"] = await get_where_to_watch(
+                db, current_user.id, pick["tmdb_id"],
+                MediaType.movie if type == "movie" else MediaType.series,
+                tmdb_key=tmdb_key
+            )
         except Exception:
-            pass
+            pick["sources"] = []
+    else:
+        pick["sources"] = []
 
-    if pick.get("in_library"):
-        if type == "movie":
-            cf_conn_q = await db.execute(
-                select(MediaServerConnection)
-                .join(CollectionFile, CollectionFile.connection_id == MediaServerConnection.id)
-                .join(Collection, Collection.id == CollectionFile.collection_id)
-                .join(Media, Media.id == Collection.media_id)
-                .where(
-                    Media.tmdb_id == pick["tmdb_id"],
-                    Media.media_type == MediaType.movie,
-                    Collection.user_id == current_user.id,
-                    CollectionFile.connection_id.isnot(None),
-                )
-                .distinct()
-            )
-        else:
-            cf_conn_q = await db.execute(
-                select(MediaServerConnection)
-                .join(CollectionFile, CollectionFile.connection_id == MediaServerConnection.id)
-                .join(Collection, Collection.id == CollectionFile.collection_id)
-                .join(Media, Media.id == Collection.media_id)
-                .join(ShowModel, ShowModel.id == Media.show_id)
-                .where(
-                    ShowModel.tmdb_id == pick["tmdb_id"],
-                    Collection.user_id == current_user.id,
-                    CollectionFile.connection_id.isnot(None),
-                )
-                .distinct()
-            )
-        seen_conn_ids: set[int] = set()
-        for c in cf_conn_q.scalars().all():
-            if c.id not in seen_conn_ids:
-                seen_conn_ids.add(c.id)
-                sources.append({"type": c.type, "name": c.name or c.type.title(), "logo": None})
-
-    pick["sources"] = sources
     return pick
 
 

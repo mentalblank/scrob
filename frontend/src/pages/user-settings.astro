@@ -4,9 +4,13 @@ import { api } from "../lib/api";
 import type { UserPreferences, PrivacyLevel } from "../lib/api";
 
 const { token } = Astro.locals;
-const [profileData, me] = await Promise.all([
+const [profileData, me, countriesRes, languagesRes, movieGenresRes, showGenresRes] = await Promise.all([
   api.profile.get(token!).catch(() => null),
   api.auth.me(token!),
+  api.media.getCountries(token!).catch(() => []),
+  api.media.getLanguages(token!).catch(() => []),
+  api.media.getGenres("movie", token!).catch(() => ({ genres: [] })),
+  api.media.getGenres("tv", token!).catch(() => ({ genres: [] })),
 ]);
 
 const prefs: UserPreferences = {
@@ -27,68 +31,21 @@ const PRIVACY_LEVELS: [PrivacyLevel, string, string][] = [
   ["public", "Public", "Anyone on this instance can see your profile and activity."],
 ];
 
-const CONTENT_LANGUAGES: [string, string][] = [
-  ["en", "English"],
-  ["fr", "French"],
-  ["de", "German"],
-  ["es", "Spanish"],
-  ["it", "Italian"],
-  ["pt", "Portuguese"],
-  ["ja", "Japanese"],
-  ["ko", "Korean"],
-  ["zh", "Chinese"],
-  ["hi", "Hindi"],
-  ["ar", "Arabic"],
-];
+const CONTENT_LANGUAGES = (languagesRes || [])
+  .filter(l => l.iso_639_1 && l.english_name)
+  .map(l => [l.iso_639_1, l.english_name])
+  .sort((a, b) => a[1].localeCompare(b[1]));
 
-const MOVIE_GENRES = [
-  "Action","Adventure","Animation","Comedy","Crime",
-  "Documentary","Drama","Family","Fantasy","History",
-  "Horror","Music","Mystery","Romance","Science Fiction",
-  "Thriller","War","Western",
-];
+const MOVIE_GENRES = (movieGenresRes?.genres || []).map(g => g.name).sort();
+const SHOW_GENRES = (showGenresRes?.genres || []).map(g => g.name).sort();
 
-const SHOW_GENRES = [
-  "Action & Adventure","Animation","Comedy","Crime",
-  "Documentary","Drama","Family","Kids","Mystery",
-  "Reality","Sci-Fi & Fantasy","Soap","Talk",
-  "War & Politics","Western",
-];
+const watchRegion = prefs.country || "US";
+const providersRes = await api.media.getWatchProviders("movie", watchRegion, token).catch(() => ({ results: [] }));
+const allProviders = providersRes.results || [];
 
-const STREAMING_SERVICES = [
-  { id: "8",    name: "Netflix" },
-  { id: "9",    name: "Prime Video" },
-  { id: "337",  name: "Disney+" },
-  { id: "350",  name: "Apple TV+" },
-  { id: "1899", name: "Max" },
-  { id: "15",   name: "Hulu" },
-];
-
-const COUNTRIES = [
-  ["DZ","Algeria"],["AR","Argentina"],["AU","Australia"],["AT","Austria"],
-  ["AZ","Azerbaijan"],["BH","Bahrain"],["BD","Bangladesh"],["BE","Belgium"],
-  ["BO","Bolivia"],["BA","Bosnia and Herzegovina"],["BR","Brazil"],
-  ["BG","Bulgaria"],["CA","Canada"],["CL","Chile"],["CN","China"],
-  ["CO","Colombia"],["HR","Croatia"],["CY","Cyprus"],["CZ","Czech Republic"],
-  ["DK","Denmark"],["EC","Ecuador"],["EG","Egypt"],["EE","Estonia"],
-  ["FI","Finland"],["FR","France"],["GE","Georgia"],["DE","Germany"],
-  ["GH","Ghana"],["GR","Greece"],["GT","Guatemala"],["HK","Hong Kong"],
-  ["HU","Hungary"],["IS","Iceland"],["IN","India"],["ID","Indonesia"],
-  ["IE","Ireland"],["IL","Israel"],["IT","Italy"],["JM","Jamaica"],
-  ["JP","Japan"],["JO","Jordan"],["KZ","Kazakhstan"],["KE","Kenya"],
-  ["KW","Kuwait"],["LV","Latvia"],["LB","Lebanon"],["LT","Lithuania"],
-  ["LU","Luxembourg"],["MY","Malaysia"],["MT","Malta"],["MX","Mexico"],
-  ["MA","Morocco"],["NL","Netherlands"],["NZ","New Zealand"],["NG","Nigeria"],
-  ["NO","Norway"],["OM","Oman"],["PK","Pakistan"],["PA","Panama"],
-  ["PY","Paraguay"],["PE","Peru"],["PH","Philippines"],["PL","Poland"],
-  ["PT","Portugal"],["QA","Qatar"],["RO","Romania"],["RU","Russia"],
-  ["SA","Saudi Arabia"],["RS","Serbia"],["SG","Singapore"],["SK","Slovakia"],
-  ["SI","Slovenia"],["ZA","South Africa"],["KR","South Korea"],["ES","Spain"],
-  ["LK","Sri Lanka"],["SE","Sweden"],["CH","Switzerland"],["TW","Taiwan"],
-  ["TH","Thailand"],["TN","Tunisia"],["TR","Turkey"],["UA","Ukraine"],
-  ["AE","United Arab Emirates"],["GB","United Kingdom"],["US","United States"],
-  ["UY","Uruguay"],["VE","Venezuela"],["VN","Vietnam"],
-];
+const COUNTRIES = (countriesRes || [])
+  .map(c => [c.iso_3166_1, c.english_name])
+  .sort((a, b) => a[1].localeCompare(b[1]));
 ---
 
 <Base title="Profile">
@@ -185,94 +142,101 @@ const COUNTRIES = [
         </div>
       </section>
 
-      <!-- Region -->
+      <!-- Discovery Preferences -->
       <section>
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-semibold text-zinc-100">Region</h2>
+        <div class="mb-6 border-b border-zinc-800 pb-3">
+          <h2 class="text-xl font-bold text-zinc-100">Discovery Preferences</h2>
+          <p class="text-xs text-zinc-500 mt-1">Configure how media is discovered and recommendations are generated.</p>
         </div>
-        <div class="space-y-2 max-w-xs">
-          <label for="country" class="block text-sm font-medium text-zinc-400">Country</label>
-          <select
-            id="country"
-            name="country"
-            class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-          >
-            <option value="">— Not set —</option>
-            {COUNTRIES.map(([code, name]) => (
-              <option value={code} selected={prefs.country === code}>{name}</option>
-            ))}
-          </select>
-          <p class="text-xs text-zinc-500">
-            Used to show relevant streaming availability on the Discover page and filter content for your region.
-          </p>
-        </div>
-      </section>
 
-      <!-- Content Language -->
-      <section>
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-semibold text-zinc-100">Content Language</h2>
-        </div>
-        <div class="space-y-2 max-w-xs">
-          <label for="content_language" class="block text-sm font-medium text-zinc-400">Preferred Language</label>
-          <select
-            id="content_language"
-            name="content_language"
-            class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-          >
-            <option value="">— Any language —</option>
-            {CONTENT_LANGUAGES.map(([code, name]) => (
-              <option value={code} selected={prefs.content_language === code}>{name}</option>
-            ))}
-          </select>
-          <p class="text-xs text-zinc-500">
-            Filter Discover recommendations to your preferred original language.
-          </p>
-        </div>
-      </section>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
+          <div class="space-y-2">
+            <label for="country" class="block text-sm font-semibold text-zinc-400 uppercase tracking-wider">Region</label>
+            <select
+              id="country"
+              name="country"
+              class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            >
+              <option value="">— Not set —</option>
+              {COUNTRIES.map(([code, name]) => (
+                <option value={code} selected={prefs.country === code}>{name}</option>
+              ))}
+            </select>
+            <p class="text-[10px] text-zinc-500 font-medium leading-relaxed">
+              Used to fetch relevant streaming availability and filter content for your region. Changing this will refresh the service list below.
+            </p>
+          </div>
 
-      <!-- Streaming Services -->
-      <section>
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-semibold text-zinc-100">Streaming Services</h2>
+          <div class="space-y-2">
+            <label for="content_language" class="block text-sm font-semibold text-zinc-400 uppercase tracking-wider">Content Language</label>
+            <select
+              id="content_language"
+              name="content_language"
+              class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            >
+              <option value="">— Any language —</option>
+              {CONTENT_LANGUAGES.map(([code, name]) => (
+                <option value={code} selected={prefs.content_language === code}>{name}</option>
+              ))}
+            </select>
+            <p class="text-[10px] text-zinc-500 font-medium leading-relaxed">
+              Prioritize recommendations in your preferred original language.
+            </p>
+          </div>
         </div>
-        <p class="text-sm text-zinc-400 mb-4">
-          Select the services you subscribe to. The Discover page will highlight content available on your services.
-        </p>
-        <div id="streaming-chips" class="flex flex-wrap gap-2">
-          {STREAMING_SERVICES.map(({ id, name }) => {
-            const active = prefs.streaming_services.includes(id);
-            return (
-              <button
-                type="button"
-                data-chip="streaming"
-                data-value={id}
-                class={`chip px-5 py-3 rounded-full border text-base font-medium transition-all cursor-pointer active:scale-95 active:opacity-70 ${active ? "bg-blue-500/20 border-blue-500 text-blue-400" : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"}`}
-              >
-                {name}
-              </button>
-            );
-          })}
+
+        <div class="space-y-4">
+          <label class="block text-sm font-semibold text-zinc-400 uppercase tracking-wider">Streaming Services</label>
+          <p class="text-xs text-zinc-500 leading-relaxed">
+            Select the services you subscribe to. The Discover page will highlight content available on your services.
+          </p>
+          <div id="streaming-services-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.streaming_services)}>
+            {allProviders.map((p: any) => {
+              const active = prefs.streaming_services.includes(String(p.provider_id));
+              return (
+                <button
+                  type="button"
+                  data-provider-id={String(p.provider_id)}
+                  class={`provider-toggle group relative flex flex-col items-center gap-3 p-4 rounded-2xl border transition-all hover:bg-zinc-800/50 ${active ? 'bg-blue-600/10 border-blue-500/40 text-blue-400 ring-2 ring-blue-500/20' : 'bg-zinc-900 border-zinc-800 text-zinc-500'}`}
+                >
+                  <div class="relative w-12 h-12 rounded-xl overflow-hidden shadow-lg group-hover:scale-110 transition-transform">
+                    <img src={p.logo_path} alt={p.provider_name} class="w-full h-full object-cover" />
+                    {active && (
+                      <div class="absolute inset-0 bg-blue-500/20 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-6 h-6 text-white drop-shadow-md">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  <span class="text-[10px] font-black uppercase tracking-widest text-center leading-tight truncate w-full">{p.provider_name}</span>
+                </button>
+              );
+            })}
+          </div>
+          {allProviders.length === 0 && (
+            <div class="p-8 rounded-2xl border border-dashed border-zinc-800 text-center">
+              <p class="text-sm text-zinc-500">No providers found for this region. Please select a country first.</p>
+            </div>
+          )}
         </div>
       </section>
 
       <!-- Favourite Movie Genres -->
       <section>
         <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-semibold text-zinc-100">Favourite Movie Genres</h2>
+          <h2 class="text-xl font-bold text-zinc-100">Favourite Movie Genres</h2>
+          <p class="text-xs text-zinc-500 mt-1">Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.</p>
         </div>
-        <p class="text-sm text-zinc-400 mb-4">
-          Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.
-        </p>
-        <div id="movie-genre-chips" class="flex flex-wrap gap-2">
+        <div id="movie-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.movie_genres)}>
           {MOVIE_GENRES.map((genre) => {
             const active = prefs.movie_genres.includes(genre);
             return (
               <button
                 type="button"
-                data-chip="movie-genre"
+                data-genre-type="movie"
                 data-value={genre}
-                class={`chip px-5 py-3 rounded-full border text-base font-medium transition-all cursor-pointer active:scale-95 active:opacity-70 ${active ? "bg-blue-500/20 border-blue-500 text-blue-400" : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"}`}
+                class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-800/50 ${active ? "bg-blue-600/10 border-blue-500/40 text-blue-400 ring-2 ring-blue-500/20" : "bg-zinc-900 border-zinc-800 text-zinc-500"}`}
               >
                 {genre}
               </button>
@@ -284,20 +248,18 @@ const COUNTRIES = [
       <!-- Favourite Show Genres -->
       <section>
         <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-semibold text-zinc-100">Favourite Show Genres</h2>
+          <h2 class="text-xl font-bold text-zinc-100">Favourite Show Genres</h2>
+          <p class="text-xs text-zinc-500 mt-1">Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.</p>
         </div>
-        <p class="text-sm text-zinc-400 mb-4">
-          Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.
-        </p>
-        <div id="show-genre-chips" class="flex flex-wrap gap-2">
+        <div id="show-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.show_genres)}>
           {SHOW_GENRES.map((genre) => {
             const active = prefs.show_genres.includes(genre);
             return (
               <button
                 type="button"
-                data-chip="show-genre"
+                data-genre-type="show"
                 data-value={genre}
-                class={`chip px-5 py-3 rounded-full border text-base font-medium transition-all cursor-pointer active:scale-95 active:opacity-70 ${active ? "bg-blue-500/20 border-blue-500 text-blue-400" : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"}`}
+                class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-800/50 ${active ? "bg-blue-600/10 border-blue-500/40 text-blue-400 ring-2 ring-blue-500/20" : "bg-zinc-900 border-zinc-800 text-zinc-500"}`}
               >
                 {genre}
               </button>
@@ -411,18 +373,61 @@ const COUNTRIES = [
       }
     });
 
-    // Chip toggle
-    document.querySelectorAll<HTMLButtonElement>('button[data-chip]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const isActive = btn.classList.contains('bg-blue-500/20');
-        if (isActive) {
-          btn.className = btn.className
-            .replace('bg-blue-500/20 border-blue-500 text-blue-400', 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200');
-        } else {
-          btn.className = btn.className
-            .replace('bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200', 'bg-blue-500/20 border-blue-500 text-blue-400');
-        }
-      });
+    // Discovery Preference Toggles
+    const streamingList = document.getElementById('streaming-services-list');
+    const movieGenreList = document.getElementById('movie-genre-list');
+    const showGenreList = document.getElementById('show-genre-list');
+    
+    const selectedStreaming = new Set(JSON.parse(streamingList?.dataset.selected || '[]'));
+    const selectedMovieGenres = new Set(JSON.parse(movieGenreList?.dataset.selected || '[]'));
+    const selectedShowGenres = new Set(JSON.parse(showGenreList?.dataset.selected || '[]'));
+
+    function refreshButton(btn: HTMLElement, active: boolean) {
+      if (active) {
+        btn.classList.add('bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20');
+        btn.classList.remove('bg-zinc-900', 'border-zinc-800', 'text-zinc-500');
+        const check = btn.querySelector('.absolute');
+        if (check) check.classList.remove('hidden');
+      } else {
+        btn.classList.remove('bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20');
+        btn.classList.add('bg-zinc-900', 'border-zinc-800', 'text-zinc-500');
+        const check = btn.querySelector('.absolute');
+        if (check) check.classList.add('hidden');
+      }
+    }
+
+    streamingList?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.provider-toggle') as HTMLElement;
+      if (!btn) return;
+      const id = btn.dataset.providerId!;
+      if (selectedStreaming.has(id)) selectedStreaming.delete(id); else selectedStreaming.add(id);
+      refreshButton(btn, selectedStreaming.has(id));
+    });
+
+    movieGenreList?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
+      if (!btn) return;
+      const val = btn.dataset.value!;
+      if (selectedMovieGenres.has(val)) selectedMovieGenres.delete(val); else selectedMovieGenres.add(val);
+      refreshButton(btn, selectedMovieGenres.has(val));
+    });
+
+    showGenreList?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
+      if (!btn) return;
+      const val = btn.dataset.value!;
+      if (selectedShowGenres.has(val)) selectedShowGenres.delete(val); else selectedShowGenres.add(val);
+      refreshButton(btn, selectedShowGenres.has(val));
+    });
+
+    // Region Change - Refresh providers (Reload page for simplicity, like in nosocial)
+    const countrySelect = document.getElementById('country') as HTMLSelectElement | null;
+    countrySelect?.addEventListener('change', async () => {
+      // We could fetch dynamically, but reloading ensures the server-side allProviders is updated
+      // However, we should save the country first or pass it as a query param.
+      // Let's just save automatically on change for country.
+      saveBtn?.click();
+      setTimeout(() => window.location.reload(), 500);
     });
 
     // Privacy radio buttons
@@ -474,9 +479,9 @@ const COUNTRIES = [
             country: country || null,
             content_language: contentLanguage || null,
             privacy_level: (document.querySelector('input[name="privacy_level"]:checked') as HTMLInputElement | null)?.value,
-            streaming_services: activeChips('streaming'),
-            movie_genres: activeChips('movie-genre'),
-            show_genres: activeChips('show-genre'),
+            streaming_services: Array.from(selectedStreaming),
+            movie_genres: Array.from(selectedMovieGenres),
+            show_genres: Array.from(selectedShowGenres),
           }),
         });
         if (!res.ok) {

@@ -13,6 +13,8 @@ const genre = Astro.url.searchParams.get("genre") ?? "";
 const year = Astro.url.searchParams.get("year") ? Number(Astro.url.searchParams.get("year")) : undefined;
 const minRating = Astro.url.searchParams.get("min_rating") ? Number(Astro.url.searchParams.get("min_rating")) : undefined;
 const status = Astro.url.searchParams.get("status") ?? "";
+const providerId = Astro.url.searchParams.get("provider_id") ? Number(Astro.url.searchParams.get("provider_id")) : undefined;
+const providerName = Astro.url.searchParams.get("provider_name") ?? "";
 const page = Number(Astro.url.searchParams.get("page") ?? 1);
 const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
@@ -31,6 +33,7 @@ if (hasTmdbKey) {
       ...(year ? { year } : {}),
       ...(minRating ? { min_rating: minRating } : {}),
       ...(status ? { status } : {}),
+      ...(providerId ? { provider_id: providerId } : {}),
     }, token);
   } catch (e) {
     console.error("Failed to fetch TMDB show list:", e);
@@ -55,6 +58,8 @@ if (genre) baseParams.set("genre", genre);
 if (year) baseParams.set("year", String(year));
 if (minRating) baseParams.set("min_rating", String(minRating));
 if (status) baseParams.set("status", status);
+if (providerId) baseParams.set("provider_id", String(providerId));
+if (providerName) baseParams.set("provider_name", providerName);
 const baseUrl = `/shows?${baseParams.toString()}`;
 ---
 
@@ -64,7 +69,9 @@ const baseUrl = `/shows?${baseParams.toString()}`;
     <a href="/collection/shows" class="px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors active:scale-95 active:opacity-70">My Collection</a>
   </div>
   <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-    <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">Explore Shows</h1>
+    <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">
+      {providerName ? `Shows on ${providerName}` : 'Explore Shows'}
+    </h1>
 
     {hasTmdbKey && (
       <div class="flex flex-wrap gap-2 text-sm bg-zinc-900/50 p-1 rounded-xl border border-zinc-800">
@@ -131,7 +138,7 @@ const baseUrl = `/shows?${baseParams.toString()}`;
             ))}
           </select>
 
-          {(genre || year || minRating || status) && (
+          {(genre || year || minRating || status || providerId) && (
             <a href={`/shows?category=${category}`} class="text-sm text-zinc-500 hover:text-zinc-300 transition">
               Clear filters
             </a>
@@ -150,7 +157,7 @@ const baseUrl = `/shows?${baseParams.toString()}`;
         type="shows"
         currentPage={data.page}
         totalPages={data.total_pages}
-        params={{ category, genre, year, min_rating: minRating, status }}
+        params={{ category, genre, year, min_rating: minRating, status, provider_id: providerId, provider_name: providerName }}
       />
     </>
   )}
@@ -168,6 +175,8 @@ const baseUrl = `/shows?${baseParams.toString()}`;
     if (y) params.set("year", y);
     if (r) params.set("min_rating", r);
     if (st) params.set("status", st);
+    if (providerId) params.set("provider_id", String(providerId));
+    if (providerName) params.set("provider_name", providerName);
     window.location.href = `/shows?${params.toString()}`;
   }
 

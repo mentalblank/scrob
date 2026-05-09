@@ -522,7 +522,7 @@ export interface MediaItem {
     audio_languages: string[];
     subtitle_languages: string[];
   } | null;
-  where_to_watch?: { type: string; name: string; logo: string | null }[];
+  where_to_watch?: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string }[];
   collection?: {
     id: number;
     name: string;
@@ -638,7 +638,7 @@ export interface Show {
   user_rating?: number | null;
   first_air_date: string | null;
   last_air_date: string | null;
-  where_to_watch?: { type: string; name: string; logo: string | null }[];
+  where_to_watch?: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string }[];
   trailer_youtube_id?: string | null;
   logo_path?: string | null;
 }
@@ -883,7 +883,7 @@ export const api = {
     getCollection: (collectionId: number, token?: string) =>
       get<CollectionDetail>(`/media/collection/${collectionId}`, undefined, token),
 
-    tmdbList: (params: { type: string; category?: string; page?: number; genre?: string; year?: number; min_rating?: number; status?: string }, token?: string) =>
+    tmdbList: (params: { type: string; category?: string; page?: number; genre?: string; year?: number; min_rating?: number; status?: string; provider_id?: number }, token?: string) =>
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/tmdb/list", params, token),
 
     getBlocklist: (token?: string) =>
@@ -945,6 +945,20 @@ export const api = {
 
     playbackSources: (type: string, tmdbId: number, token: string) =>
       get<PlaybackSource[]>(`/media/playback/${type}/${tmdbId}`, undefined, token),
+
+    getWatchProviders: (type: string = "movie", region: string = "US", token?: string) =>
+      get<{ results: any[] }>("/media/watch-providers", { type, region }, token),
+
+    getGenres: (type: string = "movie", token?: string) =>
+      get<{ genres: { id: number; name: string }[] }>("/media/genres", { type }, token),
+
+    getLanguages: (token?: string) =>
+      get<{ iso_639_1: string; english_name: string; name: string }[]>("/media/languages", undefined, token),
+
+    getCountries: (token?: string) =>
+      get<{ iso_3166_1: string; english_name: string; native_name: string }[]>("/media/countries", undefined, token),
+
+
   },
 
   shows: {
