@@ -1,14 +1,17 @@
-name: Branch build
+name: Dev Build
 
 on:
   push:
-    branches: [main]
+    branches:
+      - 'dev'
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Build branch image
+  docker:
+    name: Build & push dev images
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: write
 
     steps:
@@ -34,10 +37,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sanitize branch name
-        id: branch
-        run: echo "tag=$(echo '${{ github.ref_name }}' | sed 's|/|-|g')" >> $GITHUB_OUTPUT
-
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -45,9 +44,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            APP_VERSION=${{ steps.branch.outputs.tag }}-dev
+            APP_VERSION=dev
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ steps.branch.outputs.tag }}
-            ghcr.io/${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ steps.branch.outputs.tag }}
-          cache-from: type=gha,scope=scrob-${{ steps.branch.outputs.tag }}
-          cache-to: type=gha,mode=max,scope=scrob-${{ steps.branch.outputs.tag }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:dev
+            ghcr.io/${{ github.repository_owner }}/scrob:dev
+          cache-from: type=gha,scope=scrob-dev
+          cache-to: type=gha,mode=max,scope=scrob-dev
