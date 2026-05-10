@@ -16,8 +16,8 @@ fi
 groupadd -g "$PGID" scrob 2>/dev/null || true
 useradd -u "$PUID" -g "$PGID" -M -s /bin/false scrob 2>/dev/null || true
 
-# Fix ownership so the scrob user can write to the app directories
-chown -R scrob:scrob /app
+# Fix ownership so the scrob user can write to the data directory
+chown -R scrob:scrob /app/backend/data
 
 # Allow the unprivileged user to write to Docker's stdout/stderr
 chmod o+w /dev/stdout /dev/stderr
