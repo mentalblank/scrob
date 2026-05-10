@@ -868,3 +868,96 @@ async def sync_trakt(
 
     background_tasks.add_task(run_trakt_sync, current_user.id, job.id)
     return {"status": "started", "job_id": job.id, "message": "Trakt sync is running in the background"}
+
+
+async def _run_trakt_push(user_id: int) -> None:
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+        settings = settings_result.scalar_one_or_none()
+        if not settings or not settings.trakt_access_token or not settings.trakt_client_id:
+            return
+
+        all_media_ids: set[int] = set()
+        watched_ids: set[int] = set()
+        ratings_map: dict[int, float] = {}
+
+        if settings.trakt_push_watched:
+            watched_result = await db.execute(
+                select(WatchEvent.media_id).where(WatchEvent.user_id == user_id).distinct()
+            )
+            watched_ids = {row[0] for row in watched_result.all()}
+            all_media_ids |= watched_ids
+
+        if settings.trakt_push_ratings:
+            ratings_result = await db.execute(
+                select(Rating.media_id, Rating.rating).where(
+                    Rating.user_id == user_id,
+                    Rating.rating.isnot(None),
+                )
+            )
+            ratings_map = {row[0]: row[1] for row in ratings_result.all()}
+            all_media_ids |= set(ratings_map.keys())
+
+        if not all_media_ids:
+            print("Trakt full push: nothing to push")
+            return
+
+        media_result = await db.execute(select(Media).where(Media.id.in_(all_media_ids)))
+        media_by_id: dict[int, Media] = {m.id: m for m in media_result.scalars().all()}
+
+        show_ids = {m.show_id for m in media_by_id.values() if m.show_id}
+        shows_by_id: dict[int, Show] = {}
+        if show_ids:
+            shows_result = await db.execute(select(Show).where(Show.id.in_(show_ids)))
+            shows_by_id = {s.id: s for s in shows_result.scalars().all()}
+
+        push_tasks = []
+
+        if settings.trakt_push_watched:
+            for mid in watched_ids:
+                media = media_by_id.get(mid)
+                if not media or not media.tmdb_id:
+                    continue
+                if media.media_type == MediaType.movie:
+                    push_tasks.append(trakt_client.add_movie_to_history(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
+                elif media.media_type == MediaType.episode and media.show_id and media.season_number is not None and media.episode_number is not None:
+                    show = shows_by_id.get(media.show_id)
+                    if show and show.tmdb_id:
+                        push_tasks.append(trakt_client.add_episode_to_history(settings.trakt_client_id, settings.trakt_access_token, show.tmdb_id, media.season_number, media.episode_number))
+
+        if settings.trakt_push_ratings:
+            for mid, rating in ratings_map.items():
+                media = media_by_id.get(mid)
+                if not media or not media.tmdb_id:
+                    continue
+                if media.media_type == MediaType.movie:
+                    push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, rating))
+                elif media.media_type in (MediaType.series, MediaType.episode):
+                    push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, rating))
+
+        if not push_tasks:
+            print("Trakt full push: no items with Trakt-compatible data found")
+            return
+
+        print(f"Trakt full push: pushing {len(push_tasks)} items...")
+        results = await asyncio.gather(*push_tasks, return_exceptions=True)
+        failed = sum(1 for r in results if isinstance(r, Exception))
+        print(f"Trakt full push: {len(push_tasks) - failed}/{len(push_tasks)} succeeded")
+
+
+@router.post("/push")
+async def push_trakt(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+    _require_trakt_config(settings)
+    if not settings or not settings.trakt_access_token:
+        raise HTTPException(status_code=400, detail="Trakt is not connected")
+    if not settings.trakt_push_watched and not settings.trakt_push_ratings:
+        raise HTTPException(status_code=400, detail="Enable 'Scrob → Trakt' push flags first")
+    background_tasks.add_task(_run_trakt_push, current_user.id)
+    return {"status": "started", "message": "Trakt push is running in the background"}
