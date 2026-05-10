@@ -1084,7 +1084,7 @@ const bottomNavItem = (active: boolean) =>
 
       } else if (action === 'rate') {
         const currentRating = btn.dataset.userRating ? Number(btn.dataset.userRating) : null;
-        const ratingSeason = card.dataset.season ? Number(card.dataset.season) : null;
+        const ratingSeason = (mediaType === 'series' && card.dataset.season) ? Number(card.dataset.season) : null;
         if (document.getElementById('rating-popover')!.classList.contains('hidden') || _activeRatingBtn !== btn) {
           openRatingPopover(btn, tmdbId, mediaType, currentRating, ratingSeason);
         } else {
