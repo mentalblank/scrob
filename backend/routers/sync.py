@@ -1596,6 +1596,103 @@ async def sync_connection(
     return {"status": "started", "job_id": job.id, "message": f"{conn.type.capitalize()} sync is running in the background"}
 
 
+async def _run_full_push(user_id: int, connection_id: int) -> None:
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        conn_result = await db.execute(
+            select(MediaServerConnection).where(
+                MediaServerConnection.id == connection_id,
+                MediaServerConnection.user_id == user_id,
+            )
+        )
+        conn = conn_result.scalar_one_or_none()
+        if not conn:
+            return
+
+        conn_source = CollectionSource(conn.type)
+        watched_ids: set[int] = set()
+        ratings_map: dict[int, float] = {}
+
+        if conn.push_watched:
+            watched_result = await db.execute(
+                select(WatchEvent.media_id).where(WatchEvent.user_id == user_id).distinct()
+            )
+            watched_ids = {row[0] for row in watched_result.all()}
+
+        if conn.push_ratings:
+            ratings_result = await db.execute(
+                select(Rating.media_id, Rating.rating).where(
+                    Rating.user_id == user_id,
+                    Rating.rating.isnot(None),
+                )
+            )
+            ratings_map = {row[0]: row[1] for row in ratings_result.all()}
+
+        all_media_ids = watched_ids | set(ratings_map.keys())
+        if not all_media_ids:
+            print(f"Full push for connection {connection_id}: nothing to push")
+            return
+
+        files_result = await db.execute(
+            select(CollectionFile.source_id, Collection.media_id)
+            .join(Collection, Collection.id == CollectionFile.collection_id)
+            .where(
+                Collection.user_id == user_id,
+                Collection.media_id.in_(all_media_ids),
+                CollectionFile.source == conn_source,
+                CollectionFile.source_id.isnot(None),
+            )
+        )
+        source_ids_map: dict[int, list[str]] = {}
+        for source_id, media_id in files_result.all():
+            source_ids_map.setdefault(media_id, []).append(source_id)
+
+        push_tasks = []
+
+        if conn.push_watched:
+            for mid in watched_ids:
+                for sid in source_ids_map.get(mid, []):
+                    if conn.type == "plex":
+                        push_tasks.append(plex.mark_watched(conn.url, conn.token, sid))
+                    elif conn.type == "jellyfin":
+                        push_tasks.append(jellyfin.mark_watched(conn.url, conn.token, conn.server_user_id, sid))
+                    elif conn.type == "emby":
+                        push_tasks.append(emby.mark_watched(conn.url, conn.token, conn.server_user_id, sid))
+
+        if conn.push_ratings:
+            for mid, rating in ratings_map.items():
+                for sid in source_ids_map.get(mid, []):
+                    if conn.type == "plex":
+                        push_tasks.append(plex.set_rating(conn.url, conn.token, sid, rating))
+                    elif conn.type == "jellyfin":
+                        push_tasks.append(jellyfin.set_rating(conn.url, conn.token, conn.server_user_id, sid, rating))
+                    elif conn.type == "emby":
+                        push_tasks.append(emby.set_rating(conn.url, conn.token, conn.server_user_id, sid, rating))
+
+        if not push_tasks:
+            print(f"Full push for connection {connection_id}: no items found in collection for this server")
+            return
+
+        print(f"Full push for connection {connection_id}: pushing {len(push_tasks)} items...")
+        results = await asyncio.gather(*push_tasks, return_exceptions=True)
+        failed = sum(1 for r in results if isinstance(r, Exception))
+        print(f"Full push for connection {connection_id}: {len(push_tasks) - failed}/{len(push_tasks)} succeeded")
+
+
+@router.post("/connection/{connection_id}/push")
+async def push_upstream(
+    connection_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conn = await _get_connection_or_404(db, connection_id, current_user.id)
+    if not conn.push_watched and not conn.push_ratings:
+        raise HTTPException(status_code=400, detail="Enable 'Scrob → Server' push flags for this connection first")
+    background_tasks.add_task(_run_full_push, current_user.id, connection_id)
+    return {"status": "started", "message": "Full upstream sync is running in the background"}
+
+
 @router.post("/jellyfin")
 async def sync_jellyfin(
     background_tasks: BackgroundTasks,
