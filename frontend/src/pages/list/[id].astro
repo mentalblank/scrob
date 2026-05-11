@@ -464,8 +464,18 @@ Astro.response.headers.set("Cache-Control", "no-store");
   token, 
   listId: list?.id, 
   apiKey: user?.api_key,
+  initialRadarrAutoAdd: list.radarr_auto_add,
+  initialSonarrAutoAdd: list.sonarr_auto_add,
   initialRadarrTags: list.radarr_tags || [],
-  initialSonarrTags: list.sonarr_tags || []
+  initialSonarrTags: list.sonarr_tags || [],
+  initialRadarrRoot: list.radarr_root_folder,
+  initialRadarrQuality: list.radarr_quality_profile,
+  initialRadarrMonitor: list.radarr_monitor,
+  initialSonarrRoot: list.sonarr_root_folder,
+  initialSonarrQuality: list.sonarr_quality_profile,
+  initialSonarrMonitor: list.sonarr_monitor,
+  initialSonarrType: list.sonarr_series_type,
+  initialSonarrSeasonFolder: list.sonarr_season_folder
 }}>
   // Reload when restored from bfcache so DOM mutations (newly added items) aren't lost.
 
@@ -506,6 +516,22 @@ Astro.response.headers.set("Cache-Control", "no-store");
   const autoError = document.getElementById('automation-error');
 
   function openAutomationModal() {
+    // Reset inputs to current saved state
+    if (radarrCheckbox) radarrCheckbox.checked = initialRadarrAutoAdd;
+    if (sonarrCheckbox) sonarrCheckbox.checked = initialSonarrAutoAdd;
+    
+    const radarrMon = document.getElementById('auto-radarr-monitor');
+    if (radarrMon) radarrMon.value = currentRadarrMonitor;
+    
+    const sonarrMon = document.getElementById('auto-sonarr-monitor');
+    if (sonarrMon) sonarrMon.value = currentSonarrMonitor;
+    
+    const sonarrType = document.getElementById('auto-sonarr-type');
+    if (sonarrType) sonarrType.value = currentSonarrType;
+    
+    const sonarrSF = document.getElementById('auto-sonarr-season-folder');
+    if (sonarrSF) sonarrSF.checked = currentSonarrSeasonFolder;
+
     automationModal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
   }
@@ -528,6 +554,14 @@ Astro.response.headers.set("Cache-Control", "no-store");
 
   let selectedTagsRadarr = new Set(initialRadarrTags.map(id => id.toString()));
   let selectedTagsSonarr = new Set(initialSonarrTags.map(id => id.toString()));
+  let currentRadarrRoot = initialRadarrRoot;
+  let currentRadarrQuality = initialRadarrQuality;
+  let currentRadarrMonitor = initialRadarrMonitor;
+  let currentSonarrRoot = initialSonarrRoot;
+  let currentSonarrQuality = initialSonarrQuality;
+  let currentSonarrMonitor = initialSonarrMonitor;
+  let currentSonarrType = initialSonarrType;
+  let currentSonarrSeasonFolder = initialSonarrSeasonFolder;
 
   function updateTagUI(type) {
     const selectedSet = type === 'radarr' ? selectedTagsRadarr : selectedTagsSonarr;
@@ -623,8 +657,8 @@ Astro.response.headers.set("Cache-Control", "no-store");
       const profileSelect = document.getElementById(`auto-${type}-quality`);
       
       // Current values from list
-      const currentRoot = type === 'radarr' ? "{list.radarr_root_folder}" : "{list.sonarr_root_folder}";
-      const currentProfile = type === 'radarr' ? "{list.radarr_quality_profile}" : "{list.sonarr_quality_profile}";
+      const currentRoot = type === 'radarr' ? currentRadarrRoot : currentSonarrRoot;
+      const currentProfile = type === 'radarr' ? currentRadarrQuality : currentSonarrQuality;
 
       if (rootSelect) {
         rootSelect.innerHTML = status.root_folders.map(f => `<option value="${f.path}" ${f.path === currentRoot ? 'selected' : ''}>${f.path} (${(f.freeSpace / 1024 / 1024 / 1024).toFixed(1)} GB free)</option>`).join('');
@@ -664,16 +698,26 @@ Astro.response.headers.set("Cache-Control", "no-store");
     };
 
     if (radarrCheckbox.checked) {
-      payload.radarr_root_folder = document.getElementById('auto-radarr-root').value;
-      payload.radarr_quality_profile = parseInt(document.getElementById('auto-radarr-quality').value);
+      const rootVal = document.getElementById('auto-radarr-root').value;
+      const qualVal = document.getElementById('auto-radarr-quality').value;
+      if (rootVal) payload.radarr_root_folder = rootVal;
+      if (qualVal) {
+        const parsed = parseInt(qualVal);
+        if (!isNaN(parsed)) payload.radarr_quality_profile = parsed;
+      }
       payload.radarr_monitor = document.getElementById('auto-radarr-monitor').value;
       payload.radarr_tags = Array.from(selectedTagsRadarr).map(id => parseInt(id));
       if (payload.radarr_tags.length === 0) payload.radarr_tags = null;
     }
 
     if (sonarrCheckbox.checked) {
-      payload.sonarr_root_folder = document.getElementById('auto-sonarr-root').value;
-      payload.sonarr_quality_profile = parseInt(document.getElementById('auto-sonarr-quality').value);
+      const rootVal = document.getElementById('auto-sonarr-root').value;
+      const qualVal = document.getElementById('auto-sonarr-quality').value;
+      if (rootVal) payload.sonarr_root_folder = rootVal;
+      if (qualVal) {
+        const parsed = parseInt(qualVal);
+        if (!isNaN(parsed)) payload.sonarr_quality_profile = parsed;
+      }
       payload.sonarr_series_type = document.getElementById('auto-sonarr-type').value;
       payload.sonarr_monitor = document.getElementById('auto-sonarr-monitor').value;
       payload.sonarr_season_folder = document.getElementById('auto-sonarr-season-folder').checked;
@@ -695,6 +739,17 @@ Astro.response.headers.set("Cache-Control", "no-store");
         const err = await res.json();
         throw new Error(err.detail || 'Failed to update automation settings');
       }
+      
+      // Update local state for next modal open
+      if (payload.radarr_root_folder !== undefined) currentRadarrRoot = payload.radarr_root_folder;
+      if (payload.radarr_quality_profile !== undefined) currentRadarrQuality = payload.radarr_quality_profile;
+      if (payload.radarr_monitor !== undefined) currentRadarrMonitor = payload.radarr_monitor;
+      if (payload.sonarr_root_folder !== undefined) currentSonarrRoot = payload.sonarr_root_folder;
+      if (payload.sonarr_quality_profile !== undefined) currentSonarrQuality = payload.sonarr_quality_profile;
+      if (payload.sonarr_monitor !== undefined) currentSonarrMonitor = payload.sonarr_monitor;
+      if (payload.sonarr_series_type !== undefined) currentSonarrType = payload.sonarr_series_type;
+      if (payload.sonarr_season_folder !== undefined) currentSonarrSeasonFolder = payload.sonarr_season_folder;
+
       closeAutomationModal();
       window.showToast?.('Automation settings saved', 'success');
     } catch (err) {
