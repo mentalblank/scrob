@@ -89,11 +89,13 @@ async def submit_rating(
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
 
+    effective_season = None if media_type == MediaType.episode else body.season_number
+
     result2 = await db.execute(
         select(Rating).where(
             Rating.media_id == media.id,
             Rating.user_id == current_user.id,
-            Rating.season_number == body.season_number,
+            Rating.season_number == effective_season,
         )
     )
     rating = result2.scalar_one_or_none()
@@ -108,7 +110,7 @@ async def submit_rating(
             user_id=current_user.id,
             rating=body.rating,
             review=body.review,
-            season_number=body.season_number,
+            season_number=effective_season,
         )
         db.add(rating)
 
@@ -211,11 +213,13 @@ async def delete_rating(
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
 
+    effective_season = None if mt == MediaType.episode else season_number
+
     result = await db.execute(
         select(Rating).where(
             Rating.media_id == media.id,
             Rating.user_id == current_user.id,
-            Rating.season_number == season_number,
+            Rating.season_number == effective_season,
         )
     )
     rating = result.scalar_one_or_none()

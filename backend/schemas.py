@@ -188,6 +188,7 @@ class ScrobbleConnectionResponse(ScrobbleConnectionCreate):
 
 
 
+
 class PasswordUpdate(BaseModel):
     current_password: Optional[str] = None
     new_password: str

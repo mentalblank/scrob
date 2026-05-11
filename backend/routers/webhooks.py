@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
 
@@ -1794,4 +1795,100 @@ async def kodi_webhook(
     api_key: str = Query(..., description="Scrob user API key"),
 ):
     return await _handle_kodi_webhook(request, db, api_key)
+
+
+@router.get("/kodi/history")
+async def kodi_library_history(
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    movie_rows = (await db.execute(
+        select(Media.tmdb_id, func.sum(WatchEvent.play_count).label("play_count"))
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(
+            WatchEvent.user_id == user.id,
+            Media.media_type == MediaType.movie,
+            Media.tmdb_id.isnot(None),
+        )
+        .group_by(Media.tmdb_id)
+    )).all()
+
+    episode_rows = (await db.execute(
+        select(Show.tmdb_id, Media.season_number, Media.episode_number, func.sum(WatchEvent.play_count).label("play_count"))
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .join(Show, Show.id == Media.show_id)
+        .where(
+            WatchEvent.user_id == user.id,
+            Media.media_type == MediaType.episode,
+            Media.season_number.isnot(None),
+            Media.episode_number.isnot(None),
+        )
+        .group_by(Show.tmdb_id, Media.season_number, Media.episode_number)
+    )).all()
+
+    return {
+        "movies": [{"tmdb_id": r.tmdb_id, "play_count": r.play_count} for r in movie_rows],
+        "episodes": [{"show_tmdb_id": r.tmdb_id, "season_number": r.season_number, "episode_number": r.episode_number, "play_count": r.play_count} for r in episode_rows],
+    }
+
+
+class KodiRatingPayload(BaseModel):
+    tmdb_id: Optional[str] = None
+    tvdb_id: Optional[str] = None
+    imdb_id: Optional[str] = None
+    title: Optional[str] = None
+    year: Optional[int] = None
+    media_type: str
+    rating: float
+    series_name: Optional[str] = None
+    season_number: Optional[int] = None
+    episode_number: Optional[int] = None
+
+
+@router.post("/kodi/rating")
+async def kodi_rating(
+    payload: KodiRatingPayload,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Query(..., description="Scrob user API key"),
+):
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    settings = settings_result.scalar_one_or_none()
+    tmdb_key = await _get_tmdb_key(db, settings)
+
+    data = {
+        "media_type": payload.media_type,
+        "title": payload.title or "",
+        "year": payload.year,
+        "tmdb_id": payload.tmdb_id,
+        "imdb_id": payload.imdb_id,
+        "tvdb_id": payload.tvdb_id,
+        "series_name": payload.series_name,
+        "season_number": payload.season_number,
+        "episode_number": payload.episode_number,
+    }
+    media = await find_or_create_media_kodi(data, db, api_key=tmdb_key)
+    if media is None:
+        raise HTTPException(status_code=422, detail="Could not identify media")
+
+    existing_result = await db.execute(
+        select(Rating).where(Rating.media_id == media.id, Rating.user_id == user.id)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        existing.rating = payload.rating
+        existing.rated_at = datetime.utcnow()
+    else:
+        db.add(Rating(media_id=media.id, user_id=user.id, rating=payload.rating))
+    await db.commit()
+    return {"status": "ok"}
 

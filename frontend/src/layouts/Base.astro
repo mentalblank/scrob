@@ -1,6 +1,5 @@
 ---
 import "../styles/global.css";
-import { Image } from "astro:assets";
 import logo from "../assets/scrob.png";
 import WatchedAtPicker from "../components/WatchedAtPicker.astro";
 
@@ -112,7 +111,7 @@ const bottomNavItem = (active: boolean) =>
         <!-- Left: logo + desktop links -->
         <div class="flex items-center gap-6 min-w-0">
           <a href="/" class="flex items-center gap-2 text-zinc-100 font-bold text-lg tracking-tight shrink-0 group active:opacity-70 transition-opacity">
-            <Image src={logo} alt="Scrob Logo" width={32} height={32} loading="eager" class="w-7 h-7 md:w-8 md:h-8 object-contain group-hover:scale-105 transition-transform" />
+            <img src={logo.src} alt="Scrob Logo" width="32" height="32" loading="eager" class="w-7 h-7 md:w-8 md:h-8 object-contain group-hover:scale-105 transition-transform" />
             <span>Scrob</span>
           </a>
           <div class="hidden md:flex items-center gap-6 text-sm">
@@ -1301,7 +1300,7 @@ const bottomNavItem = (active: boolean) =>
 
       } else if (action === 'rate') {
         const currentRating = btn.dataset.userRating ? Number(btn.dataset.userRating) : null;
-        const ratingSeason = card.dataset.season ? Number(card.dataset.season) : null;
+        const ratingSeason = (mediaType === 'series' && card.dataset.season) ? Number(card.dataset.season) : null;
         if (document.getElementById('rating-popover')!.classList.contains('hidden') || _activeRatingBtn !== btn) {
           openRatingPopover(btn, tmdbId, mediaType, currentRating, ratingSeason);
         } else {
