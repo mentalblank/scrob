@@ -1,6 +1,7 @@
 ---
 import Base from "../../layouts/Base.astro";
 import MediaCard from "../../components/MediaCard.astro";
+import Pagination from "../../components/Pagination.astro";
 import InfiniteScroll from "../../components/InfiniteScroll.astro";
 import { api } from "../../lib/api";
 export const prerender = false;
@@ -13,6 +14,8 @@ const year = Astro.url.searchParams.get("year") ? Number(Astro.url.searchParams.
 const status = Astro.url.searchParams.get("status") ?? "";
 const page = Number(Astro.url.searchParams.get("page") ?? 1);
 const { token } = Astro.locals;
+const profile = await api.profile.get(token!);
+const paginationType = profile?.pagination_type ?? "infinite_scroll";
 Astro.response.headers.set("Cache-Control", "no-store");
 
 const data = await api.shows.list({
@@ -119,12 +122,20 @@ const baseUrl = `/collection/shows?${baseParams.toString()}`;
         {data.results.map(item => <MediaCard item={{...item, type: 'series', in_library: true}} />)}
       </div>
 
-      <InfiniteScroll
-        type="collection_shows"
-        currentPage={data.page}
-        totalPages={data.total_pages}
-        params={{ sort, genre, year, status }}
-      />
+      {paginationType === "pagination" ? (
+        <Pagination
+          currentPage={data.page}
+          totalPages={data.total_pages}
+          baseUrl={baseUrl}
+        />
+      ) : (
+        <InfiniteScroll
+          type="collection_shows"
+          currentPage={data.page}
+          totalPages={data.total_pages}
+          params={{ sort, genre, year, status }}
+        />
+      )}
     </>
   )}
 </Base>

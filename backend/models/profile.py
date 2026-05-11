@@ -20,5 +20,6 @@ class UserProfileData(Base):
     content_language    : Mapped[Optional[str]]        = mapped_column(String(10))
     privacy_level       : Mapped[PrivacyLevel]         = mapped_column(SQLEnum(PrivacyLevel), default=PrivacyLevel.private, nullable=False, server_default=PrivacyLevel.private.value)
     avatar_path         : Mapped[Optional[str]]        = mapped_column(String(255))
+    pagination_type     : Mapped[str]                  = mapped_column(String(20), default="infinite_scroll", server_default="infinite_scroll")
 
     user: Mapped["User"] = relationship(back_populates="profile")

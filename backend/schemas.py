@@ -207,6 +207,7 @@ class UserProfileUpdate(BaseModel):
     streaming_services: Optional[list[str]] = None
     content_language: Optional[str] = None
     privacy_level: Optional[PrivacyLevel] = None
+    pagination_type: Optional[str] = None
 
 class UserProfileResponse(BaseModel):
     display_name: Optional[str] = None
@@ -218,6 +219,7 @@ class UserProfileResponse(BaseModel):
     content_language: Optional[str] = None
     privacy_level: PrivacyLevel = PrivacyLevel.private
     avatar_url: Optional[str] = None
+    pagination_type: str = "infinite_scroll"
 
     class Config:
         from_attributes = True
@@ -238,6 +240,7 @@ class PublicProfileResponse(BaseModel):
     shows_watched: int = 0
     total_rated: int = 0
     avatar_url: Optional[str] = None
+    pagination_type: str = "infinite_scroll"
     # Activity
     recently_watched_movies: list[dict] = []
     recently_watched_shows: list[dict] = []

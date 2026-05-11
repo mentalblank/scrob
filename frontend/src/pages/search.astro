@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
+import Pagination from "../components/Pagination.astro";
 import InfiniteScroll from "../components/InfiniteScroll.astro";
 import { api, type MediaItem, type UserSearchResult } from "../lib/api";
 
@@ -17,7 +18,9 @@ const isUserSearch = type === "user";
 const showYearFilter = type === "movie" || type === "series";
 
 const settings = await api.auth.getSettings(token!);
+const profile = await api.profile.get(token!);
 const hasTmdbKey = !!settings?.has_effective_tmdb_key;
+const paginationType = profile?.pagination_type ?? "infinite_scroll";
 
 let results: MediaItem[] = [];
 let userResults: UserSearchResult[] = [];
@@ -195,12 +198,20 @@ const tabs: [string | undefined, string][] = [
   )}
 
   {!isUserSearch && totalPages > 1 && (
-    <InfiniteScroll
-      type="search"
-      currentPage={page}
-      totalPages={totalPages}
-      params={{ q, media_type: type, year }}
-    />
+    paginationType === "pagination" ? (
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        baseUrl={baseUrl}
+      />
+    ) : (
+      <InfiniteScroll
+        type="search"
+        currentPage={page}
+        totalPages={totalPages}
+        params={{ q, media_type: type, year }}
+      />
+    )
   )}
 </Base>
 

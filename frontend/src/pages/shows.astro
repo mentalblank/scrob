@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
 import VisibilityFilters from "../components/VisibilityFilters.astro";
+import Pagination from "../components/Pagination.astro";
 import InfiniteScroll from "../components/InfiniteScroll.astro";
 import { api, type MediaItem } from "../lib/api";
 export const prerender = false;
@@ -20,7 +21,9 @@ const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
 
 const settings = await api.auth.getSettings(token!);
+const profile = await api.profile.get(token!);
 const hasTmdbKey = !!settings?.has_effective_tmdb_key;
+const paginationType = profile?.pagination_type ?? "infinite_scroll";
 
 let data: { results: MediaItem[]; total_pages: number; page: number } = { results: [], total_pages: 0, page: 1 };
 if (hasTmdbKey) {
@@ -153,12 +156,20 @@ const baseUrl = `/shows?${baseParams.toString()}`;
         {data.results.map(item => <MediaCard item={item} />)}
       </div>
 
-      <InfiniteScroll
-        type="shows"
-        currentPage={data.page}
-        totalPages={data.total_pages}
-        params={{ category, genre, year, min_rating: minRating, status, provider_id: providerId, provider_name: providerName }}
-      />
+      {paginationType === "pagination" ? (
+        <Pagination
+          currentPage={data.page}
+          totalPages={data.total_pages}
+          baseUrl={baseUrl}
+        />
+      ) : (
+        <InfiniteScroll
+          type="shows"
+          currentPage={data.page}
+          totalPages={data.total_pages}
+          params={{ category, genre, year, min_rating: minRating, status, provider_id: providerId, provider_name: providerName }}
+        />
+      )}
     </>
   )}
 </Base>

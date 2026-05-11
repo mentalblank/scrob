@@ -2,12 +2,15 @@
 import Base from "../../layouts/Base.astro";
 import MediaCard from "../../components/MediaCard.astro";
 import VisibilityFilters from "../../components/VisibilityFilters.astro";
+import Pagination from "../../components/Pagination.astro";
 import InfiniteScroll from "../../components/InfiniteScroll.astro";
 import { api, type MediaItem } from "../../lib/api";
 
 
 
 const { token } = Astro.locals;
+const profile = await api.profile.get(token!);
+const paginationType = profile?.pagination_type ?? "infinite_scroll";
 Astro.response.headers.set("Cache-Control", "no-store");
 const page = parseInt(Astro.url.searchParams.get("page") || "1");
 
@@ -44,11 +47,19 @@ try {
     ))}
   </div>
 
-  <InfiniteScroll
-    type="trending_shows"
-    currentPage={trending.page}
-    totalPages={trending.total_pages}
-  />
+  {paginationType === "pagination" ? (
+    <Pagination
+      currentPage={trending.page}
+      totalPages={trending.total_pages}
+      baseUrl="/trending/shows"
+    />
+  ) : (
+    <InfiniteScroll
+      type="trending_shows"
+      currentPage={trending.page}
+      totalPages={trending.total_pages}
+    />
+  )}
 </Base>
 
 <script>

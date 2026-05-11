@@ -367,6 +367,7 @@ export interface UserPreferences {
   content_language: string | null;
   privacy_level: PrivacyLevel;
   avatar_url: string | null;
+  pagination_type?: "infinite_scroll" | "pagination";
   explore_filters?: ExploreFilters;
 }
 
@@ -678,6 +679,7 @@ export interface UserSearchResult {
   username: string;
   display_name: string;
   avatar_url: string | null;
+  pagination_type?: "infinite_scroll" | "pagination";
   country: string | null;
   movies_watched: number;
   shows_watched: number;
@@ -692,6 +694,7 @@ export interface ProfileFollowEntry {
   id: number;
   display_name: string;
   avatar_url: string | null;
+  pagination_type?: "infinite_scroll" | "pagination";
 }
 
 export interface ProfileListItem {
@@ -731,6 +734,7 @@ export interface PublicProfile {
   shows_watched: number;
   total_rated: number;
   avatar_url: string | null;
+  pagination_type?: "infinite_scroll" | "pagination";
   recently_watched_movies: ProfileWatchedItem[];
   recently_watched_shows: ProfileWatchedItem[];
   top_rated_movies: ProfileRatedItem[];
@@ -769,6 +773,7 @@ export interface Comment {
   username: string;
   display_name: string;
   avatar_url: string | null;
+  pagination_type?: "infinite_scroll" | "pagination";
   user_is_public: boolean;
   content: string;
   created_at: string;
