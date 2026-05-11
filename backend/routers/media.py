@@ -1230,6 +1230,13 @@ async def airing_today_collected(
         .distinct()
     )
     collected_tmdb_ids: set[int] = {row[0] for row in collected_q.all()}
+    
+    blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
+    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+    
+    # Filter the library IDs first (if they are blocked, don't even bother)
+    collected_tmdb_ids = {tid for tid in collected_tmdb_ids if tid not in blocked_ids}
+
 
     if not collected_tmdb_ids:
         return {"results": []}
@@ -1253,8 +1260,13 @@ async def airing_today_collected(
                 continue
             all_shows.extend(page_data.get("results", []))
 
-    # Keep only shows in the user's collection
-    collected_shows = [s for s in all_shows if s.get("id") in collected_tmdb_ids]
+    # Keep only shows in the user's collection and not blocked/filtered
+    collected_shows = [
+        s for s in all_shows 
+        if s.get("id") in collected_tmdb_ids 
+        and not _is_content_filtered(s, cf_genres, cf_kw, cf_re)
+    ]
+
 
     if not collected_shows:
         return {"results": []}
@@ -1347,7 +1359,9 @@ async def recently_added(
     result = await db.execute(query)
     items = [format_media(m) for m in result.scalars().all()]
     await enrich_with_state(db, current_user.id, items)
-    return {"results": items}
+    filtered = [i for i in items if not i.get("is_blocked")]
+    return {"results": filtered}
+
 
 
 @router.get("/person/{person_id}")
@@ -1486,6 +1500,7 @@ async def get_collection_details(
             for p in parts_data
         ]
         await enrich_with_state(db, current_user.id, parts)
+        parts = [p for p in parts if not p.get("is_blocked")]
 
         return {
             "id": data.get("id"),
@@ -1497,6 +1512,7 @@ async def get_collection_details(
             "cast": cast,
             "parts": parts,
         }
+
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
@@ -2177,9 +2193,10 @@ async def new_episodes(
         lib = await _show_library_ids(db, current_user.id, ids)
         items = _enrich_show_list(results, lib)
         await enrich_with_state(db, current_user.id, items)
-        # Only return shows the user has in their library
-        library_items = [i for i in items if i.get("in_library")]
+        # Only return shows the user has in their library and not blocked
+        library_items = [i for i in items if i.get("in_library") and not i.get("is_blocked")]
         return {"results": library_items}
+
     except Exception:
         return {"results": []}
 
@@ -2211,6 +2228,11 @@ async def recommended(
         .distinct()
     )
     all_collected_show_ids: set[int] = {row[0] for row in all_show_ids_q.all()}
+    
+    blocked_movies = await _get_blocked_ids(db, current_user.id, MediaType.movie)
+    blocked_series = await _get_blocked_ids(db, current_user.id, MediaType.series)
+    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+
 
     if not all_collected_movie_ids and not all_collected_show_ids:
         return {"results": []}
@@ -2272,6 +2294,15 @@ async def recommended(
                 continue
             if not is_show and tmdb_id in all_collected_movie_ids:
                 continue
+            
+            # Blocklist and Content Filter checks
+            if is_show and tmdb_id in blocked_series:
+                continue
+            if not is_show and tmdb_id in blocked_movies:
+                continue
+            if _is_content_filtered(item, cf_genres, cf_kw, cf_re):
+                continue
+
             if is_show:
                 enriched.append({
                     "id": None,
@@ -3887,6 +3918,11 @@ async def pick_for_me(
             .distinct()
         )
     watched_ids: set[int] = {r[0] for r in wq.all()}
+    
+    media_type = MediaType.movie if type == "movie" else MediaType.series
+    blocked_ids = await _get_blocked_ids(db, current_user.id, media_type)
+    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+
 
     # ── Collection pool (unwatched) ────────────────────────────────────────
     collection_items: list[dict] = []
@@ -3908,8 +3944,11 @@ async def pick_for_me(
                     "release_date": r[4], "tmdb_rating": r[5],
                     "overview": r[6], "in_library": True,
                 }
-                for r in cq.all() if r[0] and r[0] not in watched_ids
+                for r in cq.all() if r[0] and r[0] not in watched_ids and r[0] not in blocked_ids
             ]
+            # Apply content filtering
+            collection_items = [i for i in collection_items if not _is_content_filtered(i, cf_genres, cf_kw, cf_re)]
+
         else:
             cq = await db.execute(
                 select(ShowModel.tmdb_id, ShowModel.title, ShowModel.poster_path,
@@ -3929,8 +3968,11 @@ async def pick_for_me(
                     "release_date": r[4], "tmdb_rating": r[5],
                     "overview": r[6], "in_library": True,
                 }
-                for r in cq.all() if r[0] and r[0] not in watched_ids
+                for r in cq.all() if r[0] and r[0] not in watched_ids and r[0] not in blocked_ids
             ]
+            # Apply content filtering
+            collection_items = [i for i in collection_items if not _is_content_filtered(i, cf_genres, cf_kw, cf_re)]
+
 
     # ── Streaming pool (progressive fallback) ─────────────────────────────
     streaming_candidates: list[dict] = []
@@ -3968,8 +4010,9 @@ async def pick_for_me(
                         continue
                     for r in res.get("results", []):
                         tid = r.get("id")
-                        if tid and tid not in watched_ids:
+                        if tid and tid not in watched_ids and tid not in blocked_ids and not _is_content_filtered(r, cf_genres, cf_kw, cf_re):
                             streaming_candidates.append(r)
+
 
     # ── Combine & deduplicate ──────────────────────────────────────────────
     genre_id_map = {v: k for k, v in (MOVIE_GENRE_IDS if type == "movie" else TV_GENRE_IDS).items()}
