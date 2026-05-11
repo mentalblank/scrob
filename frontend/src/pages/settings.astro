@@ -129,6 +129,10 @@ if (me.totp_enabled) {
                     <!-- Left: Connection details -->
                     <div class="space-y-4">
                       <div class="space-y-2">
+                        <label class="block text-sm font-medium text-zinc-400">Display Name</label>
+                        <input type="text" class="conn-name-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.name} data-conn-id={conn.id} />
+                      </div>
+                      <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Server URL</label>
                         <input type="url" class="conn-url-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.url} data-conn-id={conn.id} />
                       </div>
@@ -366,6 +370,10 @@ if (me.totp_enabled) {
                   <div class="grid md:grid-cols-2 gap-6">
                     <!-- Left: identity + webhook URL -->
                     <div class="space-y-4">
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-zinc-400">Display Name</label>
+                        <input type="text" class="scrobble-name-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.name} data-conn-id={conn.id} />
+                      </div>
                       {conn.type === "plex" ? (
                         <div class="space-y-2">
                           <label class="block text-sm font-medium text-zinc-400">Plex Username</label>
@@ -1533,6 +1541,7 @@ if (me.totp_enabled) {
             const connId = newBtn.getAttribute('data-conn-id');
             const card = document.querySelector(`[data-connection-id="${connId}"]`);
             const body: Record<string, any> = {
+              name: (card?.querySelector('.conn-name-input') as HTMLInputElement)?.value || undefined,
               url: (card?.querySelector('.conn-url-input') as HTMLInputElement)?.value || undefined,
               token: (card?.querySelector('.conn-token-input') as HTMLInputElement)?.value || undefined,
               server_user_id: (card?.querySelector('.conn-user-id-input') as HTMLInputElement)?.value || null,
@@ -1571,12 +1580,23 @@ if (me.totp_enabled) {
                 body: JSON.stringify(libPayload),
               });
             }
+            if (body.name) {
+              const headerName = card?.querySelector('.font-medium.text-zinc-200');
+              if (headerName) {
+                // Preserve the status span if it exists
+                const statusSpan = headerName.querySelector('span');
+                headerName.textContent = body.name;
+                if (statusSpan) headerName.appendChild(statusSpan);
+              }
+            }
             showMessage('Connection saved!');
             return;
           } else if (action === 'save_scrobble_connection') {
             const connId = newBtn.getAttribute('data-conn-id');
             const card = document.querySelector(`[data-scrobble-conn-id="${connId}"]`);
-            const body: Record<string, boolean> = {};
+            const body: Record<string, any> = {
+              name: (card?.querySelector('.scrobble-name-input') as HTMLInputElement)?.value || undefined,
+            };
             card?.querySelectorAll('.scrobble-pref-checkbox').forEach(el => {
               const cb = el as HTMLInputElement;
               const pref = cb.getAttribute('data-pref');
@@ -1590,6 +1610,10 @@ if (me.totp_enabled) {
             if (!res.ok) {
               const err = await res.json();
               throw new Error(err.detail || 'Failed to save');
+            }
+            if (body.name) {
+              const headerName = card?.querySelector('.font-medium.text-zinc-200');
+              if (headerName) headerName.textContent = body.name;
             }
             showMessage('Saved.');
             return;

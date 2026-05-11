@@ -172,6 +172,7 @@ class ScrobbleConnectionCreate(BaseModel):
 
 
 class ScrobbleConnectionUpdate(BaseModel):
+    name: Optional[str] = None
     sync_collection: Optional[bool] = None
     sync_watched: Optional[bool] = None
     sync_playback: Optional[bool] = None
