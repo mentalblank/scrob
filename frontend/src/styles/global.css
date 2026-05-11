@@ -320,45 +320,45 @@ html.blur-explicit [data-adult-backdrop="true"] img {
 /* ── Visibility Filters ────────────────────────────────────────────────── */
 
 /* Watched */
-body[data-v-watched="fade"] [data-card][data-watched="true"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-watched="fade"] [data-card][data-watched="true"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-watched="hide"] :is([data-card][data-watched="true"], .group\/item:has([data-card][data-watched="true"])) { display: none; }
 
 /* Not Watched */
-body[data-v-unwatched="fade"] [data-card][data-watched="false"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-unwatched="fade"] [data-card][data-watched="false"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-unwatched="hide"] :is([data-card][data-watched="false"], .group\/item:has([data-card][data-watched="false"])) { display: none; }
 
 /* In Library */
-body[data-v-collected="fade"] [data-card][data-collected="true"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-collected="fade"] [data-card][data-collected="true"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-collected="hide"] :is([data-card][data-collected="true"], .group\/item:has([data-card][data-collected="true"])) { display: none; }
 
 /* Not In Library */
-body[data-v-uncollected="fade"] [data-card][data-collected="false"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-uncollected="fade"] [data-card][data-collected="false"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-uncollected="hide"] :is([data-card][data-collected="false"], .group\/item:has([data-card][data-collected="false"])) { display: none; }
 
 /* Listed */
-body[data-v-listed="fade"] [data-card][data-listed="true"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-listed="fade"] [data-card][data-listed="true"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-listed="hide"] :is([data-card][data-listed="true"], .group\/item:has([data-card][data-listed="true"])) { display: none; }
 
 /* Not Listed */
-body[data-v-unlisted="fade"] [data-card][data-listed="false"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-unlisted="fade"] [data-card][data-listed="false"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-unlisted="hide"] :is([data-card][data-listed="false"], .group\/item:has([data-card][data-listed="false"])) { display: none; }
 
 /* In Sonarr / Radarr */
-body[data-v-dvr="fade"] [data-card][data-dvr="true"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-dvr="fade"] [data-card][data-dvr="true"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-dvr="hide"] :is([data-card][data-dvr="true"], .group\/item:has([data-card][data-dvr="true"])) { display: none; }
-body[data-v-not-dvr="fade"] [data-card][data-dvr="false"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-not-dvr="fade"] [data-card][data-dvr="false"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-not-dvr="hide"] :is([data-card][data-dvr="false"], .group\/item:has([data-card][data-dvr="false"])) { display: none; }
 
 /* Partially Watched */
-body[data-v-partial-watched="fade"] [data-card][data-partial-watched="true"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-partial-watched="fade"] [data-card][data-partial-watched="true"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-partial-watched="hide"] :is([data-card][data-partial-watched="true"], .group\/item:has([data-card][data-partial-watched="true"])) { display: none; }
-body[data-v-not-partial-watched="fade"] [data-card][data-partial-watched="false"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-not-partial-watched="fade"] [data-card][data-partial-watched="false"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-not-partial-watched="hide"] :is([data-card][data-partial-watched="false"], .group\/item:has([data-card][data-partial-watched="false"])) { display: none; }
 
 /* Partially Collected */
-body[data-v-partial-collected="fade"] [data-card][data-partial-collected="true"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-partial-collected="fade"] [data-card][data-partial-collected="true"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-partial-collected="hide"] :is([data-card][data-partial-collected="true"], .group\/item:has([data-card][data-partial-collected="true"])) { display: none; }
-body[data-v-not-partial-collected="fade"] [data-card][data-partial-collected="false"] { opacity: 0.25; filter: grayscale(1); pointer-events: none; }
+body[data-v-not-partial-collected="fade"] [data-card][data-partial-collected="false"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-not-partial-collected="hide"] :is([data-card][data-partial-collected="false"], .group\/item:has([data-card][data-partial-collected="false"])) { display: none; }
 
 /* ── TMDB image fallback ────────────────────────────────────────────────── */
