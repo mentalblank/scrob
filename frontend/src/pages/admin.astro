@@ -335,6 +335,17 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
           Run Heal
         </button>
       </div>
+
+      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center gap-4 mt-4">
+        <div class="flex-1">
+          <h3 class="font-semibold text-zinc-100 mb-1">Clear Database</h3>
+          <p class="text-sm text-zinc-400">Deletes all media, history, collections, and lists. Your user and server settings will be preserved.</p>
+        </div>
+        <button id="admin-clear-database-btn"
+          class="shrink-0 px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+          Clear Database
+        </button>
+      </div>
     </section>
 
     <!-- ── Database ── -->
@@ -430,6 +441,25 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       <button type="button" id="restore-confirm-btn"
         class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors text-sm cursor-pointer">
         Restore
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Clear Database Confirmation Modal -->
+<div id="clear-database-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div id="clear-database-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+    <h2 class="text-xl font-black text-zinc-100 mb-2">Clear Entire Database?</h2>
+    <p class="text-sm text-zinc-400 mb-6">This will delete all media, history, collections, and lists globally across all users. This is a highly destructive operation. Only user settings and admin settings will remain.</p>
+    <div class="flex gap-3">
+      <button type="button" id="clear-database-cancel-btn"
+        class="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        Cancel
+      </button>
+      <button type="button" id="clear-database-confirm-btn"
+        class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        Clear Database
       </button>
     </div>
   </div>
@@ -894,6 +924,41 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
     } finally {
       adminHealBtn.disabled = false;
       adminHealBtn.textContent = 'Run Heal';
+    }
+  });
+
+  // ── Clear database ──
+  const clearDatabaseBtn = document.getElementById('admin-clear-database-btn') as HTMLButtonElement;
+  const clearDatabaseModal = document.getElementById('clear-database-modal')!;
+
+  clearDatabaseBtn?.addEventListener('click', () => {
+    clearDatabaseModal.classList.remove('hidden');
+  });
+
+  document.getElementById('clear-database-cancel-btn')?.addEventListener('click', () => {
+    clearDatabaseModal.classList.add('hidden');
+  });
+
+  document.getElementById('clear-database-modal-backdrop')?.addEventListener('click', () => {
+    clearDatabaseModal.classList.add('hidden');
+  });
+
+  document.getElementById('clear-database-confirm-btn')?.addEventListener('click', async () => {
+    clearDatabaseModal.classList.add('hidden');
+    clearDatabaseBtn.disabled = true;
+    clearDatabaseBtn.textContent = 'Clearing…';
+    try {
+      const res = await fetch('/api/proxy/admin/database', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to clear database');
+      showMessage('Database successfully cleared. All user state reset.');
+    } catch (err: unknown) {
+      showMessage(err instanceof Error ? err.message : 'Failed to clear database', 'error');
+    } finally {
+      clearDatabaseBtn.disabled = false;
+      clearDatabaseBtn.textContent = 'Clear Database';
     }
   });
 

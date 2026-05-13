@@ -1241,18 +1241,35 @@ if (me.totp_enabled) {
       <!-- Data Management -->
       <section>
         <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Data Management</h2>
-        <div class="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div>
-            <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Watch History</h3>
-            <p class="text-zinc-400 text-sm">This will permanently delete all your watch history and progress. Your collection and ratings will not be affected.</p>
+        <div class="space-y-4">
+          <div class="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div>
+              <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Watch History</h3>
+              <p class="text-zinc-400 text-sm">This will permanently delete all your watch history and progress. Your collection and ratings will not be affected.</p>
+            </div>
+            <button
+              type="button"
+              id="clear-history-btn"
+              class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap"
+            >
+              Clear History
+            </button>
           </div>
-          <button
-            type="button"
-            id="clear-history-btn"
-            class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap"
-          >
-            Clear History
-          </button>
+
+          <div class="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div>
+              <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Collection</h3>
+              <p class="text-zinc-400 text-sm">This will permanently remove all items from your collection. Your watch history and ratings will not be affected.</p>
+            </div>
+            <button
+              type="button"
+              id="clear-collection-btn"
+              class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap"
+            >
+              Clear Collection
+            </button>
+          </div>
+
         </div>
       </section>
 
@@ -1975,6 +1992,34 @@ if (me.totp_enabled) {
         } finally {
           clearHistoryBtn.disabled = false;
           clearHistoryBtn.textContent = 'Clear History';
+        }
+      };
+    }
+
+    const clearCollectionBtn = document.getElementById('clear-collection-btn');
+    if (clearCollectionBtn) {
+      clearCollectionBtn.onclick = async () => {
+        if (!confirm('Are you sure you want to clear your entire collection? Your watch history will be preserved, but all collection links will be removed.')) return;
+        
+        clearCollectionBtn.disabled = true;
+        clearCollectionBtn.textContent = 'Clearing...';
+        
+        try {
+          const res = await fetch(`/api/proxy/sync/collection`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            showMessage('Collection cleared successfully!');
+          } else {
+            const data = await res.json();
+            throw new Error(data.detail || 'Failed to clear collection');
+          }
+        } catch (e) {
+          showMessage(e.message, 'error');
+        } finally {
+          clearCollectionBtn.disabled = false;
+          clearCollectionBtn.textContent = 'Clear Collection';
         }
       };
     }

@@ -23,7 +23,7 @@ from core import jellyfin, emby, plex, tmdb
 import core.trakt as trakt_client
 from core.enrichment import enrich_media
 
-from dependencies import get_current_user
+from dependencies import get_current_user, require_admin
 
 
 async def _get_effective_tmdb_key(db: AsyncSession, user_settings: UserSettings | None) -> str | None:
@@ -2024,3 +2024,16 @@ async def abort_sync(
     )
     await db.commit()
     return {"status": "ok", "message": "All active sync jobs have been marked as aborted"}
+
+
+@router.delete("/collection")
+async def clear_collection(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Permanently delete all items from the current user's collection."""
+    await db.execute(delete(Collection).where(Collection.user_id == current_user.id))
+    await db.commit()
+    return {"status": "ok", "message": "Collection cleared successfully"}
+
+

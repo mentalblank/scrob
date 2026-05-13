@@ -8,13 +8,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.future import select
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, update, text
 
 from db import get_db, engine
 from models.users import User
 from models.global_settings import GlobalSettings
 from models.media import Media
 from models.collection import Collection
+from models.show import Show
 from dependencies import require_admin
 from core.url_validator import validate_service_url
 from core.backup import asyncpg_conn, restore_backup
@@ -250,3 +251,35 @@ async def restore_database(
         raise HTTPException(status_code=400, detail=str(e))
 
     return {"status": "restored"}
+
+@router.delete("/database")
+async def clear_database(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Resets all media, collections, history, lists, and comments globally.
+    User settings and admin settings are preserved.
+    """
+    tables_to_truncate = [
+        "shows",
+        "media",
+        "collections",
+        "collection_files",
+        "watch_events",
+        "ratings",
+        "lists",
+        "list_items",
+        "sync_jobs",
+        "playback_sessions",
+        "playback_progress",
+        "follows",
+        "blocklist_items",
+        "comments"
+    ]
+    
+    query = text(f"TRUNCATE {', '.join(tables_to_truncate)} CASCADE")
+    await db.execute(query)
+    await db.commit()
+    
+    return {"status": "ok", "message": "Database cleared successfully."}

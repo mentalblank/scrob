@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file. This project is a fork of [ellite/scrob](https://github.com/ellite/scrob).
 
-## [Unreleased] - 2026-05-09
+## [Unreleased] - 2026-05-13
 
 ### Added
 - **Synchronization**:
@@ -30,3 +30,4 @@ All notable changes to this project will be documented in this file. This projec
   - **Hide User Submitted Data**: Added global settings to hide user comments and ratings.
 - **Maintenance**:
   - **Playback Session Cleanup**: Automated removal of abandoned playback sessions older than 24 hours.
+  - **Collection Reset**: Added "Clear Collection" operation to the settings panel.
