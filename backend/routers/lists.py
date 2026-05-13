@@ -604,3 +604,62 @@ async def remove_list_item(
     return {"message": "Item removed"}
 
 
+@router.post("/{list_id}/items/cleanup-collection")
+async def cleanup_collection_items(
+    list_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ListModel)
+        .options(selectinload(ListModel.items).selectinload(ListItem.media).selectinload(Media.show))
+        .where(ListModel.id == list_id, ListModel.user_id == current_user.id)
+    )
+    lst = result.scalar_one_or_none()
+    if not lst:
+        raise HTTPException(status_code=404, detail="List not found")
+
+    if not lst.items:
+        return {"removed_count": 0}
+
+    # Prepare items for enrichment check
+    items_to_check = []
+    item_map = {}
+    for li in lst.items:
+        mtype = li.media.media_type
+        tid = li.media.tmdb_id
+        items_to_check.append({
+            "tmdb_id": tid,
+            "type": mtype.value if hasattr(mtype, "value") else mtype
+        })
+        item_map[(tid, mtype)] = li
+
+    # Use existing enrich_with_state logic to determine library status
+    enriched = await enrich_with_state(db, current_user.id, items_to_check)
+    
+    to_delete = []
+    for item in enriched:
+        if item.get("in_library"):
+            tid = item.get("tmdb_id")
+            mtype_str = item.get("type")
+            mtype = MediaType(mtype_str)
+            li = item_map.get((tid, mtype))
+            if li:
+                to_delete.append(li)
+
+    if not to_delete:
+        return {"removed_count": 0}
+
+    count = len(to_delete)
+    for li in to_delete:
+        # Handle Trakt sync if the list is linked
+        if lst.trakt_slug:
+            await _push_list_item_to_trakt(db, current_user.id, lst.trakt_slug, li.media, remove=True)
+        await db.delete(li)
+    
+    await db.commit()
+    
+    return {"removed_count": count}
+
+
+

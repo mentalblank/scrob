@@ -101,6 +101,16 @@ Astro.response.headers.set("Cache-Control", "no-store");
                   Automation
                 </button>
                 <button
+                  id="cleanup-list-btn"
+                  class="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 font-bold rounded-xl transition-all text-sm border border-emerald-500/20 cursor-pointer"
+                  title="Remove collected items"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                  </svg>
+                  Clean
+                </button>
+                <button
                   id="delete-list-btn"
                   class="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold rounded-xl transition-all text-sm border border-red-500/20 cursor-pointer"
                 >
@@ -828,6 +838,48 @@ Astro.response.headers.set("Cache-Control", "no-store");
       if (res.ok) window.location.href = '/lists';
     } catch (err) {
       console.error('Failed to delete list', err);
+    }
+  });
+
+  // --- Cleanup collection items ---
+  document.getElementById('cleanup-list-btn')?.addEventListener('click', async () => {
+    const ok = await window.showConfirm(
+      'Clean Collection?',
+      'This will remove all items from this list that are already in your collection.'
+    );
+    if (!ok) return;
+
+    const btn = document.getElementById('cleanup-list-btn');
+    const originalContent = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="animate-spin w-4 h-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Cleaning...`;
+
+    try {
+      const res = await fetch(`/api/proxy/lists/${listId}/items/cleanup-collection`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to cleanup list');
+      }
+      
+      const data = await res.json();
+      if (data.removed_count > 0) {
+        window.showToast?.(`Removed ${data.removed_count} item(s) already in collection`, 'success');
+        // Simple way: reload page. More complex: remove items from DOM.
+        // Given the grid logic, reloading is safer to ensure all counts/states are correct.
+        setTimeout(() => window.location.reload(), 1000);
+      } else {
+        window.showToast?.('No items in this list are in your collection', 'info');
+      }
+    } catch (err) {
+      console.error('Cleanup failed', err);
+      window.showToast?.(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalContent;
     }
   });
 
