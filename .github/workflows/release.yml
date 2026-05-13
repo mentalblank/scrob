@@ -64,6 +64,7 @@ jobs:
           push: true
           build-args: |
             APP_VERSION=${{ github.ref_name }}
+            APP_BRANCH=main
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/scrob:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ github.ref_name }}

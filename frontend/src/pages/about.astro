@@ -4,6 +4,11 @@ import Base from "../layouts/Base.astro";
 Astro.response.headers.set("Cache-Control", "no-store");
 
 const currentVersion = process.env.APP_VERSION ?? 'dev';
+const currentBranch = process.env.APP_BRANCH ?? (currentVersion === 'dev' ? 'dev' : 'main');
+
+const isDev = currentBranch === 'dev';
+const isMain = currentBranch === 'main';
+const displayVersion = currentVersion.replace(/^v/, '');
 
 let latestVersion: string | null = null;
 let releaseUrl: string | null = null;
@@ -44,7 +49,20 @@ if (currentVersion !== 'dev') {
       <img src="/scrob.png" alt="Scrob Logo" class="w-16 h-16 object-contain" />
       <div>
         <h1 class="text-3xl font-bold text-zinc-100">Scrob</h1>
-        <p class="text-zinc-500 text-sm mt-0.5">Version {currentVersion}</p>
+        {isDev ? (
+          <div class="mt-1">
+            <p class="text-amber-500 text-sm font-semibold">Dev Branch — Experimental</p>
+            <p class="text-zinc-500 text-xs mt-0.5 max-w-sm">
+              This branch is experimental and may break. It does not follow standard version numbering.
+            </p>
+          </div>
+        ) : isMain ? (
+          <p class="text-zinc-500 text-sm mt-0.5">Version {displayVersion}</p>
+        ) : (
+          <p class="text-zinc-500 text-sm mt-0.5">
+            Branch <span class="text-zinc-300">{currentBranch}</span> — Version <span class="text-zinc-300">{displayVersion}</span>
+          </p>
+        )}
       </div>
     </div>
 
@@ -123,6 +141,19 @@ if (currentVersion !== 'dev') {
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-0 group-hover:opacity-50 transition-opacity"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
           </a>
           <a
+            href="https://github.com/mentalblank"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-2 text-zinc-400 hover:text-zinc-100 transition-colors group"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span>Fork Maintainer — mentalblank</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-0 group-hover:opacity-50 transition-opacity"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+          </a>
+          <a
             href="https://henrique.pt"
             target="_blank"
             rel="noopener noreferrer"
@@ -132,7 +163,7 @@ if (currentVersion !== 'dev') {
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
               <circle cx="12" cy="7" r="4"/>
             </svg>
-            <span>Author — Henrique.pt</span>
+            <span>Original Author — Henrique.pt</span>
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-0 group-hover:opacity-50 transition-opacity"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
           </a>
         </div>
