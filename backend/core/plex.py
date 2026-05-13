@@ -198,35 +198,91 @@ async def get_history(url: str, token: str, mindate: int) -> List[Dict]:
     )
     return data.get("MediaContainer", {}).get("Metadata", [])
 
-async def get_movies(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: int = 100) -> List[Dict]:
-    params = {"type": 1, "includeGuids": 1}
-    if sort:
-        params["sort"] = sort
-    params["X-Plex-Container-Start"] = offset
-    params["X-Plex-Container-Size"] = limit
-    
-    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
-    return data.get("MediaContainer", {}).get("Metadata", [])
+async def get_movies(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
+    all_items = []
+    current_offset = offset
+    page_size = 500 if limit is None else min(limit, 500)
 
-async def get_shows(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: int = 100) -> List[Dict]:
-    params = {"type": 2, "includeGuids": 1}
-    if sort:
-        params["sort"] = sort
-    params["X-Plex-Container-Start"] = offset
-    params["X-Plex-Container-Size"] = limit
+    while True:
+        params = {"type": 1, "includeGuids": 1}
+        if sort:
+            params["sort"] = sort
+        params["X-Plex-Container-Start"] = current_offset
+        params["X-Plex-Container-Size"] = page_size
 
-    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
-    return data.get("MediaContainer", {}).get("Metadata", [])
+        data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
+        mc = data.get("MediaContainer", {})
+        items = mc.get("Metadata", [])
+        all_items.extend(items)
 
-async def get_episodes(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: int = 100) -> List[Dict]:
-    params = {"type": 4, "includeGuids": 1}
-    if sort:
-        params["sort"] = sort
-    params["X-Plex-Container-Start"] = offset
-    params["X-Plex-Container-Size"] = limit
+        total = mc.get("totalSize", 0)
+        current_offset += len(items)
 
-    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
-    return data.get("MediaContainer", {}).get("Metadata", [])
+        if limit is not None and len(all_items) >= limit:
+            all_items = all_items[:limit]
+            break
+        if not items or current_offset >= total:
+            break
+
+    return all_items
+
+
+async def get_shows(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
+    all_items = []
+    current_offset = offset
+    page_size = 500 if limit is None else min(limit, 500)
+
+    while True:
+        params = {"type": 2, "includeGuids": 1}
+        if sort:
+            params["sort"] = sort
+        params["X-Plex-Container-Start"] = current_offset
+        params["X-Plex-Container-Size"] = page_size
+
+        data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
+        mc = data.get("MediaContainer", {})
+        items = mc.get("Metadata", [])
+        all_items.extend(items)
+
+        total = mc.get("totalSize", 0)
+        current_offset += len(items)
+
+        if limit is not None and len(all_items) >= limit:
+            all_items = all_items[:limit]
+            break
+        if not items or current_offset >= total:
+            break
+
+    return all_items
+
+
+async def get_episodes(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
+    all_items = []
+    current_offset = offset
+    page_size = 500 if limit is None else min(limit, 500)
+
+    while True:
+        params = {"type": 4, "includeGuids": 1}
+        if sort:
+            params["sort"] = sort
+        params["X-Plex-Container-Start"] = current_offset
+        params["X-Plex-Container-Size"] = page_size
+
+        data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
+        mc = data.get("MediaContainer", {})
+        items = mc.get("Metadata", [])
+        all_items.extend(items)
+
+        total = mc.get("totalSize", 0)
+        current_offset += len(items)
+
+        if limit is not None and len(all_items) >= limit:
+            all_items = all_items[:limit]
+            break
+        if not items or current_offset >= total:
+            break
+
+    return all_items
 
 async def get_items_by_ids(url: str, token: str, section_id: str, rating_keys: List[str]) -> List[Dict]:
     """Fetch specific items from a section by their ratingKeys in one batch call."""

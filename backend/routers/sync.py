@@ -1519,7 +1519,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
                     print(f"    Fetching episodes for {lib_title}...")
                     if items is None:
-                        items = await plex.get_episodes(p_url, p_token, lib_key, min_timestamp=min_timestamp)
+                        items = await plex.get_episodes(p_url, p_token, lib_key)
                     filtered_episodes = [i for i in items if str(i.get("grandparentRatingKey")) in show_map]
 
                     total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes)
