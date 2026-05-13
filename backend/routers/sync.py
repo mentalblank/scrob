@@ -75,9 +75,12 @@ def extract_watch_state(item: dict, source: CollectionSource) -> dict:
     else:  # Plex
         state["play_count"] = int(item.get("viewCount", 0))
         state["completed"] = state["play_count"] > 0
-        lp = item.get("lastViewedAt")
+        lp = item.get("lastViewedAt") or item.get("viewedAt")
         if lp:
             state["last_played"] = datetime.fromtimestamp(lp, tz=timezone.utc).replace(tzinfo=None)
+        if state["play_count"] == 0 and item.get("viewedAt"):
+            state["play_count"] = 1
+            state["completed"] = True
         r = item.get("userRating")
         if r is not None:
             state["user_rating"] = float(r)
@@ -1217,6 +1220,30 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             await db.commit()
 
 
+async def _get_recently_updated_plex_items(p_url, p_token, lib_key, fetcher_func, min_timestamp):
+    all_items = []
+    offset = 0
+    limit = 100
+    while True:
+        items = await fetcher_func(p_url, p_token, lib_key, sort="updatedAt:desc", offset=offset, limit=limit)
+        if not items:
+            break
+        
+        reached_end = False
+        for item in items:
+            updated_at = item.get("updatedAt")
+            if updated_at and updated_at >= min_timestamp:
+                all_items.append(item)
+            else:
+                reached_end = True
+                break
+        
+        if reached_end or len(items) < limit:
+            break
+        offset += limit
+    return all_items
+
+
 async def _backfill_plex_languages(db: AsyncSession, user_id: int, connection_id: int, p_url: str, p_token: str) -> int:
     """Fetch full item detail from Plex for any CollectionFiles that have no language data yet."""
     result = await db.execute(
@@ -1314,10 +1341,15 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
             # Determine min_timestamp for partial sync
             min_timestamp = None
+            history_keys = set()
             if partial:
                 last_sync = conn.last_partial_sync or conn.last_full_sync
                 if last_sync:
                     min_timestamp = int(last_sync.timestamp())
+                    print(f"  Fetching Plex history since {last_sync}...")
+                    history = await plex.get_history(p_url, p_token, min_timestamp)
+                    history_keys = {str(i["ratingKey"]) for i in history if i.get("ratingKey")}
+                    print(f"  Found {len(history_keys)} unique items in history.")
 
             for lib in libraries:
                 lib_type = lib.get("type")
@@ -1326,7 +1358,23 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                 print(f"  Processing library: {lib_title} ({lib_type})")
 
                 if lib_type == "movie":
-                    items = await plex.get_movies(p_url, p_token, lib_key, min_timestamp=min_timestamp)
+                    if partial:
+                        print(f"    Fetching recently updated movies...")
+                        items = await _get_recently_updated_plex_items(p_url, p_token, lib_key, plex.get_movies, min_timestamp)
+                        # Add items found in history that might not have been "updated" (just watched)
+                        movie_history_keys = [] # We don't know which history keys are movies yet
+                        # But we can just fetch all history keys from this library section
+                        in_lib_history_keys = list(history_keys) # Fetching them all is fine, get_items_by_ids handles it
+                        if in_lib_history_keys:
+                            history_items = await plex.get_items_by_ids(p_url, p_token, lib_key, in_lib_history_keys)
+                            # Merge them
+                            existing_keys = {str(m["ratingKey"]) for m in items}
+                            for hi in history_items:
+                                if str(hi["ratingKey"]) not in existing_keys:
+                                    items.append(hi)
+                    else:
+                        items = await plex.get_movies(p_url, p_token, lib_key)
+
                     if movie_limit:
                         items = items[:movie_limit]
 
@@ -1379,16 +1427,31 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                 elif lib_type == "show":
                     if partial:
                         print(f"    Fetching recently updated shows and episodes...")
-                        shows = await plex.get_shows(p_url, p_token, lib_key, min_timestamp=min_timestamp)
-                        items = await plex.get_episodes(p_url, p_token, lib_key, min_timestamp=min_timestamp)
+                        shows = await _get_recently_updated_plex_items(p_url, p_token, lib_key, plex.get_shows, min_timestamp)
+                        episodes = await _get_recently_updated_plex_items(p_url, p_token, lib_key, plex.get_episodes, min_timestamp)
                         
-                        needed_show_keys = {str(e.get("grandparentRatingKey")) for e in items if e.get("grandparentRatingKey")}
+                        # Add items from history
+                        in_lib_history_keys = list(history_keys)
+                        if in_lib_history_keys:
+                            h_items = await plex.get_items_by_ids(p_url, p_token, lib_key, in_lib_history_keys)
+                            existing_show_keys = {str(s["ratingKey"]) for s in shows}
+                            existing_ep_keys = {str(e["ratingKey"]) for e in episodes}
+                            for hi in h_items:
+                                h_type = hi.get("type")
+                                rk = str(hi["ratingKey"])
+                                if h_type == "show" and rk not in existing_show_keys:
+                                    shows.append(hi)
+                                elif h_type == "episode" and rk not in existing_ep_keys:
+                                    episodes.append(hi)
+
+                        needed_show_keys = {str(e.get("grandparentRatingKey")) for e in episodes if e.get("grandparentRatingKey")}
                         existing_show_keys = {str(s.get("ratingKey")) for s in shows}
                         missing_show_keys = list(needed_show_keys - existing_show_keys)
                         if missing_show_keys:
                             print(f"    Fetching {len(missing_show_keys)} parent shows for updated episodes...")
                             extra_shows = await plex.get_items_by_ids(p_url, p_token, lib_key, missing_show_keys)
                             shows.extend(extra_shows)
+                        items = episodes
                     else:
                         shows = await plex.get_shows(p_url, p_token, lib_key)
                         if show_limit:

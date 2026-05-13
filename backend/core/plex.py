@@ -189,24 +189,42 @@ async def get_libraries(url: str, token: str) -> List[Dict]:
     data = await _get(f"{url.rstrip('/')}/library/sections", token)
     return data.get("MediaContainer", {}).get("Directory", [])
 
-async def get_movies(url: str, token: str, section_id: str, min_timestamp: Optional[int] = None) -> List[Dict]:
+async def get_history(url: str, token: str, mindate: int) -> List[Dict]:
+    """Fetch playback history from Plex since a given epoch timestamp."""
+    data = await _get(
+        f"{url.rstrip('/')}/status/sessions/history/all",
+        token,
+        params={"mindate": mindate}
+    )
+    return data.get("MediaContainer", {}).get("Metadata", [])
+
+async def get_movies(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: int = 100) -> List[Dict]:
     params = {"type": 1, "includeGuids": 1}
-    if min_timestamp:
-        params["updatedAt>="] = min_timestamp
+    if sort:
+        params["sort"] = sort
+    params["X-Plex-Container-Start"] = offset
+    params["X-Plex-Container-Size"] = limit
+    
     data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 
-async def get_shows(url: str, token: str, section_id: str, min_timestamp: Optional[int] = None) -> List[Dict]:
+async def get_shows(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: int = 100) -> List[Dict]:
     params = {"type": 2, "includeGuids": 1}
-    if min_timestamp:
-        params["updatedAt>="] = min_timestamp
+    if sort:
+        params["sort"] = sort
+    params["X-Plex-Container-Start"] = offset
+    params["X-Plex-Container-Size"] = limit
+
     data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 
-async def get_episodes(url: str, token: str, section_id: str, min_timestamp: Optional[int] = None) -> List[Dict]:
+async def get_episodes(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: int = 100) -> List[Dict]:
     params = {"type": 4, "includeGuids": 1}
-    if min_timestamp:
-        params["updatedAt>="] = min_timestamp
+    if sort:
+        params["sort"] = sort
+    params["X-Plex-Container-Start"] = offset
+    params["X-Plex-Container-Size"] = limit
+
     data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 

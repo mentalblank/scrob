@@ -169,6 +169,17 @@ async def get_ratings(client_id: str, access_token: str) -> dict:
     return {"movies": movies, "shows": shows}
 
 
+async def get_last_activities(client_id: str, access_token: str) -> dict:
+    """Fetch user's last activities (timestamps for watched, rated, etc.)."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(
+            f"{TRAKT_BASE}/sync/last_activities",
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def get_history(
     client_id: str, access_token: str, start_at: Optional[datetime] = None
 ) -> list[dict]:
