@@ -352,7 +352,7 @@ async def enrich_with_state(
         for tmdb_id in show_tmdb_ids:
             total = total_map.get(tmdb_id, 0)
             collected = collected_map.get(tmdb_id, 0)
-            show_pct[tmdb_id] = int((collected / total) * 100) if total > 0 else 0
+            show_pct[tmdb_id] = min(100, int((collected / total) * 100)) if total > 0 else 0
 
         # --- Aired counts for 'watched' logic ---
         show_aired_count = {tid: total_map.get(tid, 0) for tid in show_tmdb_ids}

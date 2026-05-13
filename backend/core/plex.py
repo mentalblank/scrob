@@ -14,40 +14,56 @@ async def _get(url: str, token: str, params: Optional[Dict] = None) -> Dict:
         res.raise_for_status()
         return res.json()
 
+def get_guids(item: Dict) -> List[Dict]:
+    """Return a normalised Guid list for a Plex item.
+
+    Modern Plex returns a 'Guid' array: [{"id": "tmdb://123"}, ...].
+    Legacy items may have an empty/missing 'Guid' but a single lowercase 'guid'
+    string like 'com.plexapp.agents.thetvdb://73762/1/1'.
+    """
+    guids = item.get("Guid") or []
+    if not guids:
+        legacy = item.get("guid", "")
+        if legacy:
+            guids = [{"id": legacy}]
+    return guids
+
+
 def extract_tmdb_id(guids: List[Dict]) -> Optional[int]:
     if not guids:
         return None
     for guid in guids:
         id_str = guid.get("id", "")
-        if id_str.startswith("tmdb://"):
-            try:
-                return int(id_str.replace("tmdb://", ""))
-            except ValueError:
-                continue
+        for prefix in ("tmdb://", "com.plexapp.agents.themoviedb://"):
+            if id_str.startswith(prefix):
+                try:
+                    return int(id_str[len(prefix):].split("/")[0])
+                except ValueError:
+                    break
     return None
 
 
 def extract_tvdb_id(guids: List[Dict]) -> Optional[str]:
-    """Extract TVDB ID string from a Plex Guid list, e.g. 'tvdb://73762' → '73762'."""
     if not guids:
         return None
     for guid in guids:
         id_str = guid.get("id", "")
-        if id_str.startswith("tvdb://"):
-            val = id_str.replace("tvdb://", "").strip()
-            return val if val else None
+        for prefix in ("tvdb://", "com.plexapp.agents.thetvdb://"):
+            if id_str.startswith(prefix):
+                val = id_str[len(prefix):].split("/")[0].strip()
+                return val if val else None
     return None
 
 
 def extract_imdb_id(guids: List[Dict]) -> Optional[str]:
-    """Extract IMDb ID string from a Plex Guid list, e.g. 'imdb://tt0944947' → 'tt0944947'."""
     if not guids:
         return None
     for guid in guids:
         id_str = guid.get("id", "")
-        if id_str.startswith("imdb://"):
-            val = id_str.replace("imdb://", "").strip()
-            return val if val else None
+        for prefix in ("imdb://", "com.plexapp.agents.imdb://"):
+            if id_str.startswith(prefix):
+                val = id_str[len(prefix):].split("/")[0].strip()
+                return val if val else None
     return None
 
 def extract_quality(media_list: List[Dict]) -> Dict:

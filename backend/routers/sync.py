@@ -2,8 +2,8 @@ import asyncio
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy import select, update, delete, func
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import select, update, delete, func, cast
+from sqlalchemy.dialects.postgresql import insert, JSONB
 
 from db import get_db, engine
 from models.media import Media
@@ -1161,39 +1161,74 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             await db.commit()
 
 
-async def _backfill_plex_languages(db: AsyncSession, user_id: int, connection_id: int, p_url: str, p_token: str) -> int:
-    """Fetch full item detail from Plex for any CollectionFiles that have no language data yet."""
-    result = await db.execute(
-        select(CollectionFile)
-        .join(Collection, Collection.id == CollectionFile.collection_id)
-        .where(
-            Collection.user_id == user_id,
-            CollectionFile.source == CollectionSource.plex,
-            CollectionFile.connection_id == connection_id,
-            CollectionFile.source_id.isnot(None),
-            (CollectionFile.audio_languages == None) | (CollectionFile.audio_languages == []),
+_BACKFILL_CHUNK = 50  # HTTP calls per chunk; commit + progress update after each
+
+async def _backfill_plex_languages(user_id: int, connection_id: int, p_url: str, p_token: str, job_id: int | None = None) -> int:
+    """Fetch full item detail from Plex for CollectionFiles that have no language data yet.
+
+    Runs in its own DB session so the main sync connection is released before this
+    long-running phase starts. Processes in chunks to avoid holding a transaction open
+    across thousands of outbound HTTP calls.
+    """
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        result = await db.execute(
+            select(CollectionFile)
+            .join(Collection, Collection.id == CollectionFile.collection_id)
+            .where(
+                Collection.user_id == user_id,
+                CollectionFile.source == CollectionSource.plex,
+                CollectionFile.connection_id == connection_id,
+                CollectionFile.source_id.isnot(None),
+                (CollectionFile.audio_languages == None) | (CollectionFile.audio_languages.cast(JSONB) == cast([], JSONB)),
+            )
         )
-    )
-    files = result.scalars().all()
-    if not files:
-        return 0
+        files = result.scalars().all()
+        if not files:
+            return 0
 
-    sem = asyncio.Semaphore(10)
+        total = len(files)
+        print(f"  Backfilling language data for {total} Plex file(s)...")
 
-    async def _fetch(cf: CollectionFile):
-        async with sem:
-            item = await plex.get_item(p_url, p_token, cf.source_id)
-            if not item:
-                return
-            quality = plex.extract_quality(item.get("Media", []))
-            if quality.get("audio_languages"):
-                cf.audio_languages = quality["audio_languages"]
-            if quality.get("subtitle_languages"):
-                cf.subtitle_languages = quality["subtitle_languages"]
+        if job_id is not None:
+            await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(processed_items=0, total_items=total))
+            await db.commit()
 
-    await asyncio.gather(*[_fetch(cf) for cf in files])
-    await db.commit()
-    return len(files)
+        sem = asyncio.Semaphore(10)
+
+        async def _fetch_quality(cf: CollectionFile) -> tuple[int, dict]:
+            async with sem:
+                item = await plex.get_item(p_url, p_token, cf.source_id)
+                if not item:
+                    return cf.id, {}
+                return cf.id, plex.extract_quality(item.get("Media", []))
+
+        done = 0
+        for chunk_start in range(0, total, _BACKFILL_CHUNK):
+            chunk = files[chunk_start:chunk_start + _BACKFILL_CHUNK]
+            cf_map = {cf.id: cf for cf in chunk}
+
+            results = await asyncio.gather(*[_fetch_quality(cf) for cf in chunk], return_exceptions=True)
+
+            for res in results:
+                if isinstance(res, Exception):
+                    continue
+                cf_id, quality = res
+                cf = cf_map.get(cf_id)
+                if cf and quality:
+                    if quality.get("audio_languages"):
+                        cf.audio_languages = quality["audio_languages"]
+                    if quality.get("subtitle_languages"):
+                        cf.subtitle_languages = quality["subtitle_languages"]
+
+            done += len(chunk)
+            await db.commit()
+
+            if job_id is not None:
+                await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(processed_items=done))
+                await db.commit()
+
+        return total
 
 
 async def run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit: int, connection_id: int | None = None):
@@ -1319,22 +1354,23 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         shows = shows[:show_limit]
 
                     series_tmdb_map = {
-                        s.get("ratingKey"): plex.extract_tmdb_id(s.get("Guid", []))
-                        for s in shows if plex.extract_tmdb_id(s.get("Guid", []))
+                        s.get("ratingKey"): plex.extract_tmdb_id(plex.get_guids(s))
+                        for s in shows if plex.extract_tmdb_id(plex.get_guids(s))
                     }
 
                     shows_without_tmdb = [
                         s for s in shows
                         if s.get("ratingKey") not in series_tmdb_map
-                        and (plex.extract_tvdb_id(s.get("Guid", [])) or plex.extract_imdb_id(s.get("Guid", [])))
+                        and (plex.extract_tvdb_id(plex.get_guids(s)) or plex.extract_imdb_id(plex.get_guids(s)))
                     ]
+
                     if shows_without_tmdb:
                         print(f"    Resolving {len(shows_without_tmdb)} shows via TVDB/IMDb fallback...")
                         semaphore = asyncio.Semaphore(TMDB_CONCURRENCY)
 
                         async def resolve_show_tmdb_id(s: dict) -> None:
                             async with semaphore:
-                                guids = s.get("Guid", [])
+                                guids = plex.get_guids(s)
                                 tvdb_id = plex.extract_tvdb_id(guids)
                                 imdb_id = plex.extract_imdb_id(guids)
                                 try:
@@ -1374,6 +1410,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                             "title": s.get("title"),
                             "media_type": "series",
                             "source_id": str(s.get("ratingKey")),
+                            "plex_guids": [g.get("id", "") for g in plex.get_guids(s) if isinstance(g, dict)],
                             "reason": "Unmatched on source — no TMDB ID available for the series",
                         })
 
@@ -1394,7 +1431,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     )
                     all_warnings.extend(w)
 
-            backfilled = await _backfill_plex_languages(db, user_id, conn.id, p_url, p_token)
+            backfilled = await _backfill_plex_languages(user_id, conn.id, p_url, p_token, job_id)
             if backfilled:
                 print(f"Plex sync job {job_id}: backfilled language data for {backfilled} file(s).")
             print(f"Plex sync job {job_id} completed. Stats: {stats}")
