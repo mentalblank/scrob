@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file. This projec
 ## [Unreleased] - 2026-05-13
 
 ### Added
+- **Drop Show Feature**:
+  - Ability to 'drop' shows from the "Next Up" list without losing watch history.
+  - New "Dropped Shows" section on the Content Filters page for managing dropped items.
+  - Added "Drop/Resume" action button to show detail pages.
 - **Synchronization**:
   - Implemented tiered synchronization schedules for Trakt and Media Servers (Plex, Emby, Jellyfin).
   - Support for independent Full Audit and Partial Sync intervals.

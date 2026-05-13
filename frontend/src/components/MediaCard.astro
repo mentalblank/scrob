@@ -5,14 +5,15 @@ import CardActionBar from "./CardActionBar.astro";
 interface Props {
   item: MediaItem;
   hideBlock?: boolean;
+  hideRating?: boolean;
 }
 
-const { item, hideBlock = false } = Astro.props;
+const { item, hideBlock = false, hideRating = false } = Astro.props;
 
 const isPerson = item.type === "person";
 const isCollection = item.type === "collection";
 const year = item.release_date?.slice(0, 4) ?? null;
-const rating = item.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
+const rating = !hideRating && item.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
 const isEpisode = item.type === "episode";
 const isSeries = item.type === "series" || (item.type === "episode" && !item.season_number && !item.id);
 const isSeason = item.type === "season";

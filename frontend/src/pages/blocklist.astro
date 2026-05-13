@@ -11,7 +11,9 @@ if (!token) {
 const tab = Astro.url.searchParams.get("tab") ?? "items";
 
 let blockedItems: MediaItem[] = [];
+let droppedItems: MediaItem[] = [];
 let blockedItemsCount = 0;
+let droppedItemsCount = 0;
 let filters: ContentFilters = { blocked_genres: [], blocked_keywords: [], blocked_regexes: [], available_genres: [] };
 let error = "";
 
@@ -21,11 +23,15 @@ try {
     api.contentFilters.get(token),
   ]);
   
-  blockedItemsCount = blocklist?.length || 0;
+  const actualBlocklist = blocklist?.filter(i => !i.is_dropped) || [];
+  const actualDroplist = blocklist?.filter(i => i.is_dropped) || [];
+  
+  blockedItemsCount = actualBlocklist.length;
+  droppedItemsCount = actualDroplist.length;
   filters = cf;
 
-  if (tab === "items" && blocklist && blocklist.length > 0) {
-    const detailPromises = blocklist.map(item => {
+  if (tab === "items" && actualBlocklist.length > 0) {
+    const detailPromises = actualBlocklist.map(item => {
       if (item.media_type === 'series') {
         return api.shows.get(item.tmdb_id, token)
           .then(show => ({ ...show, type: 'series' as const, release_date: show.first_air_date }))
@@ -35,6 +41,17 @@ try {
     });
     const results = await Promise.all(detailPromises);
     blockedItems = results.filter((item): item is MediaItem => item !== null);
+  } else if (tab === "dropped" && actualDroplist.length > 0) {
+    const detailPromises = actualDroplist.map(item => {
+      if (item.media_type === 'series') {
+        return api.shows.get(item.tmdb_id, token)
+          .then(show => ({ ...show, type: 'series' as const, release_date: show.first_air_date }))
+          .catch(() => null);
+      }
+      return api.media.get(item.media_type, item.tmdb_id, token).catch(() => null);
+    });
+    const results = await Promise.all(detailPromises);
+    droppedItems = results.filter((item): item is MediaItem => item !== null);
   }
 } catch (e: any) {
   error = e.message;
@@ -68,6 +85,7 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
   <div class="flex items-center gap-1 p-1 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-fit max-w-full mb-8 overflow-x-auto no-scrollbar">
     {[
       { id: "items",    label: "Blocked Items",       icon: "M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" },
+      { id: "dropped",  label: "Dropped Shows",       icon: "M19 14l-7 7-7-7" },
       { id: "genres",   label: "Genre Filters",       icon: "M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17" },
       { id: "keywords", label: "Keywords & Regex",    icon: "m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" },
     ].map(t => (
@@ -79,6 +97,9 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
         {t.label}
         {t.id === "items" && blockedItemsCount > 0 && (
           <span class="ml-1 bg-zinc-600 text-zinc-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{blockedItemsCount}</span>
+        )}
+        {t.id === "dropped" && droppedItemsCount > 0 && (
+          <span class="ml-1 bg-amber-900/60 text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{droppedItemsCount}</span>
         )}
         {t.id === "genres" && filters.blocked_genres.length > 0 && (
           <span class="ml-1 bg-rose-900/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{filters.blocked_genres.length}</span>
@@ -102,7 +123,7 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
       <div id="blocklist-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
         {blockedItems.map(item => (
           <div class="relative group/blocked" data-tmdb-id={item.tmdb_id} data-media-type={item.type}>
-            <MediaCard item={item} />
+            <MediaCard item={item} hideBlock={true} hideRating={true} />
             <div class="absolute inset-x-0 top-0 p-2 flex justify-end opacity-0 group-hover/blocked:opacity-100 transition-opacity z-20 pointer-events-none">
               <button
                 data-action="unblock-direct"
@@ -110,6 +131,34 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 Unblock
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  )}
+  
+  <!-- ── Tab: Dropped Shows ─────────────────────────────── -->
+  {tab === "dropped" && (
+    droppedItems.length === 0 ? (
+      <div class="flex flex-col items-center justify-center py-20 bg-zinc-900/30 border border-dashed border-zinc-800 rounded-3xl">
+        <span class="text-4xl mb-4">⏬</span>
+        <h2 class="text-xl font-bold text-zinc-100 mb-2">No dropped shows</h2>
+        <p class="text-zinc-500 text-sm">Drop shows from their detail pages to hide them from your "Next Up" list.</p>
+      </div>
+    ) : (
+      <div id="dropped-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        {droppedItems.map(item => (
+          <div class="relative group/dropped" data-tmdb-id={item.tmdb_id} data-media-type={item.type}>
+            <MediaCard item={item} hideBlock={true} hideRating={true} />
+            <div class="absolute inset-x-0 top-0 p-2 flex justify-end opacity-0 group-hover/dropped:opacity-100 transition-opacity z-20 pointer-events-none">
+              <button
+                data-action="unblock-direct"
+                class="pointer-events-auto bg-zinc-900/90 backdrop-blur-md border border-zinc-700 hover:border-emerald-500/50 hover:bg-emerald-500/20 text-zinc-100 hover:text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xl cursor-pointer flex items-center gap-1.5"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+                Resume Tracking
               </button>
             </div>
           </div>

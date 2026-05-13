@@ -952,7 +952,7 @@ const bottomNavItem = (active: boolean) =>
       if (!card) return;
 
       const action = btn.dataset.action;
-      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'block', 'block-item'];
+      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'block', 'block-item', 'drop', 'remove-progress'];
       if (!action || !mediaActions.includes(action)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -1016,6 +1016,54 @@ const bottomNavItem = (active: boolean) =>
             btn.classList.remove('bg-red-500/50', 'text-red-300', 'hover:bg-red-400/50');
             btn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-red-400/50', 'hover:text-red-400');
           }
+        } catch { /* ignore */ }
+        return;
+      }
+
+      if (action === 'drop') {
+        const isDropped = btn.dataset.dropped === 'true';
+        try {
+          if (isDropped) {
+            await apiFetch(`/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
+          } else {
+            await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, is_dropped: true });
+          }
+          
+          const nowDropped = !isDropped;
+          btn.dataset.dropped = String(nowDropped);
+          btn.dataset.state = nowDropped ? 'active' : 'inactive';
+          btn.title = nowDropped ? 'Resume tracking in Next Up' : 'Drop from Next Up';
+          
+          const labelEl = btn.querySelector('span');
+          if (labelEl) labelEl.textContent = nowDropped ? 'Dropped' : 'Drop';
+          
+          if (nowDropped) {
+            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-amber-400/50', 'hover:text-amber-400');
+            btn.classList.add('bg-amber-500/50', 'text-amber-300', 'hover:bg-amber-400/50');
+          } else {
+            btn.classList.remove('bg-amber-500/50', 'text-amber-300', 'hover:bg-amber-400/50');
+            btn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-amber-400/50', 'hover:text-amber-400');
+          }
+          
+          (window as any).showToast(nowDropped ? 'Show dropped' : 'Tracking resumed', 'success');
+        } catch { /* ignore */ }
+        return;
+      }
+
+      if (action === 'remove-progress') {
+        const confirmed = await showConfirm(
+          "Remove from Continue Watching?",
+          "This will clear your saved progress for this item."
+        );
+        if (!confirmed) return;
+        try {
+          await apiFetch(`/history/continue-watching?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
+          card.style.transition = 'all 0.3s ease';
+          card.style.opacity = '0';
+          card.style.transform = 'scale(0.9)';
+          card.style.pointerEvents = 'none';
+          setTimeout(() => card.remove(), 300);
+          (window as any).showToast('Removed from Continue Watching', 'success');
         } catch { /* ignore */ }
         return;
       }

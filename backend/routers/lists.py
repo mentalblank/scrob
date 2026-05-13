@@ -223,6 +223,10 @@ async def get_list(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from sqlalchemy import and_, or_, exists, extract, cast as sa_cast, Text
+    from models.events import WatchEvent
+    
+
     result = await db.execute(
         select(ListModel)
         .options(

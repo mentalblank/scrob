@@ -454,13 +454,17 @@ async def enrich_with_state(
 
     # --- Blocked state ---
     blocked_ids: dict[str, set[int]] = {"movie": set(), "series": set(), "episode": set()}
+    dropped_ids: dict[str, set[int]] = {"movie": set(), "series": set(), "episode": set()}
     if all_tmdb_ids:
         block_q = await db.execute(
-            select(BlocklistItem.tmdb_id, BlocklistItem.media_type)
+            select(BlocklistItem.tmdb_id, BlocklistItem.media_type, BlocklistItem.is_dropped)
             .where(BlocklistItem.user_id == user_id, BlocklistItem.tmdb_id.in_(all_tmdb_ids))
         )
-        for tid, mtype in block_q.all():
-            blocked_ids[mtype.value].add(tid)
+        for tid, mtype, is_dropped in block_q.all():
+            if is_dropped:
+                dropped_ids[mtype.value].add(tid)
+            else:
+                blocked_ids[mtype.value].add(tid)
 
     cf_genres, cf_kw, cf_re = await _get_content_filters(db, user_id)
 
@@ -500,6 +504,7 @@ async def enrich_with_state(
         if not is_blocked:
             is_blocked = _is_content_filtered(item, cf_genres, cf_kw, cf_re)
         item["is_blocked"] = is_blocked
+        item["is_dropped"] = tid in dropped_ids.get(t, set())
 
     return items
 
@@ -1321,7 +1326,10 @@ async def airing_today_collected(
 
     results = list(await asyncio.gather(*[fetch_episode(s) for s in collected_shows]))
     await enrich_with_state(db, current_user.id, results)
-    return {"results": results}
+    
+    # Filter out dropped shows from index sections
+    filtered = [i for i in results if not i.get("is_dropped")]
+    return {"results": filtered}
 
 
 @router.get("/recently-added")
@@ -1359,7 +1367,8 @@ async def recently_added(
     result = await db.execute(query)
     items = [format_media(m) for m in result.scalars().all()]
     await enrich_with_state(db, current_user.id, items)
-    filtered = [i for i in items if not i.get("is_blocked")]
+    # Filter out blocked and dropped
+    filtered = [i for i in items if not i.get("is_blocked") and not i.get("is_dropped")]
     return {"results": filtered}
 
 
@@ -4112,16 +4121,17 @@ async def get_blocklist(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get all blocked items for the current user."""
+    """Get all blocked and dropped items for the current user."""
     q = select(BlocklistItem).where(BlocklistItem.user_id == current_user.id)
     result = await db.execute(q)
     blocked = result.scalars().all()
-    return [{"tmdb_id": b.tmdb_id, "media_type": b.media_type} for b in blocked]
+    return [{"tmdb_id": b.tmdb_id, "media_type": b.media_type, "is_dropped": b.is_dropped} for b in blocked]
 
 
 class BlockRequest(BaseModel):
     tmdb_id: int
     media_type: MediaType
+    is_dropped: bool = False
 
 
 @router.post("/blocklist")
@@ -4130,25 +4140,29 @@ async def block_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Block a media item from appearing in explore pages."""
-    existing = await db.execute(
+    """Block or drop a media item."""
+    existing_q = await db.execute(
         select(BlocklistItem).where(
             BlocklistItem.user_id == current_user.id,
             BlocklistItem.tmdb_id == req.tmdb_id,
             BlocklistItem.media_type == req.media_type,
         )
     )
-    if existing.scalar_one_or_none():
-        return {"status": "already blocked"}
+    existing = existing_q.scalar_one_or_none()
+    if existing:
+        existing.is_dropped = req.is_dropped
+        await db.commit()
+        return {"status": "updated", "is_dropped": req.is_dropped}
 
     new_block = BlocklistItem(
         user_id=current_user.id,
         tmdb_id=req.tmdb_id,
         media_type=req.media_type,
+        is_dropped=req.is_dropped
     )
     db.add(new_block)
     await db.commit()
-    return {"status": "blocked"}
+    return {"status": "ok", "is_dropped": req.is_dropped}
 
 
 @router.delete("/blocklist")
@@ -4158,7 +4172,7 @@ async def unblock_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Unblock a media item."""
+    """Unblock or undrop a media item."""
     q = select(BlocklistItem).where(
         BlocklistItem.user_id == current_user.id,
         BlocklistItem.tmdb_id == tmdb_id,
@@ -4167,7 +4181,7 @@ async def unblock_item(
     result = await db.execute(q)
     block = result.scalar_one_or_none()
     if not block:
-        raise HTTPException(status_code=404, detail="Not blocked")
+        return {"status": "not blocked"}
 
     await db.delete(block)
     await db.commit()

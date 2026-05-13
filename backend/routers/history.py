@@ -257,11 +257,32 @@ async def get_continue_watching(
     current_user: User = Depends(get_current_user),
 ):
     """Items currently in progress."""
-    result = await db.execute(
+    # Step 0: Find dropped shows to exclude
+    from models.blocklist import BlocklistItem
+    dropped_q = await db.execute(
+        select(BlocklistItem.tmdb_id)
+        .where(BlocklistItem.user_id == current_user.id, BlocklistItem.is_dropped == True)
+    )
+    dropped_tmdb_ids = {r[0] for r in dropped_q.all()}
+
+    query = (
         select(PlaybackProgress, Media)
         .join(Media, Media.id == PlaybackProgress.media_id)
+        .outerjoin(Show, Show.id == Media.show_id)
         .options(selectinload(PlaybackProgress.media).selectinload(Media.show))
         .where(PlaybackProgress.user_id == current_user.id)
+    )
+
+    if dropped_tmdb_ids:
+        query = query.where(
+            or_(
+                Media.media_type != MediaType.episode,
+                Show.tmdb_id.not_in(dropped_tmdb_ids)
+            )
+        )
+
+    result = await db.execute(
+        query
         .order_by(desc(PlaybackProgress.updated_at))
         .limit(20)
     )
@@ -270,6 +291,33 @@ async def get_continue_watching(
     if items:
         await enrich_with_state(db, current_user.id, [i["media"] for i in items])
     return {"continue_watching": items}
+
+
+@router.delete("/continue-watching")
+async def delete_continue_watching(
+    tmdb_id: int = Query(...),
+    media_type: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove an item from the continue watching list by deleting its progress."""
+    # Find the media ID first
+    media_q = await db.execute(
+        select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+    )
+    media_id = media_q.scalar_one_or_none()
+    if not media_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    await db.execute(
+        delete(PlaybackProgress).where(
+            PlaybackProgress.user_id == current_user.id,
+            PlaybackProgress.media_id == media_id
+        )
+    )
+    await db.commit()
+    return {"status": "success"}
 
 
 def _format_media_item(media: Media) -> dict:
@@ -305,17 +353,32 @@ async def get_next_up(
     limit: int | None = None,
 ):
     """Next unwatched episode for each show the user is actively watching, sorted by most recent activity."""
+    # Step 0: Find dropped shows to exclude
+    from models.blocklist import BlocklistItem
+    dropped_q = await db.execute(
+        select(BlocklistItem.tmdb_id)
+        .where(BlocklistItem.user_id == current_user.id, BlocklistItem.is_dropped == True)
+    )
+    dropped_tmdb_ids = {r[0] for r in dropped_q.all()}
+
     # Step 1: Find the last watched / significantly-viewed episode per show,
     # also tracking the most recent watch timestamp for activity-date sorting.
-    result = await db.execute(
+    query = (
         select(Media.show_id, Media.season_number, Media.episode_number, func.max(WatchEvent.watched_at).label("last_watched_at"))
         .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .join(Show, Show.id == Media.show_id) # Need Show join to filter by tmdb_id if we want to exclude dropped
         .where(
             WatchEvent.user_id == current_user.id,
             Media.media_type == MediaType.episode,
             Media.show_id.isnot(None),
             or_(WatchEvent.completed == True, WatchEvent.progress_percent >= 0.5),
         )
+    )
+    if dropped_tmdb_ids:
+        query = query.where(Show.tmdb_id.not_in(dropped_tmdb_ids))
+
+    result = await db.execute(
+        query
         .group_by(Media.show_id, Media.season_number, Media.episode_number)
         .order_by(Media.show_id, desc(Media.season_number), desc(Media.episode_number))
     )

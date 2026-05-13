@@ -514,6 +514,8 @@ export interface MediaItem {
   collection_pct?: number;
   is_monitored?: boolean;
   request_enabled?: boolean;
+  is_blocked?: boolean;
+  is_dropped?: boolean;
   user_rating?: number | null;
   library: {
     resolution: string;
@@ -636,6 +638,8 @@ export interface Show {
   age_rating?: string | null;
   imdb_id?: string | null;
   adult?: boolean;
+  is_blocked?: boolean;
+  is_dropped?: boolean;
   user_rating?: number | null;
   first_air_date: string | null;
   last_air_date: string | null;
@@ -892,10 +896,13 @@ export const api = {
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/tmdb/list", params, token),
 
     getBlocklist: (token?: string) =>
-      get<{ tmdb_id: number; media_type: string }[]>("/media/blocklist", undefined, token),
+      get<{ tmdb_id: number; media_type: string; is_dropped: boolean }[]>("/media/blocklist", undefined, token),
 
     block: (tmdbId: number, mediaType: string, token?: string) =>
-      post<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType }, token),
+      post<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType, is_dropped: false }, token),
+
+    drop: (tmdbId: number, mediaType: string, token?: string) =>
+      post<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType, is_dropped: true }, token),
 
     unblock: (tmdbId: number, mediaType: string, token?: string) =>
       del<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType }, token),
@@ -1010,6 +1017,9 @@ export const api = {
 
     continueWatching: (token?: string) =>
       get<{ continue_watching: ContinueWatchingItem[] }>("/history/continue-watching", undefined, token),
+
+    deleteProgress: (tmdbId: number, mediaType: string, token: string) =>
+      del<{ status: string }>(`/history/continue-watching?tmdb_id=${tmdbId}&media_type=${mediaType}`, token),
 
     nextUp: (token?: string, limit?: number) =>
       get<{ next_up: MediaItem[] }>("/history/next-up", limit ? { limit } : undefined, token),
