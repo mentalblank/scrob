@@ -12,7 +12,9 @@ RUN npm run build
 FROM python:3.12-slim
 
 ARG APP_VERSION=dev
+ARG APP_BRANCH=unknown
 ENV APP_VERSION=${APP_VERSION}
+ENV APP_BRANCH=${APP_BRANCH}
 ENV TZ=UTC
 
 # Install Node.js 22, supervisord, gosu and tzdata
