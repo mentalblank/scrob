@@ -926,6 +926,23 @@ async def _ensure_collection_entry(
 
 
 async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str = None, conn: MediaServerConnection | None = None) -> Media | None:
+    # Fastest path: match via CollectionFile source_id (plex ratingKey).
+    # This works even after season remaps where show_id/season_number no longer
+    # match what Plex reports in the webhook payload.
+    if data.get("plex_rating_key"):
+        cf_result = await db.execute(
+            select(Media)
+            .join(Collection, Collection.media_id == Media.id)
+            .join(CollectionFile, CollectionFile.collection_id == Collection.id)
+            .where(
+                CollectionFile.source == CollectionSource.plex,
+                CollectionFile.source_id == data["plex_rating_key"],
+            )
+        )
+        media = cf_result.scalars().first()
+        if media:
+            return media
+
     series_tmdb_id: Optional[int] = int(data["grandparent_tmdb_id"]) if data.get("grandparent_tmdb_id") else None
 
     # If missing series_tmdb_id, try to resolve it via other identifiers

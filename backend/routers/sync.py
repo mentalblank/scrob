@@ -15,6 +15,7 @@ from models.sync import SyncJob, SyncStatus
 from models.events import WatchEvent
 from models.ratings import Rating
 from models.library_selections import JellyfinLibrarySelection, EmbyLibrarySelection, PlexLibrarySelection
+from models.season_override import ShowSeasonOverride
 from datetime import datetime, timezone
 from dateutil import parser
 from models.base import MediaType, CollectionSource
@@ -257,20 +258,14 @@ async def batch_enrich_items(
             media.tmdb_rating = ep.get("vote_average")
             media.tmdb_data = {"runtime": ep.get("runtime"), "cast": []}
 
-    # Build per-show warning entries (group failed seasons by show)
-    show_to_failed: dict[int, list[int]] = {}
-    show_to_ep_count: dict[int, int] = {}
-    for (stid, sn) in failed_season_keys:
-        show_to_failed.setdefault(stid, []).append(sn)
-        show_to_ep_count[stid] = show_to_ep_count.get(stid, 0) + len(season_to_eps.get((stid, sn), []))
-
+    # Build per-season warning entries (one entry per failed season)
     warnings: list[dict] = []
-    for stid, failed_seasons in show_to_failed.items():
+    for (stid, sn) in sorted(failed_season_keys):
         warnings.append({
             "show": show_title_map.get(stid, f"TMDB show #{stid}"),
             "tmdb_id": stid,
-            "seasons": sorted(failed_seasons),
-            "affected_episodes": show_to_ep_count.get(stid, 0),
+            "season": sn,
+            "affected_episodes": len(season_to_eps.get((stid, sn), [])),
             "reason": "Season not found on TMDB — the show may be split into separate series on TMDB",
         })
 
@@ -2091,3 +2086,202 @@ async def abort_sync(
     )
     await db.commit()
     return {"status": "ok", "message": "All active sync jobs have been marked as aborted"}
+
+
+# ── Season override endpoints ─────────────────────────────────────────────────
+
+class SeasonOverrideBody(BaseModel):
+    source_show_tmdb_id: int
+    source_season_number: int
+    target_show_tmdb_id: int
+    target_season_number: int
+
+
+@router.get("/season-overrides")
+async def list_season_overrides(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ShowSeasonOverride).where(ShowSeasonOverride.user_id == current_user.id)
+    )
+    overrides = result.scalars().all()
+    return [
+        {
+            "id": o.id,
+            "source_show_tmdb_id": o.source_show_tmdb_id,
+            "source_season_number": o.source_season_number,
+            "target_show_tmdb_id": o.target_show_tmdb_id,
+            "target_season_number": o.target_season_number,
+        }
+        for o in overrides
+    ]
+
+
+@router.post("/season-overrides")
+async def create_season_override(
+    body: SeasonOverrideBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    existing = await db.execute(
+        select(ShowSeasonOverride).where(
+            ShowSeasonOverride.user_id == current_user.id,
+            ShowSeasonOverride.source_show_tmdb_id == body.source_show_tmdb_id,
+            ShowSeasonOverride.source_season_number == body.source_season_number,
+        )
+    )
+    override = existing.scalar_one_or_none()
+    if override:
+        override.target_show_tmdb_id = body.target_show_tmdb_id
+        override.target_season_number = body.target_season_number
+    else:
+        override = ShowSeasonOverride(
+            user_id=current_user.id,
+            source_show_tmdb_id=body.source_show_tmdb_id,
+            source_season_number=body.source_season_number,
+            target_show_tmdb_id=body.target_show_tmdb_id,
+            target_season_number=body.target_season_number,
+        )
+        db.add(override)
+    await db.commit()
+    await db.refresh(override)
+    return {
+        "id": override.id,
+        "source_show_tmdb_id": override.source_show_tmdb_id,
+        "source_season_number": override.source_season_number,
+        "target_show_tmdb_id": override.target_show_tmdb_id,
+        "target_season_number": override.target_season_number,
+    }
+
+
+@router.delete("/season-overrides/{override_id}")
+async def delete_season_override(
+    override_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ShowSeasonOverride).where(
+            ShowSeasonOverride.id == override_id,
+            ShowSeasonOverride.user_id == current_user.id,
+        )
+    )
+    override = result.scalar_one_or_none()
+    if not override:
+        raise HTTPException(status_code=404, detail="Override not found")
+    await db.delete(override)
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/season-overrides/{override_id}/apply")
+async def apply_season_override(
+    override_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remap existing collection episodes to the target show/season and re-enrich metadata."""
+    result = await db.execute(
+        select(ShowSeasonOverride).where(
+            ShowSeasonOverride.id == override_id,
+            ShowSeasonOverride.user_id == current_user.id,
+        )
+    )
+    override = result.scalar_one_or_none()
+    if not override:
+        raise HTTPException(status_code=404, detail="Override not found")
+
+    tmdb_api_key = await _get_effective_tmdb_key(db, None)
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
+    if settings and settings.tmdb_api_key:
+        tmdb_api_key = settings.tmdb_api_key
+    if not tmdb_api_key:
+        raise HTTPException(status_code=400, detail="TMDB API key required")
+
+    # Find source show by tmdb_id
+    source_show_result = await db.execute(
+        select(Show).where(Show.tmdb_id == override.source_show_tmdb_id)
+    )
+    source_show = source_show_result.scalar_one_or_none()
+    if not source_show:
+        raise HTTPException(status_code=404, detail="Source show not found in local DB")
+
+    # Find all user-collection episodes for (source_show, source_season)
+    ep_result = await db.execute(
+        select(Media)
+        .join(Collection, Collection.media_id == Media.id)
+        .where(
+            Collection.user_id == current_user.id,
+            Media.show_id == source_show.id,
+            Media.season_number == override.source_season_number,
+            Media.media_type == MediaType.episode,
+        )
+    )
+    episodes = ep_result.scalars().all()
+    if not episodes:
+        return {"status": "ok", "remapped": 0}
+
+    # Find or create the target Show
+    target_show_result = await db.execute(
+        select(Show).where(Show.tmdb_id == override.target_show_tmdb_id)
+    )
+    target_show = target_show_result.scalar_one_or_none()
+    if not target_show:
+        try:
+            show_data = await tmdb.get_show(override.target_show_tmdb_id, api_key=tmdb_api_key)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Could not fetch target show from TMDB: {e}")
+        seasons_meta = [
+            {
+                "season_number": s["season_number"],
+                "name": s.get("name"),
+                "overview": s.get("overview"),
+                "poster_path": tmdb.poster_url(s.get("poster_path")),
+                "episode_count": s.get("episode_count"),
+                "air_date": s.get("air_date"),
+            }
+            for s in show_data.get("seasons", [])
+        ]
+        target_show = Show(
+            tmdb_id=override.target_show_tmdb_id,
+            title=show_data.get("name") or show_data.get("original_name"),
+            original_title=show_data.get("original_name"),
+            overview=show_data.get("overview"),
+            poster_path=tmdb.poster_url(show_data.get("poster_path")),
+            backdrop_path=tmdb.poster_url(show_data.get("backdrop_path"), size="w1280"),
+            tmdb_rating=show_data.get("vote_average"),
+            status=show_data.get("status"),
+            tagline=show_data.get("tagline"),
+            first_air_date=show_data.get("first_air_date"),
+            last_air_date=show_data.get("last_air_date"),
+            tmdb_data={**show_data, "seasons": seasons_meta},
+        )
+        db.add(target_show)
+        await db.flush()
+
+    # Fetch TMDB season data for the target season
+    try:
+        season_data = await tmdb.get_season(override.target_show_tmdb_id, override.target_season_number, api_key=tmdb_api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch target season from TMDB: {e}")
+
+    ep_map = {ep["episode_number"]: ep for ep in season_data.get("episodes", [])}
+
+    # Remap and re-enrich episodes
+    for media in episodes:
+        media.show_id = target_show.id
+        media.season_number = override.target_season_number
+        ep = ep_map.get(media.episode_number)
+        if ep:
+            media.tmdb_id = ep.get("id") or media.tmdb_id
+            media.title = ep.get("name") or media.title
+            media.overview = ep.get("overview")
+            media.poster_path = tmdb.poster_url(ep.get("still_path"), size="w500")
+            media.release_date = ep.get("air_date")
+            media.tmdb_rating = ep.get("vote_average")
+            media.tmdb_data = {"runtime": ep.get("runtime"), "cast": []}
+
+    await db.commit()
+    return {"status": "ok", "remapped": len(episodes)}

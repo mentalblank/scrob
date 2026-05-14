@@ -19,6 +19,7 @@ from .playback_session import PlaybackSession
 from .playback_progress import PlaybackProgress
 from .follows import Follow
 from .global_settings import GlobalSettings
+from .season_override import ShowSeasonOverride
 
 __all__ = [
     "Base",
@@ -42,4 +43,5 @@ __all__ = [
     "PlaybackProgress",
     "Follow",
     "GlobalSettings",
+    "ShowSeasonOverride",
 ]
