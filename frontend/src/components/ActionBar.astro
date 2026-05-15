@@ -42,7 +42,7 @@ const showRequest = !hideRequest && requestEnabled && (mediaType === "movie" || 
 const ratingLabel = userRating != null ? userRating.toFixed(1) : "Rate";
 
 // Shared button classes
-const btn = "flex flex-col items-center justify-center gap-0 md:gap-1.5 px-2 py-3 md:py-3.5 transition-all cursor-pointer";
+const btn = "flex flex-col items-center justify-center gap-0.5 md:gap-1.5 px-2 py-3 md:py-3.5 transition-all cursor-pointer";
 const btnW = "w-[52px] min-w-[52px] md:w-[85px] md:min-w-[85px]";
 const label = "hidden md:block text-[10px] font-bold uppercase tracking-wider leading-none";
 
@@ -133,6 +133,7 @@ const requestCls  = isMonitored
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
         </svg>
         <span class={label}>{ratingLabel}</span>
+        {userRating != null && <span class="md:hidden text-[9px] font-bold leading-none">{ratingLabel}</span>}
       </button>
     )}
 
@@ -153,6 +154,7 @@ const requestCls  = isMonitored
           <path d="M2 7h20"/>
         </svg>
         <span class={label}>{isSeries ? `${collectionPct}%` : "Collected"}</span>
+        {isSeries && <span class="md:hidden text-[9px] font-bold leading-none">{collectionPct}%</span>}
       </button>
     )}
 
