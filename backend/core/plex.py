@@ -284,13 +284,20 @@ async def get_episodes(url: str, token: str, section_id: str, sort: Optional[str
 
     return all_items
 
-async def get_items_by_ids(url: str, token: str, section_id: str, rating_keys: List[str]) -> List[Dict]:
-    """Fetch specific items from a section by their ratingKeys in one batch call."""
+async def get_items_by_ids(url: str, token: str, section_id: str, rating_keys: List[str], chunk_size: int = 200) -> List[Dict]:
     if not rating_keys:
         return []
-    params = {"includeGuids": 1, "id": ",".join(rating_keys)}
-    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
-    return data.get("MediaContainer", {}).get("Metadata", [])
+
+    all_items: List[Dict] = []
+    base_url = f"{url.rstrip('/')}/library/sections/{section_id}/all"
+
+    for i in range(0, len(rating_keys), chunk_size):
+        chunk = rating_keys[i : i + chunk_size]
+        params = {"includeGuids": 1, "id": ",".join(chunk)}
+        data = await _get(base_url, token, params=params)
+        all_items.extend(data.get("MediaContainer", {}).get("Metadata", []))
+
+    return all_items
 
 async def get_recently_added(url: str, token: str, section_id: str, media_type: int, limit: int = 50) -> List[Dict]:
     """Fetch the most recently-added items from a library section.
