@@ -32,12 +32,14 @@ const seasons = Object.entries(show?.seasons ?? {}).sort(
 );
 
 // Progress stats
+const watchedEpisodesCount = show?.watched_episodes_count ?? 0;
+const totalEpisodesCount = show?.total_episodes_count ?? 0;
+const remainingEpisodesCount = Math.max(0, totalEpisodesCount - watchedEpisodesCount);
+
 const allEpisodes = Object.values(show?.seasons ?? {}).flat();
-const watchedEpisodesCount = allEpisodes.filter(e => e.watched).length;
-const totalEpisodesCount = show?.seasons_meta?.reduce((acc, s) => acc + s.episode_count, 0) || allEpisodes.length;
-const remainingEpisodesCount = totalEpisodesCount - watchedEpisodesCount;
+const includeSpecials = show?.include_specials === true;
 const remainingDuration = allEpisodes
-  .filter(e => !e.watched)
+  .filter(e => !e.watched && (includeSpecials || e.season_number !== 0))
   .reduce((acc, e) => acc + (e.runtime || 0), 0);
 const overallProgress = totalEpisodesCount > 0 ? (watchedEpisodesCount / totalEpisodesCount) * 100 : 0;
 const showProgress = overallProgress > 0; // Show progress even if 100% to match GridCard behavior
@@ -132,9 +134,29 @@ const logoPath = show?.logo_path ?? null;
                   decoding="async"
                 />
                 <h1 class="sr-only">{show.title}</h1>
+                <div class="flex items-center gap-4 mt-2">
+                  <button id="rename-show-btn" class="text-xs font-bold text-zinc-500 hover:text-blue-400 transition flex items-center gap-1.5 cursor-pointer" title="Set a custom title for this show">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                    Rename Show
+                  </button>
+                  <a href={`/remaps?mode=season&src_tmdb=${id}`} class="text-xs font-bold text-zinc-500 hover:text-indigo-400 transition flex items-center gap-1.5 cursor-pointer" title="Remap a season of this show">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    Remap Show
+                  </a>
+                </div>
               </div>
             ) : (
-              <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none">{show.title}</h1>
+              <div class="flex items-center gap-3 mb-3 flex-wrap">
+                <h1 class="text-4xl md:text-6xl font-black text-zinc-100 tracking-tight leading-none">{show.title}</h1>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button id="rename-show-btn" class="p-2 text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded-full transition cursor-pointer" title="Set a custom title for this show">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                  </button>
+                  <a href={`/remaps?mode=season&src_tmdb=${id}`} class="p-2 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded-full transition cursor-pointer" title="Remap a season of this show">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                  </a>
+                </div>
+              </div>
             )}
 
             {show.tagline && (
@@ -558,8 +580,37 @@ const logoPath = show?.logo_path ?? null;
       trailerDialog.close();
     }
 
-    trailerBtn?.addEventListener('click', openTrailer);
-    trailerClose?.addEventListener('click', closeTrailer);
     trailerDialog?.addEventListener('click', (e) => { if (e.target === trailerDialog) closeTrailer(); });
+  }
+</script>
+
+<script define:vars={{ showId: id, token: Astro.locals.token, currentTitle: show?.custom_title || show?.tmdb_title || show?.title }}>
+  const renameShowBtn = document.getElementById('rename-show-btn');
+  if (renameShowBtn) {
+    renameShowBtn.addEventListener('click', async () => {
+      const newName = prompt('Enter a custom title for this show (leave empty to reset to default TMDB title):', currentTitle);
+      if (newName === null) return; // Cancelled
+
+      try {
+        const res = await fetch('/api/proxy/sync/custom-title', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            show_tmdb_id: Number(showId),
+            custom_title: newName.trim() === '' ? null : newName.trim()
+          })
+        });
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          window.showToast?.('Failed to rename show', 'error');
+        }
+      } catch (err) {
+        window.showToast?.('Error renaming show', 'error');
+      }
+    });
   }
 </script>

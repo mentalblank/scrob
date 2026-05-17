@@ -6,19 +6,78 @@ if (!token) {
   return Astro.redirect("/login");
 }
 
-let overrides = [];
+let seasonOverrides = [];
+let episodeOverrides = [];
+let groupedShowsList = [];
+let customTitles = [];
+let groupedCustomTitlesList = [];
 let error = "";
 
 try {
   const BACKEND_PORT = (import.meta.env.BACKEND_PORT as string | undefined) ?? "7331";
-  const res = await fetch(`http://localhost:${BACKEND_PORT}/sync/season-overrides`, {
-    headers: { 'Authorization': `Bearer ${token}` }
+  
+  const [resSeason, resEp, resTitles] = await Promise.all([
+    fetch(`http://localhost:${BACKEND_PORT}/sync/season-overrides`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    fetch(`http://localhost:${BACKEND_PORT}/sync/episode-overrides`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    fetch(`http://localhost:${BACKEND_PORT}/sync/custom-titles`, { headers: { 'Authorization': `Bearer ${token}` } })
+  ]);
+  
+  if (resSeason.ok) seasonOverrides = await resSeason.json();
+  else error += "Failed to load season overrides. ";
+  
+  if (resEp.ok) episodeOverrides = (await resEp.json()).overrides || [];
+  else error += "Failed to load episode overrides. ";
+  
+  // Group episode overrides by show ID
+  const groupedEpisodeOverrides: Record<number, any> = {};
+  episodeOverrides.forEach((override: any) => {
+    const showId = override.source_show_tmdb_id;
+    if (!groupedEpisodeOverrides[showId]) {
+      groupedEpisodeOverrides[showId] = {
+        show_title: override.source_show_title,
+        show_tmdb_id: showId,
+        show_poster_path: override.source_show_poster_path,
+        overrides: [],
+        seasons: {}
+      };
+    }
+    groupedEpisodeOverrides[showId].overrides.push(override);
+    
+    const seasonNum = override.source_season_number;
+    if (!groupedEpisodeOverrides[showId].seasons[seasonNum]) {
+      groupedEpisodeOverrides[showId].seasons[seasonNum] = [];
+    }
+    groupedEpisodeOverrides[showId].seasons[seasonNum].push(override);
   });
-  if (res.ok) {
-    overrides = await res.json();
+  groupedShowsList = Object.values(groupedEpisodeOverrides);
+  
+  if (resTitles.ok) {
+    customTitles = (await resTitles.json()).results || [];
+    
+    // Group custom titles by show ID
+    const groupedCustomTitles: Record<number, any> = {};
+    customTitles.forEach((item: any) => {
+      const showId = item.show_tmdb_id || 0;
+      if (!groupedCustomTitles[showId]) {
+        groupedCustomTitles[showId] = {
+          show_title: item.show_title || "Global / Unlinked",
+          show_tmdb_id: showId,
+          show_poster_path: item.show_poster_path || null,
+          items: []
+        };
+      }
+      groupedCustomTitles[showId].items.push(item);
+    });
+    // Sort show groups: shows with posters / names first, unlinked last
+    groupedCustomTitlesList = Object.values(groupedCustomTitles).sort((a: any, b: any) => {
+      if (a.show_tmdb_id === 0) return 1;
+      if (b.show_tmdb_id === 0) return -1;
+      return a.show_title.localeCompare(b.show_title);
+    });
   } else {
-    error = "Failed to load current season overrides.";
+    error += "Failed to load custom titles. ";
   }
+  
 } catch (e: any) {
   error = e.message;
 }
@@ -44,19 +103,29 @@ try {
     )}
 
     <!-- Toolbar -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
       <h2 class="text-xl font-semibold text-zinc-200 flex items-center gap-2">
-        Active Overrides
-        <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{overrides.length}</span>
+        Active Season Remaps
+        <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{seasonOverrides.length}</span>
       </h2>
-      <button id="add-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg active:scale-95 cursor-pointer">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
-        Add Custom Remap
-      </button>
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        {seasonOverrides.length > 0 && (
+          <input 
+            type="text" 
+            id="season-search" 
+            placeholder="Search season remaps..." 
+            class="px-4 py-2 bg-zinc-950/40 border border-zinc-800 focus:border-indigo-500 rounded-xl text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-64 placeholder-zinc-600 transition-all"
+          />
+        )}
+        <button id="add-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg active:scale-95 cursor-pointer shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
+          Add Season Remap
+        </button>
+      </div>
     </div>
 
     <!-- Active Overrides List -->
-    {overrides.length === 0 ? (
+    {seasonOverrides.length === 0 ? (
       <div class="flex flex-col items-center justify-center py-20 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
         <div class="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-4 shadow-inner">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
@@ -65,71 +134,453 @@ try {
         <p class="text-zinc-500 text-xs max-w-sm text-center">All your TV show seasons are currently using their standard synced TMDB mappings.</p>
       </div>
     ) : (
-      <div class="grid grid-cols-1 gap-4">
-        {overrides.map((override) => (
-          <div class="flex flex-col md:flex-row items-center justify-between p-5 bg-zinc-900/40 border border-zinc-800 rounded-2xl gap-6 hover:border-zinc-700/80 transition-all duration-300 hover:shadow-lg">
-            
-            <!-- Source Show -->
-            <div class="flex items-center gap-4 w-full md:w-2/5 min-w-0">
-              <div class="w-12 h-18 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-md">
-                {override.source_show_poster_path ? (
-                  <img src={override.source_show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
-                ) : (
-                  <div class="w-full h-full flex items-center justify-center text-[10px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
-                )}
-              </div>
-              <div class="min-w-0 flex-1">
-                <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider">Source Show</span>
-                <h4 class="text-zinc-100 font-bold truncate text-sm mt-0.5" title={override.source_show_title}>{override.source_show_title}</h4>
-                <div class="flex flex-wrap items-center gap-1.5 mt-1">
-                  <span class="px-2 py-0.5 bg-zinc-800 border border-zinc-750 rounded-md text-[10px] font-bold text-zinc-300">Season {override.source_season_number}</span>
-                  <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-850">TMDB: {override.source_show_tmdb_id}</span>
+      <div>
+        <div class="grid grid-cols-1 gap-4">
+          {seasonOverrides.map((override) => (
+            <div class="season-remap-card flex flex-col md:flex-row items-center justify-between p-5 bg-zinc-900/40 border border-zinc-800 rounded-2xl gap-6 hover:border-zinc-700/80 transition-all duration-300 hover:shadow-lg">
+              
+              <!-- Source Show -->
+              <div class="flex items-center gap-4 w-full md:w-2/5 min-w-0">
+                <div class="w-12 h-18 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-md">
+                  {override.source_show_poster_path ? (
+                    <img src={override.source_show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div class="w-full h-full flex items-center justify-center text-[10px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                  )}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider">Source Show</span>
+                  <a href={`/show/${override.source_show_tmdb_id}`} class="block text-zinc-100 font-bold truncate text-sm mt-0.5 hover:text-blue-400 transition-colors" title={override.source_show_title}>{override.source_show_title}</a>
+                  <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                    <span class="px-2 py-0.5 bg-zinc-800 border border-zinc-750 rounded-md text-[10px] font-bold text-zinc-300">Season {override.source_season_number}</span>
+                    <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-850">TMDB: {override.source_show_tmdb_id}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <!-- Arrow Indicator -->
-            <div class="flex flex-col items-center justify-center shrink-0">
-              <div class="w-9 h-9 rounded-full bg-zinc-950 border border-zinc-800 flex items-center justify-center text-blue-500 shadow-md">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-              </div>
-            </div>
-
-            <!-- Target Show -->
-            <div class="flex items-center gap-4 w-full md:w-2/5 min-w-0">
-              <div class="w-12 h-18 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-md">
-                {override.target_show_poster_path ? (
-                  <img src={override.target_show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
-                ) : (
-                  <div class="w-full h-full flex items-center justify-center text-[10px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
-                )}
-              </div>
-              <div class="min-w-0 flex-1">
-                <span class="text-[9px] font-extrabold uppercase text-blue-400 tracking-wider">Target TMDB Show</span>
-                <h4 class="text-zinc-100 font-bold truncate text-sm mt-0.5" title={override.target_show_title}>{override.target_show_title}</h4>
-                <div class="flex flex-wrap items-center gap-1.5 mt-1">
-                  <span class="px-2 py-0.5 bg-blue-950/40 border border-blue-900/30 rounded-md text-[10px] font-bold text-blue-400">Season {override.target_season_number}</span>
-                  <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-850">TMDB: {override.target_show_tmdb_id}</span>
+              <!-- Arrow Indicator -->
+              <div class="flex flex-col items-center justify-center shrink-0">
+                <div class="w-9 h-9 rounded-full bg-zinc-950 border border-zinc-800 flex items-center justify-center text-blue-500 shadow-md">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                 </div>
               </div>
-            </div>
 
-            <!-- Actions -->
-            <div class="flex items-center gap-2 w-full md:w-auto justify-end shrink-0 border-t border-zinc-800 md:border-t-0 pt-4 md:pt-0">
-              <button data-apply-id={override.id} class="flex items-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" title="Re-apply override & fetch TMDB metadata">
-                <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                Apply
-              </button>
-              <button data-delete-id={override.id} class="flex items-center gap-1.5 px-3 py-2 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/40 text-rose-300 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95" title="Delete override">
-                <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
-                Delete
-              </button>
-            </div>
+              <!-- Target Show -->
+              <div class="flex items-center gap-4 w-full md:w-2/5 min-w-0">
+                <div class="w-12 h-18 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-md">
+                  {override.target_show_poster_path ? (
+                    <img src={override.target_show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div class="w-full h-full flex items-center justify-center text-[10px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                  )}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <span class="text-[9px] font-extrabold uppercase text-blue-400 tracking-wider">Target TMDB Show</span>
+                  <a href={`/show/${override.target_show_tmdb_id}`} class="block text-zinc-100 font-bold truncate text-sm mt-0.5 hover:text-blue-400 transition-colors" title={override.target_show_title}>{override.target_show_title}</a>
+                  <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                    <span class="px-2 py-0.5 bg-blue-950/40 border border-blue-900/30 rounded-md text-[10px] font-bold text-blue-400">Season {override.target_season_number}</span>
+                    <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-850">TMDB: {override.target_show_tmdb_id}</span>
+                  </div>
+                </div>
+              </div>
 
+              <!-- Actions -->
+              <div class="flex items-center gap-2 w-full md:w-auto justify-end shrink-0 border-t border-zinc-800 md:border-t-0 pt-4 md:pt-0">
+                <button class="edit-season-btn flex items-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" data-source-tmdb={override.source_show_tmdb_id} data-source-season={override.source_season_number} data-target-tmdb={override.target_show_tmdb_id} data-target-season={override.target_season_number} title="Edit override">
+                  <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                  Edit
+                </button>
+                <button data-apply-id={override.id} class="flex items-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" title="Re-apply override & fetch TMDB metadata">
+                  <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                  Apply
+                </button>
+                <button data-delete-id={override.id} class="flex items-center gap-1.5 px-3 py-2 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/40 text-rose-300 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95" title="Delete override">
+                  <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                  Delete
+                </button>
+              </div>
+
+            </div>
+          ))}
+        </div>
+        <!-- Season search empty state -->
+        <div id="no-season-results" class="hidden flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
+          <div class="w-12 h-12 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-3 shadow-inner">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </div>
-        ))}
+          <h3 class="text-zinc-300 font-semibold mb-1 text-sm">No Matching Season Remaps</h3>
+          <p class="text-zinc-500 text-xs text-center">Try adjusting your keywords or search query.</p>
+        </div>
       </div>
     )}
+    
+    <!-- Episode Remaps Section -->
+    <div class="mt-16 mb-8">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+        <h2 class="text-xl font-semibold text-zinc-200 flex items-center gap-2">
+          Active Episode Remaps
+          <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{episodeOverrides.length}</span>
+        </h2>
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {episodeOverrides.length > 0 && (
+            <input 
+              type="text" 
+              id="episode-search" 
+              placeholder="Search episode remaps..." 
+              class="px-4 py-2 bg-zinc-950/40 border border-zinc-800 focus:border-indigo-500 rounded-xl text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-64 placeholder-zinc-600 transition-all"
+            />
+          )}
+          <button id="auto-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/80 text-zinc-200 hover:text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">
+            <svg class="w-4 h-4 text-indigo-400 animate-pulse" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
+            TVDB ⇆ TMDB Auto-Remapper
+          </button>
+          <button id="add-ep-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg active:scale-95 cursor-pointer shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
+            Add Episode Remap
+          </button>
+        </div>
+      </div>
+
+      <!-- Episode Overrides List Grouped by Show -->
+      {episodeOverrides.length === 0 ? (
+        <div class="flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
+          <div class="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-4 shadow-inner">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><line x1="9" x2="9" y1="21" y2="9"/></svg>
+          </div>
+          <h3 class="text-zinc-200 font-semibold mb-1">No Episode Remaps</h3>
+          <p class="text-zinc-500 text-xs max-w-sm text-center">No individual episodes have been remapped.</p>
+        </div>
+      ) : (
+        <div class="space-y-4">
+          {groupedShowsList.map((showGroup: any) => (
+            <div class="show-episodes-panel border border-zinc-800 rounded-3xl bg-zinc-900/20 overflow-hidden backdrop-blur-md transition-all duration-300" data-show-tmdb={showGroup.show_tmdb_id}>
+              
+              <!-- Show Panel Header (Collapsible Toggle) -->
+              <div 
+                class="flex items-center justify-between p-5 bg-zinc-900/60 border-b border-zinc-850 cursor-pointer select-none hover:bg-zinc-800/40 transition-colors"
+                data-show-toggle={showGroup.show_tmdb_id}
+              >
+                <div class="flex items-center gap-4 min-w-0">
+                  <!-- Collapsible chevron icon -->
+                  <svg 
+                    class="w-5 h-5 text-zinc-400 transition-transform duration-300 transform" 
+                    id={`chevron-${showGroup.show_tmdb_id}`} 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    width="24" 
+                    height="24" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    stroke-width="2.5" 
+                    stroke-linecap="round" 
+                    stroke-linejoin="round"
+                  >
+                    <path d="m9 18 6-6-6-6"/>
+                  </svg>
+                  
+                  <!-- Show Poster Image -->
+                  <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
+                    {showGroup.show_poster_path ? (
+                      <img src={showGroup.show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <div class="w-full h-full flex items-center justify-center text-[8px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                    )}
+                  </div>
+
+                  <div class="min-w-0">
+                    <h3 class="text-base font-bold text-zinc-100 truncate hover:text-indigo-400 transition-colors">
+                      {showGroup.show_title}
+                    </h3>
+                    <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850 mt-1 inline-block">TMDB ID: {showGroup.show_tmdb_id}</span>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-3 shrink-0">
+                  <span class="text-xs bg-zinc-805 text-zinc-400 border border-zinc-750 px-2.5 py-0.5 rounded-full font-extrabold">
+                    {showGroup.overrides.length} remaps
+                  </span>
+                </div>
+              </div>
+
+              <!-- Collapsible Content Panel (Hidden by default) -->
+              <div 
+                id={`panel-${showGroup.show_tmdb_id}`} 
+                class="hidden divide-y divide-zinc-850 bg-zinc-950/20"
+              >
+                
+                <!-- Bulk Actions Toolbar -->
+                <div class="px-5 py-3 bg-zinc-900/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-850">
+                  <div class="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      class="bulk-show-select-all rounded border-zinc-700 bg-zinc-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4" 
+                      data-show-id={showGroup.show_tmdb_id} 
+                    />
+                    <span class="text-xs font-bold text-zinc-400">Select All in Show</span>
+                  </div>
+                  
+                  <button 
+                    class="bulk-delete-btn flex items-center justify-center gap-1.5 px-3 py-1.5 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/40 text-rose-400 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                    data-show-id={showGroup.show_tmdb_id}
+                    disabled
+                  >
+                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                    Delete Selected (<span class="bulk-selected-count">0</span>)
+                  </button>
+                </div>
+
+                <!-- Season Groups -->
+                <div class="divide-y divide-zinc-850/60">
+                  {Object.entries(showGroup.seasons)
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([seasonNum, overrides]: [string, any]) => {
+                      // Sort episodes in season group by episode number ascending
+                      const sortedOverrides = [...overrides].sort((a: any, b: any) => a.source_episode_number - b.source_episode_number);
+                      
+                      return (
+                        <div class="season-group-container bg-zinc-950/10">
+                          <!-- Season Sub-Header -->
+                          <div class="px-5 py-2.5 bg-zinc-900/15 flex items-center justify-between border-b border-zinc-850/40">
+                            <span class="text-xs font-black uppercase text-indigo-400 tracking-wider">
+                              Season {seasonNum}
+                            </span>
+                            <span class="text-[10px] bg-zinc-850 text-zinc-400 px-2 py-0.5 rounded-full font-bold">
+                              {overrides.length} remaps
+                            </span>
+                          </div>
+
+                          <!-- Individual Overrides in Season -->
+                          <div class="grid grid-cols-1 divide-y divide-zinc-850/40">
+                            {sortedOverrides.map((override: any) => (
+                              <div class="override-row-container flex flex-col lg:flex-row items-center justify-between p-5 gap-6 hover:bg-zinc-800/10 transition-colors duration-200">
+                                
+                                <!-- Bulk Select Checkbox + Source coordinates -->
+                                <div class="flex items-center gap-4 w-full lg:w-2/5 min-w-0">
+                                  <input 
+                                    type="checkbox" 
+                                    class="override-row-checkbox rounded border-zinc-700 bg-zinc-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4 shrink-0" 
+                                    data-override-id={override.id}
+                                    data-show-id={showGroup.show_tmdb_id}
+                                  />
+                                  
+                                  <div class="min-w-0 flex-1">
+                                    <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider block">Source Episode</span>
+                                    <div class="flex items-center gap-2 mt-0.5 min-w-0">
+                                      <span class="px-2 py-0.5 bg-zinc-800 border border-zinc-750 rounded-md text-[10px] font-bold text-zinc-300 shrink-0">
+                                        S{override.source_season_number.toString().padStart(2, '0')}E{override.source_episode_number.toString().padStart(2, '0')}
+                                      </span>
+                                      <span class="text-xs text-zinc-400 font-medium truncate" title={override.source_episode_title}>
+                                        {override.source_episode_title || "Unknown Episode"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <!-- Arrow Indicator -->
+                                <div class="flex items-center justify-center shrink-0">
+                                  <div class="w-8 h-8 rounded-full bg-zinc-950 border border-zinc-850 flex items-center justify-center text-indigo-500 shadow-md">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                  </div>
+                                </div>
+
+                                <!-- Target coordinates -->
+                                <div class="flex items-center gap-4 w-full lg:w-2/5 min-w-0">
+                                  <div class="w-10 h-15 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm hidden sm:block">
+                                    {override.target_show_poster_path ? (
+                                      <img src={override.target_show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
+                                    ) : (
+                                      <div class="w-full h-full flex items-center justify-center text-[9px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                                    )}
+                                  </div>
+                                  <div class="min-w-0 flex-1">
+                                    <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider block">Target Episode</span>
+                                    <div class="flex items-center gap-2 mt-0.5 min-w-0">
+                                      <span class="px-2 py-0.5 bg-indigo-950/40 border border-indigo-900/30 rounded-md text-[10px] font-bold text-indigo-400 shrink-0">
+                                        S{override.target_season_number.toString().padStart(2, '0')}E{override.target_episode_number.toString().padStart(2, '0')}
+                                      </span>
+                                      <span class="text-xs text-zinc-450 font-medium truncate" title={override.target_episode_title}>
+                                        {override.target_episode_title || "Unknown Episode"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <!-- Actions -->
+                                <div class="flex items-center gap-2 w-full lg:w-auto justify-end shrink-0 border-t border-zinc-850 lg:border-t-0 pt-4 lg:pt-0">
+                                  <button class="edit-ep-btn flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" data-src-tmdb={override.source_show_tmdb_id} data-src-season={override.source_season_number} data-src-ep={override.source_episode_number} data-tgt-tmdb={override.target_show_tmdb_id} data-tgt-season={override.target_season_number} data-tgt-ep={override.target_episode_number} title="Edit override">
+                                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                                    Edit
+                                  </button>
+                                  <button data-ep-apply-id={override.id} class="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" title="Re-apply override & fetch TMDB metadata">
+                                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                                    Apply
+                                  </button>
+                                  <button data-ep-delete-id={override.id} class="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/40 text-rose-300 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95" title="Delete override">
+                                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                                    Delete
+                                  </button>
+                                </div>
+
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+
+              </div>
+
+            </div>
+          ))}
+          <!-- Episode search empty state -->
+          <div id="no-episode-results" class="hidden flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
+            <div class="w-12 h-12 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-3 shadow-inner">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            </div>
+            <h3 class="text-zinc-300 font-semibold mb-1 text-sm">No Matching Episode Remaps</h3>
+            <p class="text-zinc-500 text-xs text-center">Try adjusting your keywords or search query.</p>
+          </div>
+        </div>
+    )}
+    </div>
+
+    <!-- Custom Renames Section -->
+    <div class="mt-16">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <h2 class="text-xl font-semibold text-zinc-200 flex items-center gap-2">
+          Global Custom Renames
+          <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{customTitles.length}</span>
+        </h2>
+        {customTitles.length > 0 && (
+          <input 
+            type="text" 
+            id="rename-search" 
+            placeholder="Search custom renames..." 
+            class="px-4 py-2 bg-zinc-950/40 border border-zinc-800 focus:border-indigo-500 rounded-xl text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-64 placeholder-zinc-600 transition-all"
+          />
+        )}
+      </div>
+
+      {customTitles.length === 0 ? (
+        <div class="flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
+          <div class="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-4 shadow-inner">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </div>
+          <h3 class="text-zinc-200 font-semibold mb-1">No Custom Renames</h3>
+          <p class="text-zinc-500 text-xs max-w-sm text-center">You haven't renamed any shows, seasons, or episodes.</p>
+        </div>
+      ) : (
+        <div class="space-y-4">
+          {groupedCustomTitlesList.map((showGroup: any) => (
+            <div class="show-renames-panel border border-zinc-800 rounded-3xl bg-zinc-900/20 overflow-hidden backdrop-blur-md transition-all duration-300" data-rename-tmdb={showGroup.show_tmdb_id}>
+              
+              <!-- Show Panel Header (Collapsible Toggle) -->
+              <div 
+                class="flex items-center justify-between p-5 bg-zinc-900/60 border-b border-zinc-850 cursor-pointer select-none hover:bg-zinc-800/40 transition-colors"
+                data-rename-toggle={showGroup.show_tmdb_id}
+              >
+                <div class="flex items-center gap-4 min-w-0">
+                  <!-- Collapsible chevron icon -->
+                  <svg 
+                    class="w-5 h-5 text-zinc-400 transition-transform duration-300 transform" 
+                    id={`rename-chevron-${showGroup.show_tmdb_id}`} 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    width="24" 
+                    height="24" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    stroke-width="2.5" 
+                    stroke-linecap="round" 
+                    stroke-linejoin="round"
+                  >
+                    <path d="m9 18 6-6-6-6"/>
+                  </svg>
+                  
+                  <!-- Show Poster Image -->
+                  {showGroup.show_tmdb_id > 0 && (
+                    <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
+                      {showGroup.show_poster_path ? (
+                        <img src={showGroup.show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
+                      ) : (
+                        <div class="w-full h-full flex items-center justify-center text-[8px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                      )}
+                    </div>
+                  )}
+
+                  <div class="min-w-0">
+                    <h3 class="text-base font-bold text-zinc-100 truncate hover:text-indigo-400 transition-colors">
+                      {showGroup.show_title}
+                    </h3>
+                    {showGroup.show_tmdb_id > 0 && (
+                      <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850 mt-1 inline-block">TMDB ID: {showGroup.show_tmdb_id}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-3 shrink-0">
+                  <span class="text-xs bg-zinc-850 text-zinc-400 border border-zinc-750 px-2.5 py-0.5 rounded-full font-extrabold">
+                    {showGroup.items.length} renames
+                  </span>
+                </div>
+              </div>
+
+              <!-- Collapsible Content Panel (Hidden by default) -->
+              <div 
+                id={`rename-panel-${showGroup.show_tmdb_id}`} 
+                class="hidden divide-y divide-zinc-850 bg-zinc-950/20"
+              >
+                <div class="overflow-x-auto">
+                  <table class="w-full text-left border-collapse">
+                    <thead>
+                      <tr class="bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-500 uppercase tracking-wider">
+                        <th class="px-5 py-3 font-semibold w-24">Type</th>
+                        <th class="px-5 py-3 font-semibold">Context</th>
+                        <th class="px-5 py-3 font-semibold">Original Title</th>
+                        <th class="px-5 py-3 font-semibold">Custom Title</th>
+                        <th class="px-5 py-3 font-semibold text-right w-28">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-zinc-850/50 text-sm">
+                      {showGroup.items.map((item: any) => (
+                        <tr class="custom-rename-row hover:bg-zinc-800/10 transition-colors">
+                          <td class="px-5 py-4 whitespace-nowrap">
+                            {item.type === 'show' && <span class="px-2 py-1 bg-purple-900/30 text-purple-400 rounded font-bold text-xs">Show</span>}
+                            {item.type === 'season' && <span class="px-2 py-1 bg-teal-900/30 text-teal-400 rounded font-bold text-xs">Season</span>}
+                            {item.type === 'episode' && <span class="px-2 py-1 bg-orange-900/30 text-orange-400 rounded font-bold text-xs">Episode</span>}
+                          </td>
+                          <td class="px-5 py-4 text-zinc-400">{item.context}</td>
+                          <td class="px-5 py-4 text-zinc-500 line-through decoration-zinc-600">{item.original_title}</td>
+                          <td class="px-5 py-4 text-zinc-200 font-bold">{item.custom_title}</td>
+                          <td class="px-5 py-4 text-right">
+                            <button class="custom-rename-edit-btn p-1.5 text-zinc-500 hover:text-blue-400 transition-colors" data-payload={JSON.stringify(item)} title="Edit">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                            </button>
+                            <button class="custom-rename-delete-btn p-1.5 text-zinc-500 hover:text-red-400 transition-colors ml-2" data-payload={JSON.stringify(item)} title="Remove Override">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          ))}
+          <!-- Rename search empty state -->
+          <div id="no-rename-results" class="hidden flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
+            <div class="w-12 h-12 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-3 shadow-inner">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            </div>
+            <h3 class="text-zinc-300 font-semibold mb-1 text-sm">No Matching Custom Renames</h3>
+            <p class="text-zinc-500 text-xs text-center">Try adjusting your keywords or search query.</p>
+          </div>
+        </div>
+      )}
+    </div>
   </div>
 
   <!-- Wizard Modal -->
@@ -182,11 +633,23 @@ try {
           <div id="source-manual-group" class="grid grid-cols-1 sm:grid-cols-2 gap-4 hidden">
             <div>
               <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Source Show TMDB ID</label>
-              <input type="number" id="source-show-tmdb-input" placeholder="e.g. 85937" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
+              <div class="flex gap-2">
+                <input type="number" id="source-show-tmdb-input" placeholder="e.g. 85937" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
+                <button id="source-show-lookup-btn" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer">Lookup</button>
+              </div>
             </div>
             <div>
               <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Source Season Number</label>
               <input type="number" id="source-season-input" placeholder="e.g. 2" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
+            </div>
+          </div>
+          <!-- Manual Preview Card -->
+          <div id="source-manual-preview" class="flex items-center gap-4 p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl hidden mt-3">
+            <img id="source-manual-poster" src="" class="w-8 h-12 rounded object-cover hidden" />
+            <div id="source-manual-no-poster" class="w-8 h-12 bg-zinc-950 rounded flex items-center justify-center text-[8px] text-zinc-600 font-bold hidden">NO ART</div>
+            <div>
+              <h4 id="source-manual-title" class="text-sm font-bold text-zinc-200"></h4>
+              <p id="source-manual-meta" class="text-xs text-zinc-500"></p>
             </div>
           </div>
         </div>
@@ -254,6 +717,298 @@ try {
   </div>
 </Base>
 
+  <!-- Auto-Remap Modal -->
+  <div id="auto-remap-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
+    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      
+      <!-- Modal Header -->
+      <div class="px-6 py-5 border-b border-zinc-850 flex items-center justify-between shrink-0">
+        <div>
+          <h3 class="text-xl font-bold text-zinc-100 tracking-tight flex items-center gap-2">
+            <svg class="w-6 h-6 text-indigo-400 animate-pulse" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
+            TVDB ⇆ TMDB Episode Auto-Remapper
+          </h3>
+          <p class="text-zinc-400 text-xs mt-1">Intelligently match and remap seasons & episodes of a show between TVDB and TMDB databases automatically.</p>
+        </div>
+        <button id="close-auto-modal-btn" class="p-2 -mr-2 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded-full transition-colors cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Modal Body (Scrollable) -->
+      <div class="p-6 overflow-y-auto space-y-6 flex-1 min-h-0">
+        
+        <!-- Input Configuration Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-zinc-950/40 border border-zinc-850 p-5 rounded-2xl">
+          
+          <!-- Left: Show Details -->
+          <div class="space-y-4">
+            <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">1. Target Show Identification</h4>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[10px] font-bold text-zinc-500 mb-1">TMDB Show ID</label>
+                <input type="number" id="auto-tmdb-id" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="e.g. 30985" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-zinc-500 mb-1">TVDB Show ID</label>
+                <input type="number" id="auto-tvdb-id" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="e.g. 74796" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: API Configuration -->
+          <div class="space-y-4">
+            <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">2. API Configuration</h4>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-zinc-500 mb-1">TVDB API Key (v4)</label>
+                <input type="text" id="auto-tvdb-key" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Paste TVDB v4 key" />
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Generate Button Section -->
+        <div class="flex justify-center">
+          <button id="generate-preview-btn" class="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg active:scale-95 cursor-pointer">
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+            Generate Match Preview
+          </button>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="auto-remap-loader" class="hidden flex flex-col items-center justify-center py-12">
+          <div class="w-12 h-12 rounded-full border-4 border-indigo-600/30 border-t-indigo-600 animate-spin mb-4"></div>
+          <span class="text-zinc-400 text-sm font-bold animate-pulse">Fetching and matching episodes across metadata sources...</span>
+        </div>
+
+        <!-- Preview Results Area (Hidden Initially) -->
+        <div id="preview-results-area" class="hidden space-y-4">
+          
+          <!-- Summary Banner -->
+          <div class="flex items-center justify-between p-4 bg-zinc-950/80 border border-zinc-800 rounded-2xl">
+            <div>
+              <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider">Matching Integrity</span>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span id="preview-match-stats" class="text-lg font-bold text-zinc-100">0 / 0 matched successfully</span>
+                <span id="preview-match-pct" class="text-xs bg-emerald-950 border border-emerald-900/60 text-emerald-400 px-2 py-0.5 rounded-full font-extrabold">100%</span>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider">Unmatched Count</span>
+              <div id="preview-unmatched-badge" class="text-sm font-bold text-zinc-400 mt-0.5">0 episodes</div>
+            </div>
+          </div>
+
+          <!-- Filter Tabs -->
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-zinc-850 pb-3">
+            <div class="flex flex-wrap items-center gap-3 shrink-0">
+              <div class="flex gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-850 shrink-0">
+                <button id="filter-all-btn" type="button" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-zinc-800 text-zinc-100 shadow cursor-pointer">
+                  Show All
+                </button>
+                <button id="filter-matched-btn" type="button" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-zinc-400 hover:text-zinc-200 cursor-pointer">
+                  Matched Only
+                </button>
+                <button id="filter-unmatched-btn" type="button" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5 cursor-pointer">
+                  Unmatched Only
+                  <span id="unmatched-count-badge" class="bg-indigo-950 text-indigo-400 border border-indigo-900/60 px-1.5 py-0.5 rounded-full text-[9px] font-black">0</span>
+                </button>
+              </div>
+              <input 
+                type="text" 
+                id="auto-remap-search" 
+                placeholder="Search mapping preview..." 
+                class="px-3.5 py-1.5 bg-zinc-950/40 border border-zinc-800 focus:border-indigo-500 rounded-xl text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-56 placeholder-zinc-600 transition-all"
+              />
+            </div>
+            <div class="text-xs text-zinc-500 font-bold tracking-wide uppercase">
+              Check/uncheck rows to customize what is applied.
+            </div>
+          </div>
+
+          <!-- Matching List Grid -->
+          <div class="border border-zinc-850 rounded-2xl overflow-hidden bg-zinc-950/20">
+            <div class="px-4 py-2.5 bg-zinc-950 border-b border-zinc-850 flex items-center justify-between text-[10px] font-black uppercase text-zinc-500 tracking-wider shrink-0">
+              <div>Episode Mappings (Source ➜ Target)</div>
+              <div>Coordinates (S : E)</div>
+            </div>
+            
+            <div id="preview-matches-list" class="divide-y divide-zinc-850/60 overflow-y-auto max-h-[300px] text-xs">
+              <!-- Dynamically populated rows -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-4 bg-zinc-950/60 border-t border-zinc-850 flex justify-end gap-3 shrink-0">
+        <button id="cancel-auto-modal-btn" class="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 font-bold rounded-xl text-sm transition-all cursor-pointer">
+          Cancel
+        </button>
+        <button id="apply-auto-remaps-btn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/30 disabled:text-white/40 text-white font-bold rounded-xl text-sm transition-all disabled:cursor-not-allowed cursor-pointer shadow-lg" disabled>
+          Apply Auto-Remaps
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Episode Remap Modal -->
+  <div id="ep-remap-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
+    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      
+      <!-- Modal Header -->
+      <div class="px-6 py-5 border-b border-zinc-850 flex items-center justify-between shrink-0">
+        <div>
+          <h3 class="text-xl font-bold text-zinc-100 tracking-tight flex items-center gap-2">
+            <svg class="w-5 h-5 text-indigo-400" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
+            Add Custom Episode Remap
+          </h3>
+          <p class="text-zinc-400 text-xs mt-1">Specify source to target episode mappings for exact synchronization.</p>
+        </div>
+        <button id="close-ep-modal-btn" class="p-2 -mr-2 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded-full transition-colors cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Modal Body (Scrollable) -->
+      <div class="p-6 overflow-y-auto space-y-6 flex-1">
+        
+        <!-- STEP 1: Select Show -->
+        <div class="space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
+          <div class="flex items-center justify-between">
+            <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Select Show</label>
+            <button id="ep-toggle-show-mode" type="button" class="text-xs text-indigo-400 hover:underline font-semibold cursor-pointer">
+              Advanced: Different Target Show
+            </button>
+          </div>
+          
+          <div>
+            <select id="ep-show-select" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-zinc-200 text-xs font-semibold focus:border-indigo-500 focus:outline-none transition cursor-pointer">
+              <option value="">-- Choose Show --</option>
+            </select>
+          </div>
+
+          <!-- Advanced: Separate Source and Target TMDB IDs -->
+          <div id="ep-advanced-tmdb-group" class="grid grid-cols-2 gap-3 hidden pt-2 border-t border-zinc-900/50">
+            <div>
+              <label class="block text-[10px] font-bold text-zinc-500 mb-1">Source TMDB ID</label>
+              <input type="number" id="ep-src-tmdb" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" placeholder="e.g. 30984" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-zinc-500 mb-1">Target TMDB ID</label>
+              <input type="number" id="ep-tgt-tmdb" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" placeholder="e.g. 30984" />
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 2: Configure Coordinates Mapping -->
+        <div class="space-y-4 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
+          <div class="flex items-center justify-between">
+            <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">2. Episode Coordinates</label>
+            <button id="ep-toggle-coords-mode" type="button" class="text-xs text-indigo-400 hover:underline font-semibold cursor-pointer">
+              Toggle Manual Coordinate Input
+            </button>
+          </div>
+
+          <!-- Dropdowns Select Grid (Mode A - Default) -->
+          <div id="ep-coords-select-group" class="space-y-4">
+            <!-- Source coordinates selector -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Source Season</label>
+                <select id="ep-src-season-select" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition cursor-pointer" disabled>
+                  <option value="">-- Choose Show First --</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Source Episode</label>
+                <select id="ep-src-episode-select" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition cursor-pointer" disabled>
+                  <option value="">-- Choose Season First --</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Direction arrow -->
+            <div class="flex justify-center my-1">
+              <div class="w-7 h-7 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-indigo-400 shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+              </div>
+            </div>
+
+            <!-- Target coordinates selector -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Target Season</label>
+                <select id="ep-tgt-season-select" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition cursor-pointer" disabled>
+                  <option value="">-- Choose Show First --</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Target Episode</label>
+                <select id="ep-tgt-episode-select" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition cursor-pointer" disabled>
+                  <option value="">-- Choose Season First --</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Manual Inputs Grid (Mode B - Hidden) -->
+          <div id="ep-coords-manual-group" class="space-y-4 hidden">
+            <!-- Source Coordinates inputs -->
+            <div>
+              <span class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Source Coordinates</span>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <input type="number" id="ep-src-season" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" placeholder="Season (e.g. 1)" />
+                </div>
+                <div>
+                  <input type="number" id="ep-src-episode" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" placeholder="Episode (e.g. 1)" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Direction arrow -->
+            <div class="flex justify-center my-1">
+              <div class="w-7 h-7 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-indigo-400 shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+              </div>
+            </div>
+
+            <!-- Target Coordinates inputs -->
+            <div>
+              <span class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Target Coordinates</span>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <input type="number" id="ep-tgt-season" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" placeholder="Season (e.g. 1)" />
+                </div>
+                <div>
+                  <input type="number" id="ep-tgt-episode" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" placeholder="Episode (e.g. 1)" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-4 border-t border-zinc-850 bg-zinc-950/60 flex items-center justify-end shrink-0 gap-3">
+        <button id="cancel-ep-modal-btn" class="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 font-bold rounded-xl text-xs transition-all cursor-pointer">
+          Cancel
+        </button>
+        <button id="save-ep-remap-btn" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition-all shadow-lg active:scale-95 cursor-pointer">
+          Save Episode Remap
+        </button>
+      </div>
+
+    </div>
+  </div>
+
 <script>
   document.addEventListener("DOMContentLoaded", () => {
     const token = document.getElementById("app-data")?.dataset.token;
@@ -276,6 +1031,12 @@ try {
 
     const sourceShowTmdbInput = document.getElementById("source-show-tmdb-input") as HTMLInputElement;
     const sourceSeasonInput = document.getElementById("source-season-input") as HTMLInputElement;
+    const sourceShowLookupBtn = document.getElementById("source-show-lookup-btn")!;
+    const sourceManualPreview = document.getElementById("source-manual-preview")!;
+    const sourceManualPoster = document.getElementById("source-manual-poster") as HTMLImageElement;
+    const sourceManualNoPoster = document.getElementById("source-manual-no-poster")!;
+    const sourceManualTitle = document.getElementById("source-manual-title")!;
+    const sourceManualMeta = document.getElementById("source-manual-meta")!;
 
     // Wizard Step 2 Elements (Target)
     const targetSearchInput = document.getElementById("target-search-input") as HTMLInputElement;
@@ -333,12 +1094,13 @@ try {
     // Fetch shows in user's collection
     async function fetchLocalShows() {
       try {
-        const res = await fetch("/api/proxy/shows?page_size=1000&sort=title", {
+        const res = await fetch("/api/proxy/sync/source-shows", {
           headers: { "Authorization": `Bearer ${token}` }
         });
         if (res.ok) {
           const data = await res.json();
-          localShowsList = data.results || [];
+          // The new endpoint returns a list directly, not paginated
+          localShowsList = Array.isArray(data) ? data : data.results || [];
           populateLocalShowsDropdown();
         } else {
           sourceShowSelect.innerHTML = '<option value="">Failed to load shows</option>';
@@ -394,6 +1156,43 @@ try {
     sourceShowTmdbInput.addEventListener("input", validateForm);
     sourceSeasonInput.addEventListener("input", validateForm);
 
+    // Manual TMDB ID Lookup
+    sourceShowLookupBtn.addEventListener("click", async () => {
+      const tmdbId = sourceShowTmdbInput.value.trim();
+      if (!tmdbId) return;
+
+      sourceShowLookupBtn.textContent = "...";
+      try {
+        const res = await fetch(`/api/proxy/sync/tmdb-show-preview/${tmdbId}`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          sourceManualTitle.textContent = data.title;
+          const year = data.first_air_date ? new Date(data.first_air_date).getFullYear() : 'N/A';
+          sourceManualMeta.textContent = `${year} • TMDB ID: ${data.tmdb_id}`;
+          
+          if (data.poster_path) {
+            sourceManualPoster.src = data.poster_path;
+            sourceManualPoster.classList.remove("hidden");
+            sourceManualNoPoster.classList.add("hidden");
+          } else {
+            sourceManualPoster.classList.add("hidden");
+            sourceManualNoPoster.classList.remove("hidden");
+          }
+          sourceManualPreview.classList.remove("hidden");
+        } else {
+          window.showToast?.("Show not found on TMDB", "error");
+          sourceManualPreview.classList.add("hidden");
+        }
+      } catch (err) {
+        window.showToast?.("Error fetching show", "error");
+        sourceManualPreview.classList.add("hidden");
+      } finally {
+        sourceShowLookupBtn.textContent = "Lookup";
+      }
+    });
+
     // Target TMDB Search Action
     const performSearch = async () => {
       const q = targetSearchInput.value.trim();
@@ -401,6 +1200,25 @@ try {
 
       targetSearchBtn.textContent = "Searching...";
       try {
+        if (/^\d+$/.test(q)) {
+          // Direct TMDB ID lookup
+          const res = await fetch(`/api/proxy/sync/tmdb-show-preview/${q}`, {
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const normalizedResult = {
+              tmdb_id: data.tmdb_id,
+              title: data.title,
+              poster_path: data.poster_path,
+              release_date: data.first_air_date
+            };
+            renderSearchResults([normalizedResult]);
+            return;
+          }
+        }
+
+        // Standard text search fallback
         const res = await fetch(`/api/proxy/media/search?type=series&q=${encodeURIComponent(q)}`, {
           headers: { "Authorization": `Bearer ${token}` }
         });
@@ -540,6 +1358,34 @@ try {
 
         targetSeasonButtons.appendChild(btn);
       });
+
+      // Add a manual input fallback for anthologies or unlisted seasons
+      const manualDiv = document.createElement("div");
+      manualDiv.className = "flex items-center gap-2 mt-3 p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl";
+      manualDiv.innerHTML = `
+        <span class="text-xs font-bold text-zinc-500 whitespace-nowrap">Not listed?</span>
+        <input type="number" id="manual-target-season" placeholder="Season #" class="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-zinc-200 text-xs focus:border-blue-500 focus:outline-none transition" />
+        <button type="button" id="manual-target-season-btn" class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-lg text-xs transition cursor-pointer">Use</button>
+      `;
+      targetSeasonButtons.appendChild(manualDiv);
+
+      const manualInput = manualDiv.querySelector("#manual-target-season") as HTMLInputElement;
+      const manualBtn = manualDiv.querySelector("#manual-target-season-btn")!;
+      manualBtn.addEventListener("click", () => {
+        const val = parseInt(manualInput.value);
+        if (!isNaN(val) && val >= 0) {
+          // Reset button styles
+          targetSeasonButtons.querySelectorAll("button").forEach(b => {
+            if (b.id !== "manual-target-season-btn") {
+              b.className = "px-3.5 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95";
+            }
+          });
+          manualBtn.className = "px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-blue-200 font-bold rounded-lg text-xs transition cursor-pointer shadow-md border border-blue-700";
+          targetSelectedSeasonNum = val;
+          validateForm();
+        }
+      });
+
       targetSeasonGroup.classList.remove("hidden");
     }
 
@@ -568,6 +1414,7 @@ try {
 
       sourceShowTmdbInput.value = "";
       sourceSeasonInput.value = "";
+      sourceManualPreview.classList.add("hidden");
 
       targetSearchInput.value = "";
       targetSearchInput.classList.remove("hidden");
@@ -708,6 +1555,1369 @@ try {
         }
       });
     });
+
+    // Episode Overrides direct actions
+    document.querySelectorAll("[data-ep-apply-id]").forEach(button => {
+      button.addEventListener("click", async () => {
+        const id = button.getAttribute("data-ep-apply-id");
+        if (!id) return;
+
+        const icon = button.querySelector("svg");
+        if (icon) icon.classList.add("animate-spin");
+        button.setAttribute("disabled", "true");
+
+        try {
+          const res = await fetch(`/api/proxy/sync/episode-overrides/${id}/apply`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            window.showToast?.(`Applied episode mapping successfully!`, "success");
+          } else {
+            window.showToast?.("Failed to apply episode remapping override.", "error");
+          }
+        } catch (err) {
+          window.showToast?.("Error applying override.", "error");
+        } finally {
+          if (icon) icon.classList.remove("animate-spin");
+          button.removeAttribute("disabled");
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-ep-delete-id]").forEach(button => {
+      button.addEventListener("click", async () => {
+        const id = button.getAttribute("data-ep-delete-id");
+        if (!id) return;
+
+        if (!confirm("Are you sure you want to delete this episode override?")) {
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/proxy/sync/episode-overrides/${id}`, {
+            method: "DELETE",
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (res.ok) {
+            window.showToast?.("Override deleted successfully", "success");
+            setTimeout(() => window.location.reload(), 600);
+          } else {
+            window.showToast?.("Failed to delete episode override", "error");
+          }
+        } catch (err) {
+          window.showToast?.("Error deleting override", "error");
+        }
+      });
+    });
+
+    // Show/Hide Collapsible Panels for Grouped Episode Overrides
+    document.querySelectorAll("[data-show-toggle]").forEach(header => {
+      header.addEventListener("click", () => {
+        const showId = header.getAttribute("data-show-toggle");
+        const panel = document.getElementById(`panel-${showId}`);
+        const chevron = document.getElementById(`chevron-${showId}`);
+        if (panel && chevron) {
+          const isHidden = panel.classList.contains("hidden");
+          if (isHidden) {
+            panel.classList.remove("hidden");
+            chevron.classList.add("rotate-90");
+          } else {
+            panel.classList.add("hidden");
+            chevron.classList.remove("rotate-90");
+          }
+        }
+      });
+    });
+
+    // Show/Hide Collapsible Panels for Grouped Custom Renames
+    document.querySelectorAll("[data-rename-toggle]").forEach(header => {
+      header.addEventListener("click", () => {
+        const showId = header.getAttribute("data-rename-toggle");
+        const panel = document.getElementById(`rename-panel-${showId}`);
+        const chevron = document.getElementById(`rename-chevron-${showId}`);
+        if (panel && chevron) {
+          const isHidden = panel.classList.contains("hidden");
+          if (isHidden) {
+            panel.classList.remove("hidden");
+            chevron.classList.add("rotate-90");
+          } else {
+            panel.classList.add("hidden");
+            chevron.classList.remove("rotate-90");
+          }
+        }
+      });
+    });
+
+    // Recalculate selected checkboxes for a show group
+    function updateBulkDeleteState(showId: string) {
+      const panel = document.getElementById(`panel-${showId}`);
+      if (!panel) return;
+
+      const checkedBoxes = panel.querySelectorAll(".override-row-checkbox:checked");
+      const totalBoxes = panel.querySelectorAll(".override-row-checkbox");
+      const selectAllCheckbox = panel.querySelector(".bulk-show-select-all") as HTMLInputElement;
+      const bulkDeleteBtn = panel.querySelector(".bulk-delete-btn") as HTMLButtonElement;
+      const countSpan = panel.querySelector(".bulk-selected-count")!;
+
+      countSpan.textContent = checkedBoxes.length.toString();
+
+      if (checkedBoxes.length > 0) {
+        bulkDeleteBtn.removeAttribute("disabled");
+      } else {
+        bulkDeleteBtn.setAttribute("disabled", "true");
+      }
+
+      if (selectAllCheckbox && totalBoxes.length > 0) {
+        selectAllCheckbox.checked = checkedBoxes.length === totalBoxes.length;
+      }
+    }
+
+    // Toggle all checkboxes in a show group
+    document.querySelectorAll(".bulk-show-select-all").forEach(checkbox => {
+      checkbox.addEventListener("change", (e) => {
+        const showId = checkbox.getAttribute("data-show-id")!;
+        const isChecked = (e.target as HTMLInputElement).checked;
+        const panel = document.getElementById(`panel-${showId}`);
+        if (panel) {
+          panel.querySelectorAll(".override-row-checkbox").forEach(box => {
+            (box as HTMLInputElement).checked = isChecked;
+          });
+          updateBulkDeleteState(showId);
+        }
+      });
+    });
+
+    // Individual checkboxes change
+    document.querySelectorAll(".override-row-checkbox").forEach(checkbox => {
+      checkbox.addEventListener("change", () => {
+        const showId = checkbox.getAttribute("data-show-id")!;
+        updateBulkDeleteState(showId);
+      });
+    });
+
+    // 1. Season Remaps Search
+    const seasonSearchInput = document.getElementById("season-search");
+    if (seasonSearchInput) {
+      seasonSearchInput.addEventListener("input", (e) => {
+        const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
+        const cards = document.querySelectorAll(".season-remap-card");
+        let visibleCount = 0;
+        
+        cards.forEach(card => {
+          const text = card.textContent?.toLowerCase() || "";
+          if (text.includes(query)) {
+            card.classList.remove("hidden");
+            visibleCount++;
+          } else {
+            card.classList.add("hidden");
+          }
+        });
+
+        const noResults = document.getElementById("no-season-results");
+        if (noResults) {
+          if (visibleCount === 0) {
+            noResults.classList.remove("hidden");
+          } else {
+            noResults.classList.add("hidden");
+          }
+        }
+      });
+    }
+
+    // 2. Episode Remaps Search
+    const episodeSearchInput = document.getElementById("episode-search");
+    if (episodeSearchInput) {
+      episodeSearchInput.addEventListener("input", (e) => {
+        const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
+        const panels = document.querySelectorAll(".show-episodes-panel");
+        let totalVisibleEpisodes = 0;
+
+        panels.forEach(panel => {
+          const showHeader = panel.querySelector("[data-show-toggle]");
+          const showTitle = showHeader?.querySelector("h3")?.textContent?.toLowerCase() || "";
+          const showTmdbId = panel.getAttribute("data-show-tmdb") || "";
+          
+          let showHasVisibleEpisodes = false;
+
+          // Process season containers within this show panel
+          const seasons = panel.querySelectorAll(".season-group-container");
+          seasons.forEach(seasonContainer => {
+            let seasonHasVisibleEpisodes = false;
+            
+            // Process individual episode rows within this season
+            const rows = seasonContainer.querySelectorAll(".override-row-container");
+            rows.forEach(row => {
+              const rowText = row.textContent?.toLowerCase() || "";
+              const match = rowText.includes(query) || showTitle.includes(query) || showTmdbId.includes(query);
+              
+              if (match) {
+                row.classList.remove("hidden");
+                seasonHasVisibleEpisodes = true;
+                showHasVisibleEpisodes = true;
+                totalVisibleEpisodes++;
+              } else {
+                row.classList.add("hidden");
+              }
+            });
+
+            // Hide/Show season container based on whether it has visible matching rows
+            if (seasonHasVisibleEpisodes) {
+              seasonContainer.classList.remove("hidden");
+            } else {
+              seasonContainer.classList.add("hidden");
+            }
+          });
+
+          // Hide/Show entire show panel
+          if (showHasVisibleEpisodes) {
+            panel.classList.remove("hidden");
+          } else {
+            panel.classList.add("hidden");
+          }
+
+          const collapsePanel = panel.querySelector("[id^='panel-']");
+          const chevron = panel.querySelector("[id^='chevron-']");
+          
+          if (query !== "") {
+            if (showHasVisibleEpisodes) {
+              collapsePanel?.classList.remove("hidden");
+              chevron?.classList.add("rotate-90");
+            }
+          } else {
+            collapsePanel?.classList.add("hidden");
+            chevron?.classList.remove("rotate-90");
+          }
+        });
+
+        const noResults = document.getElementById("no-episode-results");
+        if (noResults) {
+          if (totalVisibleEpisodes === 0) {
+            noResults.classList.remove("hidden");
+          } else {
+            noResults.classList.add("hidden");
+          }
+        }
+      });
+    }
+
+    // 3. Custom Renames Search
+    const renameSearchInput = document.getElementById("rename-search");
+    if (renameSearchInput) {
+      renameSearchInput.addEventListener("input", (e) => {
+        const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
+        const panels = document.querySelectorAll(".show-renames-panel");
+        let totalVisibleRenames = 0;
+
+        panels.forEach(panel => {
+          const showHeader = panel.querySelector("[data-rename-toggle]");
+          const showTitle = showHeader?.querySelector("h3")?.textContent?.toLowerCase() || "";
+          const showTmdbId = panel.getAttribute("data-rename-tmdb") || "";
+          
+          let showHasVisibleRenames = false;
+
+          const rows = panel.querySelectorAll(".custom-rename-row");
+          rows.forEach(row => {
+            const rowText = row.textContent?.toLowerCase() || "";
+            const match = rowText.includes(query) || showTitle.includes(query) || showTmdbId.includes(query);
+            
+            if (match) {
+              row.classList.remove("hidden");
+              showHasVisibleRenames = true;
+              totalVisibleRenames++;
+            } else {
+              row.classList.add("hidden");
+            }
+          });
+
+          // Hide/Show entire show panel
+          if (showHasVisibleRenames) {
+            panel.classList.remove("hidden");
+          } else {
+            panel.classList.add("hidden");
+          }
+
+          const collapsePanel = panel.querySelector("[id^='rename-panel-']");
+          const chevron = panel.querySelector("[id^='rename-chevron-']");
+          
+          if (query !== "") {
+            if (showHasVisibleRenames) {
+              collapsePanel?.classList.remove("hidden");
+              chevron?.classList.add("rotate-90");
+            }
+          } else {
+            collapsePanel?.classList.add("hidden");
+            chevron?.classList.remove("rotate-90");
+          }
+        });
+
+        const noResults = document.getElementById("no-rename-results");
+        if (noResults) {
+          if (totalVisibleRenames === 0) {
+            noResults.classList.remove("hidden");
+          } else {
+            noResults.classList.add("hidden");
+          }
+        }
+      });
+    }
+
+    // Bulk Delete Action
+    document.querySelectorAll(".bulk-delete-btn").forEach(button => {
+      button.addEventListener("click", async () => {
+        const showId = button.getAttribute("data-show-id")!;
+        const panel = document.getElementById(`panel-${showId}`);
+        if (!panel) return;
+
+        const checkedBoxes = panel.querySelectorAll(".override-row-checkbox:checked");
+        const ids = Array.from(checkedBoxes).map(box => parseInt(box.getAttribute("data-override-id")!));
+        
+        if (ids.length === 0) return;
+
+        if (!confirm(`Are you sure you want to bulk delete ${ids.length} episode overrides for this show?`)) {
+          return;
+        }
+
+        button.setAttribute("disabled", "true");
+        const originalText = button.innerHTML;
+        button.innerHTML = "Deleting...";
+
+        try {
+          const res = await fetch("/api/proxy/sync/episode-overrides/bulk-delete", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({ ids })
+          });
+          if (res.ok) {
+            window.showToast?.(`Successfully deleted ${ids.length} overrides!`, "success");
+            setTimeout(() => window.location.reload(), 600);
+          } else {
+            window.showToast?.("Failed to bulk delete overrides", "error");
+            button.removeAttribute("disabled");
+            button.innerHTML = originalText;
+          }
+        } catch (err) {
+          window.showToast?.("Error bulk deleting overrides", "error");
+          button.removeAttribute("disabled");
+          button.innerHTML = originalText;
+        }
+      });
+    });
+
+    // Custom Renames Actions
+    document.querySelectorAll(".custom-rename-edit-btn").forEach(button => {
+      button.addEventListener("click", async () => {
+        const payloadStr = button.getAttribute("data-payload");
+        if (!payloadStr) return;
+        const item = JSON.parse(payloadStr);
+
+        const newName = prompt(`Enter new title for ${item.context} (Currently: ${item.custom_title})`, item.custom_title);
+        if (newName === null || newName.trim() === item.custom_title) return; // cancelled or unchanged
+
+        const body: any = { custom_title: newName.trim() === '' ? null : newName.trim() };
+        
+        if (item.type === 'show') {
+          body.show_tmdb_id = item.show_tmdb_id;
+        } else if (item.type === 'season') {
+          body.show_tmdb_id = item.show_tmdb_id;
+          body.season_number = item.season_number;
+          body.season_custom_name = body.custom_title;
+          delete body.custom_title;
+        } else if (item.type === 'episode') {
+          body.media_id = item.media_id;
+        }
+
+        try {
+          const res = await fetch('/api/proxy/sync/custom-title', {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(body)
+          });
+          
+          if (res.ok) {
+            window.showToast?.("Custom title updated successfully", "success");
+            setTimeout(() => window.location.reload(), 600);
+          } else {
+            window.showToast?.("Failed to update custom title", "error");
+          }
+        } catch (e) {
+          window.showToast?.("Error updating custom title", "error");
+        }
+      });
+    });
+
+    document.querySelectorAll(".custom-rename-delete-btn").forEach(button => {
+      button.addEventListener("click", async () => {
+        const payloadStr = button.getAttribute("data-payload");
+        if (!payloadStr) return;
+        const item = JSON.parse(payloadStr);
+
+        if (!confirm(`Are you sure you want to remove the custom title for ${item.context}? It will revert to '${item.original_title}'.`)) return;
+
+        const body: any = { custom_title: null };
+        
+        if (item.type === 'show') {
+          body.show_tmdb_id = item.show_tmdb_id;
+        } else if (item.type === 'season') {
+          body.show_tmdb_id = item.show_tmdb_id;
+          body.season_number = item.season_number;
+          body.season_custom_name = null;
+          delete body.custom_title;
+        } else if (item.type === 'episode') {
+          body.media_id = item.media_id;
+        }
+
+        try {
+          const res = await fetch('/api/proxy/sync/custom-title', {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(body)
+          });
+          
+          if (res.ok) {
+            window.showToast?.("Custom title removed successfully", "success");
+            setTimeout(() => window.location.reload(), 600);
+          } else {
+            window.showToast?.("Failed to remove custom title", "error");
+          }
+        } catch (e) {
+          window.showToast?.("Error removing custom title", "error");
+        }
+      });
+    });
+
+    // Episode Remap Modal Logic
+    const epModal = document.getElementById("ep-remap-modal")!;
+    const addEpRemapBtn = document.getElementById("add-ep-remap-btn")!;
+    const closeEpModalBtn = document.getElementById("close-ep-modal-btn")!;
+    const cancelEpModalBtn = document.getElementById("cancel-ep-modal-btn")!;
+    const saveEpRemapBtn = document.getElementById("save-ep-remap-btn") as HTMLButtonElement;
+
+    const epShowSelect = document.getElementById("ep-show-select") as HTMLSelectElement;
+    const epToggleShowMode = document.getElementById("ep-toggle-show-mode")!;
+    const epAdvancedTmdbGroup = document.getElementById("ep-advanced-tmdb-group")!;
+    
+    const epToggleCoordsMode = document.getElementById("ep-toggle-coords-mode")!;
+    const epCoordsSelectGroup = document.getElementById("ep-coords-select-group")!;
+    const epCoordsManualGroup = document.getElementById("ep-coords-manual-group")!;
+    
+    const epSrcSeasonSelect = document.getElementById("ep-src-season-select") as HTMLSelectElement;
+    const epSrcEpisodeSelect = document.getElementById("ep-src-episode-select") as HTMLSelectElement;
+    const epTgtSeasonSelect = document.getElementById("ep-tgt-season-select") as HTMLSelectElement;
+    const epTgtEpisodeSelect = document.getElementById("ep-tgt-episode-select") as HTMLSelectElement;
+    
+    const epSrcTmdbInput = document.getElementById("ep-src-tmdb") as HTMLInputElement;
+    const epTgtTmdbInput = document.getElementById("ep-tgt-tmdb") as HTMLInputElement;
+    
+    const epSrcSeasonInput = document.getElementById("ep-src-season") as HTMLInputElement;
+    const epSrcEpisodeInput = document.getElementById("ep-src-episode") as HTMLInputElement;
+    const epTgtSeasonInput = document.getElementById("ep-tgt-season") as HTMLInputElement;
+    const epTgtEpisodeInput = document.getElementById("ep-tgt-episode") as HTMLInputElement;
+
+    let epShowMode: "simple" | "advanced" = "simple";
+    let epCoordsMode: "dropdown" | "manual" = "dropdown";
+    let selectedEpShowObj: any = null;
+
+    function openEpModal() {
+      epModal.classList.remove("opacity-0", "pointer-events-none");
+      epModal.classList.add("opacity-100");
+      
+      populateEpShowsDropdown();
+    }
+
+    function closeEpModal() {
+      epModal.classList.add("opacity-0", "pointer-events-none");
+      epModal.classList.remove("opacity-100");
+      
+      // Reset state to default
+      epShowMode = "simple";
+      epAdvancedTmdbGroup.classList.add("hidden");
+      epToggleShowMode.textContent = "Advanced: Different Target Show";
+      
+      epCoordsMode = "dropdown";
+      epCoordsManualGroup.classList.add("hidden");
+      epCoordsSelectGroup.classList.remove("hidden");
+      epToggleCoordsMode.textContent = "Toggle Manual Coordinate Input";
+      
+      epShowSelect.value = "";
+      epSrcTmdbInput.value = "";
+      epTgtTmdbInput.value = "";
+      resetEpSeasonEpisodeDropdowns();
+      
+      epSrcSeasonInput.value = "";
+      epSrcEpisodeInput.value = "";
+      epTgtSeasonInput.value = "";
+      epTgtEpisodeInput.value = "";
+    }
+
+    addEpRemapBtn.addEventListener("click", openEpModal);
+    closeEpModalBtn.addEventListener("click", closeEpModal);
+    cancelEpModalBtn.addEventListener("click", closeEpModal);
+    epModal.addEventListener("click", (e) => {
+      if (e.target === epModal) closeEpModal();
+    });
+
+    // Populate local shows into dropdown
+    function populateEpShowsDropdown() {
+      epShowSelect.innerHTML = '<option value="">-- Choose Show --</option>';
+      if (localShowsList.length === 0) {
+        // If not loaded, fetch them first
+        fetchLocalShows().then(() => {
+          localShowsList.forEach(show => {
+            const opt = document.createElement("option");
+            opt.value = show.tmdb_id.toString();
+            opt.textContent = `${show.title} (${show.first_air_date ? new Date(show.first_air_date).getFullYear() : 'N/A'})`;
+            epShowSelect.appendChild(opt);
+          });
+        });
+        return;
+      }
+      
+      localShowsList.forEach(show => {
+        const opt = document.createElement("option");
+        opt.value = show.tmdb_id.toString();
+        opt.textContent = `${show.title} (${show.first_air_date ? new Date(show.first_air_date).getFullYear() : 'N/A'})`;
+        epShowSelect.appendChild(opt);
+      });
+    }
+
+    // Toggle Modes Listeners
+    epToggleShowMode.addEventListener("click", () => {
+      if (epShowMode === "simple") {
+        epShowMode = "advanced";
+        epAdvancedTmdbGroup.classList.remove("hidden");
+        epToggleShowMode.textContent = "Simple Mode (Same Show)";
+      } else {
+        epShowMode = "simple";
+        epAdvancedTmdbGroup.classList.add("hidden");
+        epToggleShowMode.textContent = "Advanced: Different Target Show";
+        
+        epTgtTmdbInput.value = epSrcTmdbInput.value;
+      }
+    });
+    
+    epToggleCoordsMode.addEventListener("click", () => {
+      if (epCoordsMode === "dropdown") {
+        epCoordsMode = "manual";
+        epCoordsSelectGroup.classList.add("hidden");
+        epCoordsManualGroup.classList.remove("hidden");
+        epToggleCoordsMode.textContent = "Toggle Dropdown Inputs";
+        
+        epSrcSeasonInput.value = epSrcSeasonSelect.value;
+        epSrcEpisodeInput.value = epSrcEpisodeSelect.value;
+        epTgtSeasonInput.value = epTgtSeasonSelect.value;
+        epTgtEpisodeInput.value = epTgtEpisodeSelect.value;
+      } else {
+        epCoordsMode = "dropdown";
+        epCoordsManualGroup.classList.add("hidden");
+        epCoordsSelectGroup.classList.remove("hidden");
+        epToggleCoordsMode.textContent = "Toggle Manual Coordinate Input";
+        
+        if (epSrcSeasonInput.value) epSrcSeasonSelect.value = epSrcSeasonInput.value;
+        if (epSrcEpisodeInput.value) epSrcEpisodeSelect.value = epSrcEpisodeInput.value;
+        if (epTgtSeasonInput.value) epTgtSeasonSelect.value = epTgtSeasonInput.value;
+        if (epTgtEpisodeInput.value) epTgtEpisodeSelect.value = epTgtEpisodeInput.value;
+      }
+    });
+
+    // Handle show dropdown change to load seasons
+    epShowSelect.addEventListener("change", () => {
+      const tmdbId = epShowSelect.value;
+      if (!tmdbId) {
+        selectedEpShowObj = null;
+        epSrcTmdbInput.value = "";
+        epTgtTmdbInput.value = "";
+        resetEpSeasonEpisodeDropdowns();
+        return;
+      }
+      
+      selectedEpShowObj = localShowsList.find(s => s.tmdb_id.toString() === tmdbId);
+      epSrcTmdbInput.value = tmdbId;
+      epTgtTmdbInput.value = tmdbId;
+      
+      populateEpSeasonDropdowns();
+    });
+
+    function resetEpSeasonEpisodeDropdowns() {
+      epSrcSeasonSelect.innerHTML = '<option value="">-- Choose Show First --</option>';
+      epSrcEpisodeSelect.innerHTML = '<option value="">-- Choose Season First --</option>';
+      epTgtSeasonSelect.innerHTML = '<option value="">-- Choose Show First --</option>';
+      epTgtEpisodeSelect.innerHTML = '<option value="">-- Choose Season First --</option>';
+      
+      epSrcSeasonSelect.disabled = true;
+      epSrcEpisodeSelect.disabled = true;
+      epTgtSeasonSelect.disabled = true;
+      epTgtEpisodeSelect.disabled = true;
+    }
+
+    function populateEpSeasonDropdowns() {
+      if (!selectedEpShowObj || !selectedEpShowObj.seasons_meta) {
+        resetEpSeasonEpisodeDropdowns();
+        return;
+      }
+      
+      epSrcSeasonSelect.innerHTML = '<option value="">-- Choose Season --</option>';
+      selectedEpShowObj.seasons_meta.forEach((season: any) => {
+        const opt = document.createElement("option");
+        opt.value = season.season_number.toString();
+        opt.textContent = season.season_number === 0 ? "Specials" : `Season ${season.season_number}`;
+        epSrcSeasonSelect.appendChild(opt);
+      });
+      epSrcSeasonSelect.disabled = false;
+      
+      epTgtSeasonSelect.innerHTML = '<option value="">-- Choose Season --</option>';
+      selectedEpShowObj.seasons_meta.forEach((season: any) => {
+        const opt = document.createElement("option");
+        opt.value = season.season_number.toString();
+        opt.textContent = season.season_number === 0 ? "Specials" : `Season ${season.season_number}`;
+        epTgtSeasonSelect.appendChild(opt);
+      });
+      epTgtSeasonSelect.disabled = false;
+      
+      epSrcEpisodeSelect.innerHTML = '<option value="">-- Choose Season First --</option>';
+      epSrcEpisodeSelect.disabled = true;
+      epTgtEpisodeSelect.innerHTML = '<option value="">-- Choose Season First --</option>';
+      epTgtEpisodeSelect.disabled = true;
+    }
+
+    epSrcSeasonSelect.addEventListener("change", () => {
+      const seasonNum = parseInt(epSrcSeasonSelect.value);
+      if (isNaN(seasonNum)) {
+        epSrcEpisodeSelect.innerHTML = '<option value="">-- Choose Season First --</option>';
+        epSrcEpisodeSelect.disabled = true;
+        return;
+      }
+      
+      const seasonMeta = selectedEpShowObj.seasons_meta.find((s: any) => s.season_number === seasonNum);
+      const epCount = seasonMeta ? seasonMeta.episode_count : 100;
+      
+      epSrcEpisodeSelect.innerHTML = '<option value="">-- Choose Episode --</option>';
+      for (let i = 1; i <= epCount; i++) {
+        const opt = document.createElement("option");
+        opt.value = i.toString();
+        opt.textContent = `Episode ${i}`;
+        epSrcEpisodeSelect.appendChild(opt);
+      }
+      epSrcEpisodeSelect.disabled = false;
+    });
+
+    epTgtSeasonSelect.addEventListener("change", () => {
+      const seasonNum = parseInt(epTgtSeasonSelect.value);
+      if (isNaN(seasonNum)) {
+        epTgtEpisodeSelect.innerHTML = '<option value="">-- Choose Season First --</option>';
+        epTgtEpisodeSelect.disabled = true;
+        return;
+      }
+      
+      const seasonMeta = selectedEpShowObj.seasons_meta.find((s: any) => s.season_number === seasonNum);
+      const epCount = seasonMeta ? seasonMeta.episode_count : 100;
+      
+      epTgtEpisodeSelect.innerHTML = '<option value="">-- Choose Episode --</option>';
+      for (let i = 1; i <= epCount; i++) {
+        const opt = document.createElement("option");
+        opt.value = i.toString();
+        opt.textContent = `Episode ${i}`;
+        epTgtEpisodeSelect.appendChild(opt);
+      }
+      epTgtEpisodeSelect.disabled = false;
+    });
+
+    epSrcTmdbInput.addEventListener("input", () => {
+      if (epShowMode === "simple") {
+        epTgtTmdbInput.value = epSrcTmdbInput.value;
+      }
+    });
+
+    // Save Action
+    saveEpRemapBtn.addEventListener("click", async () => {
+      const srcTmdb = parseInt(epSrcTmdbInput.value);
+      const tgtTmdb = parseInt(epTgtTmdbInput.value);
+      
+      let srcSeason: number;
+      let srcEp: number;
+      let tgtSeason: number;
+      let tgtEp: number;
+      
+      if (epCoordsMode === "dropdown") {
+        srcSeason = parseInt(epSrcSeasonSelect.value);
+        srcEp = parseInt(epSrcEpisodeSelect.value);
+        tgtSeason = parseInt(epTgtSeasonSelect.value);
+        tgtEp = parseInt(epTgtEpisodeSelect.value);
+      } else {
+        srcSeason = parseInt(epSrcSeasonInput.value);
+        srcEp = parseInt(epSrcEpisodeInput.value);
+        tgtSeason = parseInt(epTgtSeasonInput.value);
+        tgtEp = parseInt(epTgtEpisodeInput.value);
+      }
+
+      if (isNaN(srcTmdb) || isNaN(tgtTmdb) || isNaN(srcSeason) || isNaN(srcEp) || isNaN(tgtSeason) || isNaN(tgtEp)) {
+        window.showToast?.("Please choose a show and select valid coordinate mappings", "error");
+        return;
+      }
+
+      saveEpRemapBtn.disabled = true;
+      saveEpRemapBtn.textContent = "Saving...";
+
+      try {
+        const res = await fetch('/api/proxy/sync/episode-overrides', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            source_show_tmdb_id: srcTmdb,
+            source_season_number: srcSeason,
+            source_episode_number: srcEp,
+            target_show_tmdb_id: tgtTmdb,
+            target_season_number: tgtSeason,
+            target_episode_number: tgtEp
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          window.showToast?.("Episode override saved. Applying...", "success");
+          
+          const applyRes = await fetch(`/api/proxy/sync/episode-overrides/${data.id}/apply`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          if (applyRes.ok) {
+            window.showToast?.("Successfully applied episode remap!", "success");
+            closeEpModal();
+            setTimeout(() => window.location.reload(), 800);
+          } else {
+            window.showToast?.("Saved, but failed to apply. Check logs.", "error");
+            closeEpModal();
+            setTimeout(() => window.location.reload(), 1000);
+          }
+        } else {
+          window.showToast?.("Failed to save episode override", "error");
+          saveEpRemapBtn.disabled = false;
+          saveEpRemapBtn.textContent = "Save Episode Remap";
+        }
+      } catch (e) {
+        window.showToast?.("Error communicating with server", "error");
+        saveEpRemapBtn.disabled = false;
+        saveEpRemapBtn.textContent = "Save Episode Remap";
+      }
+    });
+
+    // Edit Existing Mappings Logic
+    document.querySelectorAll(".edit-season-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const srcTmdb = btn.getAttribute("data-source-tmdb");
+        const srcSeason = btn.getAttribute("data-source-season");
+        const tgtTmdb = btn.getAttribute("data-target-tmdb");
+        const tgtSeason = btn.getAttribute("data-target-season");
+
+        resetModalState();
+        remapModal.classList.remove("opacity-0", "pointer-events-none");
+
+        // Set source manual mode
+        sourceMode = "manual";
+        sourceSelectGroup.classList.add("hidden");
+        sourceManualGroup.classList.remove("hidden");
+        toggleSourceModeBtn.textContent = "Select From Collection";
+
+        // Fill source fields
+        sourceShowTmdbInput.value = srcTmdb || "";
+        sourceSeasonInput.value = srcSeason || "";
+        
+        // Trigger source preview lookup
+        sourceShowLookupBtn.click();
+
+        // Fill target search
+        targetSearchInput.value = tgtTmdb || "";
+        
+        // Trigger target lookup
+        await performSearch();
+
+        // Select the single search result card that was rendered
+        setTimeout(() => {
+          const firstCard = searchResultsContainer.querySelector("div") as HTMLElement;
+          if (firstCard) {
+            firstCard.click();
+            // Wait for seasons to load, then select the target season
+            setTimeout(() => {
+              const seasonButtonsList = targetSeasonButtons.querySelectorAll("button");
+              seasonButtonsList.forEach(sBtn => {
+                const txt = sBtn.textContent || "";
+                if (txt.includes(`Season ${tgtSeason}`) || (tgtSeason === "0" && txt.includes("Specials"))) {
+                  (sBtn as HTMLButtonElement).click();
+                }
+              });
+            }, 1200);
+          }
+        }, 600);
+      });
+    });
+
+    document.querySelectorAll(".edit-ep-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const srcTmdb = btn.getAttribute("data-src-tmdb");
+        const srcSeason = btn.getAttribute("data-src-season");
+        const srcEp = btn.getAttribute("data-src-ep");
+        const tgtTmdb = btn.getAttribute("data-tgt-tmdb");
+        const tgtSeason = btn.getAttribute("data-tgt-season");
+        const tgtEp = btn.getAttribute("data-tgt-ep");
+
+        openEpModal();
+
+        // Force manual coordinates mode for exact inputs
+        epCoordsMode = "manual";
+        epCoordsSelectGroup.classList.add("hidden");
+        epCoordsManualGroup.classList.remove("hidden");
+        epToggleCoordsMode.textContent = "Toggle Dropdown Inputs";
+
+        if (srcTmdb !== tgtTmdb) {
+          epShowMode = "advanced";
+          epAdvancedTmdbGroup.classList.remove("hidden");
+          epToggleShowMode.textContent = "Simple Mode (Same Show)";
+        } else {
+          epShowMode = "simple";
+          epAdvancedTmdbGroup.classList.add("hidden");
+          epToggleShowMode.textContent = "Advanced: Different Target Show";
+        }
+
+        epSrcTmdbInput.value = srcTmdb || "";
+        epTgtTmdbInput.value = tgtTmdb || "";
+        epSrcSeasonInput.value = srcSeason || "";
+        epSrcEpisodeInput.value = srcEp || "";
+        epTgtSeasonInput.value = tgtSeason || "";
+        epTgtEpisodeInput.value = tgtEp || "";
+      });
+    });
+
+    // TVDB to TMDB Auto-Remap Modal Logic
+    const autoModal = document.getElementById("auto-remap-modal")!;
+    const autoRemapBtn = document.getElementById("auto-remap-btn")!;
+    const closeAutoModalBtn = document.getElementById("close-auto-modal-btn")!;
+    const cancelAutoModalBtn = document.getElementById("cancel-auto-modal-btn")!;
+    const generatePreviewBtn = document.getElementById("generate-preview-btn") as HTMLButtonElement;
+    const applyAutoRemapsBtn = document.getElementById("apply-auto-remaps-btn") as HTMLButtonElement;
+    const loader = document.getElementById("auto-remap-loader")!;
+    const previewArea = document.getElementById("preview-results-area")!;
+    
+    const autoTmdbIdInput = document.getElementById("auto-tmdb-id") as HTMLInputElement;
+    const autoTvdbIdInput = document.getElementById("auto-tvdb-id") as HTMLInputElement;
+    const autoTvdbKeyInput = document.getElementById("auto-tvdb-key") as HTMLInputElement;
+    
+    const previewMatchStats = document.getElementById("preview-match-stats")!;
+    const previewMatchPct = document.getElementById("preview-match-pct")!;
+    const previewUnmatchedBadge = document.getElementById("preview-unmatched-badge")!;
+    const previewMatchesList = document.getElementById("preview-matches-list")!;
+    
+    const filterAllBtn = document.getElementById("filter-all-btn")!;
+    const filterMatchedBtn = document.getElementById("filter-matched-btn")!;
+    const filterUnmatchedBtn = document.getElementById("filter-unmatched-btn")!;
+    const unmatchedCountBadge = document.getElementById("unmatched-count-badge")!;
+    
+    let activeMappings: any[] = [];
+    let tmdbEpisodesList: any[] = [];
+    let selectOptionsHtml = "";
+    let currentFilter = "all";
+
+    // Restore inputs from localStorage if present
+    const storedTvdbKey = localStorage.getItem("scrob_auto_tvdb_key");
+    const storedTmdbId = localStorage.getItem("scrob_auto_tmdb_id");
+    const storedTvdbId = localStorage.getItem("scrob_auto_tvdb_id");
+    
+    if (storedTvdbKey) autoTvdbKeyInput.value = storedTvdbKey;
+    if (storedTmdbId) autoTmdbIdInput.value = storedTmdbId;
+    if (storedTvdbId) autoTvdbIdInput.value = storedTvdbId;
+
+    function openAutoModal() {
+      autoModal.classList.remove("opacity-0", "pointer-events-none");
+    }
+
+    function closeAutoModal() {
+      autoModal.classList.add("opacity-0", "pointer-events-none");
+      // Reset state
+      previewArea.classList.add("hidden");
+      loader.classList.add("hidden");
+      generatePreviewBtn.disabled = false;
+      applyAutoRemapsBtn.disabled = true;
+      setFilter("all");
+    }
+
+    function setFilter(mode: string) {
+      currentFilter = mode;
+      
+      [filterAllBtn, filterMatchedBtn, filterUnmatchedBtn].forEach(btn => {
+        btn.classList.remove("bg-zinc-800", "text-zinc-100", "shadow");
+        btn.classList.add("text-zinc-400", "hover:text-zinc-200");
+      });
+
+      if (mode === "all") {
+        filterAllBtn.classList.add("bg-zinc-800", "text-zinc-100", "shadow");
+        filterAllBtn.classList.remove("text-zinc-400", "hover:text-zinc-200");
+      } else if (mode === "matched") {
+        filterMatchedBtn.classList.add("bg-zinc-800", "text-zinc-100", "shadow");
+        filterMatchedBtn.classList.remove("text-zinc-400", "hover:text-zinc-200");
+      } else if (mode === "unmatched") {
+        filterUnmatchedBtn.classList.add("bg-zinc-800", "text-zinc-100", "shadow");
+        filterUnmatchedBtn.classList.remove("text-zinc-400", "hover:text-zinc-200");
+      }
+
+      renderList();
+    }
+
+    filterAllBtn.addEventListener("click", () => setFilter("all"));
+    filterMatchedBtn.addEventListener("click", () => setFilter("matched"));
+    filterUnmatchedBtn.addEventListener("click", () => setFilter("unmatched"));
+
+    const autoRemapSearchInput = document.getElementById("auto-remap-search") as HTMLInputElement;
+    if (autoRemapSearchInput) {
+      autoRemapSearchInput.addEventListener("input", () => {
+        renderList();
+      });
+    }
+
+    function renderList() {
+      previewMatchesList.innerHTML = "";
+      
+      const searchQuery = autoRemapSearchInput ? autoRemapSearchInput.value.toLowerCase().trim() : "";
+      
+      let filtered = activeMappings;
+      if (currentFilter === "matched") {
+        filtered = activeMappings.filter(m => m.matched);
+      } else if (currentFilter === "unmatched") {
+        filtered = activeMappings.filter(m => !m.matched);
+      }
+
+      if (searchQuery !== "") {
+        filtered = filtered.filter(m => {
+          const srcTitle = (m.source_title || "").toLowerCase();
+          const srcSeasonEp = `s${m.source_season.toString().padStart(2, '0')}e${m.source_episode.toString().padStart(2, '0')}`;
+          const tgtSeasonEp = (m.target_season !== null && m.target_episode !== null) ? `s${m.target_season.toString().padStart(2, '0')}e${m.target_episode.toString().padStart(2, '0')}` : "";
+          const tgtTitle = (m.target_title || "").toLowerCase();
+          
+          return srcTitle.includes(searchQuery) || srcSeasonEp.includes(searchQuery) || tgtSeasonEp.includes(searchQuery) || tgtTitle.includes(searchQuery);
+        });
+      }
+
+      if (filtered.length === 0) {
+        previewMatchesList.innerHTML = `<div class="p-6 text-center text-zinc-500">No episodes found matching active query/filters.</div>`;
+        return;
+      }
+
+      filtered.forEach((m: any) => {
+        // Find index in original activeMappings to ensure correct referencing
+        const origIndex = activeMappings.indexOf(m);
+        const row = document.createElement("div");
+        row.className = "p-4 flex flex-col gap-3 border-b border-zinc-850 hover:bg-zinc-800/20 transition-colors";
+        
+        row.innerHTML = `
+          <!-- Top Line: Source Title and Details (TVDB) -->
+          <div class="flex items-start gap-3 min-w-0">
+            <input type="checkbox" class="auto-include-checkbox mt-0.5 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer" data-index="${origIndex}" ${m.matched ? 'checked' : ''} />
+            
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs bg-indigo-950 text-indigo-400 border border-indigo-900/60 px-1.5 py-0.5 rounded font-black uppercase tracking-wider text-[9px]">TVDB</span>
+                <span class="text-[10px] font-bold text-zinc-500">S${m.source_season.toString().padStart(2, '0')}E${m.source_episode.toString().padStart(2, '0')}</span>
+                <span class="text-[10px] text-zinc-500">• ${m.source_air_date || 'No Date'}</span>
+              </div>
+              <div class="text-zinc-200 font-bold text-sm mt-1 leading-relaxed break-words">${m.source_title || 'Untitled Episode'}</div>
+            </div>
+          </div>
+
+          <!-- Bottom Line: Target Selection Dropdown -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-950/40 border border-zinc-900/80 rounded-xl p-2.5 ml-7">
+            
+            <!-- Target Match Status -->
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-xs bg-emerald-950 text-emerald-400 border border-emerald-900/60 px-1.5 py-0.5 rounded font-black uppercase tracking-wider text-[9px] shrink-0">TMDB Target</span>
+              <span class="text-[9px] bg-zinc-800/80 text-zinc-400 border border-zinc-700/60 px-1.5 py-0.5 rounded font-bold shrink-0">${m.matched ? (m.match_reason === 'Air Date Match' ? 'DATE MATCH' : 'TITLE MATCH') : 'UNMATCHED'}</span>
+            </div>
+
+            <!-- Custom Searchable Select Dropdown Component -->
+            <div class="w-full sm:w-[320px] shrink-0">
+              <div class="relative w-full custom-search-select-container" data-index="${origIndex}">
+                <!-- Search/Display Input -->
+                <div class="flex items-center w-full bg-zinc-900 border border-zinc-800 hover:border-zinc-700 focus-within:border-indigo-500 rounded-xl transition-all duration-200">
+                  <input 
+                    type="text" 
+                    class="custom-search-select-input w-full bg-transparent px-3 py-2 text-xs text-zinc-200 font-semibold focus:outline-none cursor-pointer" 
+                    placeholder="Search & select target episode..."
+                    readonly
+                  />
+                  <!-- Dropdown Arrow -->
+                  <div class="pr-2.5 text-zinc-500 pointer-events-none">
+                    <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </div>
+                </div>
+                <!-- Options Dropdown Box -->
+                <div class="custom-search-select-dropdown hidden absolute top-full left-0 right-0 z-50 mt-1 max-h-60 overflow-y-auto bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-2 flex flex-col gap-2 backdrop-blur-md">
+                  <!-- Inline search input inside dropdown -->
+                  <div class="relative w-full shrink-0">
+                    <input 
+                      type="text" 
+                      class="custom-search-select-filter w-full bg-zinc-900 border border-zinc-800 focus:border-indigo-500/80 rounded-lg px-2.5 py-1.5 text-[11px] text-zinc-300 focus:outline-none transition-all placeholder-zinc-650" 
+                      placeholder="Type to search episodes..."
+                    />
+                  </div>
+                  <!-- Options container -->
+                  <div class="custom-search-select-options overflow-y-auto space-y-0.5 max-h-44 text-[11px] font-semibold text-zinc-400">
+                    <!-- Loaded on click -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        `;
+
+        previewMatchesList.appendChild(row);
+      });
+
+      // Populate select values
+      previewMatchesList.querySelectorAll(".custom-search-select-container").forEach(el => {
+        const idx = parseInt(el.getAttribute("data-index")!);
+        const m = activeMappings[idx];
+        const inputEl = el.querySelector(".custom-search-select-input") as HTMLInputElement;
+        
+        if (m.target_season !== null && m.target_episode !== null) {
+          const foundEp = tmdbEpisodesList.find(ep => ep.season === m.target_season && ep.episode === m.target_episode);
+          const titleText = foundEp ? foundEp.title : 'Untitled Episode';
+          inputEl.value = `S${m.target_season.toString().padStart(2, '0')}E${m.target_episode.toString().padStart(2, '0')} - ${titleText}`;
+          el.setAttribute("data-selected-value", `${m.target_season}:${m.target_episode}`);
+        } else {
+          inputEl.value = "-- Unmapped / Ignore --";
+          el.setAttribute("data-selected-value", "");
+        }
+      });
+
+      // Hook up custom search-select event listeners
+      previewMatchesList.querySelectorAll(".custom-search-select-container").forEach(container => {
+        const idx = parseInt(container.getAttribute("data-index")!);
+        const inputEl = container.querySelector(".custom-search-select-input") as HTMLInputElement;
+        const dropdownEl = container.querySelector(".custom-search-select-dropdown") as HTMLDivElement;
+        const filterInput = container.querySelector(".custom-search-select-filter") as HTMLInputElement;
+        const optionsContainer = container.querySelector(".custom-search-select-options") as HTMLDivElement;
+
+        // Toggle open dropdown
+        inputEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          
+          // Close all other open dropdowns first!
+          document.querySelectorAll(".custom-search-select-dropdown").forEach(d => {
+            if (d !== dropdownEl) d.classList.add("hidden");
+          });
+
+          const isHidden = dropdownEl.classList.contains("hidden");
+          if (isHidden) {
+            dropdownEl.classList.remove("hidden");
+            filterInput.value = "";
+            filterInput.focus();
+            
+            // Build options dynamically!
+            optionsContainer.innerHTML = "";
+            
+            // 1. Unmapped / Ignore option
+            const unmappedDiv = document.createElement("div");
+            unmappedDiv.className = "custom-option px-2.5 py-1.5 hover:bg-zinc-900 rounded-lg cursor-pointer transition-colors text-zinc-400 font-bold border border-transparent";
+            unmappedDiv.setAttribute("data-value", "");
+            unmappedDiv.textContent = "-- Unmapped / Ignore --";
+            unmappedDiv.addEventListener("click", () => {
+              selectOption("", "-- Unmapped / Ignore --");
+            });
+            optionsContainer.appendChild(unmappedDiv);
+
+            // 2. All episodes from tmdbEpisodesList
+            tmdbEpisodesList.forEach((ep: any) => {
+              const optDiv = document.createElement("div");
+              optDiv.className = "custom-option px-2.5 py-1.5 hover:bg-zinc-900 hover:text-zinc-100 rounded-lg cursor-pointer transition-colors border border-transparent";
+              const val = `${ep.season}:${ep.episode}`;
+              const label = `S${ep.season.toString().padStart(2, '0')}E${ep.episode.toString().padStart(2, '0')} - ${ep.title || 'Untitled Episode'}`;
+              
+              optDiv.setAttribute("data-value", val);
+              optDiv.textContent = label;
+              optDiv.addEventListener("click", () => {
+                selectOption(val, label);
+              });
+              optionsContainer.appendChild(optDiv);
+            });
+          } else {
+            dropdownEl.classList.add("hidden");
+          }
+        });
+
+        // Live filter/search input inside the dropdown
+        filterInput.addEventListener("input", (e) => {
+          const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
+          optionsContainer.querySelectorAll(".custom-option").forEach(opt => {
+            const label = opt.textContent?.toLowerCase() || "";
+            const val = opt.getAttribute("data-value") || "";
+            
+            if (label.includes(query) || val.includes(query)) {
+              (opt as HTMLElement).classList.remove("hidden");
+            } else {
+              (opt as HTMLElement).classList.add("hidden");
+            }
+          });
+        });
+
+        // Function to select an option
+        function selectOption(val: string, label: string) {
+          inputEl.value = label;
+          container.setAttribute("data-selected-value", val);
+          dropdownEl.classList.add("hidden");
+
+          if (val === "") {
+            activeMappings[idx].target_season = null;
+            activeMappings[idx].target_episode = null;
+            activeMappings[idx].target_title = null;
+            activeMappings[idx].matched = false;
+            
+            // Uncheck checkbox
+            const checkbox = previewMatchesList.querySelector(`.auto-include-checkbox[data-index="${idx}"]`) as HTMLInputElement;
+            if (checkbox) checkbox.checked = false;
+          } else {
+            const [s, eNum] = val.split(":");
+            activeMappings[idx].target_season = parseInt(s);
+            activeMappings[idx].target_episode = parseInt(eNum);
+            
+            const foundEp = tmdbEpisodesList.find(ep => ep.season === activeMappings[idx].target_season && ep.episode === activeMappings[idx].target_episode);
+            if (foundEp) {
+              activeMappings[idx].target_title = foundEp.title;
+            }
+            activeMappings[idx].matched = true;
+            
+            // Check checkbox
+            const checkbox = previewMatchesList.querySelector(`.auto-include-checkbox[data-index="${idx}"]`) as HTMLInputElement;
+            if (checkbox) checkbox.checked = true;
+          }
+        }
+      });
+
+      // Hook up include checkbox listeners
+      previewMatchesList.querySelectorAll(".auto-include-checkbox").forEach(el => {
+        el.addEventListener("change", (e) => {
+          const idx = parseInt((e.target as HTMLElement).getAttribute("data-index")!);
+          activeMappings[idx].matched = (e.target as HTMLInputElement).checked;
+        });
+      });
+    }
+
+    // Global click listener to close open select dropdowns
+    document.addEventListener("click", (e) => {
+      if (!(e.target as HTMLElement).closest(".custom-search-select-container")) {
+        document.querySelectorAll(".custom-search-select-dropdown").forEach(d => {
+          d.classList.add("hidden");
+        });
+      }
+    });
+
+    autoRemapBtn.addEventListener("click", openAutoModal);
+    closeAutoModalBtn.addEventListener("click", closeAutoModal);
+    cancelAutoModalBtn.addEventListener("click", closeAutoModal);
+    autoModal.addEventListener("click", (e) => {
+      if (e.target === autoModal) closeAutoModal();
+    });
+
+    generatePreviewBtn.addEventListener("click", async () => {
+      const tmdbId = parseInt(autoTmdbIdInput.value);
+      const tvdbId = parseInt(autoTvdbIdInput.value);
+      const tvdbKey = autoTvdbKeyInput.value.trim();
+      
+      if (!tmdbId || !tvdbId || !tvdbKey) {
+        window.showToast?.("TMDB ID, TVDB ID, and TVDB API Key are all required!", "error");
+        return;
+      }
+
+      // Save keys to localStorage
+      localStorage.setItem("scrob_auto_tvdb_key", tvdbKey);
+      localStorage.setItem("scrob_auto_tmdb_id", tmdbId.toString());
+      localStorage.setItem("scrob_auto_tvdb_id", tvdbId.toString());
+
+      loader.classList.remove("hidden");
+      previewArea.classList.add("hidden");
+      generatePreviewBtn.disabled = true;
+      applyAutoRemapsBtn.disabled = true;
+
+      try {
+        const res = await fetch("/api/proxy/sync/auto-map-tvdb-tmdb/preview", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            tmdb_show_id: tmdbId,
+            tvdb_show_id: tvdbId,
+            tvdb_api_key: tvdbKey
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          window.showToast?.(err.detail || "Failed to generate preview", "error");
+          loader.classList.add("hidden");
+          generatePreviewBtn.disabled = false;
+          return;
+        }
+
+        const data = await res.json();
+        activeMappings = data.matches || [];
+        tmdbEpisodesList = data.tmdb_episodes || [];
+        
+        // Compile dropdown options once in memory
+        selectOptionsHtml = `<option value="">-- Unmapped / Ignore --</option>`;
+        let currentSeason = -1;
+        tmdbEpisodesList.forEach((ep: any) => {
+          if (ep.season !== currentSeason) {
+            if (currentSeason !== -1) selectOptionsHtml += `</optgroup>`;
+            currentSeason = ep.season;
+            selectOptionsHtml += `<optgroup label="Season ${currentSeason}">`;
+          }
+          selectOptionsHtml += `<option value="${ep.season}:${ep.episode}">S${ep.season.toString().padStart(2, '0')}E${ep.episode.toString().padStart(2, '0')} - ${ep.title || 'Untitled Episode'}</option>`;
+        });
+        if (currentSeason !== -1) selectOptionsHtml += `</optgroup>`;
+
+        // Populate stats
+        const totalTvdb = data.total_tvdb_episodes || 0;
+        const matchedCount = data.matched_count || 0;
+        const unmatchedCount = activeMappings.filter(m => !m.matched).length;
+        
+        const pct = totalTvdb > 0 ? Math.round((matchedCount / totalTvdb) * 100) : 0;
+        previewMatchStats.textContent = `${matchedCount} / ${totalTvdb} matched successfully`;
+        previewMatchPct.textContent = `${pct}% Match Rate`;
+        
+        if (pct >= 85) {
+          previewMatchPct.className = "text-xs bg-emerald-950/80 border border-emerald-900/60 text-emerald-400 px-2 py-0.5 rounded-full font-extrabold";
+        } else if (pct >= 50) {
+          previewMatchPct.className = "text-xs bg-amber-950/80 border border-amber-900/60 text-amber-400 px-2 py-0.5 rounded-full font-extrabold";
+        } else {
+          previewMatchPct.className = "text-xs bg-rose-950/80 border border-rose-900/60 text-rose-400 px-2 py-0.5 rounded-full font-extrabold";
+        }
+
+        previewUnmatchedBadge.textContent = `${unmatchedCount} unmatched`;
+        unmatchedCountBadge.textContent = unmatchedCount.toString();
+
+        // Render matched pairs
+        renderList();
+
+        loader.classList.add("hidden");
+        previewArea.classList.remove("hidden");
+        generatePreviewBtn.disabled = false;
+        
+        if (activeMappings.length > 0) {
+          applyAutoRemapsBtn.disabled = false;
+        }
+      } catch (err: any) {
+        window.showToast?.("Error communicating with server", "error");
+        loader.classList.add("hidden");
+        generatePreviewBtn.disabled = false;
+      }
+    });
+
+    applyAutoRemapsBtn.addEventListener("click", async () => {
+      const tmdbId = parseInt(autoTmdbIdInput.value);
+      
+      const mappingsToApply = activeMappings.filter(m => m.matched && m.target_season !== null && m.target_episode !== null);
+      if (mappingsToApply.length === 0) {
+        window.showToast?.("No active mappings with filled target coordinates are checked!", "error");
+        return;
+      }
+
+      applyAutoRemapsBtn.disabled = true;
+      applyAutoRemapsBtn.textContent = "Applying Overrides...";
+
+      try {
+        const payload = {
+          tmdb_show_id: tmdbId,
+          target_show_tmdb_id: tmdbId,
+          mappings: mappingsToApply.map(m => ({
+            source_season: m.source_season,
+            source_episode: m.source_episode,
+            target_season: m.target_season,
+            target_episode: m.target_episode
+          }))
+        };
+
+        const res = await fetch("/api/proxy/sync/auto-map-tvdb-tmdb/apply", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          window.showToast?.(`Successfully applied ${data.overrides_created} overrides and remapped ${data.media_remapped} library items!`, "success");
+          closeAutoModal();
+          setTimeout(() => window.location.reload(), 1000);
+        } else {
+          const err = await res.json();
+          window.showToast?.(err.detail || "Failed to apply auto-remaps", "error");
+          applyAutoRemapsBtn.disabled = false;
+          applyAutoRemapsBtn.textContent = "Apply Auto-Remaps";
+        }
+      } catch (e) {
+        window.showToast?.("Error communicating with server", "error");
+        applyAutoRemapsBtn.disabled = false;
+        applyAutoRemapsBtn.textContent = "Apply Auto-Remaps";
+      }
+    });
+
+    // Auto-fill and Open Modals based on URL Query Parameters
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    
+    if (mode === 'ep') {
+      const tmdb = params.get('src_tmdb');
+      const season = params.get('src_season');
+      const ep = params.get('src_ep');
+      
+      if (tmdb) (document.getElementById("ep-src-tmdb") as HTMLInputElement).value = tmdb;
+      if (season) (document.getElementById("ep-src-season") as HTMLInputElement).value = season;
+      if (ep) (document.getElementById("ep-src-episode") as HTMLInputElement).value = ep;
+      
+      openEpModal();
+      // Remove params from URL so refresh doesn't pop it open again
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (mode === 'season') {
+      const tmdb = params.get('src_tmdb');
+      const season = params.get('src_season');
+      
+      if (tmdb) {
+        const searchInput = document.getElementById("search-show") as HTMLInputElement;
+        const searchBtn = document.getElementById("search-btn");
+        if (searchInput && searchBtn) {
+          searchInput.value = tmdb;
+          openModal();
+          // Simulate clicking search to load the show's seasons
+          searchBtn.click();
+          
+          // Wait a tiny bit and select the correct season from the dropdown if provided
+          if (season) {
+            setTimeout(() => {
+              const seasonSelect = document.getElementById("source-season-select") as HTMLSelectElement;
+              if (seasonSelect) {
+                seasonSelect.value = season;
+              }
+            }, 1500); // Give TMDB API time to respond and populate the select box
+          }
+        }
+      }
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
   });
 </script>

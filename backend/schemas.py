@@ -308,3 +308,25 @@ class AdminUser(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AutoMapPreviewRequest(BaseModel):
+    tmdb_show_id: int
+    tvdb_show_id: int
+    tvdb_api_key: str
+    tmdb_api_key: Optional[str] = None
+    match_strategy: Optional[str] = "auto"
+
+
+class AutoMapMappingItem(BaseModel):
+    source_season: int
+    source_episode: int
+    target_season: int
+    target_episode: int
+
+
+class AutoMapApplyRequest(BaseModel):
+    tmdb_show_id: int
+    target_show_tmdb_id: int
+    mappings: list[AutoMapMappingItem]
+    tmdb_api_key: Optional[str] = None

@@ -288,7 +288,7 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
     }
 
 
-async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: str = None) -> Media | None:
+async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: str = None, user_id: int | None = None) -> Media | None:
     # 1. Match by Jellyfin source ID via CollectionFile (fastest path post-sync)
     if data["jellyfin_id"]:
         result = await db.execute(
@@ -321,6 +321,37 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
                     series_tmdb_id = res["results"][0]["id"]
             except Exception:
                 pass
+
+    if user_id and data["media_type"] == "episode" and series_tmdb_id and data.get("season_number") is not None and data.get("episode_number") is not None:
+        from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
+        
+        ep_override_q = await db.execute(
+            select(ShowEpisodeOverride).where(
+                ShowEpisodeOverride.user_id == user_id,
+                ShowEpisodeOverride.source_show_tmdb_id == series_tmdb_id,
+                ShowEpisodeOverride.source_season_number == data["season_number"],
+                ShowEpisodeOverride.source_episode_number == data["episode_number"]
+            )
+        )
+        ep_override = ep_override_q.scalar_one_or_none()
+        if ep_override:
+            series_tmdb_id = ep_override.target_show_tmdb_id
+            data["series_tmdb_id"] = ep_override.target_show_tmdb_id
+            data["season_number"] = ep_override.target_season_number
+            data["episode_number"] = ep_override.target_episode_number
+        else:
+            season_override_q = await db.execute(
+                select(ShowSeasonOverride).where(
+                    ShowSeasonOverride.user_id == user_id,
+                    ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
+                    ShowSeasonOverride.source_season_number == data["season_number"]
+                )
+            )
+            season_override = season_override_q.scalar_one_or_none()
+            if season_override:
+                series_tmdb_id = season_override.target_show_tmdb_id
+                data["series_tmdb_id"] = season_override.target_show_tmdb_id
+                data["season_number"] = season_override.target_season_number
 
     if data["media_type"] == "episode" and series_tmdb_id:
         try:
@@ -445,7 +476,7 @@ async def _handle_jellyfin_webhook(request: Request, db: AsyncSession, api_key: 
     settings = settings_result.scalar_one_or_none()
     tmdb_key = await _get_tmdb_key(db, settings)
 
-    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key)
+    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key, user_id=user.id)
     session_key = f"jellyfin:{user.id}:{data['session_id']}"
 
     if media is None:
@@ -574,7 +605,7 @@ async def _handle_emby_webhook(request: Request, db: AsyncSession, api_key: str,
     settings = settings_result.scalar_one_or_none()
     tmdb_key = await _get_tmdb_key(db, settings)
 
-    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key)
+    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key, user_id=user.id)
     session_key = f"emby:{user.id}:{data['session_id']}"
 
     if media is None:
@@ -673,7 +704,7 @@ async def _handle_jellyfin_scrobble_webhook(
     settings = settings_result.scalar_one_or_none()
     tmdb_key = await _get_tmdb_key(db, settings)
 
-    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key)
+    media = await find_or_create_media_jellyfin(data, db, api_key=tmdb_key, user_id=user.id)
     session_key = f"{source}:scrobble:{user.id}:{data['session_id']}"
 
     if media is None:
@@ -925,7 +956,7 @@ async def _ensure_collection_entry(
     await db.flush()
 
 
-async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str = None, conn: MediaServerConnection | None = None) -> Media | None:
+async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str = None, conn: MediaServerConnection | None = None, user_id: int | None = None) -> Media | None:
     # Fastest path: match via CollectionFile source_id (plex ratingKey).
     # This works even after season remaps where show_id/season_number no longer
     # match what Plex reports in the webhook payload.
@@ -1034,6 +1065,37 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
     # to episodes it can't match (the show exists only on TVDB/IMDB, not TMDB).
     if data["media_type"] == "episode" and not series_tmdb_id:
         data["tmdb_id"] = None
+
+    if user_id and data["media_type"] == "episode" and series_tmdb_id and data.get("season_number") is not None and data.get("episode_number") is not None:
+        from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
+        
+        ep_override_q = await db.execute(
+            select(ShowEpisodeOverride).where(
+                ShowEpisodeOverride.user_id == user_id,
+                ShowEpisodeOverride.source_show_tmdb_id == series_tmdb_id,
+                ShowEpisodeOverride.source_season_number == data["season_number"],
+                ShowEpisodeOverride.source_episode_number == data["episode_number"]
+            )
+        )
+        ep_override = ep_override_q.scalar_one_or_none()
+        if ep_override:
+            series_tmdb_id = ep_override.target_show_tmdb_id
+            data["grandparent_tmdb_id"] = ep_override.target_show_tmdb_id
+            data["season_number"] = ep_override.target_season_number
+            data["episode_number"] = ep_override.target_episode_number
+        else:
+            season_override_q = await db.execute(
+                select(ShowSeasonOverride).where(
+                    ShowSeasonOverride.user_id == user_id,
+                    ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
+                    ShowSeasonOverride.source_season_number == data["season_number"]
+                )
+            )
+            season_override = season_override_q.scalar_one_or_none()
+            if season_override:
+                series_tmdb_id = season_override.target_show_tmdb_id
+                data["grandparent_tmdb_id"] = season_override.target_show_tmdb_id
+                data["season_number"] = season_override.target_season_number
 
     if data["tmdb_id"]:
         tmdb_id_int = int(data["tmdb_id"])
@@ -1182,7 +1244,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
     session_key = f"plex:{user.id}:{data['session_key']}"
 
     if event in ("media.play", "media.resume", "media.pause", "media.stop", "media.scrobble"):
-        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn, user_id=user.id)
         if media is None:
             return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
 
@@ -1199,7 +1261,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
             await db.commit()
 
     elif event == "media.resume":
-        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn, user_id=user.id)
         if media is None:
             return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
         if not conn or conn.sync_playback:
@@ -1232,7 +1294,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
             progress_seconds = data["progress_seconds"] or (session.progress_seconds if session else 0)
             media_id = session.media_id if session else None
             if media_id is None:
-                fallback = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
+                fallback = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn, user_id=user.id)
                 media_id = fallback.id if fallback else None
             if media_id and (not conn or conn.sync_watched) and progress_percent > 0.05:
                 await _write_watch_event(
@@ -1245,14 +1307,14 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
     elif event == "media.scrobble":
         await _close_session(db, session_key)
         if not conn or conn.sync_watched:
-            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn, user_id=user.id)
             if media:
                 await _write_watch_event(db, user.id, media.id, 1.0, data["progress_seconds"], True)
             await db.commit()
 
     elif event == "media.rate":
         if not conn or conn.sync_ratings:
-            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn, user_id=user.id)
             rating_value = data.get("rating")
 
             existing = await db.execute(
@@ -1344,7 +1406,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
 
                     try:
                         item_media = await find_or_create_media_plex(
-                            item_data, db, api_key=tmdb_key, conn=conn
+                            item_data, db, api_key=tmdb_key, conn=conn, user_id=user.id
                         )
                         if item_media:
                             await _ensure_collection_entry(
@@ -1355,7 +1417,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                     except Exception as e:
                         print(f"  library.new batch: failed to process item {item_rating_key}: {e}")
             else:
-                media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
+                media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn, user_id=user.id)
                 quality = data.get("quality") or {}
                 if (not quality.get("resolution") or not quality.get("audio_languages")) and conn:
                     item = await plex_client.get_item(conn.url, conn.token, data["plex_rating_key"])
@@ -1379,7 +1441,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                 if selected_keys and section_id not in selected_keys:
                     return {"status": "ignored", "reason": f"library section {section_id} not in sync selection"}
 
-            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn)
+            media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=conn, user_id=user.id)
             if media is None:
                 return {"status": "ignored", "reason": "could not identify media"}
 
@@ -1465,7 +1527,7 @@ async def _handle_plex_scrobble_webhook(request: Request, db: AsyncSession, api_
     session_key = f"plex:scrobble:{user.id}:{data['session_key']}"
 
     if event in ("media.play", "media.resume", "media.pause", "media.stop", "media.scrobble"):
-        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=None)
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=None, user_id=user.id)
         if media is None:
             return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
 
@@ -1482,7 +1544,7 @@ async def _handle_plex_scrobble_webhook(request: Request, db: AsyncSession, api_
             await db.commit()
 
     elif event == "media.resume":
-        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=None)
+        media = await find_or_create_media_plex(data, db, api_key=tmdb_key, conn=None, user_id=user.id)
         if media is None:
             return {"status": "ignored", "reason": "episode could not be identified (no season/episode/tmdb_id)"}
         if conn.sync_playback:

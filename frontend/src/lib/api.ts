@@ -654,6 +654,9 @@ export interface Show {
   where_to_watch?: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string }[];
   trailer_youtube_id?: string | null;
   logo_path?: string | null;
+  include_specials?: boolean;
+  watched_episodes_count?: number;
+  total_episodes_count?: number;
 }
 
 export interface ProfileWatchedItem {

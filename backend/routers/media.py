@@ -84,6 +84,9 @@ async def enrich_with_state(
     # --- Radarr / Sonarr state (Request button logic) ---
     settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = settings_q.scalar_one_or_none()
+    include_specials = False
+    if settings and settings.preferences:
+        include_specials = settings.preferences.get("include_specials", False)
     gs = await _get_global_settings(db)
 
     monitored_status = {} # tmdb_id -> bool
@@ -196,7 +199,7 @@ async def enrich_with_state(
         show_tmdb_to_local_id = {r[0]: r[1] for r in show_id_map_q.all()}
         local_show_ids = list(show_tmdb_to_local_id.values())
 
-        watched_eps_sq = (
+        watched_eps_q = (
             select(ShowModel.tmdb_id.label("show_tmdb_id"), Media.season_number, Media.episode_number)
             .join(WatchEvent, WatchEvent.media_id == Media.id)
             .join(ShowModel, ShowModel.id == Media.show_id)
@@ -204,10 +207,15 @@ async def enrich_with_state(
                 WatchEvent.user_id == user_id,
                 Media.media_type == MediaType.episode,
                 Media.season_number.isnot(None),
-                Media.season_number != 0,
                 Media.episode_number.isnot(None),
                 ShowModel.tmdb_id.in_(show_tmdb_ids),
             )
+        )
+        if not include_specials:
+            watched_eps_q = watched_eps_q.where(Media.season_number != 0)
+            
+        watched_eps_sq = (
+            watched_eps_q
             .group_by(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
             .subquery()
         )
@@ -269,7 +277,7 @@ async def enrich_with_state(
             show_status_map[show_tmdb_id] = status or ""
             show_seasons_map[show_tmdb_id] = seasons
             total_map[show_tmdb_id] = sum(
-                s.get("episode_count", 0) for s in seasons if s.get("season_number", 0) != 0
+                s.get("episode_count", 0) for s in seasons if (include_specials or s.get("season_number", 0) != 0)
             )
 
         # 2. For shows not in local DB (or to ensure accuracy), fetch details from TMDB
@@ -302,13 +310,13 @@ async def enrich_with_state(
                         show_status_map[tid] = data.get("status", "")
                         show_seasons_map[tid] = seasons
                         total_map[tid] = sum(
-                            s.get("episode_count", 0) for s in seasons if s.get("season_number", 0) != 0
+                            s.get("episode_count", 0) for s in seasons if (include_specials or s.get("season_number", 0) != 0)
                         )
 
         # Count distinct watched episodes per show, deduplicated by (season, episode).
         # We find episodes by their show_id link. 
         # Primary path: show_id -> ShowModel.id -> ShowModel.tmdb_id
-        watched_eps_sq = (
+        watched_eps_q = (
             select(ShowModel.tmdb_id.label("show_tmdb_id"), Media.season_number, Media.episode_number)
             .join(WatchEvent, WatchEvent.media_id == Media.id)
             .join(ShowModel, ShowModel.id == Media.show_id)
@@ -316,10 +324,15 @@ async def enrich_with_state(
                 WatchEvent.user_id == user_id,
                 Media.media_type == MediaType.episode,
                 Media.season_number.isnot(None),
-                Media.season_number != 0,
                 Media.episode_number.isnot(None),
                 ShowModel.tmdb_id.in_(show_tmdb_ids),
             )
+        )
+        if not include_specials:
+            watched_eps_q = watched_eps_q.where(Media.season_number != 0)
+            
+        watched_eps_sq = (
+            watched_eps_q
             .group_by(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
             .subquery()
         )
@@ -330,7 +343,7 @@ async def enrich_with_state(
         show_watched_count_map = {r[0]: r[1] for r in watched_count_q.all()}
 
         # Count distinct collected episodes per show
-        ep_dedup_sq = (
+        ep_dedup_q = (
             select(ShowModel.tmdb_id.label("show_tmdb_id"), Media.season_number, Media.episode_number)
             .join(Collection, Collection.media_id == Media.id)
             .join(ShowModel, ShowModel.id == Media.show_id)
@@ -338,10 +351,15 @@ async def enrich_with_state(
                 Collection.user_id == user_id,
                 Media.media_type == MediaType.episode,
                 Media.season_number.isnot(None),
-                Media.season_number != 0,
                 Media.episode_number.isnot(None),
                 ShowModel.tmdb_id.in_(show_tmdb_ids),
             )
+        )
+        if not include_specials:
+            ep_dedup_q = ep_dedup_q.where(Media.season_number != 0)
+            
+        ep_dedup_sq = (
+            ep_dedup_q
             .group_by(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
             .subquery()
         )
@@ -350,6 +368,61 @@ async def enrich_with_state(
             .group_by(ep_dedup_sq.c.show_tmdb_id)
         )
         collected_map = {r[0]: r[1] for r in collected_q.all()}
+
+        # Map to store adjusted show season ep counts for still-airing calculations
+        adjusted_show_season_ep_counts = {}
+        
+        # Apply overrides to get correct total episode counts
+        from models.season_override import ShowSeasonOverride
+        overrides_q = await db.execute(
+            select(ShowSeasonOverride).where(
+                ShowSeasonOverride.user_id == user_id,
+                or_(
+                    ShowSeasonOverride.source_show_tmdb_id.in_(show_tmdb_ids),
+                    ShowSeasonOverride.target_show_tmdb_id.in_(show_tmdb_ids),
+                )
+            )
+        )
+        overrides = overrides_q.scalars().all()
+
+        # Group overrides by show
+        overrides_by_show = {}
+        for override in overrides:
+            overrides_by_show.setdefault(override.source_show_tmdb_id, []).append(override)
+            overrides_by_show.setdefault(override.target_show_tmdb_id, []).append(override)
+
+        for tmdb_id in show_tmdb_ids:
+            # Get native seasons
+            seasons = show_seasons_map.get(tmdb_id, [])
+            show_season_ep_counts = {
+                s["season_number"]: s.get("episode_count", 0)
+                for s in seasons if (include_specials or s.get("season_number", 0) != 0)
+            }
+
+            # Apply overrides
+            show_overrides = overrides_by_show.get(tmdb_id, [])
+            for override in show_overrides:
+                if override.source_show_tmdb_id == tmdb_id:
+                    # Remapped away! Exclude this season's episodes
+                    if override.source_season_number in show_season_ep_counts:
+                        del show_season_ep_counts[override.source_season_number]
+                elif override.target_show_tmdb_id == tmdb_id:
+                    # Remapped to! Include the source season's episodes
+                    src_show_q = await db.execute(
+                        select(ShowModel).where(ShowModel.tmdb_id == override.source_show_tmdb_id)
+                    )
+                    src_show = src_show_q.scalar_one_or_none()
+                    ep_count = 0
+                    if src_show and src_show.tmdb_data:
+                        src_seasons = src_show.tmdb_data.get("seasons", [])
+                        src_season_meta = next((s for s in src_seasons if s.get("season_number") == override.source_season_number), None)
+                        if src_season_meta:
+                            ep_count = src_season_meta.get("episode_count", 0)
+                    show_season_ep_counts[override.target_season_number] = ep_count
+
+            adjusted_show_season_ep_counts[tmdb_id] = show_season_ep_counts
+            # Now update total_map!
+            total_map[tmdb_id] = sum(show_season_ep_counts.values())
 
         for tmdb_id in show_tmdb_ids:
             total = total_map.get(tmdb_id, 0)
@@ -395,12 +468,13 @@ async def enrich_with_state(
                 continue
             last_season = last_ep.get("season_number", 0)
             last_ep_num = last_ep.get("episode_number", 0)
-            seasons = show_seasons_map.get(tid, [])
+            
+            show_season_ep_counts = adjusted_show_season_ep_counts.get(tid, {})
             # Sum completed seasons before the current airing season, plus episodes aired so far in it.
             aired_total = sum(
-                s.get("episode_count", 0)
-                for s in seasons
-                if 0 < s.get("season_number", 0) < last_season
+                show_season_ep_counts.get(s_num, 0)
+                for s_num in show_season_ep_counts
+                if (s_num < last_season if include_specials else 0 < s_num < last_season)
             ) + last_ep_num
             show_aired_count[tid] = aired_total
             collected = collected_map.get(tid, 0)
@@ -596,7 +670,9 @@ def format_media(media: Media) -> dict:
         "id": media.id,
         "tmdb_id": media.tmdb_id,
         "type": media.media_type,
-        "title": media.title,
+        "title": media.custom_title or media.title,
+        "tmdb_title": media.title,
+        "custom_title": media.custom_title,
         "original_title": media.original_title,
         "overview": media.overview,
         "poster_path": media.poster_path,
@@ -608,7 +684,7 @@ def format_media(media: Media) -> dict:
         "status": media.status,
         "season_number": media.season_number,
         "episode_number": media.episode_number,
-        "show_title": media.show.title if media.show else None,
+        "show_title": (media.show.custom_title or media.show.title) if media.show else None,
         "show_tmdb_id": media.show.tmdb_id if media.show else None,
         "show_poster_path": media.show.poster_path if media.show else None,
         "show_backdrop_path": media.show.backdrop_path if media.show else None,

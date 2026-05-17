@@ -96,7 +96,17 @@ const showProgress = progressPct > 0;
 
           <div class="flex-1 pt-4 text-center md:text-left">
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-2">
-              <h1 class="text-4xl md:text-5xl font-black text-zinc-100 tracking-tight">{season.name}</h1>
+              <div class="flex items-center gap-3 flex-wrap">
+                <h1 class="text-4xl md:text-5xl font-black text-zinc-100 tracking-tight">{season.name}</h1>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button id="rename-season-btn" class="p-2 text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded-full transition cursor-pointer" title="Set a custom title for this season">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                  </button>
+                  <a href={`/remaps?mode=season&src_tmdb=${id}&src_season=${season_number}`} class="p-2 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded-full transition cursor-pointer" title="Remap this season">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                  </a>
+                </div>
+              </div>
               
               {show?.seasons_meta && show.seasons_meta.length > 1 && (
                 <div class="flex items-center gap-2 shrink-0">
@@ -319,6 +329,38 @@ const showProgress = progressPct > 0;
         btn.removeAttribute('disabled');
         btn.classList.remove('opacity-60', 'cursor-not-allowed');
         setTimeout(() => { label.textContent = 'Refresh Metadata'; }, 3000);
+      }
+    });
+  }
+</script>
+
+<script define:vars={{ showId: id, seasonNum: season_number, token: Astro.locals.token, currentTitle: season?.name }}>
+  const renameSeasonBtn = document.getElementById('rename-season-btn');
+  if (renameSeasonBtn) {
+    renameSeasonBtn.addEventListener('click', async () => {
+      const newName = prompt('Enter a custom title for this season (leave empty to reset to default TMDB title):', currentTitle);
+      if (newName === null) return; // Cancelled
+
+      try {
+        const res = await fetch('/api/proxy/sync/custom-title', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            show_tmdb_id: Number(showId),
+            season_number: Number(seasonNum),
+            season_custom_name: newName.trim() === '' ? null : newName.trim()
+          })
+        });
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          window.showToast?.('Failed to rename season', 'error');
+        }
+      } catch (err) {
+        window.showToast?.('Error renaming season', 'error');
       }
     });
   }

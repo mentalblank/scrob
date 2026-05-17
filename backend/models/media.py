@@ -34,6 +34,8 @@ class Media(Base):
     show_id        : Mapped[Optional[int]]   = mapped_column(ForeignKey("shows.id", ondelete="SET NULL"))
     season_number  : Mapped[Optional[int]]   = mapped_column(Integer)
     episode_number : Mapped[Optional[int]]   = mapped_column(Integer)
+    # User-defined rename override (propagated everywhere in the UI)
+    custom_title   : Mapped[Optional[str]]   = mapped_column(String(500))
     created_at     : Mapped[datetime]        = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at     : Mapped[datetime]        = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

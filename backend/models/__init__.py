@@ -20,7 +20,7 @@ from .playback_progress import PlaybackProgress
 from .follows import Follow
 from .global_settings import GlobalSettings
 from .blocklist import BlocklistItem
-from .season_override import ShowSeasonOverride
+from .season_override import ShowSeasonOverride, ShowEpisodeOverride
 
 __all__ = [
     "Base",
@@ -46,4 +46,5 @@ __all__ = [
     "GlobalSettings",
     "BlocklistItem",
     "ShowSeasonOverride",
+    "ShowEpisodeOverride",
 ]

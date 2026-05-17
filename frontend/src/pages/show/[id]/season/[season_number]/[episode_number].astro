@@ -98,10 +98,24 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
                 <h1 class="text-3xl md:text-5xl font-black text-zinc-100 mb-2 tracking-tight leading-tight">{episode.title}</h1>
                 <div class="flex flex-wrap items-center gap-3">
                   <p class="text-lg text-blue-400 font-bold tracking-wide uppercase">{show?.title}</p>
-                   <span class="px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
-                     S{String(season_number).padStart(2, '0')}E{String(episode_number).padStart(2, '0')}
-                   </span>
-                 </div>
+                  <div class="flex items-center gap-2">
+                    <span class="px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
+                      S{String(season_number).padStart(2, '0')}E{String(episode_number).padStart(2, '0')}
+                    </span>
+                    
+                    <!-- Quick Actions -->
+                    <div class="flex items-center gap-1.5 ml-2 border-l border-zinc-800 pl-3">
+                      <button id="rename-episode-btn" class="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800/50 rounded-lg text-zinc-400 hover:text-blue-400 transition-all text-[10px] font-bold" data-media-id={episode.id} data-current-title={episode.custom_title || episode.title} title="Rename Episode">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                        Rename
+                      </button>
+                      <a href={`/remaps?mode=ep&src_tmdb=${id}&src_season=${season_number}&src_ep=${episode_number}`} class="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800/50 rounded-lg text-zinc-400 hover:text-indigo-400 transition-all text-[10px] font-bold" title="Remap Episode">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        Remap
+                      </a>
+                    </div>
+                  </div>
+                </div>
               </div>
               
               {episode.episodes && episode.episodes.length > 1 && (
@@ -396,6 +410,55 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
         btn.removeAttribute('disabled');
         btn.classList.remove('opacity-60', 'cursor-not-allowed');
         setTimeout(() => { label.textContent = 'Refresh Metadata'; }, 3000);
+      }
+    });
+  }
+
+  // Rename Episode Logic
+  const renameBtn = document.getElementById('rename-episode-btn');
+  if (renameBtn) {
+    renameBtn.addEventListener('click', async () => {
+      const currentTitle = renameBtn.getAttribute('data-current-title') || '';
+      const newName = prompt('Enter a custom title for this episode (leave empty to reset to default TMDB title):', currentTitle);
+      
+      if (newName === null) return; // Cancelled
+
+      const token = document.getElementById("app-data")?.dataset.token || 
+                    document.querySelector("[data-token]")?.getAttribute("data-token") ||
+                    document.cookie.split('; ').find(row => row.startsWith('auth_token='))?.split('=')[1];
+      
+      if (!token) {
+        window.showToast?.('Authentication error: No token found', 'error');
+        return;
+      }
+
+      // Need the media ID, but we only have TMDB ID here for the show. Let's use the same custom_title patch endpoint we just added which can take media_id, or we need to add the media ID to the button.
+      // Wait, we have episode.id which is mediaId! Let's get it.
+      const mediaId = renameBtn.getAttribute('data-media-id');
+      if (!mediaId) {
+         window.showToast?.('Cannot rename episode: missing media ID', 'error');
+         return;
+      }
+
+      try {
+        const res = await fetch('/api/proxy/sync/custom-title', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            media_id: Number(mediaId),
+            custom_title: newName.trim() === '' ? null : newName.trim()
+          })
+        });
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          window.showToast?.('Failed to rename episode', 'error');
+        }
+      } catch (err) {
+        window.showToast?.('Error renaming episode', 'error');
       }
     });
   }
