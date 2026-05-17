@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. This project is a fork of [ellite/scrob](https://github.com/ellite/scrob).
 
+## [Unreleased] - 2026-05-17
+
+### Added
+- **Season Remapping Manager**:
+  - Dedicated "Season Remapping" page (`/remaps`) to manage metadata sync overrides.
+  - Interactive view showing source and target shows with posters, titles, and season mapping arrows.
+  - Visual autocomplete picker for local collection shows and manual input override fallbacks.
+  - Built-in TMDB TV show search and season-selection wizard inside the creation flow.
+  - Direct Action triggers to apply or delete season overrides immediately on collection items.
+
 ## [Unreleased] - 2026-05-13
 
 ### Added

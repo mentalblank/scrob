@@ -2281,16 +2281,72 @@ async def list_season_overrides(
         select(ShowSeasonOverride).where(ShowSeasonOverride.user_id == current_user.id)
     )
     overrides = result.scalars().all()
-    return [
-        {
+
+    # Collect source and target tmdb_ids
+    show_tmdb_ids = set()
+    for o in overrides:
+        show_tmdb_ids.add(o.source_show_tmdb_id)
+        show_tmdb_ids.add(o.target_show_tmdb_id)
+
+    # Query all matching local shows
+    local_shows = {}
+    if show_tmdb_ids:
+        local_shows_q = await db.execute(
+            select(Show).where(Show.tmdb_id.in_(list(show_tmdb_ids)))
+        )
+        local_shows = {s.tmdb_id: s for s in local_shows_q.scalars().all()}
+
+    # Query missing shows from TMDB in parallel if key is available
+    missing_tmdb_ids = [tid for tid in show_tmdb_ids if tid not in local_shows]
+    tmdb_shows = {}
+    if missing_tmdb_ids:
+        tmdb_api_key = await _get_effective_tmdb_key(db, None)
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+        settings = settings_result.scalar_one_or_none()
+        if settings and settings.tmdb_api_key:
+            tmdb_api_key = settings.tmdb_api_key
+        if tmdb_api_key:
+            async def fetch_light(tid: int):
+                try:
+                    return tid, await tmdb.get_show_light(tid, api_key=tmdb_api_key)
+                except Exception:
+                    return tid, None
+            results = await asyncio.gather(*[fetch_light(tid) for tid in missing_tmdb_ids])
+            for tid, data in results:
+                if data:
+                    tmdb_shows[tid] = data
+
+    response_data = []
+    for o in overrides:
+        src = local_shows.get(o.source_show_tmdb_id)
+        src_title = src.title if src else f"TMDB ID: {o.source_show_tmdb_id}"
+        src_poster = src.poster_path if src else None
+
+        tgt = local_shows.get(o.target_show_tmdb_id)
+        if tgt:
+            tgt_title = tgt.title
+            tgt_poster = tgt.poster_path
+        elif o.target_show_tmdb_id in tmdb_shows:
+            t_data = tmdb_shows[o.target_show_tmdb_id]
+            tgt_title = t_data.get("name") or f"TMDB ID: {o.target_show_tmdb_id}"
+            tgt_poster = tmdb.poster_url(t_data.get("poster_path")) if t_data.get("poster_path") else None
+        else:
+            tgt_title = f"TMDB ID: {o.target_show_tmdb_id}"
+            tgt_poster = None
+
+        response_data.append({
             "id": o.id,
             "source_show_tmdb_id": o.source_show_tmdb_id,
             "source_season_number": o.source_season_number,
+            "source_show_title": src_title,
+            "source_show_poster_path": src_poster,
             "target_show_tmdb_id": o.target_show_tmdb_id,
             "target_season_number": o.target_season_number,
-        }
-        for o in overrides
-    ]
+            "target_show_title": tgt_title,
+            "target_show_poster_path": tgt_poster,
+        })
+    return response_data
+
 
 
 @router.post("/season-overrides")
