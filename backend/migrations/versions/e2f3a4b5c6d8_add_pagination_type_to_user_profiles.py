@@ -1,6 +1,6 @@
 """Add pagination_type to user_profiles
 
-Revision ID: e2f3a4b5c6d7
+Revision ID: e2f3a4b5c6d8
 Revises: 99fbc5954be6
 Create Date: 2026-05-12 01:25:00.000000
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'e2f3a4b5c6d7'
+revision: str = 'e2f3a4b5c6d8'
 down_revision: Union[str, Sequence[str], None] = '99fbc5954be6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

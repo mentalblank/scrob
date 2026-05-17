@@ -1,7 +1,7 @@
 """add is_dropped to blocklist
 
 Revision ID: 1ebdbd0d3372
-Revises: e2f3a4b5c6d7
+Revises: e2f3a4b5c6d8
 Create Date: 2026-05-13 19:26:02.468982
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '1ebdbd0d3372'
-down_revision: Union[str, Sequence[str], None] = 'e2f3a4b5c6d7'
+down_revision: Union[str, Sequence[str], None] = 'e2f3a4b5c6d8'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
