@@ -14,40 +14,56 @@ async def _get(url: str, token: str, params: Optional[Dict] = None) -> Dict:
         res.raise_for_status()
         return res.json()
 
+def get_guids(item: Dict) -> List[Dict]:
+    """Return a normalised Guid list for a Plex item.
+
+    Modern Plex returns a 'Guid' array: [{"id": "tmdb://123"}, ...].
+    Legacy items may have an empty/missing 'Guid' but a single lowercase 'guid'
+    string like 'com.plexapp.agents.thetvdb://73762/1/1'.
+    """
+    guids = item.get("Guid") or []
+    if not guids:
+        legacy = item.get("guid", "")
+        if legacy:
+            guids = [{"id": legacy}]
+    return guids
+
+
 def extract_tmdb_id(guids: List[Dict]) -> Optional[int]:
     if not guids:
         return None
     for guid in guids:
         id_str = guid.get("id", "")
-        if id_str.startswith("tmdb://"):
-            try:
-                return int(id_str.replace("tmdb://", ""))
-            except ValueError:
-                continue
+        for prefix in ("tmdb://", "com.plexapp.agents.themoviedb://"):
+            if id_str.startswith(prefix):
+                try:
+                    return int(id_str[len(prefix):].split("/")[0])
+                except ValueError:
+                    break
     return None
 
 
 def extract_tvdb_id(guids: List[Dict]) -> Optional[str]:
-    """Extract TVDB ID string from a Plex Guid list, e.g. 'tvdb://73762' → '73762'."""
     if not guids:
         return None
     for guid in guids:
         id_str = guid.get("id", "")
-        if id_str.startswith("tvdb://"):
-            val = id_str.replace("tvdb://", "").strip()
-            return val if val else None
+        for prefix in ("tvdb://", "com.plexapp.agents.thetvdb://"):
+            if id_str.startswith(prefix):
+                val = id_str[len(prefix):].split("/")[0].strip()
+                return val if val else None
     return None
 
 
 def extract_imdb_id(guids: List[Dict]) -> Optional[str]:
-    """Extract IMDb ID string from a Plex Guid list, e.g. 'imdb://tt0944947' → 'tt0944947'."""
     if not guids:
         return None
     for guid in guids:
         id_str = guid.get("id", "")
-        if id_str.startswith("imdb://"):
-            val = id_str.replace("imdb://", "").strip()
-            return val if val else None
+        for prefix in ("imdb://", "com.plexapp.agents.imdb://"):
+            if id_str.startswith(prefix):
+                val = id_str[len(prefix):].split("/")[0].strip()
+                return val if val else None
     return None
 
 def extract_quality(media_list: List[Dict]) -> Dict:
@@ -316,16 +332,142 @@ async def get_recently_added(url: str, token: str, section_id: str, media_type: 
         return []
 
 
-async def mark_watched(url: str, token: str, rating_key: str) -> bool:
-    """Scrobble a media item as watched on Plex."""
+METADATA_BASE = "https://metadata.provider.plex.tv"
+DISCOVER_BASE = "https://discover.provider.plex.tv"
+PLEX_TV_BASE  = "https://plex.tv"
+COMMUNITY_BASE = "https://community.plex.tv"
+_CLOUD_HEADERS = {
+    "Accept": "application/json",
+    "X-Plex-Product": "Scrob",
+    "X-Plex-Client-Identifier": "scrob-watchlist",
+}
+
+
+async def _post_graphql(token: str, query: str, variables: Optional[Dict] = None) -> Dict:
+    """POST a GraphQL query to the Plex community API."""
+    payload: Dict = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+        res = await client.post(
+            f"{COMMUNITY_BASE}/api",
+            headers={"X-Plex-Token": token, "Content-Type": "application/json", "Accept": "application/json"},
+            json=payload,
+        )
+        res.raise_for_status()
+        return res.json()
+
+
+async def get_all_friends(token: str) -> List[Dict]:
+    """Return all Plex friends (server users) visible to this token via the community GraphQL API."""
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            headers = {"X-Plex-Token": token, "Accept": "application/json"}
-            r = await client.get(
-                f"{url.rstrip('/')}/:/scrobble",
-                headers=headers,
-                params={"key": rating_key, "identifier": "com.plexapp.plugins.library"},
+        data = await _post_graphql(token, """
+            query GetAllFriends {
+              allFriendsV2 {
+                user { id username displayName }
+              }
+            }
+        """)
+        friends = []
+        for entry in (data.get("data") or {}).get("allFriendsV2") or []:
+            user = entry.get("user", {})
+            if user.get("id"):
+                friends.append({
+                    "watchlist_id": user["id"],
+                    "username": user.get("username", ""),
+                    "display_name": user.get("displayName", ""),
+                })
+        return friends
+    except Exception:
+        return []
+
+
+async def get_friend_watchlist(token: str, watchlist_id: str) -> List[Dict]:
+    """Fetch all watchlist items for a friend via the community GraphQL API.
+    Returns list of {id (plex metadata id), title, type} — no GUIDs; enrich separately.
+    """
+    items = []
+    cursor = None
+    query = """
+        query GetWatchlist($user: UserInput!, $first: PaginationInt!, $after: String) {
+          userV2(user: $user) {
+            ... on User {
+              watchlist(first: $first, after: $after) {
+                nodes { id title type }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }
+    """
+    while True:
+        try:
+            data = await _post_graphql(
+                token, query,
+                variables={"user": {"id": watchlist_id}, "first": 100, "after": cursor},
             )
+        except Exception:
+            break
+        watchlist = (data.get("data") or {}).get("userV2", {}).get("watchlist", {})
+        nodes = watchlist.get("nodes", [])
+        items.extend(nodes)
+        page_info = watchlist.get("pageInfo", {})
+        if not page_info.get("hasNextPage") or not page_info.get("endCursor"):
+            break
+        cursor = page_info["endCursor"]
+    return items
+
+
+async def enrich_plex_item(token: str, plex_id: str) -> Optional[Dict]:
+    """Fetch full metadata for a Plex community item to get GUIDs (TMDB/TVDB/IMDB IDs)."""
+    try:
+        data = await _get(
+            f"{DISCOVER_BASE}/library/metadata/{plex_id}",
+            token,
+            params={"includeGuids": 1},
+        )
+        items = data.get("MediaContainer", {}).get("Metadata", [])
+        return items[0] if items else None
+    except Exception:
+        return None
+
+
+async def get_watchlist(token: str) -> List[Dict]:
+    """Fetch all items from the user's Plex watchlist via the Plex Discover API."""
+    items: List[Dict] = []
+    start = 0
+    url = f"{DISCOVER_BASE}/library/sections/watchlist/all"
+    while True:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+            res = await client.get(
+                url,
+                headers={"X-Plex-Token": token, "Accept": "application/json"},
+                params={"X-Plex-Token": token, "X-Plex-Container-Start": start, "includeGuids": 1},
+            )
+            res.raise_for_status()
+            data = res.json()
+        container = data.get("MediaContainer", {})
+        batch = container.get("Metadata", [])
+        items.extend(batch)
+        total = container.get("totalSize", 0) or len(items)
+        start += len(batch)
+        if not batch or start >= total:
+            break
+    return items
+
+
+PUSH_TIMEOUT = httpx.Timeout(15.0)
+
+async def mark_watched(url: str, token: str, rating_key: str, client: httpx.AsyncClient | None = None) -> bool:
+    """Scrobble a media item as watched on Plex."""
+    headers = {"X-Plex-Token": token, "Accept": "application/json"}
+    params = {"key": rating_key, "identifier": "com.plexapp.plugins.library"}
+    try:
+        if client:
+            r = await client.get(f"{url.rstrip('/')}/:/scrobble", headers=headers, params=params)
+            return r.status_code < 400
+        async with httpx.AsyncClient(timeout=PUSH_TIMEOUT, follow_redirects=False) as c:
+            r = await c.get(f"{url.rstrip('/')}/:/scrobble", headers=headers, params=params)
             return r.status_code < 400
     except Exception:
         return False
@@ -364,16 +506,15 @@ async def scan_libraries(url: str, token: str, section_keys: list[str]) -> bool:
         return False
 
 
-async def set_rating(url: str, token: str, rating_key: str, rating: float) -> bool:
+async def set_rating(url: str, token: str, rating_key: str, rating: float, client: httpx.AsyncClient | None = None) -> bool:
     """Set a star rating on a Plex item (0–10 scale)."""
+    headers = {"X-Plex-Token": token, "Accept": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            headers = {"X-Plex-Token": token, "Accept": "application/json"}
-            r = await client.put(
-                f"{url.rstrip('/')}/library/metadata/{rating_key}/userRating",
-                headers=headers,
-                params={"rating": rating},
-            )
+        if client:
+            r = await client.put(f"{url.rstrip('/')}/library/metadata/{rating_key}/userRating", headers=headers, params={"rating": rating})
+            return r.status_code < 400
+        async with httpx.AsyncClient(timeout=PUSH_TIMEOUT, follow_redirects=False) as c:
+            r = await c.put(f"{url.rstrip('/')}/library/metadata/{rating_key}/userRating", headers=headers, params={"rating": rating})
             return r.status_code < 400
     except Exception:
         return False

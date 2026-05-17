@@ -413,7 +413,7 @@ const bottomNavItem = (active: boolean) =>
       if (isNaN(updatedMs)) return 0;
       const elapsed = playing ? (Date.now() - updatedMs) / 1000 : 0;
       const current = Math.max(0, Math.min(progressSeconds + elapsed, runtimeSeconds));
-      return Math.min(100, Math.floor((current / runtimeSeconds) * 100));
+      return Math.min(100, (current / runtimeSeconds) * 100);
     }
 
     function renderNowPlaying(sessions) {
@@ -425,15 +425,20 @@ const bottomNavItem = (active: boolean) =>
         const subtitle = isEpisode
           ? `S${String(m.season_number).padStart(2,'0')}E${String(m.episode_number).padStart(2,'0')} · ${m.title}`
           : null;
-        const href = isEpisode && m.show_tmdb_id ? `/show/${m.show_tmdb_id}` : `/media/movie/${m.tmdb_id}`;
+        const href = isEpisode
+          ? (m.show_tmdb_id && m.season_number && m.episode_number
+              ? `/show/${m.show_tmdb_id}/season/${m.season_number}/${m.episode_number}`
+              : m.show_tmdb_id ? `/show/${m.show_tmdb_id}` : null)
+          : (m.tmdb_id ? `/media/movie/${m.tmdb_id}` : null);
         const isPaused = session.state === 'paused';
-        const sourceLabels = { plex: 'Plex', emby: 'Emby', kodi: 'Kodi', jellyfin: 'Jellyfin' };
+        const sourceLabels = { plex: 'Plex', emby: 'Emby', kodi: 'Kodi', jellyfin: 'Jellyfin', manual: 'Scrob' };
         const sourceLabel = sourceLabels[session.source] ?? session.source;
         const progressSeconds = session.progress_seconds ?? 0;
         const runtime = m.runtime ?? 0;
         const pct = runtime > 0
           ? calcLivePct(progressSeconds, session.updated_at, runtime, !isPaused)
           : Math.round((session.progress_percent ?? 0) * 100);
+        const pctDisplay = Math.floor(pct);
         const sessionKey = esc(session.session_key);
 
         const rawBackdrop = m.backdrop_path || m.show_backdrop_path;
@@ -457,7 +462,7 @@ const bottomNavItem = (active: boolean) =>
             <div class="absolute inset-0 overflow-hidden" ${backdropBg}>
               ${backdropUrl ? `<div class="absolute inset-0 bg-zinc-950/85 backdrop-blur-sm"></div>` : `<div class="absolute inset-0 bg-zinc-900"></div>`}
             </div>
-            <a href="${esc(href)}" class="relative flex items-center gap-3 px-6 md:px-8 py-2.5 max-w-screen-xl mx-auto hover:brightness-110 transition-all">
+            ${href ? `<a href="${esc(href)}" class="relative flex items-center gap-3 px-6 md:px-8 py-2.5 max-w-screen-xl mx-auto hover:brightness-110 transition-all">` : `<div class="relative flex items-center gap-3 px-6 md:px-8 py-2.5 max-w-screen-xl mx-auto">`}
               ${indicator}
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-0.5">
@@ -469,14 +474,14 @@ const bottomNavItem = (active: boolean) =>
                 ${subtitle ? `<p class="text-[10px] text-zinc-400 truncate leading-tight mt-0.5">${esc(subtitle)}</p>` : ''}
               </div>
               <div class="flex items-center gap-3">
-                <span data-nppct="${sessionKey}" class="text-xs font-bold text-zinc-300 tabular-nums shrink-0">${esc(String(pct))}%</span>
+                <span data-nppct="${sessionKey}" class="text-xs font-bold text-zinc-300 tabular-nums shrink-0">${esc(String(pctDisplay))}%</span>
                 <button onclick="event.preventDefault(); event.stopPropagation(); window.clearNowPlaying('${sessionKey}')"
                         class="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
                         title="Clear stuck session">
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
               </div>
-            </a>
+            ${href ? '</a>' : '</div>'}
             <div class="absolute bottom-0 left-0 right-0 bg-zinc-950/30" style="height:2px">
               <div data-npbar="${sessionKey}"
                 data-ps="${progressSeconds}"
@@ -498,7 +503,7 @@ const bottomNavItem = (active: boolean) =>
         const pct = calcLivePct(parseFloat(bar.dataset.ps), bar.dataset.ua, rt, true);
         bar.style.width = pct + '%';
         const pctEl = document.querySelector(`[data-nppct="${bar.dataset.npbar}"]`);
-        if (pctEl) pctEl.textContent = pct + '%';
+        if (pctEl) pctEl.textContent = Math.floor(pct) + '%';
       });
     }
 
@@ -1288,11 +1293,19 @@ const bottomNavItem = (active: boolean) =>
       } else if (action === 'collected') {
         const season = card.dataset.season;
         const showTmdbId = card.dataset.showTmdbId;
-        if (mediaType === 'series' && !season) return; // show-level: read-only
         const inLibrary = btn.dataset.inLibrary === 'true';
         const seriesId = showTmdbId || tmdbId;
         try {
-          if (mediaType === 'series' && season) {
+          if (mediaType === 'series' && !season) {
+            // Show-level collect/uncollect — covers all seasons
+            if (inLibrary) {
+              const ok = await showConfirm('Remove show from collection?', 'This will remove all collection entries for every episode in this show.');
+              if (!ok) return;
+              await apiFetch(`/media/collect-show?tmdb_id=${tmdbId}`, 'DELETE');
+            } else {
+              await apiFetch('/media/collect-show', 'POST', { tmdb_id: Number(tmdbId), media_type: 'series' });
+            }
+          } else if (mediaType === 'series' && season) {
             // Season-level collect/uncollect
             if (inLibrary) {
               const ok = await showConfirm('Remove season from collection?', 'This will remove all collection entries for this season.');
@@ -1318,32 +1331,23 @@ const bottomNavItem = (active: boolean) =>
               }
               await apiFetch('/media/collect', 'POST', collectBody);
             }
-          }
-          const nowInLibrary = !inLibrary;
-          btn.dataset.inLibrary = String(nowInLibrary);
-          btn.dataset.state = nowInLibrary ? 'active' : 'inactive';
-
-          const isCard = btn.parentElement?.classList.contains('grid');
-          if (nowInLibrary) {
-            btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
-            if (isCard) {
-              btn.classList.add('bg-purple-500/20', 'text-purple-400');
+            // Episode-level: just toggle the button locally
+            const nowInLibrary = !inLibrary;
+            btn.dataset.inLibrary = String(nowInLibrary);
+            btn.dataset.state = nowInLibrary ? 'active' : 'inactive';
+            const isCard = btn.parentElement?.classList.contains('grid');
+            if (nowInLibrary) {
+              btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
+              btn.classList.add(isCard ? 'bg-purple-500/20' : 'bg-purple-500/50', 'text-purple-400');
             } else {
-              btn.classList.add('bg-purple-500/50', 'text-purple-300', 'hover:bg-purple-400/50');
+              btn.classList.remove('bg-purple-500/20', 'bg-purple-500/50', 'text-purple-400', 'text-purple-300', 'hover:bg-purple-500/40', 'hover:bg-purple-400/50');
+              btn.classList.add(isCard ? 'bg-zinc-900' : 'bg-zinc-800', isCard ? 'text-zinc-400' : 'text-zinc-500');
             }
-          } else {
-            btn.classList.remove('bg-purple-500/20', 'bg-purple-500/50', 'text-purple-400', 'text-purple-300', 'hover:bg-purple-500/40', 'hover:bg-purple-400/50');
-            if (isCard) {
-              btn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
-            } else {
-              btn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-purple-500/50', 'hover:text-purple-400');
-            }
+            btn.title = nowInLibrary ? 'In collection' : 'Add to collection';
+            return;
           }
-
-          const collectionPct = Number(btn.dataset.collectionPct || 0);
-          btn.title = mediaType === 'series' && !season
-            ? `${collectionPct}% in library`
-            : (nowInLibrary ? 'In collection' : 'Add to collection');
+          // Season/show-level: reload so percentages and all sibling cards update
+          window.location.reload();
         } catch { /* ignore */ }
 
       } else if (action === 'rate') {

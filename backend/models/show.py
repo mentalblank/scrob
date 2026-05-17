@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, Integer, JSON, String, Text, func
+from sqlalchemy import DateTime, Float, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -22,7 +23,7 @@ class Show(Base):
     tagline        : Mapped[Optional[str]]   = mapped_column(Text)
     first_air_date : Mapped[Optional[str]]   = mapped_column(String(20))
     last_air_date  : Mapped[Optional[str]]   = mapped_column(String(20))
-    tmdb_data      : Mapped[Optional[dict]]  = mapped_column(JSON)
+    tmdb_data      : Mapped[Optional[dict]]  = mapped_column(JSONB)
     created_at     : Mapped[datetime]        = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at     : Mapped[datetime]        = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

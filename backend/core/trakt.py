@@ -205,6 +205,70 @@ async def get_history(
 
 # ── Outbound Push ─────────────────────────────────────────────────────────────
 
+async def add_to_history_batch(
+    client_id: str,
+    access_token: str,
+    movies: list[int],
+    episodes: list[tuple[int, int, int]],
+) -> None:
+    """Add multiple movies and/or episodes to Trakt history in a single API call.
+
+    episodes: list of (show_tmdb_id, season_number, episode_number)
+    """
+    if not movies and not episodes:
+        return
+    body: dict = {}
+    if movies:
+        body["movies"] = [{"ids": {"tmdb": tmdb_id}} for tmdb_id in movies]
+    if episodes:
+        shows_map: dict[int, dict[int, list[int]]] = {}
+        for show_tmdb_id, season, ep_num in episodes:
+            shows_map.setdefault(show_tmdb_id, {}).setdefault(season, []).append(ep_num)
+        body["shows"] = [
+            {
+                "ids": {"tmdb": show_tmdb_id},
+                "seasons": [
+                    {"number": season, "episodes": [{"number": n} for n in eps]}
+                    for season, eps in seasons.items()
+                ],
+            }
+            for show_tmdb_id, seasons in shows_map.items()
+        ]
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/history",
+            json=body,
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def set_ratings_batch(
+    client_id: str,
+    access_token: str,
+    movie_ratings: list[tuple[int, float]],
+    show_ratings: list[tuple[int, float]],
+) -> None:
+    """Set ratings for multiple movies and/or shows in a single API call.
+
+    movie_ratings / show_ratings: list of (tmdb_id, rating)
+    """
+    if not movie_ratings and not show_ratings:
+        return
+    body: dict = {}
+    if movie_ratings:
+        body["movies"] = [{"rating": max(1, min(10, round(r))), "ids": {"tmdb": tid}} for tid, r in movie_ratings]
+    if show_ratings:
+        body["shows"] = [{"rating": max(1, min(10, round(r))), "ids": {"tmdb": tid}} for tid, r in show_ratings]
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/ratings",
+            json=body,
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
 async def add_movie_to_history(client_id: str, access_token: str, tmdb_id: int) -> None:
     """Mark a movie as watched on Trakt."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:

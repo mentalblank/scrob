@@ -258,43 +258,44 @@ async def scan_libraries(url: str, token: str) -> bool:
         return False
 
 
-async def mark_watched(url: str, token: str, user_id: str, item_id: str) -> bool:
+PUSH_TIMEOUT = httpx.Timeout(15.0)  # shorter timeout for bulk push operations
+
+async def mark_watched(url: str, token: str, user_id: str, item_id: str, client: httpx.AsyncClient | None = None) -> bool:
     """Mark a Jellyfin item as played."""
+    headers = {"X-Emby-Token": token}
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            headers = {"X-Emby-Token": token}
-            r = await client.post(
-                f"{url.rstrip('/')}/Users/{user_id}/PlayedItems/{item_id}",
-                headers=headers,
-            )
+        if client:
+            r = await client.post(f"{url.rstrip('/')}/Users/{user_id}/PlayedItems/{item_id}", headers=headers)
+            return r.status_code < 400
+        async with httpx.AsyncClient(timeout=PUSH_TIMEOUT, follow_redirects=False) as c:
+            r = await c.post(f"{url.rstrip('/')}/Users/{user_id}/PlayedItems/{item_id}", headers=headers)
             return r.status_code < 400
     except Exception:
         return False
 
-async def mark_unwatched(url: str, token: str, user_id: str, item_id: str) -> bool:
+async def mark_unwatched(url: str, token: str, user_id: str, item_id: str, client: httpx.AsyncClient | None = None) -> bool:
     """Mark a Jellyfin item as unplayed."""
+    headers = {"X-Emby-Token": token}
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            headers = {"X-Emby-Token": token}
-            r = await client.delete(
-                f"{url.rstrip('/')}/Users/{user_id}/PlayedItems/{item_id}",
-                headers=headers,
-            )
+        if client:
+            r = await client.delete(f"{url.rstrip('/')}/Users/{user_id}/PlayedItems/{item_id}", headers=headers)
+            return r.status_code < 400
+        async with httpx.AsyncClient(timeout=PUSH_TIMEOUT, follow_redirects=False) as c:
+            r = await c.delete(f"{url.rstrip('/')}/Users/{user_id}/PlayedItems/{item_id}", headers=headers)
             return r.status_code < 400
     except Exception:
         return False
 
-async def set_rating(url: str, token: str, user_id: str, item_id: str, rating: float) -> bool:
+async def set_rating(url: str, token: str, user_id: str, item_id: str, rating: float, client: httpx.AsyncClient | None = None) -> bool:
     """Set a star rating on a Jellyfin item (0–10 scale)."""
+    headers = {"X-Emby-Token": token, "Content-Type": "application/json"}
+    body = {"PlayedPercentage": None, "UnplayedItemCount": None, "Rating": rating}
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            headers = {"X-Emby-Token": token, "Content-Type": "application/json"}
-            body = {"PlayedPercentage": None, "UnplayedItemCount": None, "Rating": rating}
-            r = await client.post(
-                f"{url.rstrip('/')}/Users/{user_id}/Items/{item_id}/UserData",
-                headers=headers,
-                json=body,
-            )
+        if client:
+            r = await client.post(f"{url.rstrip('/')}/Users/{user_id}/Items/{item_id}/UserData", headers=headers, json=body)
+            return r.status_code < 400
+        async with httpx.AsyncClient(timeout=PUSH_TIMEOUT, follow_redirects=False) as c:
+            r = await c.post(f"{url.rstrip('/')}/Users/{user_id}/Items/{item_id}/UserData", headers=headers, json=body)
             return r.status_code < 400
     except Exception:
         return False

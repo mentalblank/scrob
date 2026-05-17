@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Integer, JSON, String, func, ForeignKey
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Integer, String, func, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, UserRole
@@ -54,14 +55,14 @@ class UserSettings(Base):
     radarr_token           : Mapped[Optional[str]] = mapped_column(String(500))
     radarr_root_folder     : Mapped[Optional[str]] = mapped_column(String(500))
     radarr_quality_profile : Mapped[Optional[int]] = mapped_column(Integer)
-    radarr_tags            : Mapped[Optional[list[int]]] = mapped_column(JSON)
+    radarr_tags            : Mapped[Optional[list[int]]] = mapped_column(JSONB)
 
     # Sonarr integration
     sonarr_url              : Mapped[Optional[str]] = mapped_column(String(500))
     sonarr_token            : Mapped[Optional[str]] = mapped_column(String(500))
     sonarr_root_folder      : Mapped[Optional[str]] = mapped_column(String(500))
     sonarr_quality_profile  : Mapped[Optional[int]] = mapped_column(Integer)
-    sonarr_tags             : Mapped[Optional[list[int]]] = mapped_column(JSON)
+    sonarr_tags             : Mapped[Optional[list[int]]] = mapped_column(JSONB)
     sonarr_season_folder    : Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
     # Trakt OAuth app credentials (per-user)
@@ -87,7 +88,7 @@ class UserSettings(Base):
     trakt_push_lists         : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_watchlist_split    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
-    preferences    : Mapped[Optional[dict]] = mapped_column(JSON)
+    preferences    : Mapped[Optional[dict]] = mapped_column(JSONB)
     blur_explicit  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     show_comments  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     show_user_ratings : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")

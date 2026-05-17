@@ -129,6 +129,10 @@ class MediaServerConnectionBase(BaseModel):
     push_ratings: bool = False
     auto_sync_interval: Optional[int] = None
     partial_sync_interval: Optional[int] = None
+    watchlist_to_radarr: bool = False
+    watchlist_to_sonarr: bool = False
+    watchlist_all_users: bool = False
+    watchlist_monitored_users: Optional[list[str]] = None
 
 
 class MediaServerConnectionCreate(MediaServerConnectionBase):
@@ -149,6 +153,10 @@ class MediaServerConnectionUpdate(BaseModel):
     push_ratings: Optional[bool] = None
     auto_sync_interval: Optional[int] = None
     partial_sync_interval: Optional[int] = None
+    watchlist_to_radarr: Optional[bool] = None
+    watchlist_to_sonarr: Optional[bool] = None
+    watchlist_all_users: Optional[bool] = None
+    watchlist_monitored_users: Optional[list[str]] = None
 
 
 class MediaServerConnectionResponse(MediaServerConnectionBase):
@@ -198,6 +206,22 @@ class WatchEventCreate(BaseModel):
     media_type: MediaType
     watched_at: Optional[datetime] = None
     completed: bool = True
+
+
+class ManualSessionStart(BaseModel):
+    tmdb_id: int
+    media_type: MediaType
+    title: Optional[str] = None
+    runtime: Optional[int] = None       # minutes, used if Media.runtime is null
+    show_tmdb_id: Optional[int] = None  # episode context
+    season_number: Optional[int] = None
+    episode_number: Optional[int] = None
+
+
+class ManualSessionUpdate(BaseModel):
+    progress_seconds: int
+    state: Optional[str] = None  # "playing" | "paused"
+
 
 class UserProfileUpdate(BaseModel):
     display_name: Optional[str] = None

@@ -926,6 +926,23 @@ async def _ensure_collection_entry(
 
 
 async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str = None, conn: MediaServerConnection | None = None) -> Media | None:
+    # Fastest path: match via CollectionFile source_id (plex ratingKey).
+    # This works even after season remaps where show_id/season_number no longer
+    # match what Plex reports in the webhook payload.
+    if data.get("plex_rating_key"):
+        cf_result = await db.execute(
+            select(Media)
+            .join(Collection, Collection.media_id == Media.id)
+            .join(CollectionFile, CollectionFile.collection_id == Collection.id)
+            .where(
+                CollectionFile.source == CollectionSource.plex,
+                CollectionFile.source_id == data["plex_rating_key"],
+            )
+        )
+        media = cf_result.scalars().first()
+        if media:
+            return media
+
     series_tmdb_id: Optional[int] = int(data["grandparent_tmdb_id"]) if data.get("grandparent_tmdb_id") else None
 
     # If missing series_tmdb_id, try to resolve it via other identifiers
@@ -1000,13 +1017,23 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
             except Exception:
                 pass
 
-        # 4. Last resort: search by show title
+        # 4. Last resort: search by show title — exact name match only to avoid false positives
+        #    (a fuzzy first-result on a show that doesn't exist on TMDB at all causes wrong linkage).
         if not series_tmdb_id and data.get("grandparent_title"):
             try:
                 res = await tmdb.search_shows(data["grandparent_title"], api_key=api_key)
-                if res.get("results"):
-                    series_tmdb_id = res["results"][0]["id"]
+                gt_lower = data["grandparent_title"].lower()
+                for r in (res.get("results") or [])[:3]:
+                    if r.get("name", "").lower() == gt_lower or r.get("original_name", "").lower() == gt_lower:
+                        series_tmdb_id = r["id"]
+                        break
             except Exception: pass
+
+    # When we couldn't verify the parent show on TMDB via any identifier, discard any
+    # episode-level TMDB ID that Plex provided. Plex sometimes assigns a movie's TMDB ID
+    # to episodes it can't match (the show exists only on TVDB/IMDB, not TMDB).
+    if data["media_type"] == "episode" and not series_tmdb_id:
+        data["tmdb_id"] = None
 
     if data["tmdb_id"]:
         tmdb_id_int = int(data["tmdb_id"])
@@ -1094,6 +1121,8 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
         season_number=data["season_number"],
         episode_number=data["episode_number"],
     )
+    if media.media_type == MediaType.episode and not series_tmdb_id and data.get("grandparent_title"):
+        media.tmdb_data = {"show_title": data["grandparent_title"]}
     db.add(media)
     await db.flush()
 

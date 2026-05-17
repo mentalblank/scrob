@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -36,5 +37,12 @@ class MediaServerConnection(Base):
     
     last_full_sync        : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_partial_sync     : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Plex watchlist → Radarr/Sonarr auto-request (Plex connections only)
+    watchlist_to_radarr       : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    watchlist_to_sonarr       : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    watchlist_all_users       : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    watchlist_monitored_users : Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    watchlist_synced_ids      : Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
 
     created_at       : Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)

@@ -354,7 +354,7 @@ async def enrich_with_state(
         for tmdb_id in show_tmdb_ids:
             total = total_map.get(tmdb_id, 0)
             collected = collected_map.get(tmdb_id, 0)
-            show_pct[tmdb_id] = int((collected / total) * 100) if total > 0 else 0
+            show_pct[tmdb_id] = min(100, int((collected / total) * 100)) if total > 0 else 0
 
         # --- Aired counts for 'watched' logic ---
         show_aired_count = {tid: total_map.get(tid, 0) for tid in show_tmdb_ids}
@@ -2068,7 +2068,8 @@ async def for_you(
     random.shuffle(combined)
 
     await enrich_with_state(db, current_user.id, combined)
-    result = {"results": combined[:20]}
+    unwatched = [item for item in combined if not item.get("watched")]
+    result = {"results": unwatched[:20]}
     _FOR_YOU_CACHE[current_user.id] = (_time.monotonic(), result)
     return result
 
@@ -2504,6 +2505,111 @@ async def manually_uncollect(
     return {"status": "ok", "message": "Removed from collection"}
 
 
+async def _resolve_season_episodes(
+    db: AsyncSession, show: "ShowModel", series_tmdb_id: int, season_number: int, tmdb_key: str | None
+) -> list:
+    """Return all Media rows for a season, creating or adopting rows as needed.
+
+    Always uses TMDB as the authoritative episode list so that:
+    - shows with no Media rows yet get them created
+    - orphaned episodes (show_id=NULL) get adopted
+    - already-linked episodes are returned as-is
+    """
+    if not check_tmdb_key(tmdb_key):
+        q = await db.execute(
+            select(Media).where(
+                Media.show_id == show.id,
+                Media.media_type == MediaType.episode,
+                Media.season_number == season_number,
+            )
+        )
+        return q.scalars().all()
+
+    try:
+        season_data = await tmdb.get_season(series_tmdb_id, season_number, api_key=tmdb_key)
+    except Exception:
+        q = await db.execute(
+            select(Media).where(
+                Media.show_id == show.id,
+                Media.media_type == MediaType.episode,
+                Media.season_number == season_number,
+            )
+        )
+        return q.scalars().all()
+
+    tmdb_episodes = season_data.get("episodes", [])
+    if not tmdb_episodes:
+        return []
+
+    tmdb_ids = [ep["id"] for ep in tmdb_episodes if ep.get("id")]
+    existing_q = await db.execute(
+        select(Media).where(
+            Media.tmdb_id.in_(tmdb_ids),
+            Media.media_type == MediaType.episode,
+        )
+    )
+    existing_by_tmdb: dict[int, Media] = {m.tmdb_id: m for m in existing_q.scalars().all()}
+
+    result: list[Media] = []
+    for ep in tmdb_episodes:
+        tid = ep.get("id")
+        if not tid:
+            continue
+        media = existing_by_tmdb.get(tid)
+        if media:
+            if not media.show_id:
+                media.show_id = show.id
+        else:
+            media = Media(
+                tmdb_id=tid,
+                media_type=MediaType.episode,
+                title=ep.get("name", ""),
+                season_number=season_number,
+                episode_number=ep.get("episode_number"),
+                show_id=show.id,
+                overview=ep.get("overview"),
+                release_date=ep.get("air_date"),
+                tmdb_rating=ep.get("vote_average"),
+                poster_path=tmdb.poster_url(ep.get("still_path"), size="w500"),
+            )
+            db.add(media)
+        result.append(media)
+
+    await db.flush()
+    return result
+
+
+async def _collect_episodes(db: AsyncSession, user_id: int, episodes: list) -> int:
+    """Insert Collection + CollectionFile(manual) for each episode, skipping existing ones."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    added = 0
+    for ep in episodes:
+        coll_stmt = pg_insert(Collection).values(user_id=user_id, media_id=ep.id)
+        coll_stmt = coll_stmt.on_conflict_do_nothing(constraint="uq_collection_user_media")
+        await db.execute(coll_stmt)
+        await db.flush()
+        coll_q = await db.execute(
+            select(Collection).where(Collection.user_id == user_id, Collection.media_id == ep.id)
+        )
+        coll = coll_q.scalar_one_or_none()
+        if not coll:
+            continue
+        existing_file_q = await db.execute(
+            select(CollectionFile).where(
+                CollectionFile.collection_id == coll.id,
+                CollectionFile.source == CollectionSource.manual,
+            )
+        )
+        if not existing_file_q.scalars().first():
+            db.add(CollectionFile(
+                collection_id=coll.id,
+                source=CollectionSource.manual,
+                source_id=str(ep.tmdb_id or ep.id),
+            ))
+            added += 1
+    return added
+
+
 @router.post("/collect-season")
 async def collect_season(
     body: CollectSeasonRequest,
@@ -2511,42 +2617,133 @@ async def collect_season(
     current_user: User = Depends(get_current_user),
 ):
     """Manually add all episodes in a season to the user's collection."""
-    from models.show import Show as ShowModel
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
 
     show_q = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == body.series_tmdb_id))
     show = show_q.scalar_one_or_none()
     if not show:
-        raise HTTPException(status_code=404, detail="Show not found in library")
-
-    episodes_q = await db.execute(
-        select(Media).where(
-            Media.show_id == show.id,
-            Media.media_type == MediaType.episode,
-            Media.season_number == body.season_number,
+        if not check_tmdb_key(tmdb_key):
+            raise HTTPException(status_code=404, detail="Show not found and no TMDB key configured")
+        show_data = await tmdb.get_show(body.series_tmdb_id, api_key=tmdb_key)
+        show = ShowModel(
+            tmdb_id=body.series_tmdb_id,
+            title=show_data.get("name", ""),
+            poster_path=tmdb.poster_url(show_data.get("poster_path")),
+            backdrop_path=tmdb.poster_url(show_data.get("backdrop_path"), size="w1280"),
+            tmdb_rating=show_data.get("vote_average"),
+            status=show_data.get("status"),
+            first_air_date=show_data.get("first_air_date"),
+            last_air_date=show_data.get("last_air_date"),
+            tmdb_data={
+                "genres": [g["name"] for g in show_data.get("genres", [])],
+                "seasons": [
+                    {
+                        "season_number": s["season_number"],
+                        "poster_path": tmdb.poster_url(s.get("poster_path")),
+                        "episode_count": s["episode_count"],
+                        "name": s["name"],
+                    }
+                    for s in show_data.get("seasons", [])
+                ],
+            },
         )
-    )
-    episodes = episodes_q.scalars().all()
+        db.add(show)
+        await db.flush()
+
+    episodes = await _resolve_season_episodes(db, show, body.series_tmdb_id, body.season_number, tmdb_key)
     if not episodes:
         return {"status": "ok", "count": 0}
 
-    added = 0
-    for ep in episodes:
-        existing_q = await db.execute(
-            select(Collection).where(
-                Collection.user_id == current_user.id,
-                Collection.media_id == ep.id,
-            )
-        )
-        if not existing_q.scalars().first():
-            db.add(Collection(
-                user_id=current_user.id,
-                media_id=ep.id,
-                source=CollectionSource.manual,
-                source_id=str(ep.tmdb_id or ep.id),
-            ))
-            added += 1
+    added = await _collect_episodes(db, current_user.id, episodes)
     await db.commit()
     return {"status": "ok", "count": added}
+
+
+@router.post("/collect-show")
+async def collect_show(
+    body: CollectRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Manually collect all aired seasons/episodes for a show."""
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        raise HTTPException(status_code=400, detail="TMDB key required to collect a show")
+
+    show_q = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == body.tmdb_id))
+    show = show_q.scalar_one_or_none()
+    if not show:
+        show_data = await tmdb.get_show(body.tmdb_id, api_key=tmdb_key)
+        show = ShowModel(
+            tmdb_id=body.tmdb_id,
+            title=show_data.get("name", ""),
+            poster_path=tmdb.poster_url(show_data.get("poster_path")),
+            backdrop_path=tmdb.poster_url(show_data.get("backdrop_path"), size="w1280"),
+            tmdb_rating=show_data.get("vote_average"),
+            status=show_data.get("status"),
+            first_air_date=show_data.get("first_air_date"),
+            last_air_date=show_data.get("last_air_date"),
+            tmdb_data={
+                "genres": [g["name"] for g in show_data.get("genres", [])],
+                "seasons": [
+                    {
+                        "season_number": s["season_number"],
+                        "poster_path": tmdb.poster_url(s.get("poster_path")),
+                        "episode_count": s["episode_count"],
+                        "name": s["name"],
+                    }
+                    for s in show_data.get("seasons", [])
+                ],
+            },
+        )
+        db.add(show)
+        await db.flush()
+
+    season_numbers = [
+        s["season_number"]
+        for s in (show.tmdb_data or {}).get("seasons", [])
+        if s.get("season_number", 0) != 0
+    ]
+
+    total_added = 0
+    for sn in season_numbers:
+        episodes = await _resolve_season_episodes(db, show, body.tmdb_id, sn, tmdb_key)
+        total_added += await _collect_episodes(db, current_user.id, episodes)
+
+    await db.commit()
+    return {"status": "ok", "count": total_added}
+
+
+@router.delete("/collect-show")
+async def uncollect_show(
+    tmdb_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove all collection entries for every episode in a show."""
+    show_q = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == tmdb_id))
+    show = show_q.scalar_one_or_none()
+    if not show:
+        return {"status": "ok"}
+
+    episode_ids_q = await db.execute(
+        select(Media.id).where(
+            Media.show_id == show.id,
+            Media.media_type == MediaType.episode,
+        )
+    )
+    episode_ids = [r[0] for r in episode_ids_q.all()]
+    if episode_ids:
+        await db.execute(
+            sa_delete(Collection).where(
+                Collection.user_id == current_user.id,
+                Collection.media_id.in_(episode_ids),
+            )
+        )
+        await db.commit()
+    return {"status": "ok"}
 
 
 @router.delete("/collect-season")

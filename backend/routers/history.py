@@ -1,4 +1,5 @@
 import asyncio
+from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, select, desc, func, delete
@@ -247,6 +248,10 @@ async def get_now_playing(
                 item["media"]["show_tmdb_id"] = show.tmdb_id
                 item["media"]["show_poster_path"] = show.poster_path
                 item["media"]["show_backdrop_path"] = show.backdrop_path
+        elif media.media_type == MediaType.episode:
+            hint = (media.tmdb_data or {}).get("show_title")
+            if hint:
+                item["media"]["show_title"] = hint
         sessions.append(item)
     return {"now_playing": sessions}
 
@@ -295,29 +300,44 @@ async def get_continue_watching(
 
 @router.delete("/continue-watching")
 async def delete_continue_watching(
-    tmdb_id: int = Query(...),
-    media_type: str = Query(...),
+    tmdb_id: Optional[int] = Query(None),
+    media_type: Optional[str] = Query(None),
+    media_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Remove an item from the continue watching list by deleting its progress."""
-    # Find the media ID first
-    media_q = await db.execute(
-        select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
-    )
-    media_id = media_q.scalar_one_or_none()
-    if not media_id:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Media not found")
-
-    await db.execute(
-        delete(PlaybackProgress).where(
-            PlaybackProgress.user_id == current_user.id,
-            PlaybackProgress.media_id == media_id
+    if media_id is not None:
+        await db.execute(
+            delete(PlaybackProgress).where(
+                PlaybackProgress.user_id == current_user.id,
+                PlaybackProgress.media_id == media_id,
+            )
         )
-    )
-    await db.commit()
-    return {"status": "success"}
+        await db.commit()
+        return {"status": "success"}
+
+    if tmdb_id is not None and media_type is not None:
+        # Find the media ID first
+        media_q = await db.execute(
+            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+        )
+        resolved_media_id = media_q.scalar_one_or_none()
+        if not resolved_media_id:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        await db.execute(
+            delete(PlaybackProgress).where(
+                PlaybackProgress.user_id == current_user.id,
+                PlaybackProgress.media_id == resolved_media_id
+            )
+        )
+        await db.commit()
+        return {"status": "success"}
+
+    from fastapi import HTTPException
+    raise HTTPException(status_code=400, detail="Must provide either media_id or tmdb_id and media_type")
 
 
 def _format_media_item(media: Media) -> dict:
@@ -902,6 +922,143 @@ async def clear_all_now_playing_sessions(
     return {"status": "ok"}
 
 
+# ---------------------------------------------------------------------------
+# Manual scrobble session endpoints
+# ---------------------------------------------------------------------------
+
+async def _get_or_create_media_for_session(
+    db: AsyncSession,
+    body: schemas.ManualSessionStart,
+    user_id: int,
+) -> Media:
+    result = await db.execute(
+        select(Media).where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
+    )
+    media = result.scalar_one_or_none()
+    if media:
+        return media
+
+    api_key = await get_user_tmdb_key(db, user_id)
+
+    if body.media_type == MediaType.movie:
+        if not check_tmdb_key(api_key):
+            raise HTTPException(status_code=404, detail="Movie not in library and TMDB key not configured")
+        try:
+            data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
+            title = data.get("title") or body.title or "Unknown"
+        except Exception:
+            title = body.title or "Unknown"
+        media = Media(tmdb_id=body.tmdb_id, media_type=body.media_type, title=title)
+        db.add(media)
+        await db.flush()
+        try:
+            await enrich_media(media, api_key=api_key)
+        except Exception:
+            pass
+    else:
+        # Episode: create a minimal row from request data
+        media = Media(
+            tmdb_id=body.tmdb_id,
+            media_type=body.media_type,
+            title=body.title or "Unknown",
+            runtime=body.runtime,
+            season_number=body.season_number,
+            episode_number=body.episode_number,
+        )
+        if body.show_tmdb_id:
+            show_q = await db.execute(select(Show).where(Show.tmdb_id == body.show_tmdb_id))
+            show = show_q.scalar_one_or_none()
+            if show:
+                media.show_id = show.id
+        db.add(media)
+        await db.flush()
+
+    return media
+
+
+@router.post("/session/start")
+async def start_manual_session(
+    body: schemas.ManualSessionStart,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Start a manual scrobble session for any movie or episode."""
+    media = await _get_or_create_media_for_session(db, body, current_user.id)
+
+    if media.runtime is None and body.runtime:
+        media.runtime = body.runtime
+
+    session_key = f"manual-{current_user.id}-{media.id}"
+
+    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
+    session = PlaybackSession(
+        user_id=current_user.id,
+        media_id=media.id,
+        session_key=session_key,
+        source="manual",
+        state="playing",
+        progress_seconds=0,
+        progress_percent=0.0,
+    )
+    db.add(session)
+    await db.commit()
+
+    return {"session_key": session_key, "media_id": media.id, "runtime": media.runtime}
+
+
+@router.patch("/session/{session_key}")
+async def update_manual_session(
+    session_key: str,
+    body: schemas.ManualSessionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Heartbeat / pause / resume for a manual session."""
+    result = await db.execute(
+        select(PlaybackSession).where(
+            PlaybackSession.session_key == session_key,
+            PlaybackSession.user_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    media_q = await db.execute(select(Media).where(Media.id == session.media_id))
+    media = media_q.scalar_one_or_none()
+
+    runtime_seconds = (media.runtime * 60) if (media and media.runtime) else 0
+    progress_pct = (body.progress_seconds / runtime_seconds) if runtime_seconds > 0 else 0.0
+    progress_pct = min(1.0, max(0.0, progress_pct))
+
+    session.progress_seconds = body.progress_seconds
+    session.progress_percent = progress_pct
+    if body.state in ("playing", "paused"):
+        session.state = body.state
+    session.updated_at = datetime.utcnow()
+
+    if 0.05 <= progress_pct < 0.90:
+        prog_q = await db.execute(
+            select(PlaybackProgress).where(
+                PlaybackProgress.user_id == current_user.id,
+                PlaybackProgress.media_id == session.media_id,
+            )
+        )
+        prog = prog_q.scalar_one_or_none()
+        if prog:
+            prog.progress_seconds = body.progress_seconds
+            prog.progress_percent = progress_pct
+        else:
+            db.add(PlaybackProgress(
+                user_id=current_user.id,
+                media_id=session.media_id,
+                progress_seconds=body.progress_seconds,
+                progress_percent=progress_pct,
+            ))
+    await db.commit()
+    return {"status": "ok"}
+
+
 @router.delete("/now-playing/{session_key}")
 async def delete_now_playing_session(
     session_key: str,
@@ -916,4 +1073,71 @@ async def delete_now_playing_session(
         )
     )
     await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/session/{session_key}")
+async def stop_manual_session(
+    session_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Stop and discard a manual session without marking as watched."""
+    result = await db.execute(
+        select(PlaybackSession).where(
+            PlaybackSession.session_key == session_key,
+            PlaybackSession.user_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    media_id = session.media_id
+    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
+    await db.execute(
+        delete(PlaybackProgress).where(
+            PlaybackProgress.user_id == current_user.id,
+            PlaybackProgress.media_id == media_id,
+        )
+    )
+    await db.commit()
+    return {"status": "ok"}
+@router.post("/session/{session_key}/complete")
+async def complete_manual_session(
+    session_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mark as fully watched and end the session."""
+    result = await db.execute(
+        select(PlaybackSession).where(
+            PlaybackSession.session_key == session_key,
+            PlaybackSession.user_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    media_id = session.media_id
+    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
+    await db.execute(
+        delete(PlaybackProgress).where(
+            PlaybackProgress.user_id == current_user.id,
+            PlaybackProgress.media_id == media_id,
+        )
+    )
+
+    db.add(WatchEvent(
+        user_id=current_user.id,
+        media_id=media_id,
+        watched_at=datetime.now(),
+        completed=True,
+        play_count=1,
+        progress_percent=1.0,
+    ))
+    await db.commit()
+
+    await _push_watch_state(db, current_user.id, [media_id], watched=True)
     return {"status": "ok"}

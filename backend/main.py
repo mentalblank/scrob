@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from core.limiter import limiter
 
-from sqlalchemy import select, update, delete
+from sqlalchemy import or_, select, update, delete
 from models.sync import SyncJob, SyncStatus
 from models.base import CollectionSource
 
@@ -137,6 +137,145 @@ async def _auto_sync_scheduler():
             traceback.print_exc()
 
 
+async def _watchlist_poller():
+    import logging
+    log = logging.getLogger("uvicorn.error")
+
+    try:
+        from db import async_sessionmaker
+        from models.connections import MediaServerConnection
+        from models.users import UserSettings
+        from models.global_settings import GlobalSettings
+        from routers.media import _effective_radarr, _effective_sonarr
+        from core import plex as plex_client
+        from core import radarr as radarr_client
+        from core import sonarr as sonarr_client
+    except Exception as e:
+        log.error(f"Watchlist poller: failed to import dependencies: {e}")
+        return
+
+    CHECK_INTERVAL = 300
+    log.info("Watchlist poller: started")
+
+    while True:
+        await asyncio.sleep(CHECK_INTERVAL)
+        try:
+            async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+            async with async_session() as db:
+                result = await db.execute(
+                    select(MediaServerConnection).where(
+                        MediaServerConnection.type == "plex",
+                        or_(
+                            MediaServerConnection.watchlist_to_radarr.is_(True),
+                            MediaServerConnection.watchlist_to_sonarr.is_(True),
+                        ),
+                    )
+                )
+                connections = result.scalars().all()
+
+                for conn in connections:
+                    try:
+                        settings_q = await db.execute(
+                            select(UserSettings).where(UserSettings.user_id == conn.user_id)
+                        )
+                        user_settings = settings_q.scalar_one_or_none()
+                        gs_q = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+                        global_settings = gs_q.scalar_one_or_none()
+
+                        radarr_cfg = _effective_radarr(user_settings, global_settings) if conn.watchlist_to_radarr else None
+                        sonarr_cfg = _effective_sonarr(user_settings, global_settings) if conn.watchlist_to_sonarr else None
+
+                        if not radarr_cfg and not sonarr_cfg:
+                            log.info(f"Watchlist poller: connection {conn.id} — Radarr/Sonarr not configured, skipping")
+                            continue
+
+                        synced: set = set(conn.watchlist_synced_ids or [])
+                        newly_synced: set = set()
+
+                        async def _send_to_arr(item_type: str, guids, title: str, cache_key: str):
+                            """Send one item to Radarr or Sonarr and mark it synced."""
+                            tmdb_id = plex_client.extract_tmdb_id(guids)
+                            if not tmdb_id:
+                                return
+                            if cache_key in synced or cache_key in newly_synced:
+                                return
+                            if item_type == "movie" and radarr_cfg:
+                                try:
+                                    await radarr_client.add_movie(
+                                        url=radarr_cfg.radarr_url,
+                                        token=radarr_cfg.radarr_token,
+                                        tmdb_id=tmdb_id,
+                                        title=title,
+                                        root_folder=radarr_cfg.radarr_root_folder,
+                                        quality_profile_id=radarr_cfg.radarr_quality_profile,
+                                        tags=radarr_cfg.radarr_tags,
+                                    )
+                                    newly_synced.add(cache_key)
+                                    log.info(f"Watchlist: queued movie tmdb:{tmdb_id} in Radarr for user {conn.user_id}")
+                                except Exception as e:
+                                    log.error(f"Watchlist: Radarr error for tmdb:{tmdb_id}: {e}")
+                            elif item_type == "show" and sonarr_cfg:
+                                tvdb_id = plex_client.extract_tvdb_id(guids)
+                                if not tvdb_id:
+                                    return
+                                try:
+                                    await sonarr_client.add_series(
+                                        url=sonarr_cfg.sonarr_url,
+                                        token=sonarr_cfg.sonarr_token,
+                                        tvdb_id=int(tvdb_id),
+                                        root_folder=sonarr_cfg.sonarr_root_folder,
+                                        quality_profile_id=sonarr_cfg.sonarr_quality_profile,
+                                        tags=sonarr_cfg.sonarr_tags,
+                                        season_folder=sonarr_cfg.sonarr_season_folder if sonarr_cfg.sonarr_season_folder is not None else True,
+                                    )
+                                    newly_synced.add(cache_key)
+                                    log.info(f"Watchlist: queued show tvdb:{tvdb_id} in Sonarr for user {conn.user_id}")
+                                except Exception as e:
+                                    log.error(f"Watchlist: Sonarr error for tvdb:{tvdb_id}: {e}")
+
+                        # Admin's own watchlist via REST (returns GUIDs directly)
+                        own_watchlist = await plex_client.get_watchlist(conn.token)
+                        for item in own_watchlist:
+                            item_type = item.get("type")
+                            guids = plex_client.get_guids(item)
+                            tmdb_id = plex_client.extract_tmdb_id(guids)
+                            if not tmdb_id:
+                                continue
+                            cache_key = f"{item_type}:{tmdb_id}"
+                            await _send_to_arr(item_type, guids, item.get("title", ""), cache_key)
+
+                        # Friends' watchlists via GraphQL (requires per-item enrichment for GUIDs)
+                        if conn.watchlist_all_users:
+                            all_friends = await plex_client.get_all_friends(conn.token)
+                            monitored = set(conn.watchlist_monitored_users or [])
+                            friends = [f for f in all_friends if f["watchlist_id"] in monitored] if monitored else []
+                            for friend in friends:
+                                friend_items = await plex_client.get_friend_watchlist(conn.token, friend["watchlist_id"])
+                                for fi in friend_items:
+                                    plex_id = fi.get("id")
+                                    if not plex_id:
+                                        continue
+                                    cache_key = f"plex:{plex_id}"
+                                    if cache_key in synced or cache_key in newly_synced:
+                                        continue
+                                    enriched = await plex_client.enrich_plex_item(conn.token, plex_id)
+                                    if not enriched:
+                                        continue
+                                    item_type = fi.get("type", "").lower()
+                                    guids = plex_client.get_guids(enriched)
+                                    await _send_to_arr(item_type, guids, fi.get("title", ""), cache_key)
+
+                        if newly_synced:
+                            conn.watchlist_synced_ids = list(synced | newly_synced)
+                            await db.commit()
+
+                    except Exception as e:
+                        log.error(f"Watchlist poller: error on connection {conn.id}: {e}", exc_info=True)
+
+        except Exception as e:
+            log.error(f"Watchlist poller error: {e}", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
@@ -154,12 +293,18 @@ async def lifespan(app: FastAPI):
         await db.commit()
 
     scheduler_task = asyncio.create_task(_auto_sync_scheduler())
+    watchlist_task = asyncio.create_task(_watchlist_poller())
 
     yield
 
     scheduler_task.cancel()
+    watchlist_task.cancel()
     try:
         await scheduler_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await watchlist_task
     except asyncio.CancelledError:
         pass
 

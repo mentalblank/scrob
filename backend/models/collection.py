@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CollectionSource
@@ -35,15 +36,15 @@ class CollectionFile(Base):
 
     id                 : Mapped[int]               = mapped_column(Integer, primary_key=True)
     collection_id      : Mapped[int]               = mapped_column(ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
-    connection_id      : Mapped[Optional[int]]     = mapped_column(ForeignKey("media_server_connections.id", ondelete="SET NULL"), nullable=True)
+    connection_id      : Mapped[Optional[int]]     = mapped_column(ForeignKey("media_server_connections.id", ondelete="SET NULL"), nullable=True, index=True)
     source             : Mapped[CollectionSource]  = mapped_column(Enum(CollectionSource), nullable=False)
     source_id          : Mapped[Optional[str]]     = mapped_column(String(255))
     resolution         : Mapped[Optional[str]]     = mapped_column(String(50))
     video_codec        : Mapped[Optional[str]]     = mapped_column(String(50))
     audio_codec        : Mapped[Optional[str]]     = mapped_column(String(50))
     audio_channels     : Mapped[Optional[str]]     = mapped_column(String(20))
-    audio_languages    : Mapped[Optional[list]]    = mapped_column(JSON)
-    subtitle_languages : Mapped[Optional[list]]    = mapped_column(JSON)
+    audio_languages    : Mapped[Optional[list]]    = mapped_column(JSONB)
+    subtitle_languages : Mapped[Optional[list]]    = mapped_column(JSONB)
     file_path          : Mapped[Optional[str]]     = mapped_column(String(1000))
     added_at           : Mapped[datetime]          = mapped_column(DateTime, server_default=func.now(), nullable=False)
 

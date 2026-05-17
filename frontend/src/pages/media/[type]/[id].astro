@@ -4,6 +4,7 @@ import MediaRow from "../../../components/MediaRow.astro";
 import ActionBar from "../../../components/ActionBar.astro";
 import CommentsSection from "../../../components/CommentsSection.astro";
 import VideoPlayer from "../../../components/VideoPlayer.astro";
+import ManualScrobble from "../../../components/ManualScrobble.astro";
 import { api, type MediaItem } from "../../../lib/api";
 export const prerender = false;
 
@@ -86,13 +87,20 @@ const logoPath = item?.logo_path ?? null;
           <div class="w-64 shrink-0 mx-auto md:mx-0">
             <div class="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative" data-adult={item.adult ? "true" : undefined}>
               {item.poster_path ? (
-                <img
-                  src={item.poster_path}
-                  alt={item.title}
-                  class="w-full h-full object-cover"
-                  loading="eager"
-                  decoding="async"
-                />
+                <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${item.title}`}>
+                  <img
+                    src={item.poster_path}
+                    alt={item.title}
+                    class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
+                    loading="eager"
+                    decoding="async"
+                  />
+                  <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover/poster:opacity-100 transition-opacity duration-200 bg-black/30">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8 text-white drop-shadow-lg">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
+                    </svg>
+                  </div>
+                </button>
               ) : (
                 <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
                   <span class="text-4xl mb-2">🎬</span>
@@ -195,6 +203,18 @@ const logoPath = item?.logo_path ?? null;
                 isBlocked={item.is_blocked ?? false}
               />
             </div>
+
+            {(item.type === 'movie' || item.type === 'episode') && (
+              <ManualScrobble
+                tmdbId={item.tmdb_id}
+                mediaType={item.type}
+                runtime={item.runtime}
+                title={item.title}
+                showTmdbId={item.show_tmdb_id}
+                seasonNumber={item.season_number}
+                episodeNumber={item.episode_number}
+              />
+            )}
 
             {(showRefreshBtn || ((item.type === "movie" || item.type === "episode") && item.in_library) || trailerYoutubeId) && (
               <div class="mb-4 flex flex-wrap gap-2">
@@ -450,6 +470,49 @@ const logoPath = item?.logo_path ?? null;
         if (html) container.innerHTML = html;
       })
       .catch(err => console.error('Failed to load recommendations', err));
+  }
+</script>
+
+{item?.poster_path && (
+  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
+    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
+    <img
+      src={item.poster_path}
+      alt={item.title}
+      class="relative max-h-[90vh] max-w-[85vw] md:max-w-[50vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
+    />
+    <button
+      id="poster-modal-close"
+      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
+      aria-label="Close"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+)}
+
+<script>
+  const zoomBtn = document.getElementById('poster-zoom-btn');
+  const modal = document.getElementById('poster-modal');
+  const backdrop = document.getElementById('poster-modal-backdrop');
+  const closeBtn = document.getElementById('poster-modal-close');
+
+  if (zoomBtn && modal) {
+    function openModal() {
+      modal.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeModal() {
+      modal.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    zoomBtn.addEventListener('click', openModal);
+    backdrop?.addEventListener('click', closeModal);
+    closeBtn?.addEventListener('click', closeModal);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
   }
 </script>
 

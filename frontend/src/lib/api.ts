@@ -224,6 +224,14 @@ export interface SyncJob {
   updated_at: string;
 }
 
+export interface ShowSeasonOverride {
+  id: number;
+  source_show_tmdb_id: number;
+  source_season_number: number;
+  target_show_tmdb_id: number;
+  target_season_number: number;
+}
+
 export interface UserList {
   id: number;
   name: string;
