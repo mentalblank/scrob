@@ -8,6 +8,7 @@
   [![GitHub Contributors](https://img.shields.io/github/contributors/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/graphs/contributors)
   [![GitHub Sponsors](https://img.shields.io/github/sponsors/ellite?style=flat-square)](https://github.com/sponsors/ellite)
   [![Latest Release](https://img.shields.io/github/v/release/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/releases/latest)
+  [![Build](https://github.com/ellite/scrob/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/ellite/scrob/actions/workflows/release.yml)
 </div>
 
 ---
