@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file. This projec
 
 ### Added
 
+#### Error Pages
+- **Custom Error Pages**: Creatd 404 (Not Found) and 500 (Internal Server Error) error pages.
+
 #### Content Filtering
 - **Blocklist**: Dedicated management page for complex filtering with support for genres, keywords, and regexes.
 - **Drop Show Feature**:
@@ -59,6 +62,9 @@ All notable changes to this project will be documented in this file. This projec
 ---
 
 ### Fixed
+
+#### UI/UX
+- **Favicon**: Replaced the Astro favicon assets across all formats (PNG, SVG, ICO, Manifest) with the Scrob logo.
 
 #### Sync & Backend
 - **Plex Library Synchronization**: Implemented pagination chunking of 500 records per page for movie, show, and episode requests to prevent OOM/timeouts on large Plex libraries.
