@@ -410,5 +410,3 @@ You are free to use, modify, and distribute Scrob, provided that any derivative 
 
 - Fork maintainer: [mentalblank](https://github.com/mentalblank)
 - Original author: [henrique.pt](https://henrique.pt)
-- Scrob Landingpage: [scrob.app](https://scrob.app)
-- Join the conversation: [Discord Server](https://discord.gg/anex9GUrPW)
