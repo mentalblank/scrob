@@ -19,10 +19,88 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Build Changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v5
+        with:
+          mode: 'COMMIT'
+          configurationJson: |
+            {
+              "categories": [
+                {
+                  "title": "## Features",
+                  "rules": [
+                    {
+                      "pattern": "^feat(\\([a-z0-9_-]+\\))?:",
+                      "on_property": "title"
+                    }
+                  ]
+                },
+                {
+                  "title": "## Bug Fixes",
+                  "rules": [
+                    {
+                      "pattern": "^fix(\\([a-z0-9_-]+\\))?:",
+                      "on_property": "title"
+                    }
+                  ]
+                },
+                {
+                  "title": "## Refactoring & Maintenance",
+                  "rules": [
+                    {
+                      "pattern": "^(refactor|chore|style)(\\([a-z0-9_-]+\\))?:",
+                      "on_property": "title"
+                    }
+                  ]
+                },
+                {
+                  "title": "## Documentation",
+                  "rules": [
+                    {
+                      "pattern": "^docs(\\([a-z0-9_-]+\\))?:",
+                      "on_property": "title"
+                    }
+                  ]
+                },
+                {
+                  "title": "## Performance Improvements",
+                  "rules": [
+                    {
+                      "pattern": "^perf(\\([a-z0-9_-]+\\))?:",
+                      "on_property": "title"
+                    }
+                  ]
+                },
+                {
+                  "title": "## Tests",
+                  "rules": [
+                    {
+                      "pattern": "^test(\\([a-z0-9_-]+\\))?:",
+                      "on_property": "title"
+                    }
+                  ]
+                },
+                {
+                  "title": "## CI/CD & Build",
+                  "rules": [
+                    {
+                      "pattern": "^(ci|build)(\\([a-z0-9_-]+\\))?:",
+                      "on_property": "title"
+                    }
+                  ]
+                }
+              ],
+              "template": "${{CHANGELOG}}",
+              "empty_template": "No conventional changes found."
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
