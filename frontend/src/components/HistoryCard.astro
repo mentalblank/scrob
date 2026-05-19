@@ -3,13 +3,14 @@ import type { WatchEvent } from "../lib/api";
 
 interface Props {
   event: WatchEvent;
+  use24h?: boolean;
 }
 
-const { event } = Astro.props;
+const { event, use24h = false } = Astro.props;
 const { media, watched_at } = event;
 
-const date = new Date(watched_at);
-const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const date = new Date(watched_at + 'Z');
+const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24h });
 
 const isEpisode = media.type === 'episode';
 const title = isEpisode ? media.title : media.title;

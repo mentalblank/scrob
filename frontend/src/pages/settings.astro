@@ -10,8 +10,7 @@ const [settings, me, connections, scrobbleConnections] = await Promise.all([
   api.auth.getConnections(token!),
   api.auth.getScrobbleConnections(token!),
 ]);
-
-const hasTmdbKey = !!settings.tmdb_api_key;
+const hasTmdbKey = settings.has_effective_tmdb_key;
 const traktConfigured    = !!(settings.trakt_connected || settings.trakt_client_id);
 const radarrConfigured   = !!(settings.radarr_url && settings.radarr_token);
 const sonarrConfigured   = !!(settings.sonarr_url && settings.sonarr_token);
@@ -150,7 +149,13 @@ if (me.totp_enabled) {
                       </div>
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">{conn.type === "plex" ? "X-Plex-Token" : "API Token"}</label>
-                        <input type="password" class="conn-token-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.token} data-conn-id={conn.id} />
+                        <div class="relative">
+                          <input type="password" class="conn-token-input w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.token} data-conn-id={conn.id} />
+                          <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle token visibility">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                          </button>
+                        </div>
                       </div>
                       {conn.type !== "plex" && (
                         <div class="space-y-2">
@@ -326,7 +331,13 @@ if (me.totp_enabled) {
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-token" class="block text-sm font-medium text-zinc-400">Token</label>
-                      <input type="password" id="new-conn-token" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <div class="relative">
+                        <input type="password" id="new-conn-token" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle token visibility">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                        </button>
+                      </div>
                     </div>
                     <div id="new-conn-user-id-row" class="space-y-2">
                       <label for="new-conn-user-id" class="block text-sm font-medium text-zinc-400">User ID</label>
@@ -920,6 +931,22 @@ if (me.totp_enabled) {
                 id="blur-explicit-toggle"
                 class="sr-only peer"
                 checked={settings.blur_explicit !== false}
+              />
+              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            </label>
+          </div>
+          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+            <div>
+              <p class="text-sm font-semibold text-zinc-100 mb-1">24-hour time format</p>
+              <p class="text-xs text-zinc-400">Display watch times in 24-hour format (e.g. 23:31) instead of 12-hour (e.g. 11:31 PM).</p>
+            </div>
+            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+              <input
+                type="checkbox"
+                name="time_format_24h"
+                id="time-format-24h-toggle"
+                class="sr-only peer"
+                checked={settings.time_format_24h !== false}
               />
               <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
             </label>
@@ -2009,6 +2036,8 @@ if (me.totp_enabled) {
               noPull
             );
             if (!ok) return;
+            // Show "queued" state immediately — don't wait for the first poll
+            renderConnProgress(connId, { status: 'pending', job_type: 'pull', processed_items: 0, total_items: 0, updated_at: new Date().toISOString() });
             url = `/api/proxy/sync/connection/${connId}${isPartial ? '?partial=true' : ''}`;
             syncConnId = connId;
           } else if (action === 'push_upstream') {
@@ -2116,6 +2145,7 @@ if (me.totp_enabled) {
             showMessage(data.message || 'Action successful!');
             if (syncConnId) startConnPoller(syncConnId);
           } else {
+            if (syncConnId) renderConnProgress(syncConnId, null);
             throw new Error(data.detail || 'Action failed');
           }
         } catch (e) {
@@ -2762,7 +2792,7 @@ if (me.totp_enabled) {
         const syncKeys = [
           'trakt_sync_watched', 'trakt_sync_ratings', 'trakt_sync_lists', 'trakt_watchlist_split',
           'trakt_push_watched', 'trakt_push_ratings', 'trakt_push_lists',
-          'blur_explicit', 'show_comments', 'show_user_ratings'
+          'blur_explicit', 'time_format_24h', 'show_comments', 'show_user_ratings'
         ] as const;
         const syncPrefs: Record<string, boolean> = {};
         for (const key of syncKeys) {
@@ -2806,6 +2836,11 @@ if (me.totp_enabled) {
           explore_filters: visibilityFilters,
           include_specials: specialsEl ? specialsEl.checked : false
         };
+
+        const timeFormatEl = form.querySelector<HTMLInputElement>('[name="time_format_24h"]');
+        if (timeFormatEl) {
+          document.cookie = `time_format_24h=${timeFormatEl.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
+        }
 
         saves.push(fetch(`/api/proxy/auth/settings`, {
           method: 'PATCH',
@@ -3026,6 +3061,22 @@ if (me.totp_enabled) {
       });
     });
   }
+  // Sync time_format_24h cookie from the server-rendered value on page load.
+  const timeFormatToggle = document.getElementById('time-format-24h-toggle') as HTMLInputElement | null;
+  if (timeFormatToggle) {
+    document.cookie = `time_format_24h=${timeFormatToggle.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
+
+    timeFormatToggle.addEventListener('change', async () => {
+      document.cookie = `time_format_24h=${timeFormatToggle.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
+      const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+      await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ time_format_24h: timeFormatToggle.checked }),
+      });
+    });
+  }
+
   const showCommentsToggle = document.getElementById('show-comments-toggle') as HTMLInputElement | null;
   if (showCommentsToggle) {
     const val = showCommentsToggle.checked ? 'true' : 'false';
@@ -3044,6 +3095,7 @@ if (me.totp_enabled) {
       });
     });
   }
+
   const ratingsToggle = document.getElementById('show-user-ratings-toggle') as HTMLInputElement | null;
   if (ratingsToggle) {
     const val = ratingsToggle.checked ? 'true' : 'false';
@@ -3062,6 +3114,7 @@ if (me.totp_enabled) {
       });
     });
   }
+
   const specialsToggle = document.getElementById('include-specials-toggle') as HTMLInputElement | null;
   if (specialsToggle) {
     specialsToggle.addEventListener('change', async () => {
@@ -3219,10 +3272,36 @@ if (me.totp_enabled) {
           </div>
         ` : '';
 
+        // Group episode warnings by series_name to avoid N identical rows for the same show.
+        // Non-episode warnings and episodes without a series_name are rendered individually.
+        const groupedEpisodeWarnings: Map<string, {count: number, reason: string}> = new Map();
+        const standaloneUnmatched: any[] = [];
+        for (const w of unmatchedWarnings) {
+          if (w.media_type === 'episode' && w.series_name) {
+            const existing = groupedEpisodeWarnings.get(w.series_name);
+            if (existing) {
+              existing.count++;
+            } else {
+              groupedEpisodeWarnings.set(w.series_name, { count: 1, reason: w.reason ?? 'unknown reason' });
+            }
+          } else {
+            standaloneUnmatched.push(w);
+          }
+        }
+
         const renderUnmatched = unmatchedWarnings.length > 0 ? `
           <div class="space-y-1 ${enrichmentWarnings.length > 0 ? 'mt-4 pt-4 border-t border-zinc-800/60' : ''}">
             <p class="text-xs text-zinc-500 mb-2">Items that couldn't be matched to TMDB:</p>
-            ${unmatchedWarnings.map((w: any) => `
+            ${[...groupedEpisodeWarnings.entries()].map(([seriesName, {count, reason}]) => `
+              <div class="flex flex-col gap-0.5 py-1.5 border-b border-zinc-800/60 last:border-0">
+                <div class="min-w-0">
+                  <span class="text-sm text-zinc-200 font-medium">${escapeHtml(seriesName)}</span>
+                  <span class="ml-2 text-xs text-zinc-600">${count} unmatched episode${count !== 1 ? 's' : ''}</span>
+                </div>
+                <span class="text-xs text-zinc-500">${escapeHtml(reason)}</span>
+              </div>
+            `).join('')}
+            ${standaloneUnmatched.map((w: any) => `
               <div class="flex flex-col gap-0.5 py-1.5 border-b border-zinc-800/60 last:border-0">
                 <div class="min-w-0">
                   <span class="text-sm text-zinc-200 font-medium">${escapeHtml(w.title)}</span>

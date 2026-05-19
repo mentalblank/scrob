@@ -1,4 +1,5 @@
 import asyncio
+import re
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -696,6 +697,20 @@ async def sync_items(
                 else:
                     show_id = show_map.get(str(parent_id)) if media_type == MediaType.episode else None
 
+                    # For Jellyfin/Emby episodes whose metadata scraping failed: the item title
+                    # is often the raw filename (e.g. "Show.Name.S02E01"). Try to salvage the
+                    # season/episode numbers from the filename so the item can be stored and
+                    # later enriched (or generate a Remap-capable enrichment warning) instead of
+                    # being silently skipped as unmatched.
+                    if (media_type == MediaType.episode and show_id and not tmdb_id
+                            and (season_num is None or episode_num is None)):
+                        _m = re.search(r'[Ss](\d+)[Ee](\d+)', name or '')
+                        if _m:
+                            if season_num is None:
+                                season_num = int(_m.group(1))
+                            if episode_num is None:
+                                episode_num = int(_m.group(2))
+
                     # Look up existing media from pre-loaded dicts (O(1), no DB query)
                     if media_type == MediaType.episode and show_id:
                         media = media_by_episode.get((show_id, season_num, episode_num))
@@ -749,10 +764,15 @@ async def sync_items(
                                     and season_num is not None
                                     and episode_num is not None
                                 ):
+                                    series_name = (
+                                        item.get("SeriesName") if source in (CollectionSource.jellyfin, CollectionSource.emby)
+                                        else item.get("grandparentTitle")
+                                    ) if media_type == MediaType.episode else None
                                     skipped_warnings.append({
                                         "title": name,
                                         "media_type": media_type.value,
                                         "source_id": source_id,
+                                        **({"series_name": series_name} if series_name else {}),
                                         "reason": "Unmatched on source — no TMDB ID available",
                                     })
                                     stats["skipped"] += 1
@@ -2247,16 +2267,18 @@ async def heal_metadata(
     if not await _get_effective_tmdb_key(db, settings):
         raise HTTPException(status_code=400, detail="TMDB API key required")
 
-    background_tasks.add_task(run_heal, current_user.id, settings.tmdb_api_key)
+    effective_key = await _get_effective_tmdb_key(db, settings)
+    background_tasks.add_task(run_heal, current_user.id, effective_key)
     return {"status": "started", "message": "Metadata heal is running in the background"}
 
 
 async def run_heal(user_id: int, api_key: str):
     from models.show import Show
+    from routers.webhooks import _find_or_create_show
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
         try:
-            # Load all collection media missing poster_path
+            # ── Phase 1: Re-enrich items that have show linkage but missing poster ──
             coll_q = await db.execute(
                 select(Media)
                 .join(Collection, Collection.media_id == Media.id)
@@ -2270,28 +2292,77 @@ async def run_heal(user_id: int, api_key: str):
             movies = [m for m in items if m.media_type == MediaType.movie and m.tmdb_id]
             episodes = [m for m in items if m.media_type == MediaType.episode and m.show_id and m.season_number is not None and m.episode_number is not None]
 
-            if not movies and not episodes:
-                print(f"Heal: nothing to fix for user {user_id}")
-                return
+            if movies or episodes:
+                print(f"Heal: {len(movies)} movies, {len(episodes)} episodes to re-enrich for user {user_id}")
 
-            print(f"Heal: {len(movies)} movies, {len(episodes)} episodes to re-enrich for user {user_id}")
+                show_ids = list({m.show_id for m in episodes})
+                show_tmdb_map: dict[int, int] = {}
+                if show_ids:
+                    shows_q = await db.execute(select(Show).where(Show.id.in_(show_ids)))
+                    for s in shows_q.scalars().all():
+                        if s.tmdb_id:
+                            show_tmdb_map[s.id] = s.tmdb_id
 
-            # Load show tmdb_ids for episodes
-            show_ids = list({m.show_id for m in episodes})
-            show_tmdb_map: dict[int, int] = {}
-            if show_ids:
-                shows_q = await db.execute(select(Show).where(Show.id.in_(show_ids)))
-                for s in shows_q.scalars().all():
-                    if s.tmdb_id:
-                        show_tmdb_map[s.id] = s.tmdb_id
+                to_enrich = [(m, None) for m in movies] + [
+                    (m, show_tmdb_map[m.show_id]) for m in episodes if m.show_id in show_tmdb_map
+                ]
+                await batch_enrich_items(to_enrich, api_key=api_key)
+                await db.commit()
+                print(f"Heal: re-enriched {len(to_enrich)} items for user {user_id}")
+            else:
+                print(f"Heal: nothing to re-enrich for user {user_id}")
 
-            to_enrich = [(m, None) for m in movies] + [
-                (m, show_tmdb_map[m.show_id]) for m in episodes if m.show_id in show_tmdb_map
-            ]
+            # ── Phase 2: Recover orphaned episodes via Jellyfin/Emby ─────────────
+            # Webhook-created episodes may have show_id=None if the show wasn't in
+            # the DB yet. Look them up by their source ID to re-link and enrich them.
+            orphan_q = await db.execute(
+                select(Media, CollectionFile, MediaServerConnection)
+                .join(Collection, Collection.media_id == Media.id)
+                .join(CollectionFile, CollectionFile.collection_id == Collection.id)
+                .join(MediaServerConnection, MediaServerConnection.id == CollectionFile.connection_id)
+                .where(
+                    Collection.user_id == user_id,
+                    Media.media_type == MediaType.episode,
+                    Media.show_id.is_(None),
+                    Media.season_number.isnot(None),
+                    Media.episode_number.isnot(None),
+                    CollectionFile.source.in_([CollectionSource.jellyfin, CollectionSource.emby]),
+                    CollectionFile.connection_id.isnot(None),
+                )
+            )
+            orphan_rows = orphan_q.all()
 
-            await batch_enrich_items(to_enrich, api_key=api_key)
-            await db.commit()
-            print(f"Heal complete for user {user_id}: processed {len(to_enrich)} items")
+            if orphan_rows:
+                recovered = 0
+                seen: set[int] = set()
+                for orphan_media, coll_file, conn in orphan_rows:
+                    if orphan_media.id in seen:
+                        continue
+                    seen.add(orphan_media.id)
+                    try:
+                        item_data = await jellyfin.get_item(conn.url, conn.token, coll_file.source_id)
+                        if not item_data:
+                            continue
+                        series_id = item_data.get("SeriesId")
+                        if not series_id:
+                            continue
+                        series_data = await jellyfin.get_item(conn.url, conn.token, series_id)
+                        if not series_data:
+                            continue
+                        series_tmdb_raw = series_data.get("ProviderIds", {}).get("Tmdb")
+                        if not series_tmdb_raw:
+                            continue
+                        series_tmdb_id = int(series_tmdb_raw)
+                        show = await _find_or_create_show(db, series_tmdb_id, api_key)
+                        orphan_media.show_id = show.id
+                        await enrich_media(orphan_media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+                        recovered += 1
+                    except Exception as e:
+                        print(f"Heal: failed to recover orphan '{orphan_media.title}' (id={orphan_media.id}): {e}")
+                if recovered:
+                    await db.commit()
+                print(f"Heal: recovered {recovered}/{len(seen)} orphaned episode(s) for user {user_id}")
+
         except Exception as e:
             print(f"Heal failed for user {user_id}: {e}")
             import traceback

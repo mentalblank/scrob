@@ -169,6 +169,7 @@ export interface EpisodeDetail {
   in_lists: number[];
   collection_pct: number;
   user_rating?: number | null;
+  play_count?: number;
   cast: CastMember[];
   guest_stars: CastMember[];
   episodes: EpisodeItem[];
@@ -411,6 +412,7 @@ export interface UserSettings {
   blur_explicit: boolean;
   show_comments: boolean;
   show_user_ratings: boolean;
+  time_format_24h: boolean;
 }
 
 export interface MediaServerConnection {
@@ -527,6 +529,7 @@ export interface MediaItem {
   is_blocked?: boolean;
   is_dropped?: boolean;
   user_rating?: number | null;
+  play_count?: number;
   library: {
     resolution: string;
     video_codec: string;

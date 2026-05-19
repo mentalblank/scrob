@@ -6,7 +6,6 @@
   [![Docker Pulls](https://img.shields.io/docker/pulls/mentalblank/scrob?style=flat-square)](https://hub.docker.com/r/mentalblank/scrob)
   [![GitHub Contributors](https://img.shields.io/github/contributors/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/graphs/contributors)
   [![Latest Release](https://img.shields.io/github/v/release/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/releases/latest)
-  
 </div>
 
 ---

@@ -292,7 +292,12 @@ const logoPath = item?.logo_path ?? null;
 
             <!-- Library info -->
             {item.library && (
-              <div class="mb-8 flex flex-wrap gap-2">
+              <div class="mb-4 flex flex-wrap gap-2">
+                {!!item.play_count && (
+                  <span class="inline-flex items-center px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-bold">
+                    {item.play_count} {item.play_count === 1 ? 'Play' : 'Plays'}
+                  </span>
+                )}
                 {[
                   item.library.resolution,
                   item.library.video_codec,

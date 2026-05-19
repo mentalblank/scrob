@@ -109,6 +109,7 @@ class UserSettings(BaseModel):
     blur_explicit: Optional[bool] = None
     show_comments: Optional[bool] = None
     show_user_ratings: Optional[bool] = None
+    time_format_24h: Optional[bool] = None
 
     class Config:
         from_attributes = True
