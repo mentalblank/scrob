@@ -3206,9 +3206,14 @@ if (me.totp_enabled) {
                   ${existing ? `<span class="ml-2 text-xs text-green-500">→ remapped</span>` : ''}
                 </div>
                 <span class="text-xs text-zinc-600 shrink-0 mr-2">${w.affected_episodes} ep${w.affected_episodes !== 1 ? 's' : ''}</span>
-                <button type="button" class="remap-season-btn text-xs px-2.5 py-1 rounded-lg border cursor-pointer transition-colors shrink-0 ${existing ? 'border-green-700/50 text-green-400 hover:bg-green-900/20' : 'bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60'}" ${remapAttr}>
-                  ${existing ? 'Edit remap' : 'Remap'}
-                </button>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <button type="button" class="remap-season-btn text-xs px-2.5 py-1 rounded-lg border cursor-pointer transition-colors ${existing ? 'border-green-700/50 text-green-400 hover:bg-green-900/20' : 'bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60'}" ${remapAttr}>
+                    ${existing ? 'Edit remap' : 'Remap'}
+                  </button>
+                  <a href="/remaps?mode=season&src_tmdb=${w.tmdb_id}&src_season=${w.season}" class="text-xs px-2.5 py-1 rounded-lg border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40" title="Advanced mapping on the overrides page">
+                    Advanced
+                  </a>
+                </div>
               </div>`;
             }).join('')}
           </div>

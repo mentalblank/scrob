@@ -95,26 +95,22 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
           <div class="flex-1 min-w-0 pt-2">
             <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-2">
               <div class="min-w-0">
-                <h1 class="text-3xl md:text-5xl font-black text-zinc-100 mb-2 tracking-tight leading-tight">{episode.title}</h1>
+                <div class="flex items-center gap-3 flex-wrap mb-2">
+                  <h1 class="text-3xl md:text-5xl font-black text-zinc-100 tracking-tight leading-tight">{episode.title}</h1>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button id="rename-episode-btn" class="p-2 text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded-full transition cursor-pointer" data-media-id={episode.id} data-current-title={episode.custom_title || episode.title} title="Set a custom title for this episode">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                    </button>
+                    <a href={`/remaps?mode=ep&src_tmdb=${id}&src_season=${season_number}&src_ep=${episode_number}`} class="p-2 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded-full transition cursor-pointer" title="Remap this episode">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </a>
+                  </div>
+                </div>
                 <div class="flex flex-wrap items-center gap-3">
                   <p class="text-lg text-blue-400 font-bold tracking-wide uppercase">{show?.title}</p>
-                  <div class="flex items-center gap-2">
-                    <span class="px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
-                      S{String(season_number).padStart(2, '0')}E{String(episode_number).padStart(2, '0')}
-                    </span>
-                    
-                    <!-- Quick Actions -->
-                    <div class="flex items-center gap-1.5 ml-2 border-l border-zinc-800 pl-3">
-                      <button id="rename-episode-btn" class="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800/50 rounded-lg text-zinc-400 hover:text-blue-400 transition-all text-[10px] font-bold" data-media-id={episode.id} data-current-title={episode.custom_title || episode.title} title="Rename Episode">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                        Rename
-                      </button>
-                      <a href={`/remaps?mode=ep&src_tmdb=${id}&src_season=${season_number}&src_ep=${episode_number}`} class="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800/50 rounded-lg text-zinc-400 hover:text-indigo-400 transition-all text-[10px] font-bold" title="Remap Episode">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                        Remap
-                      </a>
-                    </div>
-                  </div>
+                  <span class="px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
+                    S{String(season_number).padStart(2, '0')}E{String(episode_number).padStart(2, '0')}
+                  </span>
                 </div>
               </div>
               

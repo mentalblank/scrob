@@ -3207,42 +3207,94 @@ try {
     const params = new URLSearchParams(window.location.search);
     const mode = params.get('mode');
     
-    if (mode === 'ep') {
-      const tmdb = params.get('src_tmdb');
-      const season = params.get('src_season');
-      const ep = params.get('src_ep');
-      
-      if (tmdb) (document.getElementById("ep-src-tmdb") as HTMLInputElement).value = tmdb;
-      if (season) (document.getElementById("ep-src-season") as HTMLInputElement).value = season;
-      if (ep) (document.getElementById("ep-src-episode") as HTMLInputElement).value = ep;
-      
-      openEpModal();
-      // Remove params from URL so refresh doesn't pop it open again
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (mode === 'season') {
+    if (mode === 'season') {
       const tmdb = params.get('src_tmdb');
       const season = params.get('src_season');
       
       if (tmdb) {
-        const searchInput = document.getElementById("search-show") as HTMLInputElement;
-        const searchBtn = document.getElementById("search-btn");
-        if (searchInput && searchBtn) {
-          searchInput.value = tmdb;
-          openModal();
-          // Simulate clicking search to load the show's seasons
-          searchBtn.click();
-          
-          // Wait a tiny bit and select the correct season from the dropdown if provided
-          if (season) {
-            setTimeout(() => {
-              const seasonSelect = document.getElementById("source-season-select") as HTMLSelectElement;
-              if (seasonSelect) {
-                seasonSelect.value = season;
-              }
-            }, 1500); // Give TMDB API time to respond and populate the select box
+        // 1. Open the Season Remap Modal
+        resetModalState();
+        remapModal.classList.remove("opacity-0", "pointer-events-none");
+        
+        // 2. Fetch local shows to see if we can select it from dropdown
+        fetchLocalShows().then(() => {
+          const hasMatchingShow = localShowsList.some(s => s.tmdb_id.toString() === tmdb);
+          if (hasMatchingShow) {
+            // Select show from dropdown
+            sourceShowSelect.value = tmdb;
+            sourceShowSelect.dispatchEvent(new Event("change"));
+            
+            if (season) {
+              // Wait a moment for seasons dropdown to be populated, then select season
+              setTimeout(() => {
+                sourceSeasonSelect.value = season;
+                sourceSeasonSelect.dispatchEvent(new Event("change"));
+              }, 100);
+            }
+          } else {
+            // Toggle to manual mode and load show metadata
+            if (sourceMode === "select") {
+              toggleSourceModeBtn.click();
+            }
+            sourceShowTmdbInput.value = tmdb;
+            if (season) sourceSeasonInput.value = season;
+            sourceShowLookupBtn.click();
           }
-        }
+        });
+
+        // 3. Pre-fill target show search with the same TMDB ID to make remapping easy
+        targetSearchInput.value = tmdb;
+        targetSearchBtn.click();
       }
+      // Remove params from URL so refresh doesn't pop it open again
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (mode === 'ep') {
+      const tmdb = params.get('src_tmdb');
+      const season = params.get('src_season');
+      const ep = params.get('src_ep');
+      
+      if (tmdb) {
+        // 1. Open the Episode Remap Modal
+        openEpModal();
+        
+        // 2. Fetch local shows to see if we can select it from dropdown
+        fetchLocalShows().then(() => {
+          const hasMatchingShow = localShowsList.some(s => s.tmdb_id.toString() === tmdb);
+          if (hasMatchingShow) {
+            // Select show from dropdown
+            epShowSelect.value = tmdb;
+            epShowSelect.dispatchEvent(new Event("change"));
+            
+            if (season) {
+              setTimeout(() => {
+                epSrcSeasonSelect.value = season;
+                epSrcSeasonSelect.dispatchEvent(new Event("change"));
+                
+                if (ep) {
+                  setTimeout(() => {
+                    epSrcEpisodeSelect.value = ep;
+                    epSrcEpisodeSelect.dispatchEvent(new Event("change"));
+                  }, 100);
+                }
+              }, 100);
+            }
+          } else {
+            // Toggle to manual coordinate mode and fill inputs
+            if (epCoordsMode === "dropdown") {
+              epToggleCoordsMode.click();
+            }
+            epSrcTmdbInput.value = tmdb;
+            if (season) epSrcSeasonInput.value = season;
+            if (ep) epSrcEpisodeInput.value = ep;
+            
+            // Dispatch input events
+            epSrcTmdbInput.dispatchEvent(new Event("input"));
+            epSrcSeasonInput.dispatchEvent(new Event("input"));
+            epSrcEpisodeInput.dispatchEvent(new Event("input"));
+          }
+        });
+      }
+      // Remove params from URL so refresh doesn't pop it open again
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
