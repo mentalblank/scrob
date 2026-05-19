@@ -988,6 +988,23 @@ if (me.totp_enabled) {
 
           <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
             <div>
+              <p class="text-sm font-semibold text-zinc-100 mb-1">Media server enrichment</p>
+              <p class="text-xs text-zinc-400">Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.</p>
+            </div>
+            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+              <input
+                type="checkbox"
+                name="media_server_enrichment"
+                id="media-server-enrichment-toggle"
+                class="sr-only peer"
+                checked={settings.preferences?.media_server_enrichment !== false}
+              />
+              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            </label>
+          </div>
+
+          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+            <div>
               <p class="text-sm font-semibold text-zinc-100 mb-1">Include specials in counts</p>
               <p class="text-xs text-zinc-400">Include Specials (Season 0) when calculating show and season watch/collection progress.</p>
             </div>
@@ -2829,13 +2846,18 @@ if (me.totp_enabled) {
         });
 
         const existingPrefs = JSON.parse(appData?.dataset?.preferences || '{}');
-        const specialsEl = form.querySelector<HTMLInputElement>('[name="include_specials"]');
-
+        const specialsEl = document.getElementById('include-specials-toggle') as HTMLInputElement | null;
+        const enrichmentEl = document.getElementById('media-server-enrichment-toggle') as HTMLInputElement | null;
         const updatedPreferences = {
           ...existingPrefs,
           explore_filters: visibilityFilters,
-          include_specials: specialsEl ? specialsEl.checked : false
+          include_specials: specialsEl ? specialsEl.checked : (existingPrefs.include_specials ?? false),
+          media_server_enrichment: enrichmentEl ? enrichmentEl.checked : (existingPrefs.media_server_enrichment ?? true)
         };
+
+        if (appData) {
+          appData.dataset.preferences = JSON.stringify(updatedPreferences);
+        }
 
         const timeFormatEl = form.querySelector<HTMLInputElement>('[name="time_format_24h"]');
         if (timeFormatEl) {
@@ -3112,6 +3134,33 @@ if (me.totp_enabled) {
         headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ show_user_ratings: ratingsToggle.checked }),
       });
+    });
+  }
+
+  const enrichmentToggle = document.getElementById('media-server-enrichment-toggle') as HTMLInputElement | null;
+  if (enrichmentToggle) {
+    enrichmentToggle.addEventListener('change', async () => {
+      const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+      const appData = document.getElementById('app-data');
+      const existingPrefs = JSON.parse(appData?.dataset?.preferences || '{}');
+      const updatedPrefs = {
+        ...existingPrefs,
+        media_server_enrichment: enrichmentToggle.checked
+      };
+
+      if (appData) {
+        appData.dataset.preferences = JSON.stringify(updatedPrefs);
+      }
+
+      await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: updatedPrefs }),
+      });
+
+      if (window.showToast) {
+        window.showToast('Preferences updated', 'success');
+      }
     });
   }
 

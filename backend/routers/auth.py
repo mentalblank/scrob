@@ -384,16 +384,15 @@ async def update_user_settings(
             update_data[field] = await validate_service_url(update_data[field], label)
 
     for field, value in update_data.items():
-        if hasattr(settings, field):
-            if field == "preferences" and value is not None:
-                # Merge preferences bag rather than total overwrite
-                current_prefs = dict(settings.preferences or {})
-                if isinstance(value, dict):
-                    current_prefs.update(value)
-                settings.preferences = current_prefs
-                flag_modified(settings, "preferences")
-            else:
-                setattr(settings, field, value)
+        if field == "preferences" and value is not None:
+            # Merge preferences bag rather than total overwrite
+            current_prefs = dict(settings.preferences or {})
+            if isinstance(value, dict):
+                current_prefs.update(value)
+            settings.preferences = current_prefs
+            flag_modified(settings, "preferences")
+        elif hasattr(settings, field):
+            setattr(settings, field, value)
 
     await db.commit()
     await db.refresh(settings)

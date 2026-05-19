@@ -1375,7 +1375,8 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                     item_guids = plex_item.get("Guid") or []
                     item_tmdb_id = plex_client.extract_tmdb_id(item_guids)
                     item_rating_key = str(plex_item.get("ratingKey", ""))
-                    item_quality = plex_client.extract_quality(plex_item.get("Media", []))
+                    do_enrich = settings.preferences.get("media_server_enrichment", True) if settings and settings.preferences else True
+                    item_quality = plex_client.extract_quality(plex_item.get("Media", [])) if do_enrich else {}
 
                     item_data = {
                         "media_type": "movie" if plex_item.get("type") == "movie" else "episode",
@@ -1422,7 +1423,8 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                 if (not quality.get("resolution") or not quality.get("audio_languages")) and conn:
                     item = await plex_client.get_item(conn.url, conn.token, data["plex_rating_key"])
                     if item:
-                        quality = plex_client.extract_quality(item.get("Media", []))
+                        do_enrich = settings.preferences.get("media_server_enrichment", True) if settings and settings.preferences else True
+                        quality = plex_client.extract_quality(item.get("Media", [])) if do_enrich else {}
                 if media:
                     await _ensure_collection_entry(
                         db, user.id, media.id, CollectionSource.plex, data["plex_rating_key"], quality,
@@ -1450,7 +1452,8 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
                 import core.plex as plex_client
                 item = await plex_client.get_item(conn.url, conn.token, data["plex_rating_key"])
                 if item:
-                    quality = plex_client.extract_quality(item.get("Media", []))
+                    do_enrich = settings.preferences.get("media_server_enrichment", True) if settings and settings.preferences else True
+                    quality = plex_client.extract_quality(item.get("Media", [])) if do_enrich else {}
 
             old_files_result = await db.execute(
                 select(CollectionFile)

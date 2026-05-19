@@ -96,7 +96,10 @@ def get_jellyfin_tmdb_id(provider_ids: dict) -> int | None:
     return int(tid) if tid else None
 
 
-def extract_jellyfin_quality(item: dict) -> dict:
+def extract_jellyfin_quality(item: dict, settings: "UserSettings | None" = None) -> dict:
+    do_enrich = settings.preferences.get("media_server_enrichment", True) if settings and settings.preferences else True
+    if not do_enrich:
+        return {}
     from core.jellyfin import extract_quality
     quality = extract_quality(item.get("MediaStreams", []))
     quality["file_path"] = item.get("Path")
@@ -436,6 +439,7 @@ async def sync_items(
     new_watched_ids: set[int] | None = None,  # accumulated across calls; mutated in-place
     new_ratings: dict[int, float] | None = None,  # accumulated across calls; mutated in-place
     connection_id: int | None = None,
+    settings: "UserSettings | None" = None,
 ) -> list[dict]:  # returns warnings
     print(f"  Syncing {len(items)} {media_type.value}s from {source.value}...")
 
@@ -571,8 +575,8 @@ async def sync_items(
         try:
             async with db.begin_nested():
                 if source in (CollectionSource.jellyfin, CollectionSource.emby):
-                    source_id = str(item.get("Id"))
-                    quality = extract_jellyfin_quality(item)
+                    source_id = item.get("Id")
+                    quality = extract_jellyfin_quality(item, settings=settings)
                     tmdb_id = get_jellyfin_tmdb_id(item.get("ProviderIds", {}))
                     parent_id = item.get("SeriesId")
                     name = item.get("Name")
@@ -580,7 +584,8 @@ async def sync_items(
                     episode_num = item.get("IndexNumber")
                 else:  # Plex
                     source_id = str(item.get("ratingKey"))
-                    quality = plex.extract_quality(item.get("Media", []))
+                    do_enrich = settings.preferences.get("media_server_enrichment", True) if settings and settings.preferences else True
+                    quality = plex.extract_quality(item.get("Media", [])) if do_enrich else {}
                     tmdb_id = plex.extract_tmdb_id(item.get("Guid", []))
                     parent_id = item.get("grandparentRatingKey")
                     name = item.get("title")
@@ -1556,7 +1561,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
                     w = await sync_items(items, MediaType.movie, CollectionSource.plex, db, stats, user_id, job_id, api_key=tmdb_api_key,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
-                        new_watched_ids=_new_watched, new_ratings=_new_ratings, connection_id=conn.id)
+                        new_watched_ids=_new_watched, new_ratings=_new_ratings, connection_id=conn.id, settings=settings)
                     all_warnings.extend(w)
 
                 elif lib_type == "show":
@@ -1669,10 +1674,16 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, connection_id=conn.id,
+                        settings=settings,
                     )
                     all_warnings.extend(w)
 
-            backfilled = await _backfill_plex_languages(user_id, conn.id, p_url, p_token, job_id)
+            do_enrich = settings.preferences.get("media_server_enrichment", True) if settings and settings.preferences else True
+            if do_enrich:
+                backfilled = await _backfill_plex_languages(user_id, conn.id, p_url, p_token, job_id)
+            else:
+                backfilled = 0
+
             if backfilled:
                 print(f"Plex sync job {job_id}: backfilled language data for {backfilled} file(s).")
             print(f"Plex sync job {job_id} completed. Stats: {stats}")
