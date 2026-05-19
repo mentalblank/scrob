@@ -1042,6 +1042,16 @@ export const api = {
 
     nowPlaying: (token: string) =>
       get<{ now_playing: NowPlayingSession[] }>("/history/now-playing", undefined, token),
+
+    getItemEvents: (tmdbId: number, mediaType: string, token: string) =>
+      get<{ events: { id: number; watched_at: string; progress_seconds: number | null; progress_percent: number | null; completed: boolean; play_count: number }[] }>(
+        `/history/item/events?tmdb_id=${tmdbId}&media_type=${mediaType}`,
+        undefined,
+        token
+      ),
+
+    deleteEvent: (eventId: number, token: string) =>
+      del<{ status: string; remaining_count: number }>(`/history/event/${eventId}`, undefined, token),
   },
 
   lists: {

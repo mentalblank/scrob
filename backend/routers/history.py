@@ -592,6 +592,76 @@ async def unwatch_item(
     return {"status": "ok"}
 
 
+@router.get("/item/events")
+async def get_item_watch_events(
+    tmdb_id: int = Query(...),
+    media_type: MediaType = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all watch events for a specific item, sorted by watched_at desc."""
+    media_q = await db.execute(
+        select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+    )
+    media = media_q.scalar_one_or_none()
+    if not media:
+        return {"events": []}
+
+    events_q = await db.execute(
+        select(WatchEvent)
+        .where(WatchEvent.user_id == current_user.id, WatchEvent.media_id == media.id)
+        .order_by(desc(WatchEvent.watched_at))
+    )
+    events = events_q.scalars().all()
+    
+    return {
+        "events": [
+            {
+                "id": e.id,
+                "watched_at": e.watched_at.isoformat(),
+                "progress_seconds": e.progress_seconds,
+                "progress_percent": e.progress_percent,
+                "completed": e.completed,
+                "play_count": e.play_count,
+            }
+            for e in events
+        ]
+    }
+
+
+@router.delete("/event/{event_id}")
+async def delete_watch_event(
+    event_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a specific watch event by ID."""
+    from fastapi import HTTPException
+    event_q = await db.execute(
+        select(WatchEvent).where(WatchEvent.id == event_id, WatchEvent.user_id == current_user.id)
+    )
+    event = event_q.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Watch event not found")
+
+    media_id = event.media_id
+    
+    await db.delete(event)
+    await db.commit()
+
+    # Check if any watch events remain for this media item
+    remaining_q = await db.execute(
+        select(func.count(WatchEvent.id))
+        .where(WatchEvent.user_id == current_user.id, WatchEvent.media_id == media_id)
+    )
+    remaining_count = remaining_q.scalar() or 0
+
+    if remaining_count == 0:
+        await _push_watch_state(db, current_user.id, [media_id], watched=False)
+
+    return {"status": "ok", "remaining_count": remaining_count}
+
+
 @router.post("/season")
 async def mark_season_watched(
     body: SeasonWatchRequest,
