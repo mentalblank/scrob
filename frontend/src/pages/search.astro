@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
 import Pagination from "../components/Pagination.astro";
 import InfiniteScroll from "../components/InfiniteScroll.astro";
+import VisibilityFilters from "../components/VisibilityFilters.astro";
 import { api, type MediaItem, type UserSearchResult } from "../lib/api";
 
 
@@ -105,6 +106,8 @@ const tabs: [string | undefined, string][] = [
         )}
       </div>
     ) : <div></div>}
+    
+    {!isUserSearch && <VisibilityFilters />}
   </div>
 
   {error && (

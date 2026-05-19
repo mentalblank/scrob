@@ -3,7 +3,14 @@ import { api, type ExploreFilters, type VisibilityAction } from "../lib/api";
 
 const { token } = Astro.locals;
 const settings = await api.auth.getSettings(token!);
-const filters: ExploreFilters = settings?.preferences?.explore_filters || {
+const prefs = settings?.preferences || {};
+const isUnified = prefs.unified_filters !== false; // Default to true
+
+// Generate a page ID from the URL
+const pathname = Astro.url.pathname;
+const pageId = pathname.replace(/^\//, '').replace(/\//g, '_') || 'home';
+
+const currentFilters: ExploreFilters = (isUnified ? prefs.explore_filters : prefs[`explore_filters_${pageId}`]) || {
   watched: 'show',
   unwatched: 'show',
   collected: 'show',
@@ -22,7 +29,7 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
 ];
 ---
 
-<div class="relative inline-block" id="visibility-filters-container">
+<div class="relative inline-block" id="visibility-filters-container" data-page-id={pageId} data-is-unified={isUnified ? "true" : "false"}>
   <button
     id="visibility-toggle-btn"
     class="flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 rounded-lg text-sm text-zinc-300 transition-all active:scale-95 cursor-pointer"
@@ -39,7 +46,10 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
     class="hidden absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-72 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden"
   >
     <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
-      <span class="text-xs font-bold text-zinc-400 uppercase tracking-widest">Visibility Filters</span>
+      <div class="flex flex-col">
+        <span class="text-xs font-bold text-zinc-400 uppercase tracking-widest">Visibility Filters</span>
+        {!isUnified && <span class="text-[10px] text-zinc-500 font-medium">Independent for this page</span>}
+      </div>
       <button id="visibility-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
@@ -53,7 +63,7 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
             {['show', 'fade', 'hide'].map((action) => (
               <button
                 data-action={action}
-                class={`px-3 py-1 text-[10px] font-bold uppercase rounded transition-all cursor-pointer ${filters[key] === action ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                class={`px-3 py-1 text-[10px] font-bold uppercase rounded transition-all cursor-pointer ${currentFilters[key] === action ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
               >
                 {action}
               </button>
@@ -74,37 +84,36 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
   </div>
 </div>
 
-<script define:vars={{ initialFilters: filters }}>
+<script define:vars={{ initialFilters: currentFilters }}>
   const container = document.getElementById('visibility-filters-container');
   const btn = document.getElementById('visibility-toggle-btn');
   const popover = document.getElementById('visibility-popover');
   const closeBtn = document.getElementById('visibility-close');
   const resetBtn = document.getElementById('visibility-reset');
   
-  let currentFilters = { ...initialFilters };
+  const pageId = container.dataset.pageId;
+  const isUnified = container.dataset.isUnified === "true";
+
+  let activeFilters = { ...initialFilters };
 
   // Apply initial filters to body
-  Object.entries(currentFilters).forEach(([key, value]) => {
+  Object.entries(activeFilters).forEach(([key, value]) => {
     document.body.setAttribute(`data-v-${key}`, value);
   });
 
   function togglePopover(show) {
     popover.classList.toggle('hidden', !show);
     if (show) {
-      // Small delay to let the DOM update hidden state if needed for accurate measurements
       requestAnimationFrame(() => {
         const rect = popover.getBoundingClientRect();
-        const padding = 16; // 1rem
+        const padding = 16;
         
         if (rect.left < padding) {
-          // If off-screen to the left, align with the left edge of the screen (with padding)
-          // We calculate the offset relative to the parent container
           const containerRect = container.getBoundingClientRect();
           const offset = padding - containerRect.left;
           popover.style.left = `${offset}px`;
           popover.style.right = 'auto';
         } else if (rect.right > window.innerWidth - padding) {
-          // If off-screen to the right, align with the right edge
           popover.style.right = '0';
           popover.style.left = 'auto';
         }
@@ -133,7 +142,6 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
       actionBtn.addEventListener('click', async () => {
         const action = actionBtn.dataset.action;
         
-        // Update UI
         group.querySelectorAll('button').forEach(b => {
           b.classList.remove('bg-blue-600', 'text-white');
           b.classList.add('text-zinc-500', 'hover:text-zinc-300');
@@ -141,11 +149,11 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
         actionBtn.classList.remove('text-zinc-500', 'hover:text-zinc-300');
         actionBtn.classList.add('bg-blue-600', 'text-white');
 
-        // Apply to body
         document.body.setAttribute(`data-v-${key}`, action);
-        currentFilters[key] = action;
+        activeFilters[key] = action;
 
-        // Save to backend
+        const prefKey = isUnified ? 'explore_filters' : `explore_filters_${pageId}`;
+
         try {
           await fetch('/api/proxy/auth/settings', {
             method: 'PATCH',
@@ -155,7 +163,7 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
             },
             body: JSON.stringify({
               preferences: {
-                explore_filters: currentFilters
+                [prefKey]: activeFilters
               }
             })
           });
@@ -176,14 +184,12 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
       unlisted: 'show'
     };
     
-    currentFilters = { ...defaults };
+    activeFilters = { ...defaults };
     
-    // Update body
-    Object.entries(currentFilters).forEach(([key, value]) => {
+    Object.entries(activeFilters).forEach(([key, value]) => {
       document.body.setAttribute(`data-v-${key}`, value);
     });
 
-    // Update UI buttons
     container.querySelectorAll('[data-filter-group]').forEach(group => {
       const key = group.dataset.filterGroup;
       group.querySelectorAll('button').forEach(b => {
@@ -198,7 +204,8 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
       });
     });
 
-    // Save
+    const prefKey = isUnified ? 'explore_filters' : `explore_filters_${pageId}`;
+
     try {
       await fetch('/api/proxy/auth/settings', {
         method: 'PATCH',
@@ -208,7 +215,7 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
         },
         body: JSON.stringify({
           preferences: {
-            explore_filters: currentFilters
+            [prefKey]: activeFilters
           }
         })
       });

@@ -380,6 +380,7 @@ export interface UserPreferences {
   avatar_url: string | null;
   pagination_type?: "infinite_scroll" | "pagination";
   explore_filters?: ExploreFilters;
+  unified_filters?: boolean;
 }
 
 export interface UserSettings {
