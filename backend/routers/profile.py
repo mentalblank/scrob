@@ -453,16 +453,16 @@ async def get_public_profile(
     show_tmdb_ids = list({c.tmdb_id for c in comments_list if c.media_type in ("series", "season", "episode")})
     movie_tmdb_ids = list({c.tmdb_id for c in comments_list if c.media_type == "movie"})
 
-    show_titles: dict[int, tuple[str, str | None]] = {}
+    show_titles: dict[int, tuple[str, str | None, dict | None]] = {}
     movie_titles: dict[int, tuple[str, str | None]] = {}
 
     if show_tmdb_ids:
         sq = await db.execute(
-            select(ShowModel.tmdb_id, ShowModel.title, ShowModel.poster_path)
+            select(ShowModel.tmdb_id, ShowModel.title, ShowModel.poster_path, ShowModel.custom_season_names)
             .where(ShowModel.tmdb_id.in_(show_tmdb_ids))
         )
-        for tmdb_id, title, poster_path in sq.all():
-            show_titles[tmdb_id] = (title, poster_path)
+        for tmdb_id, title, poster_path, custom_season_names in sq.all():
+            show_titles[tmdb_id] = (title, poster_path, custom_season_names)
 
     if movie_tmdb_ids:
         mq = await db.execute(
@@ -475,16 +475,21 @@ async def get_public_profile(
 
     recent_comments = []
     for c in comments_list:
+        season_name = None
         if c.media_type in ("series", "season", "episode"):
             info = show_titles.get(c.tmdb_id)
+            if info and c.season_number is not None:
+                season_name = (info[2] or {}).get(str(c.season_number))
         else:
             info = movie_titles.get(c.tmdb_id)
+
         recent_comments.append({
             "id": c.id,
             "content": c.content,
             "media_type": c.media_type,
             "tmdb_id": c.tmdb_id,
             "season_number": c.season_number,
+            "season_name": season_name,
             "episode_number": c.episode_number,
             "title": info[0] if info else None,
             "poster_path": info[1] if info else None,

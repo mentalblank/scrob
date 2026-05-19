@@ -70,9 +70,9 @@ function commentUrl(item: { media_type: string; tmdb_id: number; season_number: 
   return `/show/${item.tmdb_id}`;
 }
 
-function commentLabel(item: { media_type: string; season_number: number | null; episode_number: number | null; title: string | null }): string {
+function commentLabel(item: { media_type: string; season_number: number | null; season_name?: string | null; episode_number: number | null; title: string | null }): string {
   if (item.media_type === "season" && item.season_number != null)
-    return `${item.title ?? "Unknown"} — Season ${item.season_number}`;
+    return `${item.title ?? "Unknown"} — ${item.season_name || `Season ${item.season_number}`}`;
   if (item.media_type === "episode" && item.season_number != null && item.episode_number != null)
     return `${item.title ?? "Unknown"} — S${String(item.season_number).padStart(2, "0")}E${String(item.episode_number).padStart(2, "0")}`;
   return item.title ?? "Unknown";

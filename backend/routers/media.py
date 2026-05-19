@@ -683,6 +683,7 @@ def format_media(media: Media) -> dict:
         "tagline": media.tagline,
         "status": media.status,
         "season_number": media.season_number,
+        "season_name": (media.show.custom_season_names or {}).get(str(media.season_number)) if (media.show and media.season_number is not None) else None,
         "episode_number": media.episode_number,
         "show_title": (media.show.custom_title or media.show.title) if media.show else None,
         "show_tmdb_id": media.show.tmdb_id if media.show else None,

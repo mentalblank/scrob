@@ -34,7 +34,7 @@ const groupedHistory = history.results.reduce<Record<string, WatchEvent[]>>((acc
       : event.media.title;
   } else if (groupBy === "season") {
     key = event.media.type === 'episode'
-      ? `${event.media.show_title || event.media.title} - Season ${event.media.season_number}`
+      ? `${event.media.show_title || event.media.title} - ${event.media.season_name || `Season ${event.media.season_number}`}`
       : 'Movies';
   } else if (groupBy === "type") {
     key = event.media.type === 'episode' ? 'TV Shows' : 'Movies';

@@ -505,6 +505,7 @@ export interface MediaItem {
   first_air_date?: string | null;
   tmdb_rating?: number | null;
   season_number?: number | null;
+  season_name?: string | null;
   episode_number?: number | null;
   runtime?: number | null;
   genres?: string[];
@@ -734,6 +735,7 @@ export interface ProfileCommentItem {
   media_type: string;
   tmdb_id: number;
   season_number: number | null;
+  season_name: string | null;
   episode_number: number | null;
   title: string | null;
   poster_path: string | null;
