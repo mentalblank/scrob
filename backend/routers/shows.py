@@ -791,8 +791,8 @@ async def get_show_recommendations(
         recs_raw = data.get("recommendations", {}).get("results", [])[:12]
         
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        recs_raw = [res for res in recs_raw if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+        cf = await _get_content_filters(db, current_user.id)
+        recs_raw = [res for res in recs_raw if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
         recommendations = [
             {

@@ -693,6 +693,8 @@ export interface ContentFilters {
   blocked_genres: string[];
   blocked_keywords: string[];
   blocked_regexes: string[];
+  filter_languages: string[];
+  language_filter_mode: "blacklist" | "whitelist";
   available_genres: string[];
 }
 
@@ -1156,5 +1158,7 @@ export const api = {
       put<{ status: string; blocked_keywords: string[] }>("/media/content-filters/keywords", { keywords }, token),
     putRegexes: (regexes: string[], token: string) =>
       put<{ status: string; blocked_regexes: string[] }>("/media/content-filters/regexes", { regexes }, token),
+    putLanguages: (languages: string[], mode: "blacklist" | "whitelist", token: string) =>
+      put<{ status: string; filter_languages: string[]; language_filter_mode: string }>("/media/content-filters/languages", { languages, mode }, token),
   },
 };

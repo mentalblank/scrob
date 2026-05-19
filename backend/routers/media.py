@@ -554,7 +554,7 @@ async def enrich_with_state(
             )
             play_count_map[tid0] = pc_q.scalar() or 0
 
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, user_id)
+    cf = await _get_content_filters(db, user_id)
 
     # --- Apply to items ---
     for item in items:
@@ -593,7 +593,7 @@ async def enrich_with_state(
         # Blocked status: individual or global filter
         is_blocked = tid in blocked_ids.get(t, set())
         if not is_blocked:
-            is_blocked = _is_content_filtered(item, cf_genres, cf_kw, cf_re)
+            is_blocked = _is_content_filtered(item, *cf)
         item["is_blocked"] = is_blocked
         item["is_dropped"] = tid in dropped_ids.get(t, set())
 
@@ -707,6 +707,7 @@ def format_media(media: Media) -> dict:
         "show_poster_path": media.show.poster_path if media.show else None,
         "show_backdrop_path": media.show.backdrop_path if media.show else None,
         "genres": (media.tmdb_data or {}).get("genres", []),
+        "original_language": (media.tmdb_data or {}).get("original_language"),
         "cast": cast[:12],
         "collection": (media.tmdb_data or {}).get("collection"),
         "adult": media.adult,
@@ -952,12 +953,12 @@ async def search_media(
     # Filter out blocked items
     blocked_movies = await _get_blocked_ids(db, current_user.id, MediaType.movie)
     blocked_series = await _get_blocked_ids(db, current_user.id, MediaType.series)
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+    cf = await _get_content_filters(db, current_user.id)
     raw_results = [
         res for res in raw_results
         if not (res.get("media_type") == "movie" and res.get("id") in blocked_movies)
         and not (res.get("media_type") == "tv" and res.get("id") in blocked_series)
-        and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)
+        and not _is_content_filtered(res, *cf)
     ]
 
     # 2. Check which TMDB results are in the local library.
@@ -1100,7 +1101,7 @@ _GENRE_ID_TO_NAME: dict[int, str] = {v: k for k, v in _ALL_GENRE_ID_MAP.items()}
 
 
 async def _get_content_filters(db: AsyncSession, user_id: int, lower: bool = True) -> tuple:
-    """Return (blocked_genre_names, blocked_keywords, blocked_regexes) from user preferences."""
+    """Return (blocked_genre_names, blocked_keywords, blocked_regexes, filter_languages, language_filter_mode) from user preferences."""
     q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = q.scalar_one_or_none()
     prefs: dict = (settings.preferences or {}) if settings else {}
@@ -1109,14 +1110,18 @@ async def _get_content_filters(db: AsyncSession, user_id: int, lower: bool = Tru
     genres = cf.get("blocked_genres", [])
     keywords = cf.get("blocked_keywords", [])
     regexes = cf.get("blocked_regexes", [])
+    languages = cf.get("filter_languages", [])
+    mode = cf.get("language_filter_mode", "blacklist")
 
     if lower:
         return (
             {g.lower() for g in genres},
             [k.lower() for k in keywords],
             regexes,
+            [lang.lower() for lang in languages],
+            mode.lower(),
         )
-    return (genres, keywords, regexes)
+    return (genres, keywords, regexes, languages, mode)
 
 
 def _is_content_filtered(
@@ -1124,9 +1129,22 @@ def _is_content_filtered(
     blocked_genres: set[str],
     blocked_keywords: list[str],
     blocked_regexes: list[str],
+    filter_languages: list[str],
+    language_filter_mode: str,
 ) -> bool:
     """Return True if item should be hidden due to a content filter rule."""
     import re as _re
+
+    if filter_languages:
+        itype = item.get("type")
+        if itype is None or itype in ("movie", "series"):
+            item_lang = (item.get("original_language") or "").lower()
+            if language_filter_mode == "blacklist":
+                if item_lang in filter_languages:
+                    return True
+            elif language_filter_mode == "whitelist":
+                if item_lang and item_lang not in filter_languages:
+                    return True
 
     title = (item.get("title") or item.get("name") or "").lower()
 
@@ -1173,8 +1191,8 @@ async def trending_movies(
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
 
     blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+    cf = await _get_content_filters(db, current_user.id)
+    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
     if not tmdb_results:
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
@@ -1230,8 +1248,8 @@ async def trending_shows(
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
 
     blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+    cf = await _get_content_filters(db, current_user.id)
+    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
     if not tmdb_results:
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
@@ -1286,8 +1304,8 @@ async def on_air_today(
     tmdb_results = data.get("results", [])
 
     blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+    cf = await _get_content_filters(db, current_user.id)
+    tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
     results = [
         {
@@ -1332,7 +1350,7 @@ async def airing_today_collected(
     collected_tmdb_ids: set[int] = {row[0] for row in collected_q.all()}
     
     blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+    cf = await _get_content_filters(db, current_user.id)
     
     # Filter the library IDs first (if they are blocked, don't even bother)
     collected_tmdb_ids = {tid for tid in collected_tmdb_ids if tid not in blocked_ids}
@@ -1365,7 +1383,7 @@ async def airing_today_collected(
     collected_shows = [
         s for s in all_tmdb_shows 
         if s.get("id") in collected_tmdb_ids 
-        and not _is_content_filtered(s, cf_genres, cf_kw, cf_re)
+        and not _is_content_filtered(s, *cf)
     ]
 
     if not collected_shows:
@@ -1673,8 +1691,8 @@ async def get_tmdb_list(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, type)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        results = [r for r in results if r["id"] not in blocked_ids and not _is_content_filtered(r, cf_genres, cf_kw, cf_re)]
+        cf = await _get_content_filters(db, current_user.id)
+        results = [r for r in results if r["id"] not in blocked_ids and not _is_content_filtered(r, *cf)]
 
         tmdb_ids = [res["id"] for res in results]
 
@@ -1819,8 +1837,8 @@ async def now_playing(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+        cf = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
@@ -1844,8 +1862,8 @@ async def trending_trailers(
         movies = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        movies = [m for m in movies if m.get("id") not in blocked_ids and not _is_content_filtered(m, cf_genres, cf_kw, cf_re)][:16]
+        cf = await _get_content_filters(db, current_user.id)
+        movies = [m for m in movies if m.get("id") not in blocked_ids and not _is_content_filtered(m, *cf)][:16]
 
         async def fetch_trailer(movie: dict) -> dict | None:
             try:
@@ -1889,8 +1907,8 @@ async def upcoming_movies(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+        cf = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
@@ -1914,8 +1932,8 @@ async def on_air_this_week(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+        cf = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _show_library_ids(db, current_user.id, ids)
@@ -1947,8 +1965,8 @@ async def hidden_gems(
             results = data.get("results", [])
 
             blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-            cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+            cf = await _get_content_filters(db, current_user.id)
+            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _movie_library_ids(db, current_user.id, ids)
@@ -1964,8 +1982,8 @@ async def hidden_gems(
             results = data.get("results", [])
 
             blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-            cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+            cf = await _get_content_filters(db, current_user.id)
+            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _show_library_ids(db, current_user.id, ids)
@@ -1989,8 +2007,8 @@ async def top_rated_movies(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.movie)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+        cf = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
@@ -2014,8 +2032,8 @@ async def top_rated_shows(
         results = data.get("results", [])
 
         blocked_ids = await _get_blocked_ids(db, current_user.id, MediaType.series)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+        cf = await _get_content_filters(db, current_user.id)
+        results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _show_library_ids(db, current_user.id, ids)
@@ -2128,17 +2146,17 @@ async def for_you(
     # Filter out blocked items and content
     blocked_movies = await _get_blocked_ids(db, current_user.id, MediaType.movie)
     blocked_series = await _get_blocked_ids(db, current_user.id, MediaType.series)
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+    cf = await _get_content_filters(db, current_user.id)
 
     movie_items = _enrich_movie_list(unique_movies, movie_lib)
     show_items = _enrich_show_list(unique_shows, show_lib)
 
     combined = []
     for item in movie_items:
-        if item["tmdb_id"] not in blocked_movies and not _is_content_filtered(item, cf_genres, cf_kw, cf_re):
+        if item["tmdb_id"] not in blocked_movies and not _is_content_filtered(item, *cf):
             combined.append(item)
     for item in show_items:
-        if item["tmdb_id"] not in blocked_series and not _is_content_filtered(item, cf_genres, cf_kw, cf_re):
+        if item["tmdb_id"] not in blocked_series and not _is_content_filtered(item, *cf):
             combined.append(item)
 
     random.shuffle(combined)
@@ -2163,7 +2181,7 @@ async def streaming(
         return {"results": []}
     try:
         blocked_ids = await _get_blocked_ids(db, current_user.id, type)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+        cf = await _get_content_filters(db, current_user.id)
 
         if type == MediaType.movie:
             data = await tmdb.discover_movies(
@@ -2173,7 +2191,7 @@ async def streaming(
             )
             results = data.get("results", [])
             # Filter
-            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
             
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _movie_library_ids(db, current_user.id, ids)
@@ -2186,7 +2204,7 @@ async def streaming(
             )
             results = data.get("results", [])
             # Filter
-            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+            results = [res for res in results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _show_library_ids(db, current_user.id, ids)
@@ -2317,7 +2335,7 @@ async def recommended(
     
     blocked_movies = await _get_blocked_ids(db, current_user.id, MediaType.movie)
     blocked_series = await _get_blocked_ids(db, current_user.id, MediaType.series)
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+    cf = await _get_content_filters(db, current_user.id)
 
 
     if not all_collected_movie_ids and not all_collected_show_ids:
@@ -2386,7 +2404,7 @@ async def recommended(
                 continue
             if not is_show and tmdb_id in blocked_movies:
                 continue
-            if _is_content_filtered(item, cf_genres, cf_kw, cf_re):
+            if _is_content_filtered(item, *cf):
                 continue
 
             if is_show:
@@ -4125,8 +4143,8 @@ async def get_media_recommendations(
         recs_raw = data.get("recommendations", {}).get("results", [])[:12]
         
         blocked_ids = await _get_blocked_ids(db, current_user.id, type)
-        cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
-        recs_raw = [res for res in recs_raw if res.get("id") not in blocked_ids and not _is_content_filtered(res, cf_genres, cf_kw, cf_re)]
+        cf = await _get_content_filters(db, current_user.id)
+        recs_raw = [res for res in recs_raw if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
         recommendations = [
             {
@@ -4205,7 +4223,7 @@ async def pick_for_me(
     
     media_type = MediaType.movie if type == "movie" else MediaType.series
     blocked_ids = await _get_blocked_ids(db, current_user.id, media_type)
-    cf_genres, cf_kw, cf_re = await _get_content_filters(db, current_user.id)
+    cf = await _get_content_filters(db, current_user.id)
 
 
     # ── Collection pool (unwatched) ────────────────────────────────────────
@@ -4231,7 +4249,7 @@ async def pick_for_me(
                 for r in cq.all() if r[0] and r[0] not in watched_ids and r[0] not in blocked_ids
             ]
             # Apply content filtering
-            collection_items = [i for i in collection_items if not _is_content_filtered(i, cf_genres, cf_kw, cf_re)]
+            collection_items = [i for i in collection_items if not _is_content_filtered(i, *cf)]
 
         else:
             cq = await db.execute(
@@ -4255,7 +4273,7 @@ async def pick_for_me(
                 for r in cq.all() if r[0] and r[0] not in watched_ids and r[0] not in blocked_ids
             ]
             # Apply content filtering
-            collection_items = [i for i in collection_items if not _is_content_filtered(i, cf_genres, cf_kw, cf_re)]
+            collection_items = [i for i in collection_items if not _is_content_filtered(i, *cf)]
 
 
     # ── Streaming pool (progressive fallback) ─────────────────────────────
@@ -4294,7 +4312,7 @@ async def pick_for_me(
                         continue
                     for r in res.get("results", []):
                         tid = r.get("id")
-                        if tid and tid not in watched_ids and tid not in blocked_ids and not _is_content_filtered(r, cf_genres, cf_kw, cf_re):
+                        if tid and tid not in watched_ids and tid not in blocked_ids and not _is_content_filtered(r, *cf):
                             streaming_candidates.append(r)
 
 
@@ -4471,11 +4489,13 @@ async def get_content_filters(
     current_user: User = Depends(get_current_user),
 ):
     """Return the user's active content filter rules and the known genre list."""
-    blocked_genres, blocked_keywords, blocked_regexes = await _get_content_filters(db, current_user.id, lower=False)
+    blocked_genres, blocked_keywords, blocked_regexes, filter_languages, language_filter_mode = await _get_content_filters(db, current_user.id, lower=False)
     return {
         "blocked_genres": sorted(blocked_genres),
         "blocked_keywords": blocked_keywords,
         "blocked_regexes": blocked_regexes,
+        "filter_languages": filter_languages,
+        "language_filter_mode": language_filter_mode,
         "available_genres": sorted(set(list(MOVIE_GENRE_IDS.keys()) + list(TV_GENRE_IDS.keys()))),
     }
 
@@ -4488,6 +4508,10 @@ class KeywordFilterRequest(BaseModel):
 
 class RegexFilterRequest(BaseModel):
     regexes: list[str]
+
+class LanguageFilterRequest(BaseModel):
+    languages: list[str]
+    mode: str
 
 
 async def _patch_content_filters(db: AsyncSession, user_id: int, update: dict) -> None:
@@ -4552,4 +4576,22 @@ async def update_regex_filters(
             raise HTTPException(status_code=422, detail=f"Invalid regex '{pat}': {e}")
     await _patch_content_filters(db, current_user.id, {"blocked_regexes": validated})
     return {"status": "ok", "blocked_regexes": validated}
+
+
+@router.put("/content-filters/languages")
+async def update_language_filters(
+    req: LanguageFilterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the language filter list and mode."""
+    cleaned = [lang.strip().lower() for lang in req.languages if lang.strip()]
+    mode = req.mode.strip().lower()
+    if mode not in ("blacklist", "whitelist"):
+        mode = "blacklist"
+    await _patch_content_filters(db, current_user.id, {
+        "filter_languages": cleaned,
+        "language_filter_mode": mode
+    })
+    return {"status": "ok", "filter_languages": cleaned, "language_filter_mode": mode}
 

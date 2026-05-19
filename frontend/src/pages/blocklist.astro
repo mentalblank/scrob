@@ -14,7 +14,7 @@ let blockedItems: MediaItem[] = [];
 let droppedItems: MediaItem[] = [];
 let blockedItemsCount = 0;
 let droppedItemsCount = 0;
-let filters: ContentFilters = { blocked_genres: [], blocked_keywords: [], blocked_regexes: [], available_genres: [] };
+let filters: ContentFilters = { blocked_genres: [], blocked_keywords: [], blocked_regexes: [], filter_languages: [], language_filter_mode: "blacklist", available_genres: [] };
 let error = "";
 
 try {
@@ -61,6 +61,31 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
   "Movies": ["Action","Adventure","Animation","Comedy","Crime","Documentary","Drama","Family","Fantasy","History","Horror","Music","Mystery","Romance","Science Fiction","Thriller","War","Western"],
   "TV": ["Action & Adventure","Animation","Comedy","Crime","Documentary","Drama","Family","Kids","Mystery","News","Reality","Sci-Fi & Fantasy","Soap","Talk","War & Politics","Western"],
 };
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  ja: "Japanese",
+  ko: "Korean",
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
+  zh: "Chinese",
+  hi: "Hindi",
+  ru: "Russian",
+  ar: "Arabic",
+  sv: "Swedish",
+  nl: "Dutch",
+  pl: "Polish",
+  tr: "Turkish",
+  da: "Danish",
+  fi: "Finnish",
+  no: "Norwegian",
+  vi: "Vietnamese",
+  th: "Thai",
+  id: "Indonesian",
+};
 ---
 
 <Base title="Blocklist & Content Filters">
@@ -74,7 +99,7 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
       </a>
       <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">Content Filters</h1>
     </div>
-    <p class="text-zinc-400 ml-12">Block individual titles, entire genres, or keywords from your explore pages.</p>
+    <p class="text-zinc-400 ml-12">Block individual titles, entire genres, or keywords/languages from your explore pages.</p>
   </div>
 
   {error && (
@@ -84,10 +109,11 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
   <!-- Tab Bar -->
   <div class="flex items-center gap-1 p-1 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-fit max-w-full mb-8 overflow-x-auto no-scrollbar">
     {[
-      { id: "items",    label: "Blocked Items",       icon: "M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" },
-      { id: "dropped",  label: "Dropped Shows",       icon: "M19 14l-7 7-7-7" },
-      { id: "genres",   label: "Genre Filters",       icon: "M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17" },
-      { id: "keywords", label: "Keywords & Regex",    icon: "m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" },
+      { id: "items",     label: "Blocked Items",       icon: "M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" },
+      { id: "dropped",   label: "Dropped Shows",       icon: "M19 14l-7 7-7-7" },
+      { id: "genres",    label: "Genre Filters",       icon: "M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17" },
+      { id: "languages", label: "Language Filters",    icon: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-18a8 8 0 1 1 0 16 8 8 0 0 1 0-16z M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" },
+      { id: "keywords",  label: "Keywords & Regex",    icon: "m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" },
     ].map(t => (
       <a
         href={`/blocklist?tab=${t.id}`}
@@ -103,6 +129,9 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
         )}
         {t.id === "genres" && filters.blocked_genres.length > 0 && (
           <span class="ml-1 bg-rose-900/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{filters.blocked_genres.length}</span>
+        )}
+        {t.id === "languages" && (filters.filter_languages || []).length > 0 && (
+          <span class="ml-1 bg-rose-900/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{(filters.filter_languages || []).length}</span>
         )}
         {t.id === "keywords" && (filters.blocked_keywords.length + filters.blocked_regexes.length) > 0 && (
           <span class="ml-1 bg-rose-900/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{filters.blocked_keywords.length + filters.blocked_regexes.length}</span>
@@ -274,6 +303,90 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
         <div id="re-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
       </div>
 
+    </div>
+  )}
+
+  <!-- ── Tab: Language Filters ────────────────────────── -->
+  {tab === "languages" && (
+    <div class="grid md:grid-cols-2 gap-8" id="lang-panel">
+      <div>
+        <h2 class="text-base font-bold text-zinc-100 mb-1">Language Filter Mode</h2>
+        <p class="text-sm text-zinc-400 mb-5">Choose whether to block the selected languages (Blacklist) or only show them (Whitelist).</p>
+        
+        <div class="flex items-center gap-3 p-1.5 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-fit mb-6">
+          <button
+            id="mode-blacklist-btn"
+            data-mode="blacklist"
+            class={`px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
+              (filters.language_filter_mode || "blacklist") === "blacklist"
+                ? "bg-zinc-700 text-zinc-100 shadow-sm"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Blacklist (Exclude)
+          </button>
+          <button
+            id="mode-whitelist-btn"
+            data-mode="whitelist"
+            class={`px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
+              filters.language_filter_mode === "whitelist"
+                ? "bg-zinc-700 text-zinc-100 shadow-sm"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Whitelist (Only Keep)
+          </button>
+        </div>
+
+        <h2 class="text-base font-bold text-zinc-100 mb-1">Languages</h2>
+        <p class="text-sm text-zinc-400 mb-5" id="lang-description">
+          {(filters.language_filter_mode || "blacklist") === "blacklist"
+            ? "Discovery results matching these languages will be hidden."
+            : "Only discovery results matching these languages will be shown."}
+        </p>
+
+        <ul id="lang-list" class="space-y-2 mb-6">
+          {(filters.filter_languages || []).map(lang => (
+            <li class="flex items-center justify-between bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5" data-lang={lang}>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-sm bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded uppercase">{lang}</span>
+                <span class="text-sm text-zinc-200">{LANGUAGE_NAMES[lang] || lang.toUpperCase()}</span>
+              </div>
+              <button data-action="remove-language" data-value={lang} class="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer ml-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </li>
+          ))}
+          {(!filters.filter_languages || filters.filter_languages.length === 0) && (
+            <li id="lang-empty" class="text-sm text-zinc-500 italic py-2">No language filters configured yet.</li>
+          )}
+        </ul>
+
+        <div class="flex flex-col gap-2">
+          <div class="flex gap-2">
+            <select
+              id="lang-select"
+              class="flex-1 bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-xl px-4 py-2.5 text-sm text-zinc-100 focus:outline-none transition-colors"
+            >
+              <option value="">Select a common language...</option>
+              {Object.entries(LANGUAGE_NAMES)
+                .sort((a, b) => a[1].localeCompare(b[1]))
+                .map((entry) => (
+                  <option value={entry[0]}>{entry[1]} ({entry[0].toUpperCase()})</option>
+                ))}
+            </select>
+            <input
+              id="lang-custom-input"
+              type="text"
+              placeholder="Or code (e.g. ja)"
+              class="w-32 bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-xl px-4 py-2.5 text-sm text-zinc-100 focus:outline-none transition-colors font-mono text-center"
+              maxlength="3"
+            />
+            <button id="lang-add-btn" class="px-4 py-2.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-100 text-sm font-bold rounded-xl transition-colors cursor-pointer">Add</button>
+          </div>
+        </div>
+        <div id="lang-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
+      </div>
     </div>
   )}
 </Base>
@@ -497,3 +610,160 @@ const GENRE_CATEGORIES: Record<string, string[]> = {
     reInput?.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('re-add-btn')?.click(); });
   }
 </script>
+
+<script>
+  // ── Language filters ────────────────────────────────────────────────────────
+  const langPanel = document.getElementById('lang-panel');
+  if (langPanel) {
+    const token = (document.getElementById('app-data') as HTMLElement)?.dataset.token;
+    
+    const LANGUAGE_NAMES: Record<string, string> = {
+      en: "English",
+      ja: "Japanese",
+      ko: "Korean",
+      es: "Spanish",
+      fr: "French",
+      de: "German",
+      it: "Italian",
+      pt: "Portuguese",
+      zh: "Chinese",
+      hi: "Hindi",
+      ru: "Russian",
+      ar: "Arabic",
+      sv: "Swedish",
+      nl: "Dutch",
+      pl: "Polish",
+      tr: "Turkish",
+      da: "Danish",
+      fi: "Finnish",
+      no: "Norwegian",
+      vi: "Vietnamese",
+      th: "Thai",
+      id: "Indonesian",
+    };
+
+    function languages(): string[] {
+      return Array.from(document.querySelectorAll('#lang-list li[data-lang]')).map(el => (el as HTMLElement).dataset.lang!);
+    }
+
+    function getActiveMode(): "blacklist" | "whitelist" {
+      const activeBtn = document.querySelector('[id^="mode-"][class*="bg-zinc-700"]') as HTMLElement;
+      return (activeBtn?.dataset.mode || 'blacklist') as "blacklist" | "whitelist";
+    }
+
+    function showStatus(msg: string, ok = true) {
+      const el = document.getElementById('lang-save-status');
+      if (!el) return;
+      el.textContent = msg;
+      el.className = `text-xs mt-2 h-4 ${ok ? 'text-emerald-400' : 'text-red-400'}`;
+      setTimeout(() => { el.textContent = ''; }, 2500);
+    }
+
+    async function saveLanguages(mode?: "blacklist" | "whitelist") {
+      const activeMode = mode || getActiveMode();
+      const currentLangs = languages();
+      try {
+        const res = await fetch('/api/proxy/media/content-filters/languages', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ languages: currentLangs, mode: activeMode }),
+        });
+        if (!res.ok) throw new Error();
+        showStatus('✓ Saved changes');
+      } catch {
+        showStatus('✗ Failed to save', false);
+      }
+    }
+
+    function makeLangItem(lang: string): HTMLLIElement {
+      const name = LANGUAGE_NAMES[lang] || lang.toUpperCase();
+      const li = document.createElement('li');
+      li.className = 'flex items-center justify-between bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5';
+      li.dataset.lang = lang;
+      li.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="font-mono text-sm bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded uppercase">${lang}</span>
+          <span class="text-sm text-zinc-200">${name}</span>
+        </div>
+        <button data-action="remove-language" data-value="${lang}" class="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer ml-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      `;
+      return li;
+    }
+
+    // Toggle Blacklist / Whitelist mode
+    const blacklistBtn = document.getElementById('mode-blacklist-btn')!;
+    const whitelistBtn = document.getElementById('mode-whitelist-btn')!;
+    const description = document.getElementById('lang-description')!;
+
+    async function setMode(mode: "blacklist" | "whitelist") {
+      if (mode === "blacklist") {
+        blacklistBtn.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer bg-zinc-700 text-zinc-100 shadow-sm';
+        whitelistBtn.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-zinc-400 hover:text-zinc-200';
+        description.textContent = 'Discovery results matching these languages will be hidden.';
+      } else {
+        whitelistBtn.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer bg-zinc-700 text-zinc-100 shadow-sm';
+        blacklistBtn.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-zinc-400 hover:text-zinc-200';
+        description.textContent = 'Only discovery results matching these languages will be shown.';
+      }
+      await saveLanguages(mode);
+    }
+
+    blacklistBtn.addEventListener('click', () => setMode('blacklist'));
+    whitelistBtn.addEventListener('click', () => setMode('whitelist'));
+
+    // Add language
+    const customInput = document.getElementById('lang-custom-input') as HTMLInputElement;
+    document.getElementById('lang-add-btn')?.addEventListener('click', async () => {
+      const select = document.getElementById('lang-select') as HTMLSelectElement;
+      
+      let val = customInput.value.trim().toLowerCase();
+      if (!val) {
+        val = select.value;
+      }
+      if (!val) return;
+
+      // Validate lang code
+      if (!/^[a-z]{2,3}$/.test(val)) {
+        showStatus('✗ Language code must be 2 or 3 letters', false);
+        return;
+      }
+
+      if (languages().includes(val)) {
+        showStatus('✗ Language already added', false);
+        return;
+      }
+
+      const list = document.getElementById('lang-list')!;
+      document.getElementById('lang-empty')?.remove();
+      list.appendChild(makeLangItem(val));
+
+      select.value = '';
+      customInput.value = '';
+      await saveLanguages();
+    });
+
+    // Remove language (event delegation)
+    document.addEventListener('click', async (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-action="remove-language"]') as HTMLElement;
+      if (!btn) return;
+      const li = btn.closest('li[data-lang]')!;
+      li.remove();
+      
+      if (!languages().length) {
+        const list = document.getElementById('lang-list')!;
+        const empty = document.createElement('li');
+        empty.id = 'lang-empty';
+        empty.className = 'text-sm text-zinc-500 italic py-2';
+        empty.textContent = 'No language filters configured yet.';
+        list.appendChild(empty);
+      }
+      await saveLanguages();
+    });
+
+    // Enter key to add
+    customInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('lang-add-btn')?.click(); });
+  }
+</script>
+
