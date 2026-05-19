@@ -58,6 +58,9 @@ try {
   } else if (type === "airing_today") {
     const data = await api.media.onAirToday(page, token);
     items = data.results;
+  } else if (type === "airing_today_collected") {
+    const data = await api.media.airingTodayCollected(page, token);
+    items = data.results;
   } else if (type === "search") {
     const q = Astro.url.searchParams.get("q") || "";
     const mediaType = Astro.url.searchParams.get("media_type") || undefined;

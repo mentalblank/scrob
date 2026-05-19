@@ -1295,12 +1295,13 @@ async def on_air_today(
 
 @router.get("/airing-today/collected")
 async def airing_today_collected(
+    page: int = Query(default=1, ge=1),
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """Return shows airing today on TMDB that the user has in their collection."""
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(tmdb_key):
-        return {"results": []}
+        return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
 
     # Collect the user's show TMDB IDs in one query
     collected_q = await db.execute(
@@ -1318,94 +1319,75 @@ async def airing_today_collected(
     # Filter the library IDs first (if they are blocked, don't even bother)
     collected_tmdb_ids = {tid for tid in collected_tmdb_ids if tid not in blocked_ids}
 
-
     if not collected_tmdb_ids:
-        return {"results": []}
+        return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
 
-    # Fetch page 1 to discover total_pages, then fetch remaining pages concurrently
+    # Fetch all shows airing today to filter against collection
+    # We fetch up to 20 pages (400 shows) to ensure we find enough collected shows
     try:
         first = await tmdb.get_on_air_today(page=1, api_key=tmdb_key)
     except Exception as e:
         print(f"Error fetching airing-today from TMDB: {e}")
-        return {"results": []}
-    total_pages = min(first.get("total_pages", 1), 20)  # cap at 20 pages (400 shows)
-    all_shows = list(first.get("results", []))
+        return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
+        
+    total_tmdb_pages = min(first.get("total_pages", 1), 20)
+    all_tmdb_shows = list(first.get("results", []))
 
-    if total_pages > 1:
-        pages = await asyncio.gather(
-            *[tmdb.get_on_air_today(page=p, api_key=tmdb_key) for p in range(2, total_pages + 1)],
+    if total_tmdb_pages > 1:
+        pages_data = await asyncio.gather(
+            *[tmdb.get_on_air_today(page=p, api_key=tmdb_key) for p in range(2, total_tmdb_pages + 1)],
             return_exceptions=True,
         )
-        for page_data in pages:
+        for page_data in pages_data:
             if isinstance(page_data, Exception):
                 continue
-            all_shows.extend(page_data.get("results", []))
+            all_tmdb_shows.extend(page_data.get("results", []))
 
     # Keep only shows in the user's collection and not blocked/filtered
     collected_shows = [
-        s for s in all_shows 
+        s for s in all_tmdb_shows 
         if s.get("id") in collected_tmdb_ids 
         and not _is_content_filtered(s, cf_genres, cf_kw, cf_re)
     ]
 
-
     if not collected_shows:
-        return {"results": []}
+        return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
 
-    # Fetch show details in parallel to get today's episode (last/next_episode_to_air)
-    from datetime import date
-    today = date.today().isoformat()
-    semaphore = asyncio.Semaphore(10)
+    # Paginate the collected shows locally
+    page_size = 20
+    total_results = len(collected_shows)
+    total_pages = (total_results + page_size - 1) // page_size
+    
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    page_shows = collected_shows[start_idx:end_idx]
 
-    async def fetch_episode(show: dict) -> dict:
-        async with semaphore:
-            try:
-                detail = await tmdb.get_show_light(show["id"], api_key=tmdb_key)
-            except Exception:
-                detail = {}
+    if not page_shows:
+        return {"results": [], "page": page, "total_pages": total_pages, "total_results": total_results}
 
-        episode: dict | None = None
-        for candidate in (detail.get("last_episode_to_air"), detail.get("next_episode_to_air")):
-            if candidate and candidate.get("air_date") == today:
-                episode = candidate
-                break
-
-        show_name = show.get("name")
-        if episode:
-            return {
-                "id": None,
-                "tmdb_id": show["id"],
-                "type": "episode",
-                "title": episode.get("name") or show_name,
-                "show_title": show_name,
-                "show_tmdb_id": show["id"],
-                "season_number": episode.get("season_number"),
-                "episode_number": episode.get("episode_number"),
-                "poster_path": tmdb.poster_url(episode.get("still_path"), size="w780")
-                    or tmdb.poster_url(show.get("backdrop_path"), size="w780"),
-                "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
-                "tmdb_rating": show.get("vote_average"),
-                "release_date": episode.get("air_date"),
-                "adult": show.get("adult", False),
-            }
-        return {
+    results = [
+        {
             "id": None,
-            "tmdb_id": show["id"],
+            "tmdb_id": s.get("id"),
             "type": "series",
-            "title": show_name,
-            "poster_path": tmdb.poster_url(show.get("poster_path")),
-            "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
-            "tmdb_rating": show.get("vote_average"),
-            "release_date": show.get("first_air_date"),
-            "adult": show.get("adult", False),
+            "title": s.get("name"),
+            "poster_path": tmdb.poster_url(s.get("poster_path")),
+            "backdrop_path": tmdb.poster_url(s.get("backdrop_path"), size="w780"),
+            "tmdb_rating": s.get("vote_average"),
+            "release_date": s.get("first_air_date"),
         }
-
-    results = list(await asyncio.gather(*[fetch_episode(s) for s in collected_shows]))
+        for s in page_shows
+    ]
     await enrich_with_state(db, current_user.id, results)
     
-    # Filter out dropped shows from index sections
+    # Filter out dropped shows
     filtered = [i for i in results if not i.get("is_dropped")]
-    return {"results": filtered}
+    return {
+        "results": filtered,
+        "page": page,
+        "total_pages": total_pages,
+        "total_results": total_results
+    }
 
 
 @router.get("/recently-added")

@@ -9,6 +9,7 @@ import { api, type MediaItem } from "../lib/api";
 const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
 const page = parseInt(Astro.url.searchParams.get("page") || "1");
+const filter = Astro.url.searchParams.get("filter") || "my-shows";
 
 let data: { results: MediaItem[]; page: number; total_pages: number; total_results: number } = {
   results: [],
@@ -19,16 +20,45 @@ let data: { results: MediaItem[]; page: number; total_pages: number; total_resul
 let error = "";
 
 try {
-  data = await api.media.onAirToday(page, token);
+  if (filter === "all") {
+    data = await api.media.onAirToday(page, token);
+  } else {
+    data = await api.media.airingTodayCollected(page, token);
+  }
 } catch (e: unknown) {
   error = e instanceof Error ? e.message : "Failed to load";
 }
 ---
 
 <Base title={`Airing Today — Page ${page}`}>
-  <div class="mb-8">
-    <h1 class="text-3xl font-bold text-zinc-100 mb-2">Airing Today</h1>
-    <p class="text-zinc-500">TV shows with episodes airing today</p>
+  <div class="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-bold text-zinc-100 mb-2">Airing Today</h1>
+      <p class="text-zinc-500">TV shows with episodes airing today</p>
+    </div>
+
+    <div class="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-xl p-1 w-fit h-fit">
+      <a
+        href="/airing-today?filter=my-shows"
+        class={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors active:scale-95 active:opacity-70 ${
+          filter === "my-shows"
+            ? "bg-blue-600 text-white"
+            : "text-zinc-400 hover:text-zinc-100"
+        }`}
+      >
+        My Shows
+      </a>
+      <a
+        href="/airing-today?filter=all"
+        class={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors active:scale-95 active:opacity-70 ${
+          filter === "all"
+            ? "bg-blue-600 text-white"
+            : "text-zinc-400 hover:text-zinc-100"
+        }`}
+      >
+        All Shows
+      </a>
+    </div>
   </div>
 
   {error && (
@@ -44,7 +74,7 @@ try {
   </div>
 
   <InfiniteScroll
-    type="airing_today"
+    type={filter === "all" ? "airing_today" : "airing_today_collected"}
     currentPage={data.page}
     totalPages={data.total_pages}
   />

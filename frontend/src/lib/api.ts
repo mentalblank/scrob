@@ -932,8 +932,8 @@ export const api = {
     onAirToday: (page: number = 1, token?: string) =>
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/on-air-today", { page }, token),
 
-    airingTodayCollected: (token?: string) =>
-      get<{ results: MediaItem[] }>("/media/airing-today/collected", {}, token),
+    airingTodayCollected: (page: number = 1, token?: string) =>
+      get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/airing-today/collected", { page }, token),
 
     trendingMovies: (page: number = 1, token?: string) =>
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/trending/movies", { page }, token),
