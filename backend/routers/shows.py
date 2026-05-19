@@ -80,29 +80,44 @@ async def get_enriched_show_info(db: AsyncSession, current_user_id: int, series_
     existing_snums = {s.get("season_number") for s in show_info.get("seasons_meta", [])}
     seasons_meta = list(show_info.get("seasons_meta", []))
     
-    for override in season_overrides:
-        s_num = override.target_season_number
-        if s_num not in existing_snums:
+    season_overrides_map = {o.target_season_number: o for o in season_overrides}
+
+    # Update existing seasons or add new ones
+    for s_num, override in season_overrides_map.items():
+        src_show_q = await db.execute(
+            select(ShowModel).where(ShowModel.tmdb_id == override.source_show_tmdb_id)
+        )
+        src_show = src_show_q.scalar_one_or_none()
+        src_season_meta = None
+        if src_show and src_show.tmdb_data:
+            src_seasons = src_show.tmdb_data.get("seasons", [])
+            src_season_meta = next((s for s in src_seasons if s.get("season_number") == override.source_season_number), None)
+        
+        if s_num in existing_snums:
+            # Update existing season
+            for s in seasons_meta:
+                if s.get("season_number") == s_num:
+                    if src_season_meta:
+                        s["poster_path"] = src_season_meta.get("poster_path")
+                        s["overview"] = src_season_meta.get("overview")
+                        s["air_date"] = src_season_meta.get("air_date")
+                        s["name"] = src_season_meta.get("name") or s.get("name")
+                        s["episode_count"] = src_season_meta.get("episode_count", s.get("episode_count", 0))
+                    break
+        else:
+            # Add new season
             poster_path = None
             overview = None
             air_date = None
             name = f"Season {s_num}"
             episode_count = 0
+            if src_season_meta:
+                poster_path = src_season_meta.get("poster_path")
+                overview = src_season_meta.get("overview")
+                air_date = src_season_meta.get("air_date")
+                name = src_season_meta.get("name") or name
+                episode_count = src_season_meta.get("episode_count", 0)
             
-            src_show_q = await db.execute(
-                select(ShowModel).where(ShowModel.tmdb_id == override.source_show_tmdb_id)
-            )
-            src_show = src_show_q.scalar_one_or_none()
-            if src_show and src_show.tmdb_data:
-                src_seasons = src_show.tmdb_data.get("seasons", [])
-                src_season_meta = next((s for s in src_seasons if s.get("season_number") == override.source_season_number), None)
-                if src_season_meta:
-                    poster_path = src_season_meta.get("poster_path")
-                    overview = src_season_meta.get("overview")
-                    air_date = src_season_meta.get("air_date")
-                    name = src_season_meta.get("name") or name
-                    episode_count = src_season_meta.get("episode_count", 0)
-                    
             seasons_meta.append({
                 "season_number": s_num,
                 "name": name,
@@ -111,6 +126,12 @@ async def get_enriched_show_info(db: AsyncSession, current_user_id: int, series_
                 "poster_path": poster_path,
                 "air_date": air_date
             })
+
+    # Ensure all poster paths are absolute URLs
+    for s in seasons_meta:
+        if s.get("poster_path") and not str(s["poster_path"]).startswith("http"):
+            s["poster_path"] = tmdb.poster_url(s["poster_path"])
+
     seasons_meta.sort(key=lambda x: x.get("season_number", 0))
     show_info["seasons_meta"] = seasons_meta
     return show_info
@@ -531,6 +552,24 @@ async def get_show(
         existing_snums = {s.get("season_number") for s in base_seasons_meta}
         season_overrides = {o.target_season_number: o for o in overrides_all if o.target_show_tmdb_id == series_tmdb_id}
 
+        # Update existing seasons with overrides if applicable
+        for s in base_seasons_meta:
+            s_num = s.get("season_number")
+            if s_num in season_overrides:
+                override = season_overrides[s_num]
+                src_show_q = await db.execute(
+                    select(ShowModel).where(ShowModel.tmdb_id == override.source_show_tmdb_id)
+                )
+                src_show = src_show_q.scalar_one_or_none()
+                if src_show and src_show.tmdb_data:
+                    src_seasons = src_show.tmdb_data.get("seasons", [])
+                    src_season_meta = next((s for s in src_seasons if s.get("season_number") == override.source_season_number), None)
+                    if src_season_meta:
+                        s["poster_path"] = src_season_meta.get("poster_path")
+                        s["overview"] = src_season_meta.get("overview")
+                        s["air_date"] = src_season_meta.get("air_date")
+                        s["name"] = src_season_meta.get("name") or s.get("name")
+
         for s_num in seasons.keys():
             if s_num not in existing_snums:
                 override = season_overrides.get(s_num)
@@ -570,6 +609,7 @@ async def get_show(
                 "name": custom_names.get(str(s["season_number"]), s.get("name")),
                 "tmdb_season_id": tmdb_season_map.get(s["season_number"], {}).get("id"),
                 "tmdb_rating": tmdb_season_map.get(s["season_number"], {}).get("vote_average"),
+                "poster_path": tmdb.poster_url(s.get("poster_path")) if s.get("poster_path") and not str(s.get("poster_path")).startswith("http") else s.get("poster_path")
             }
             for s in base_seasons_meta
         ]
@@ -876,6 +916,16 @@ async def get_show_season(
 
             show_info = await get_enriched_show_info(db, current_user.id, series_tmdb_id, show_info)
 
+            source_backdrop = None
+            if season_override:
+                try:
+                    # Fetch source show images to get the correct backdrop for the remapped season
+                    user_lang = await get_user_content_language(db, current_user.id)
+                    src_show_images = await tmdb.get_tv_images(query_show_tmdb_id, api_key=api_key)
+                    source_backdrop = tmdb.pick_image(src_show_images.get("backdrops", []), preferred_lang=user_lang, size="original")
+                except Exception:
+                    pass
+
             if season_override:
                 tmdb_data = dict(tmdb_data)
                 tmdb_data["season_number"] = season_number
@@ -1124,9 +1174,9 @@ async def get_show_season(
                 "name": (show.custom_season_names or {}).get(str(season_number)) or tmdb_data.get("name") if show else tmdb_data.get("name"),
                 "overview": tmdb_data.get("overview"),
                 "poster_path": tmdb.poster_url(tmdb_data.get("poster_path")),
-                "backdrop_path": tmdb.poster_url(
+                "backdrop_path": source_backdrop or tmdb.poster_url(
                     tmdb_data.get("backdrop_path"), size="w1280"
-                ),
+                ) or show_info.get("backdrop_path"),
                 "air_date": tmdb_data.get("air_date"),
                 "tmdb_rating": tmdb_data.get("vote_average"),
                 "episodes": episodes,
@@ -1290,6 +1340,16 @@ async def get_episode_detail(
             ep_data = dict(ep_data)
             ep_data["season_number"] = season_number
             ep_data["episode_number"] = episode_number
+            
+            try:
+                # Fetch source show images to get the correct backdrop for the remapped episode
+                user_lang = await get_user_content_language(db, current_user.id)
+                src_show_images = await tmdb.get_tv_images(query_show_tmdb_id, api_key=api_key)
+                source_backdrop = tmdb.pick_image(src_show_images.get("backdrops", []), preferred_lang=user_lang, size="original")
+                if source_backdrop:
+                    show_info["backdrop_path"] = source_backdrop
+            except Exception:
+                pass
 
         ep_tmdb_id = ep_data.get("id")
             
