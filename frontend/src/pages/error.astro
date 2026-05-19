@@ -1,0 +1,82 @@
+---
+import Base from "../layouts/Base.astro";
+import ErrorDisplay from "../components/ErrorDisplay.astro";
+
+export const prerender = false;
+
+Astro.response.headers.set("Cache-Control", "no-store");
+
+const codeParam = Astro.url.searchParams.get("code") ?? "500";
+const titleParam = Astro.url.searchParams.get("title");
+const messageParam = Astro.url.searchParams.get("message");
+
+const code = Number(codeParam) || 500;
+
+const errorMap: Record<number, { title: string; message: string; glowColor: 'blue' | 'red' | 'purple' | 'amber' | 'green'; gradientClasses: string; showReload: boolean }> = {
+  400: {
+    title: "Bad Script!",
+    message: "The server read the script but couldn't follow the plot.",
+    glowColor: "amber",
+    gradientClasses: "from-amber-500 via-orange-400 to-red-500",
+    showReload: false,
+  },
+  401: {
+    title: "Ticket Expired!",
+    message: "Your ticket for this showing has expired. Please log in again to continue scrobbling.",
+    glowColor: "red",
+    gradientClasses: "from-red-500 via-rose-400 to-pink-500",
+    showReload: false,
+  },
+  403: {
+    title: "Backstage Access Only!",
+    message: "You've stumbled into off-limits territory! This area is strictly for cast and crew.",
+    glowColor: "purple",
+    gradientClasses: "from-purple-500 via-indigo-400 to-blue-500",
+    showReload: false,
+  },
+  404: {
+    title: "This Scene Was Cut!",
+    message: "Oops! The media or page you are looking for has scrobbled away. It might have been deleted, renamed, or never existed.",
+    glowColor: "blue",
+    gradientClasses: "from-blue-500 via-indigo-400 to-purple-500",
+    showReload: false,
+  },
+  422: {
+    title: "Plot Hole Found!",
+    message: "The inputs for this scrobble didn't match the script.",
+    glowColor: "amber",
+    gradientClasses: "from-yellow-500 via-amber-400 to-orange-500",
+    showReload: false,
+  },
+  500: {
+    title: "Projector Malfunction!",
+    message: "The projector caught fire! An unexpected error interrupted the broadcast.",
+    glowColor: "red",
+    gradientClasses: "from-red-500 via-orange-400 to-amber-500",
+    showReload: true,
+  },
+};
+
+const defaultError = errorMap[code] ?? {
+  title: "Static on the Line!",
+  message: "We're experiencing unexpected interference. Please stay tuned and try again later.",
+  glowColor: "blue",
+  gradientClasses: "from-blue-500 via-teal-400 to-green-500",
+  showReload: true,
+};
+
+const title = titleParam ?? defaultError.title;
+const message = messageParam ?? defaultError.message;
+const { glowColor, gradientClasses, showReload } = defaultError;
+---
+
+<Base title={`${code} - ${title}`}>
+  <ErrorDisplay
+    code={code}
+    title={title}
+    message={message}
+    glowColor={glowColor}
+    gradientClasses={gradientClasses}
+    showReload={showReload}
+  />
+</Base>
