@@ -365,7 +365,7 @@ try {
                               >
                                 
                                 <!-- Bulk Select Checkbox + Source coordinates -->
-                                <div class="flex items-center gap-4 w-full lg:w-2/5 min-w-0">
+                                <div class="flex items-center gap-3.5 w-full lg:w-[42%] min-w-0">
                                   <input 
                                     type="checkbox" 
                                     class="override-row-checkbox rounded border-zinc-700 bg-zinc-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4 shrink-0" 
@@ -376,10 +376,10 @@ try {
                                   <div class="min-w-0 flex-1">
                                     <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider block">Source Episode</span>
                                     <div class="flex items-center gap-2 mt-0.5 min-w-0">
-                                      <span class="px-2 py-0.5 bg-zinc-800 border border-zinc-750 rounded-md text-[10px] font-bold text-zinc-300 shrink-0">
+                                      <span class="px-2 py-0.5 bg-zinc-800 border border-zinc-700/80 rounded-md text-[10px] font-mono font-bold text-zinc-305 shrink-0">
                                         S{override.source_season_number.toString().padStart(2, '0')}E{override.source_episode_number.toString().padStart(2, '0')}
                                       </span>
-                                      <span class="text-xs text-zinc-400 font-medium truncate" title={override.source_episode_title}>
+                                      <span class="text-xs text-zinc-300 font-semibold truncate" title={override.source_episode_title}>
                                         {override.source_episode_title || "Unknown Episode"}
                                       </span>
                                     </div>
@@ -387,50 +387,56 @@ try {
                                 </div>
 
                                 <!-- Arrow Indicator -->
-                                <div class="flex items-center justify-center shrink-0">
-                                  <div class="w-8 h-8 rounded-full bg-zinc-950 border border-zinc-850 flex items-center justify-center text-indigo-500 shadow-md">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                <div class="hidden lg:flex items-center justify-center shrink-0">
+                                  <div class="w-8 h-8 rounded-full bg-zinc-950/80 border border-zinc-800/80 flex items-center justify-center text-indigo-400/80 shadow-inner">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                                   </div>
                                 </div>
 
                                 <!-- Target coordinates -->
-                                <div class="flex items-center gap-4 w-full lg:w-2/5 min-w-0">
-                                  <div class="w-10 h-15 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm hidden sm:block">
-                                    {override.target_show_poster_path ? (
-                                      <img src={override.target_show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
-                                    ) : (
-                                      <div class="w-full h-full flex items-center justify-center text-[9px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
-                                    )}
-                                  </div>
+                                <div class="flex items-center gap-3.5 w-full lg:w-[42%] min-w-0 lg:pl-2">
+                                  {override.source_show_tmdb_id !== override.target_show_tmdb_id && (
+                                    <div class="w-7 h-10 rounded overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm hidden sm:block">
+                                      {override.target_show_poster_path ? (
+                                        <img src={override.target_show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
+                                      ) : (
+                                        <div class="w-full h-full flex items-center justify-center text-[7px] text-zinc-650 font-bold bg-zinc-900">NO ART</div>
+                                      )}
+                                    </div>
+                                  )}
                                   <div class="min-w-0 flex-1">
                                     <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider block">Target Episode</span>
                                     <div class="flex items-center gap-2 mt-0.5 min-w-0">
-                                      <span class="px-2 py-0.5 bg-indigo-950/40 border border-indigo-900/30 rounded-md text-[10px] font-bold text-indigo-400 shrink-0">
+                                      <span class="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded-md text-[10px] font-mono font-bold text-indigo-400 shrink-0">
                                         S{override.target_season_number.toString().padStart(2, '0')}E{override.target_episode_number.toString().padStart(2, '0')}
                                       </span>
-                                      <span class="text-xs text-zinc-450 font-medium truncate" title={override.target_episode_title}>
+                                      <span class="text-xs text-zinc-350 font-semibold truncate" title={override.target_episode_title}>
                                         {override.target_episode_title || "Unknown Episode"}
                                       </span>
                                     </div>
+                                    {override.source_show_tmdb_id !== override.target_show_tmdb_id && (
+                                      <span class="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-black mt-1 block w-fit truncate max-w-full" title={override.target_show_title}>
+                                        Target Show: {override.target_show_title}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
 
                                 <!-- Actions -->
-                                <div class="flex items-center gap-2 w-full lg:w-auto justify-end shrink-0 border-t border-zinc-850 lg:border-t-0 pt-4 lg:pt-0">
-                                  <button class="edit-ep-btn flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" data-src-tmdb={override.source_show_tmdb_id} data-src-season={override.source_season_number} data-src-ep={override.source_episode_number} data-tgt-tmdb={override.target_show_tmdb_id} data-tgt-season={override.target_season_number} data-tgt-ep={override.target_episode_number} title="Edit override">
-                                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                                <div class="flex items-center gap-1.5 w-full lg:w-auto justify-end shrink-0 border-t border-zinc-850 lg:border-t-0 pt-3 lg:pt-0">
+                                  <button class="edit-ep-btn flex items-center gap-1 px-2.5 py-1.5 bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800/80 hover:border-zinc-700 rounded-xl text-zinc-400 hover:text-blue-400 active:scale-95 text-[11px] font-bold transition-all cursor-pointer shadow-sm" data-src-tmdb={override.source_show_tmdb_id} data-src-season={override.source_season_number} data-src-ep={override.source_episode_number} data-tgt-tmdb={override.target_show_tmdb_id} data-tgt-season={override.target_season_number} data-tgt-ep={override.target_episode_number} title="Edit override">
+                                    <svg class="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                                     Edit
                                   </button>
-                                  <button data-ep-apply-id={override.id} class="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" title="Re-apply override & fetch TMDB metadata">
-                                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                                  <button data-ep-apply-id={override.id} class="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800/80 hover:border-zinc-700 rounded-xl text-zinc-400 hover:text-emerald-400 active:scale-95 text-[11px] font-bold transition-all cursor-pointer shadow-sm" title="Re-apply override & fetch TMDB metadata">
+                                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
                                     Apply
                                   </button>
-                                  <button data-ep-delete-id={override.id} class="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/40 text-rose-300 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95" title="Delete override">
-                                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                                  <button data-ep-delete-id={override.id} class="flex items-center gap-1 px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 hover:border-rose-500/30 text-rose-400 active:scale-95 text-[11px] font-bold transition-all cursor-pointer shadow-sm" title="Delete override">
+                                    <svg class="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
                                     Delete
                                   </button>
                                 </div>
-
                               </div>
                             ))}
                           </div>
