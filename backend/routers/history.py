@@ -342,7 +342,7 @@ async def delete_continue_watching(
         media_q = await db.execute(
             select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
         )
-        resolved_media_id = media_q.scalar_one_or_none()
+        resolved_media_id = media_q.scalars().first()
         if not resolved_media_id:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Media not found")
@@ -522,7 +522,7 @@ async def mark_as_watched(
         Media.tmdb_id == event_in.tmdb_id, Media.media_type == event_in.media_type
     )
     result = await db.execute(query)
-    media = result.scalar_one_or_none()
+    media = result.scalars().first()
 
     # 2. If not, create Media record from TMDB
     if not media:
@@ -591,24 +591,23 @@ async def unwatch_item(
 
     if tmdb_id:
         media_q = await db.execute(
-            select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
         )
+        media_ids = media_q.scalars().all()
     else:
-        media_q = await db.execute(
-            select(Media).where(Media.id == media_id, Media.media_type == media_type)
-        )
+        media_ids = [media_id]
     
-    media = media_q.scalar_one_or_none()
-    if not media:
+    if not media_ids:
         return {"status": "ok", "count": 0}
+
     await db.execute(
         delete(WatchEvent).where(
             WatchEvent.user_id == current_user.id,
-            WatchEvent.media_id == media.id,
+            WatchEvent.media_id.in_(media_ids),
         )
     )
     await db.commit()
-    await _push_watch_state(db, current_user.id, [media.id], watched=False)
+    await _push_watch_state(db, current_user.id, media_ids, watched=False)
     return {"status": "ok"}
 
 
@@ -621,15 +620,15 @@ async def get_item_watch_events(
 ):
     """Get all watch events for a specific item, sorted by watched_at desc."""
     media_q = await db.execute(
-        select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+        select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
     )
-    media = media_q.scalar_one_or_none()
-    if not media:
+    media_ids = media_q.scalars().all()
+    if not media_ids:
         return {"events": []}
 
     events_q = await db.execute(
         select(WatchEvent)
-        .where(WatchEvent.user_id == current_user.id, WatchEvent.media_id == media.id)
+        .where(WatchEvent.user_id == current_user.id, WatchEvent.media_id.in_(media_ids))
         .order_by(desc(WatchEvent.watched_at))
     )
     events = events_q.scalars().all()
@@ -1024,7 +1023,7 @@ async def _get_or_create_media_for_session(
     result = await db.execute(
         select(Media).where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
     )
-    media = result.scalar_one_or_none()
+    media = result.scalars().first()
     if media:
         return media
 

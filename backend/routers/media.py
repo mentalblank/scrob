@@ -4322,7 +4322,7 @@ async def pick_for_me(
         m_res = await db.execute(
             select(Media).where(Media.tmdb_id == pick["tmdb_id"], Media.media_type == MediaType.movie)
         )
-        local_media = m_res.scalar_one_or_none()
+        local_media = m_res.scalars().first()
     else:
         s_res = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == pick["tmdb_id"]))
         local_show = s_res.scalar_one_or_none()

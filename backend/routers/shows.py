@@ -460,7 +460,7 @@ async def get_show(
         show_media_q = await db.execute(
             select(Media).where(Media.tmdb_id == series_tmdb_id, Media.media_type == MediaType.series)
         )
-        show_media = show_media_q.scalar_one_or_none()
+        show_media = show_media_q.scalars().first()
         if show_media and not show_media.adult and (tmdb_extra or {}).get("adult", False):
             show_media.adult = True
             await db.commit()
@@ -1156,7 +1156,7 @@ async def get_show_season(
             show_media_q = await db.execute(
                 select(Media).where(Media.tmdb_id == series_tmdb_id, Media.media_type == MediaType.series)
             )
-            show_media = show_media_q.scalar_one_or_none()
+            show_media = show_media_q.scalars().first()
             if show_media:
                 rating_q = await db.execute(
                     select(Rating.rating).where(
