@@ -1034,8 +1034,15 @@ export const api = {
     unmarkShowWatched: (seriesTmdbId: number, token: string) =>
       del<{ status: string }>(`/history/show-all?series_tmdb_id=${seriesTmdbId}`, token),
 
-    continueWatching: (token?: string) =>
-      get<{ continue_watching: ContinueWatchingItem[] }>("/history/continue-watching", undefined, token),
+    continueWatching: (params?: { page?: number; page_size?: number } | string, token?: string) => {
+      const finalParams = typeof params === "object" ? params : undefined;
+      const finalToken = typeof params === "string" ? params : token;
+      return get<{ continue_watching: ContinueWatchingItem[]; page: number; total_pages: number; total_results: number }>(
+        "/history/continue-watching",
+        finalParams as any,
+        finalToken
+      );
+    },
 
     deleteProgress: (tmdbId: number, mediaType: string, token: string) =>
       del<{ status: string }>(`/history/continue-watching?tmdb_id=${tmdbId}&media_type=${mediaType}`, token),

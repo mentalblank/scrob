@@ -234,6 +234,8 @@ async def get_now_playing(
 
 @router.get("/continue-watching")
 async def get_continue_watching(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -246,6 +248,14 @@ async def get_continue_watching(
     )
     dropped_tmdb_ids = {r[0] for r in dropped_q.all()}
 
+    base_query = (
+        select(func.count(PlaybackProgress.id))
+        .select_from(PlaybackProgress)
+        .join(Media, Media.id == PlaybackProgress.media_id)
+        .outerjoin(Show, Show.id == Media.show_id)
+        .where(PlaybackProgress.user_id == current_user.id)
+    )
+
     query = (
         select(PlaybackProgress, Media)
         .join(Media, Media.id == PlaybackProgress.media_id)
@@ -255,23 +265,36 @@ async def get_continue_watching(
     )
 
     if dropped_tmdb_ids:
-        query = query.where(
-            or_(
-                Media.media_type != MediaType.episode,
-                Show.tmdb_id.not_in(dropped_tmdb_ids)
-            )
+        exclude_filter = or_(
+            Media.media_type != MediaType.episode,
+            Show.tmdb_id.not_in(dropped_tmdb_ids)
         )
+        base_query = base_query.where(exclude_filter)
+        query = query.where(exclude_filter)
 
+    total_result = await db.execute(base_query)
+    total_count = total_result.scalar_one()
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+
+    offset = (page - 1) * page_size
     result = await db.execute(
         query
         .order_by(desc(PlaybackProgress.updated_at))
-        .limit(20)
+        .offset(offset)
+        .limit(page_size)
     )
     rows = result.all()
     items = [format_event(e, m) for e, m in rows]
     if items:
         await enrich_with_state(db, current_user.id, [i["media"] for i in items])
-    return {"continue_watching": items}
+
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total_results": total_count,
+        "total_pages": total_pages,
+        "continue_watching": items,
+    }
 
 
 @router.delete("/continue-watching")

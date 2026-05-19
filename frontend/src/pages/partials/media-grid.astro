@@ -1,6 +1,7 @@
 ---
 import MediaCard from "../../components/MediaCard.astro";
 import HistoryCard from "../../components/HistoryCard.astro";
+import ContinueWatchingCard from "../../components/ContinueWatchingCard.astro";
 import { api } from "../../lib/api";
 
 export const prerender = false;
@@ -11,6 +12,7 @@ const type = Astro.url.searchParams.get("type");
 
 let items = [];
 let isHistory = false;
+let isContinueWatching = false;
 
 try {
   if (type === "shows") {
@@ -106,13 +108,19 @@ try {
     }, token);
     items = data.results;
     isHistory = true;
+  } else if (type === "continue_watching") {
+    const data = await api.history.continueWatching({ page, page_size: 24 }, token);
+    items = data.continue_watching;
+    isContinueWatching = true;
   }
 } catch (e) {
   console.error(`Partial fetch failed for ${type}:`, e);
 }
 ---
 
-{isHistory ? (
+{isContinueWatching ? (
+  items.map((item) => <ContinueWatchingCard item={item} />)
+) : isHistory ? (
   items.map((event) => <HistoryCard event={event} />)
 ) : (
   items.map((item) => <MediaCard item={item} />)
