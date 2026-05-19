@@ -82,23 +82,9 @@ const showProgress = !event.completed && progressPct > 0;
         </button>
       </div>
 
-      {sxe && (
-        <div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">
-          {sxe}
-        </div>
-      )}
-
       {showProgress && (
         <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
           <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
-        </div>
-      )}
-      
-      {event.completed && (
-        <div class="absolute bottom-2 right-2 bg-green-500/80 backdrop-blur-md p-1 rounded-full shadow-lg border border-green-400/30">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-white">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
         </div>
       )}
     </div>

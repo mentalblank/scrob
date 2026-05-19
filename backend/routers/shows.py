@@ -8,6 +8,7 @@ from models.events import WatchEvent
 from models.collection import Collection, CollectionFile
 from models.ratings import Rating
 from models.lists import List as UserList, ListItem
+from models.playback_progress import PlaybackProgress
 
 from db import get_db
 from models.media import Media
@@ -1071,6 +1072,17 @@ async def get_show_season(
                     for ep_tmdb_id, list_id in ep_lists_q.all():
                         episode_in_lists.setdefault(ep_tmdb_id, []).append(list_id)
 
+            # Fetch active playback progress per episode
+            episode_progress: dict[int, float] = {}
+            if local_media_ids:
+                progress_q = await db.execute(
+                    select(PlaybackProgress.media_id, PlaybackProgress.progress_percent).where(
+                        PlaybackProgress.user_id == current_user.id,
+                        PlaybackProgress.media_id.in_(local_media_ids)
+                    )
+                )
+                episode_progress = {r[0]: r[1] for r in progress_q.all()}
+
             episodes = []
             seen_ep_nums = set()
             for ep in tmdb_episodes:
@@ -1095,6 +1107,12 @@ async def get_show_season(
                         user_rating = episode_ratings[m.id]
                         break
 
+                user_progress = None
+                for m in matching_media:
+                    if m.id in episode_progress:
+                        user_progress = min(100, max(0, int(episode_progress[m.id] * 100)))
+                        break
+
                 episodes.append(
                     {
                         "id": local_media_id,
@@ -1114,6 +1132,7 @@ async def get_show_season(
                         "watched": is_watched,
                         "user_rating": user_rating,
                         "in_lists": episode_in_lists.get(ep_tmdb_id, []) if ep_tmdb_id else [],
+                        "progress_percent": user_progress,
                     }
                 )
 
@@ -1127,6 +1146,10 @@ async def get_show_season(
                 is_watched = local_media_id in watched_media_ids
                 is_in_library = local_media_id in collected_media_ids
                 user_rating = episode_ratings.get(local_media_id)
+
+                user_progress = None
+                if local_media_id in episode_progress:
+                    user_progress = min(100, max(0, int(episode_progress[local_media_id] * 100)))
 
                 episodes.append(
                     {
@@ -1145,6 +1168,7 @@ async def get_show_season(
                         "watched": is_watched,
                         "user_rating": user_rating,
                         "in_lists": [],
+                        "progress_percent": user_progress,
                     }
                 )
 

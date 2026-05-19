@@ -29,6 +29,8 @@ All notable changes to this project will be documented in this file. This projec
 ---
 
 ### Changed
+- **Continue Watching Cards**: Replaced the vertical card design with landscape episode cards across homepage and continue-watching lists.
+- **Season Episode Progress**: Integrated database-backed watch progress bars directly onto season episode cards.
 - **Auto-Pick Recommendations**: Improved suggestions based on preferences, library, and available services.
 - **Dynamic Refresh**: Enabled automatic refreshing of Next Up dashboard items upon episode completion.
 - **Next Up Query**: Optimized SQL unwatched episode retrieval queries for large databases.

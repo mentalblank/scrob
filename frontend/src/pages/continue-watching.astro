@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import ContinueWatchingCard from "../components/ContinueWatchingCard.astro";
+import EpisodeCard from "../components/EpisodeCard.astro";
 import InfiniteScroll from "../components/InfiniteScroll.astro";
 import Pagination from "../components/Pagination.astro";
 import { api, type ContinueWatchingItem } from "../lib/api";
@@ -37,10 +37,14 @@ const baseUrl = "/continue-watching";
     </div>
   ) : (
     <>
-      <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 sm:gap-6">
-        {data.continue_watching.map((item) => (
-          <ContinueWatchingCard item={item} />
-        ))}
+      <div id="media-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        {data.continue_watching.map((item) => {
+          const mediaItem = {
+            ...item.media,
+            progress_percent: Math.round((item.progress_percent ?? 0) * 100)
+          };
+          return <EpisodeCard item={mediaItem} showDismiss={true} />;
+        })}
       </div>
 
       {paginationType === "pagination" ? (

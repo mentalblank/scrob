@@ -3,7 +3,7 @@ import Base from "../layouts/Base.astro";
 import MediaRow from "../components/MediaRow.astro";
 import MediaCard from "../components/MediaCard.astro";
 import EpisodeCard from "../components/EpisodeCard.astro";
-import ContinueWatchingCard from "../components/ContinueWatchingCard.astro";
+
 import ActionBar from "../components/ActionBar.astro";
 import { api, type ContinueWatchingItem, type MediaItem } from "../lib/api";
 
@@ -184,9 +184,17 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
         </a>
       </div>
       <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-        {continueWatching.slice(0, 12).map((item) => (
-          <div class="flex-shrink-0 w-40"><ContinueWatchingCard item={item} /></div>
-        ))}
+        {continueWatching.slice(0, 12).map((item) => {
+          const mediaItem = {
+            ...item.media,
+            progress_percent: Math.round((item.progress_percent ?? 0) * 100)
+          };
+          return (
+            <div class="flex-shrink-0 w-56">
+              <EpisodeCard item={mediaItem} showDismiss={true} />
+            </div>
+          );
+        })}
       </div>
     </section>
   )}
@@ -497,27 +505,5 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
         loadSection('/api/proxy/media/trending/shows', 'grid-trending-shows', mediaCardHtml, 12);
         loadSection('/api/proxy/media/airing-today/collected', 'grid-airing-today', episodeCardHtml, 12);
 
-        // Continue watching dismiss
-        document.addEventListener('click', async (e) => {
-          const btn = e.target.closest('.dismiss-cw');
-          if (!btn) return;
-          e.preventDefault();
-          e.stopPropagation();
-          const mediaId = btn.dataset.mediaId;
-          const card = btn.closest('.flex-shrink-0');
-          if (card) card.style.opacity = '0.4';
-          try {
-            await fetch(`/api/proxy/history/continue-watching?media_id=${mediaId}`, {
-              method: 'DELETE',
-              headers: { 'Authorization': `Bearer ${token}` },
-            });
-            card?.remove();
-            const section = document.getElementById('continue-watching-section');
-            if (section && section.querySelectorAll('.dismiss-cw').length === 0) {
-              section.remove();
-            }
-          } catch {
-            if (card) card.style.opacity = '';
-          }
-        });
+
 </script>

@@ -1064,11 +1064,37 @@ const bottomNavItem = (active: boolean) =>
         if (!confirmed) return;
         try {
           await apiFetch(`/history/continue-watching?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
-          card.style.transition = 'all 0.3s ease';
-          card.style.opacity = '0';
-          card.style.transform = 'scale(0.9)';
-          card.style.pointerEvents = 'none';
-          setTimeout(() => card.remove(), 300);
+          const wrapper = card.closest('.flex-shrink-0') || card;
+          wrapper.style.transition = 'all 0.3s ease';
+          wrapper.style.opacity = '0';
+          wrapper.style.transform = 'scale(0.9)';
+          wrapper.style.pointerEvents = 'none';
+          setTimeout(() => {
+            wrapper.remove();
+            
+            // Check homepage continue watching section
+            const homepageSection = document.getElementById('continue-watching-section');
+            if (homepageSection && homepageSection.querySelectorAll('[data-card]').length === 0) {
+              homepageSection.remove();
+            }
+
+            // Check continue-watching page grid
+            const grid = document.getElementById('media-grid');
+            if (grid && grid.querySelectorAll('[data-card]').length === 0) {
+              const emptyStateHtml = `
+                <div class="flex flex-col items-center justify-center py-24 bg-zinc-900/30 border border-zinc-800/50 rounded-3xl text-center w-full">
+                  <div class="text-6xl mb-6 opacity-20">🍿</div>
+                  <h2 class="text-2xl font-bold text-zinc-300 mb-2">Nothing in progress</h2>
+                  <p class="text-zinc-500 max-w-sm mx-auto">Start watching a movie or show to see it here and resume anytime.</p>
+                </div>
+              `;
+              const container = grid.parentElement;
+              if (container) {
+                document.getElementById('infinite-scroll-sentinel')?.remove();
+                grid.replaceWith(document.createRange().createContextualFragment(emptyStateHtml));
+              }
+            }
+          }, 300);
           (window as any).showToast('Removed from Continue Watching', 'success');
         } catch { /* ignore */ }
         return;

@@ -19,6 +19,7 @@ from models.collection import Collection, CollectionFile
 from models.connections import MediaServerConnection
 from models.events import WatchEvent
 from models.ratings import Rating
+from models.playback_progress import PlaybackProgress
 from models.base import MediaType, CollectionSource
 from models.lists import List as UserList, ListItem
 from models.profile import UserProfileData
@@ -520,6 +521,20 @@ async def enrich_with_state(
             else:
                 blocked_ids[mtype.value].add(tid)
 
+    # --- Playback progress ---
+    progress_map: dict[tuple[int, str], float] = {}
+    if all_tmdb_ids:
+        progress_q = await db.execute(
+            select(Media.tmdb_id, Media.media_type, PlaybackProgress.progress_percent)
+            .join(PlaybackProgress, PlaybackProgress.media_id == Media.id)
+            .where(
+                PlaybackProgress.user_id == user_id,
+                Media.tmdb_id.in_(all_tmdb_ids)
+            )
+        )
+        for tmdb_id, media_type, prog_pct in progress_q.all():
+            progress_map[(tmdb_id, media_type.value)] = min(100, max(0, int(prog_pct * 100)))
+
     # --- Play count (detail view only) ---
     play_count_map: dict[int, int] = {}
     if len(items) == 1:
@@ -550,6 +565,7 @@ async def enrich_with_state(
             in_lib = tid in collected_movie_ids
             item["in_library"] = in_lib
             item["collection_pct"] = 100 if in_lib else 0
+            item["progress_percent"] = progress_map.get((tid, "movie"))
         elif t == "series":
             item["watched"] = tid in watched_shows
             pct = show_pct.get(tid, 0)
@@ -562,6 +578,7 @@ async def enrich_with_state(
             in_lib = tid in collected_ep_ids
             item["in_library"] = in_lib
             item["collection_pct"] = 100 if in_lib else 0
+            item["progress_percent"] = progress_map.get((tid, "episode"))
         else:
             item["watched"] = False
             item["collection_pct"] = 0

@@ -4,9 +4,10 @@ import CardActionBar from "./CardActionBar.astro";
 
 interface Props {
   item: MediaItem;
+  showDismiss?: boolean;
 }
 
-const { item } = Astro.props;
+const { item, showDismiss = false } = Astro.props;
 
 const sxe =
   item.season_number != null && item.episode_number != null
@@ -18,18 +19,22 @@ const isSeries = item.type === "series";
 const href =
   item.show_tmdb_id && item.season_number != null && item.episode_number != null
     ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
-    : item.show_tmdb_id
-      ? `/show/${item.show_tmdb_id}`
-      : isSeries && item.tmdb_id
-        ? `/show/${item.tmdb_id}`
-        : item.tmdb_id && item.season_number != null
-          ? `/media/${item.type}/${item.tmdb_id}`
-          : null;
+    : item.type === "movie" && item.tmdb_id
+      ? `/media/movie/${item.tmdb_id}`
+      : item.show_tmdb_id
+        ? `/show/${item.show_tmdb_id}`
+        : isSeries && item.tmdb_id
+          ? `/show/${item.tmdb_id}`
+          : item.tmdb_id && item.season_number != null
+            ? `/media/${item.type}/${item.tmdb_id}`
+            : null;
 
-// Episodes: use episode still, fall back to show backdrop then show poster.
+// Episodes: use episode still, fall back to show backdrop then show poster. Movies/Series: use backdrop.
 const rawImage = isSeries
   ? (item.backdrop_path ?? item.poster_path)
-  : (item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
+  : item.type === "movie"
+    ? (item.backdrop_path ?? item.poster_path)
+    : (item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
 const imageUrl = rawImage
   ? rawImage.startsWith("http")
     ? rawImage
@@ -77,16 +82,23 @@ const showProgress = progressPct > 0;
 
         <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
-        {sxe && (
-          <div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">
-            {sxe}
+        {item.library?.resolution && (
+          <div class={`absolute top-2 ${showDismiss ? 'right-10' : 'right-2'} bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg tracking-tighter`}>
+            {item.library.resolution}
           </div>
         )}
 
-        {item.library?.resolution && (
-          <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg tracking-tighter">
-            {item.library.resolution}
-          </div>
+        {showDismiss && (
+          <button
+            data-action="remove-progress"
+            class="absolute top-2 right-2 z-10 bg-black/60 backdrop-blur-md text-zinc-400 hover:text-red-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 border border-zinc-800 hover:border-red-500/50 cursor-pointer shadow-lg active:scale-90 animate-none"
+            title="Remove from Continue Watching"
+            aria-label="Remove from continue watching"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
         )}
 
         {showProgress && (
@@ -117,16 +129,23 @@ const showProgress = progressPct > 0;
 
         <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
-        {sxe && (
-          <div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">
-            {sxe}
+        {item.library?.resolution && (
+          <div class={`absolute top-2 ${showDismiss ? 'right-10' : 'right-2'} bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg tracking-tighter`}>
+            {item.library.resolution}
           </div>
         )}
 
-        {item.library?.resolution && (
-          <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg tracking-tighter">
-            {item.library.resolution}
-          </div>
+        {showDismiss && (
+          <button
+            data-action="remove-progress"
+            class="absolute top-2 right-2 z-10 bg-black/60 backdrop-blur-md text-zinc-400 hover:text-red-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 border border-zinc-800 hover:border-red-500/50 cursor-pointer shadow-lg active:scale-90 animate-none"
+            title="Remove from Continue Watching"
+            aria-label="Remove from continue watching"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
         )}
 
         {showProgress && (
@@ -143,13 +162,15 @@ const showProgress = progressPct > 0;
   )}
 
   <!-- Action bar (below image, above info) -->
-  <CardActionBar
-    watched={watched}
-    inLists={inLists}
-    inLibrary={inLibrary}
-    collectionPct={collectionPct}
-    isSeries={isSeries}
-  />
+  {!showDismiss && (
+    <CardActionBar
+      watched={watched}
+      inLists={inLists}
+      inLibrary={inLibrary}
+      collectionPct={collectionPct}
+      isSeries={isSeries}
+    />
+  )}
 
   <!-- Info -->
   {href ? (
@@ -167,7 +188,12 @@ const showProgress = progressPct > 0;
           {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">{sxe}</span>}
         </div>
         <div class="flex items-center gap-2">
-          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">EPISODE</span>
+          {showProgress && (
+            <span class="text-[10px] font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+          )}
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
+            {item.type === "movie" ? "MOVIE" : "EPISODE"}
+          </span>
         </div>
       </div>
     </a>
@@ -184,7 +210,12 @@ const showProgress = progressPct > 0;
           {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide mt-0.5 block">{sxe}</span>}
         </div>
         <div class="flex items-center gap-2">
-          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">EPISODE</span>
+          {showProgress && (
+            <span class="text-[10px] font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+          )}
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
+            {item.type === "movie" ? "MOVIE" : "EPISODE"}
+          </span>
         </div>
       </div>
     </div>

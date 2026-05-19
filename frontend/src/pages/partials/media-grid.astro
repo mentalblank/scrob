@@ -1,7 +1,7 @@
 ---
 import MediaCard from "../../components/MediaCard.astro";
 import HistoryCard from "../../components/HistoryCard.astro";
-import ContinueWatchingCard from "../../components/ContinueWatchingCard.astro";
+import EpisodeCard from "../../components/EpisodeCard.astro";
 import { api } from "../../lib/api";
 
 export const prerender = false;
@@ -119,7 +119,13 @@ try {
 ---
 
 {isContinueWatching ? (
-  items.map((item) => <ContinueWatchingCard item={item} />)
+  items.map((item) => {
+    const mediaItem = {
+      ...item.media,
+      progress_percent: Math.round((item.progress_percent ?? 0) * 100)
+    };
+    return <EpisodeCard item={mediaItem} showDismiss={true} />;
+  })
 ) : isHistory ? (
   items.map((event) => <HistoryCard event={event} />)
 ) : (
