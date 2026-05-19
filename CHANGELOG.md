@@ -29,6 +29,8 @@ All notable changes to this project will be documented in this file. This projec
 ---
 
 ### Changed
+- **History Card Badges**: Removed redundant blue season/episode badge and green checkmark badge overlay on watch history cards.
+- **Mobile Details Alignment**: Centered logos, titles, action bars, metadata, and overview text blocks when viewed on mobile viewports for show, season, episode, and movie detail pages.
 - **Continue Watching Cards**: Replaced the vertical card design with landscape episode cards across homepage and continue-watching lists.
 - **Season Episode Progress**: Integrated database-backed watch progress bars directly onto season episode cards.
 - **Auto-Pick Recommendations**: Improved suggestions based on preferences, library, and available services.

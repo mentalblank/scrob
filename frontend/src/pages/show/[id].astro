@@ -123,18 +123,18 @@ const logoPath = show?.logo_path ?? null;
           </div>
 
           <!-- Info -->
-          <div class="flex-1 min-w-0 pt-4">
+          <div class="flex-1 min-w-0 pt-4 text-center md:text-left flex flex-col items-center md:items-start">
             {logoPath ? (
-              <div class="mb-4">
+              <div class="mb-4 flex flex-col items-center md:items-start">
                 <img
                   src={logoPath}
                   alt={show.title}
-                  class="max-h-28 max-w-xs md:max-w-sm object-contain drop-shadow-2xl"
+                  class="max-h-28 max-w-xs md:max-w-sm object-contain drop-shadow-2xl mx-auto md:mx-0"
                   loading="eager"
                   decoding="async"
                 />
                 <h1 class="sr-only">{show.title}</h1>
-                <div class="flex items-center gap-4 mt-2">
+                <div class="flex items-center justify-center md:justify-start gap-4 mt-2">
                   <button id="rename-show-btn" class="text-xs font-bold text-zinc-500 hover:text-blue-400 transition flex items-center gap-1.5 cursor-pointer" title="Set a custom title for this show">
                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                     Rename Show
@@ -146,8 +146,8 @@ const logoPath = show?.logo_path ?? null;
                 </div>
               </div>
             ) : (
-              <div class="flex items-center gap-3 mb-3 flex-wrap">
-                <h1 class="text-4xl md:text-6xl font-black text-zinc-100 tracking-tight leading-none">{show.title}</h1>
+              <div class="flex flex-col items-center md:flex-row gap-3 mb-3 justify-center md:justify-start">
+                <h1 class="text-4xl md:text-6xl font-black text-zinc-100 tracking-tight leading-none text-center md:text-left">{show.title}</h1>
                 <div class="flex items-center gap-1 shrink-0">
                   <button id="rename-show-btn" class="p-2 text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded-full transition cursor-pointer" title="Set a custom title for this show">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
@@ -160,11 +160,11 @@ const logoPath = show?.logo_path ?? null;
             )}
 
             {show.tagline && (
-              <p class="text-xl italic text-zinc-400 mb-8 font-light leading-relaxed">"{show.tagline}"</p>
+              <p class="text-xl italic text-zinc-400 mb-8 font-light leading-relaxed text-center md:text-left">"{show.tagline}"</p>
             )}
 
-            <div class="flex flex-wrap items-center gap-3 mb-10">
-              <div class="flex flex-wrap items-center gap-4 text-zinc-300 text-sm bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm">
+            <div class="flex flex-wrap items-center justify-center md:justify-start gap-3 mb-10">
+              <div class="flex flex-wrap items-center justify-center md:justify-start gap-4 text-zinc-300 text-sm bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm">
                 {year && <span class="font-bold">{year}</span>}
                 {rating && (
                   <span class="flex items-center gap-1.5 text-yellow-400 font-black">
@@ -210,9 +210,9 @@ const logoPath = show?.logo_path ?? null;
               {(() => { const n = show.networks?.find(n => n.logo_path); return n ? <div class="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm flex items-center"><img src={n.logo_path!} alt={n.name} title={n.name} class="h-5 max-w-[80px] object-contain" loading="lazy" /></div> : null; })()}
             </div>
 
-            <div class="mb-6">
+            <div class="mb-6 w-full">
                 <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
-                    <div class="flex-1">
+                    <div class="flex-1 flex justify-center md:justify-start">
                         <ActionBar
                           tmdbId={Number(id)}
                           mediaType="series"
@@ -242,7 +242,7 @@ const logoPath = show?.logo_path ?? null;
             </div>
 
             {(show.in_library || trailerYoutubeId) && (
-              <div class="mb-8 flex flex-wrap gap-2">
+              <div class="mb-8 flex flex-wrap gap-2 justify-center md:justify-start">
                 {show.in_library && (
                   <button
                     id="refresh-metadata-btn"
@@ -306,7 +306,7 @@ const logoPath = show?.logo_path ?? null;
               </div>
             )}
 
-            <div class="mb-12">
+            <div class="mb-12 flex flex-col items-center md:items-start text-center md:text-left">
               <h2 class="text-xl font-black text-zinc-100 mb-4 flex items-center gap-2 uppercase tracking-tight">
                 <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
                 Overview
@@ -317,7 +317,7 @@ const logoPath = show?.logo_path ?? null;
             </div>
 
             {show.genres?.length > 0 && (
-              <div class="flex flex-wrap gap-2 mb-12">
+              <div class="flex flex-wrap gap-2 mb-12 justify-center md:justify-start">
                 {show.genres.map(g => {
                   const name = typeof g === 'object' && g !== null ? g.name : g;
                   return (
@@ -335,16 +335,16 @@ const logoPath = show?.logo_path ?? null;
               const others = show.where_to_watch.filter(s => !s.is_subscribed);
               
               return (
-                <div class="mb-10">
+                <div class="mb-10 w-full flex flex-col items-center md:items-start">
                   <h2 class="text-sm font-black text-zinc-500 mb-4 uppercase tracking-widest flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v2"/><path d="M2 12V4"/><path d="M22 12V4"/><path d="M2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6"/><path d="M2 12h20"/><path d="M7 15h.01"/><path d="M11 15h.01"/><path d="M15 15h.01"/><path d="M19 15h.01"/><path d="M7 18h.01"/><path d="M11 18h.01"/><path d="M15 18h.01"/><path d="M19 18h.01"/></svg>
                     Where to Watch
                   </h2>
                   
-                  <div class="space-y-6">
+                  <div class="space-y-6 w-full flex flex-col items-center md:items-start">
                     {subscribed.length > 0 && (
-                      <div class="space-y-3">
-                        <p class="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Your Services</p>
+                      <div class="space-y-3 w-full">
+                        <p class="text-[10px] font-bold text-blue-400 uppercase tracking-wider text-center md:text-left">Your Services</p>
                         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                           {subscribed.map(s => (
                             <div class="flex items-center gap-2.5 p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-xl hover:border-blue-500/30 transition-colors group">
@@ -355,7 +355,7 @@ const logoPath = show?.logo_path ?? null;
                                   {s.type === "plex" ? "🟡" : s.type === "jellyfin" ? "🟣" : s.type === "emby" ? "🟢" : "▶"}
                                 </div>
                               )}
-                              <div class="min-w-0">
+                              <div class="min-w-0 text-left">
                                 <p class="text-zinc-200 text-xs font-bold truncate group-hover:text-blue-400 transition-colors">{s.name}</p>
                                 <p class="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter truncate">{s.category === 'flatrate' ? 'Stream' : s.category === 'local' ? 'Local' : s.category}</p>
                               </div>
@@ -366,9 +366,9 @@ const logoPath = show?.logo_path ?? null;
                     )}
 
                     {others.length > 0 && (
-                      <div class="space-y-3">
-                        <p class="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">{subscribed.length > 0 ? "Other Options" : "Available On"}</p>
-                        <div class="flex flex-wrap gap-2">
+                      <div class="space-y-3 w-full flex flex-col items-center md:items-start">
+                        <p class="text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-center md:text-left">{subscribed.length > 0 ? "Other Options" : "Available On"}</p>
+                        <div class="flex flex-wrap gap-2 justify-center md:justify-start">
                           {others.map(s => (
                             <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/40 border border-zinc-800/50 rounded-lg hover:border-zinc-700 transition-colors group">
                               {s.logo ? (
