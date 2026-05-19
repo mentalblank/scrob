@@ -156,9 +156,13 @@ async def get_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     type: str | None = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from datetime import datetime, time
+    
     offset = (page - 1) * page_size
 
     base_query = (
@@ -171,10 +175,6 @@ async def get_history(
     if type and type in ("movie", "episode"):
         base_query = base_query.where(Media.media_type == type)
 
-    total_result = await db.execute(base_query)
-    total_count = total_result.scalar_one()
-    total_pages = max(1, (total_count + page_size - 1) // page_size)
-
     query = (
         select(WatchEvent, Media)
         .join(Media, Media.id == WatchEvent.media_id)
@@ -185,6 +185,26 @@ async def get_history(
     )
     if type and type in ("movie", "episode"):
         query = query.where(Media.media_type == type)
+
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            base_query = base_query.where(WatchEvent.watched_at >= start_dt)
+            query = query.where(WatchEvent.watched_at >= start_dt)
+        except ValueError:
+            pass
+
+    if end_date:
+        try:
+            end_dt = datetime.combine(datetime.strptime(end_date, "%Y-%m-%d"), time(23, 59, 59, 999999))
+            base_query = base_query.where(WatchEvent.watched_at <= end_dt)
+            query = query.where(WatchEvent.watched_at <= end_dt)
+        except ValueError:
+            pass
+
+    total_result = await db.execute(base_query)
+    total_count = total_result.scalar_one()
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
 
     query = query.offset(offset).limit(page_size)
 

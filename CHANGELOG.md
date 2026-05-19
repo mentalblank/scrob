@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file. This projec
 ## [Unreleased] - 2026-05-19
 
 ### Added
+- **Watch History Features**: Added date range filtering, grouping options (Date, Media Type, Show/Movie, Season), and single-click history event deletion directly from the `/history` page.
 - **Play History Management**: Added the ability to click the play count badge on movie and episode pages to open a modal, view specific watch history events, and delete individual plays.
 - **Custom Error Pages**: Created custom 404 (Not Found) and 500 (Internal Server Error) error pages.
 - **Blocklist**: Added a dedicated filtering page for genres, keywords, and regex patterns.

@@ -41,6 +41,10 @@ const showProgress = !event.completed && progressPct > 0;
 <div 
   class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70"
   data-watched-at={watched_at}
+  data-media-type={media.type}
+  data-media-title={title}
+  data-show-title={showTitle || ""}
+  data-season-number={media.season_number || ""}
 >
   <a href={href} class="block">
     <!-- Backdrop/Still container: 3:2 -->
@@ -62,9 +66,20 @@ const showProgress = !event.completed && progressPct > 0;
 
       <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
-      <!-- Time badge -->
-      <div class="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg uppercase tracking-wider">
-        {timeString}
+      <!-- Time badge / Delete button container -->
+      <div class="absolute top-2 right-2 z-30 flex items-center justify-end">
+        <div class="time-badge bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-md border border-white/10 shadow-lg uppercase tracking-wider group-hover:scale-0 origin-right transition-transform duration-200">
+          {timeString}
+        </div>
+        <button 
+          class="delete-history-btn absolute top-0 right-0 scale-0 group-hover:scale-100 origin-right transition-transform duration-200 p-1.5 rounded-lg bg-red-950/90 hover:bg-red-900 text-red-400 border border-red-900/30 cursor-pointer flex items-center justify-center shadow-lg"
+          data-event-id={event.id}
+          title="Delete this play from history"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-3.5 h-3.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+          </svg>
+        </button>
       </div>
 
       {sxe && (
@@ -115,3 +130,61 @@ const showProgress = !event.completed && progressPct > 0;
     </div>
   </a>
 </div>
+
+<script>
+  if (!(window as any).hasHistoryCardDeleteListener) {
+    (window as any).hasHistoryCardDeleteListener = true;
+    document.addEventListener('click', async (e) => {
+      const btn = (e.target as HTMLElement).closest('.delete-history-btn');
+      if (!btn) return;
+      
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const eventId = btn.getAttribute('data-event-id');
+      if (!eventId) return;
+      
+      if (!confirm('Are you sure you want to remove this play from your history?')) return;
+      
+      const originalHTML = btn.innerHTML;
+      btn.setAttribute('disabled', 'true');
+      btn.innerHTML = '<svg class="animate-spin h-3.5 w-3.5 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+      
+      const token = document.getElementById("app-data")?.dataset.token || 
+                    document.querySelector("[data-token]")?.getAttribute("data-token") ||
+                    document.cookie.split('; ').find(row => row.startsWith('auth_token='))?.split('=')[1];
+                    
+      try {
+        const res = await fetch(`/api/proxy/history/event/${eventId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!res.ok) {
+          throw new Error('Failed to delete history event');
+        }
+        
+        const card = btn.closest('[data-watched-at]');
+        if (card) {
+          card.classList.add('opacity-0', 'scale-95');
+          (card as HTMLElement).style.transition = 'all 0.3s ease';
+          setTimeout(() => {
+            const grid = card.parentNode;
+            card.remove();
+            
+            if (grid && grid.children.length === 0) {
+              const groupSection = grid.closest('[data-history-group]');
+              if (groupSection) {
+                groupSection.remove();
+              }
+            }
+          }, 300);
+        }
+      } catch (err: any) {
+        alert('Error: ' + err.message);
+        btn.removeAttribute('disabled');
+        btn.innerHTML = originalHTML;
+      }
+    });
+  }
+</script>

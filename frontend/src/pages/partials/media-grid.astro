@@ -92,7 +92,15 @@ try {
     items = data.results.map(i => ({...i, type: 'movie', in_library: true}));
   } else if (type === "history") {
     const historyType = Astro.url.searchParams.get("history_type") || undefined;
-    const data = await api.history.list({ page, page_size: 40, type: historyType }, token);
+    const startDate = Astro.url.searchParams.get("start_date") || undefined;
+    const endDate = Astro.url.searchParams.get("end_date") || undefined;
+    const data = await api.history.list({
+      page,
+      page_size: 40,
+      type: historyType,
+      start_date: startDate,
+      end_date: endDate
+    }, token);
     items = data.results;
     isHistory = true;
   }

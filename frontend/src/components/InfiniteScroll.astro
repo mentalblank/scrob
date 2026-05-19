@@ -123,33 +123,52 @@ const {
       const temp = document.createElement('div');
       temp.innerHTML = html;
       const cards = temp.querySelectorAll('[data-watched-at]');
+      const params = JSON.parse(this.sentinel.dataset.params || '{}');
+      const groupBy = params.group_by || 'date';
       
       cards.forEach(card => {
         const watchedAt = card.getAttribute('data-watched-at');
         if (!watchedAt) return;
         
-        const dateObj = new Date(watchedAt);
-        const dateStr = dateObj.toLocaleDateString('en-US', {
-          weekday: 'long',
-          month: 'long',
-          day: 'numeric',
-          year: 'numeric'
-        });
+        const mediaType = card.getAttribute('data-media-type') || '';
+        const mediaTitle = card.getAttribute('data-media-title') || '';
+        const showTitle = card.getAttribute('data-show-title') || '';
+        const seasonNumber = card.getAttribute('data-season-number') || '';
+        
+        let groupStr = '';
+        if (groupBy === 'show_movie') {
+          groupStr = mediaType === 'episode' ? (showTitle || mediaTitle) : mediaTitle;
+        } else if (groupBy === 'season') {
+          groupStr = mediaType === 'episode'
+            ? `${showTitle || mediaTitle} - Season ${seasonNumber}`
+            : 'Movies';
+        } else if (groupBy === 'type') {
+          groupStr = mediaType === 'episode' ? 'TV Shows' : 'Movies';
+        } else {
+          // default is 'date'
+          const dateObj = new Date(watchedAt);
+          groupStr = dateObj.toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric'
+          });
+        }
         
         // Find or create group
-        let group = target.querySelector(`[data-history-date="${dateStr}"]`);
+        let group = target.querySelector(`[data-history-group="${groupStr}"]`);
         if (!group) {
           const groupHtml = `
-            <div class="relative mb-10" data-history-date="${dateStr}">
+            <div class="relative mb-10" data-history-group="${groupStr}">
               <h2 class="text-lg font-bold text-zinc-100 mb-4 sticky top-[72px] py-2 bg-zinc-950/80 backdrop-blur-md z-10 flex items-center gap-3 border-b border-zinc-800/50">
-                ${dateStr}
+                ${groupStr}
               </h2>
               <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 history-grid">
               </div>
             </div>
           `;
           target.insertAdjacentHTML('beforeend', groupHtml);
-          group = target.querySelector(`[data-history-date="${dateStr}"]`);
+          group = target.querySelector(`[data-history-group="${groupStr}"]`);
         }
         
         const grid = group?.querySelector('.history-grid');
