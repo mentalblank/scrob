@@ -132,6 +132,14 @@ async def get_enriched_show_info(db: AsyncSession, current_user_id: int, series_
         if s.get("poster_path") and not str(s["poster_path"]).startswith("http"):
             s["poster_path"] = tmdb.poster_url(s["poster_path"])
 
+    # Re-apply custom season names to the updated seasons_meta list
+    custom_season_names = show_info.get("custom_season_names") or {}
+    for s in seasons_meta:
+        s_num_str = str(s.get("season_number"))
+        if s_num_str in custom_season_names:
+            s["name"] = custom_season_names[s_num_str]
+            s["custom_name"] = custom_season_names[s_num_str]
+
     seasons_meta.sort(key=lambda x: x.get("season_number", 0))
     show_info["seasons_meta"] = seasons_meta
     return show_info

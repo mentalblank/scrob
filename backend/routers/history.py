@@ -14,7 +14,7 @@ from models.collection import Collection, CollectionFile
 from models.base import MediaType, CollectionSource
 from models.users import UserSettings
 from models.connections import MediaServerConnection
-from routers.media import enrich_with_state, get_user_tmdb_key, check_tmdb_key
+from routers.media import format_media, enrich_with_state, get_user_tmdb_key, check_tmdb_key
 
 from dependencies import get_current_user
 from models.users import User
@@ -118,23 +118,7 @@ def format_event(event: WatchEvent | PlaybackProgress, media: Media) -> dict:
     
     data = {
         "id": event.id,
-        "media": {
-            "id": media.id,
-            "tmdb_id": media.tmdb_id,
-            "type": media.media_type,
-            "title": media.title,
-            "overview": media.overview,
-            "poster_path": media.poster_path,
-            "backdrop_path": media.backdrop_path,
-            "release_date": media.release_date,
-            "tmdb_rating": media.tmdb_rating,
-            "user_rating": (media.tmdb_data or {}).get("user_rating"), # Placeholder, will be enriched
-            "season_number": media.season_number,
-            "episode_number": media.episode_number,
-            "runtime": media.runtime,
-            "tagline": media.tagline,
-            "genres": (media.tmdb_data or {}).get("genres", []),
-        },
+        "media": format_media(media),
         "user_id": event.user_id,
         "watched_at": watched_at.isoformat(),
         "progress_seconds": event.progress_seconds,
@@ -142,11 +126,6 @@ def format_event(event: WatchEvent | PlaybackProgress, media: Media) -> dict:
         "completed": getattr(event, "completed", False),
         "play_count": getattr(event, "play_count", 1),
     }
-
-    if media.media_type == MediaType.episode and media.show:
-        data["media"]["show_title"] = media.show.title
-        data["media"]["show_poster_path"] = media.show.poster_path
-        data["media"]["show_tmdb_id"] = media.show.tmdb_id
 
     return data
 
@@ -233,14 +212,14 @@ async def get_now_playing(
     result = await db.execute(
         select(PlaybackSession, Media)
         .join(Media, Media.id == PlaybackSession.media_id)
-        .outerjoin(Show, Show.id == Media.show_id)
+        .options(selectinload(Media.show))
         .where(PlaybackSession.user_id == current_user.id)
         .order_by(desc(PlaybackSession.updated_at))
     )
     rows = result.all()
     sessions = []
     for session, media in rows:
-        item: dict = {
+        sessions.append({
             "session_key": session.session_key,
             "source": session.source,
             "state": session.state,
@@ -248,31 +227,8 @@ async def get_now_playing(
             "progress_seconds": session.progress_seconds,
             "started_at": session.started_at.isoformat(),
             "updated_at": session.updated_at.isoformat(),
-            "media": {
-                "id": media.id,
-                "tmdb_id": media.tmdb_id,
-                "type": media.media_type,
-                "title": media.title,
-                "poster_path": media.poster_path,
-                "backdrop_path": media.backdrop_path,
-                "season_number": media.season_number,
-                "episode_number": media.episode_number,
-                "runtime": media.runtime,
-            },
-        }
-        if media.media_type == MediaType.episode and media.show_id:
-            show_result = await db.execute(select(Show).where(Show.id == media.show_id))
-            show = show_result.scalar_one_or_none()
-            if show:
-                item["media"]["show_title"] = show.title
-                item["media"]["show_tmdb_id"] = show.tmdb_id
-                item["media"]["show_poster_path"] = show.poster_path
-                item["media"]["show_backdrop_path"] = show.backdrop_path
-        elif media.media_type == MediaType.episode:
-            hint = (media.tmdb_data or {}).get("show_title")
-            if hint:
-                item["media"]["show_title"] = hint
-        sessions.append(item)
+            "media": format_media(media),
+        })
     return {"now_playing": sessions}
 
 
@@ -361,29 +317,7 @@ async def delete_continue_watching(
 
 
 def _format_media_item(media: Media) -> dict:
-    data = {
-        "id": media.id,
-        "tmdb_id": media.tmdb_id,
-        "type": media.media_type,
-        "title": media.title,
-        "overview": media.overview,
-        "poster_path": media.poster_path,
-        "backdrop_path": media.backdrop_path,
-        "release_date": media.release_date,
-        "tmdb_rating": media.tmdb_rating,
-        "season_number": media.season_number,
-        "episode_number": media.episode_number,
-        "runtime": media.runtime,
-        "genres": (media.tmdb_data or {}).get("genres", []),
-        "library": None,
-        "in_library": False,
-    }
-    if media.media_type == MediaType.episode and media.show:
-        data["show_title"] = media.show.title
-        data["show_poster_path"] = media.show.poster_path
-        data["show_backdrop_path"] = media.show.backdrop_path
-        data["show_tmdb_id"] = media.show.tmdb_id
-    return data
+    return format_media(media)
 
 
 @router.get("/next-up")
