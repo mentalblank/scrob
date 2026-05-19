@@ -2643,39 +2643,58 @@ async def list_episode_overrides(
         select(ShowEpisodeOverride).where(ShowEpisodeOverride.user_id == current_user.id)
     )
     overrides = result.scalars().all()
+    if not overrides:
+        return {"overrides": []}
+
+    # Collect all unique show tmdb_ids needed
+    show_tmdb_ids = set()
+    for o in overrides:
+        show_tmdb_ids.add(o.source_show_tmdb_id)
+        show_tmdb_ids.add(o.target_show_tmdb_id)
+
+    # Batch fetch all shows
+    shows_q = await db.execute(
+        select(Show).where(Show.tmdb_id.in_(list(show_tmdb_ids)))
+    )
+    shows_map = {s.tmdb_id: s for s in shows_q.scalars().all()}
+
+    # Build a list of (show_id, season, episode) tuples we need titles for
+    ep_lookups: list[tuple[int, int, int]] = []
+    for o in overrides:
+        ss = shows_map.get(o.source_show_tmdb_id)
+        if ss:
+            ep_lookups.append((ss.id, o.source_season_number, o.source_episode_number))
+        ts = shows_map.get(o.target_show_tmdb_id)
+        if ts:
+            ep_lookups.append((ts.id, o.target_season_number, o.target_episode_number))
+
+    # Batch fetch all episode titles in one query using OR conditions
+    ep_title_map: dict[tuple[int, int, int], str] = {}
+    if ep_lookups:
+        conditions = [
+            (Media.show_id == sid) & (Media.season_number == sn) & (Media.episode_number == en)
+            for sid, sn, en in ep_lookups
+        ]
+        ep_q = await db.execute(
+            select(Media.show_id, Media.season_number, Media.episode_number, Media.title)
+            .where(Media.media_type == MediaType.episode, or_(*conditions))
+        )
+        for sid, sn, en, title in ep_q.all():
+            ep_title_map[(sid, sn, en)] = title or "Unknown Episode"
+
     output = []
     for o in overrides:
-        src_show_q = await db.execute(select(Show).where(Show.tmdb_id == o.source_show_tmdb_id))
-        ss = src_show_q.scalar_one_or_none()
-        tgt_show_q = await db.execute(select(Show).where(Show.tmdb_id == o.target_show_tmdb_id))
-        ts = tgt_show_q.scalar_one_or_none()
-        
-        # Get source episode title
+        ss = shows_map.get(o.source_show_tmdb_id)
+        ts = shows_map.get(o.target_show_tmdb_id)
+
         src_ep_title = "Unknown Episode"
         if ss:
-            src_ep_q = await db.execute(
-                select(Media.title).where(
-                    Media.show_id == ss.id,
-                    Media.season_number == o.source_season_number,
-                    Media.episode_number == o.source_episode_number,
-                    Media.media_type == MediaType.episode
-                )
-            )
-            src_ep_title = src_ep_q.scalars().first() or "Unknown Episode"
+            src_ep_title = ep_title_map.get((ss.id, o.source_season_number, o.source_episode_number), "Unknown Episode")
 
-        # Get target episode title
         tgt_ep_title = "Unknown Episode"
         if ts:
-            tgt_ep_q = await db.execute(
-                select(Media.title).where(
-                    Media.show_id == ts.id,
-                    Media.season_number == o.target_season_number,
-                    Media.episode_number == o.target_episode_number,
-                    Media.media_type == MediaType.episode
-                )
-            )
-            tgt_ep_title = tgt_ep_q.scalars().first() or "Unknown Episode"
-        
+            tgt_ep_title = ep_title_map.get((ts.id, o.target_season_number, o.target_episode_number), "Unknown Episode")
+
         output.append({
             "id": o.id,
             "source_show_tmdb_id": o.source_show_tmdb_id,
@@ -2687,6 +2706,7 @@ async def list_episode_overrides(
             "target_episode_number": o.target_episode_number,
             "target_episode_title": tgt_ep_title,
             "source_show_title": ss.title if ss else "Unknown",
+            "source_show_poster_path": ss.poster_path if ss else None,
             "target_show_title": ts.title if ts else "Unknown",
             "target_show_poster_path": ts.poster_path if ts else None,
         })
@@ -2905,15 +2925,17 @@ async def list_source_shows(
 ):
     """Return all shows that have any Media row for this user (broader than the
     standard /shows endpoint which requires fully collected episodes)."""
+    from sqlalchemy import exists
+
     result = await db.execute(
         select(Show)
-        .join(Media, Media.show_id == Show.id)
-        .join(Collection, Collection.media_id == Media.id)
         .where(
-            Collection.user_id == current_user.id,
-            Media.media_type == MediaType.episode,
+            exists()
+            .where(Media.show_id == Show.id)
+            .where(Collection.media_id == Media.id)
+            .where(Collection.user_id == current_user.id)
+            .where(Media.media_type == MediaType.episode)
         )
-        .distinct()
         .order_by(Show.title.asc())
     )
     shows = result.scalars().all()
@@ -3133,6 +3155,139 @@ async def clear_all_custom_titles_for_show(
     return {"status": "ok"}
 
 
+# ── Show search endpoints for Auto-Remapper ─────────────────────────────────
+
+class TvdbSearchRequest(BaseModel):
+    query: str
+    tvdb_api_key: str
+
+
+@router.post("/tvdb-search")
+async def search_tvdb_shows(
+    body: TvdbSearchRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Search TVDB for series by name or ID. Requires a TVDB API key."""
+    import httpx
+
+    # 1. Login to TVDB
+    tvdb_token = None
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            login_res = await client.post(
+                "https://api4.thetvdb.com/v4/login",
+                json={"apikey": body.tvdb_api_key}
+            )
+            login_data = login_res.json()
+            if login_res.status_code == 200 and login_data.get("status") == "success":
+                tvdb_token = login_data.get("data", {}).get("token")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to authenticate with TVDB: {e}")
+
+    if not tvdb_token:
+        raise HTTPException(status_code=400, detail="Invalid TVDB API key")
+
+    query = body.query.strip()
+    results = []
+
+    # 2. If query is a numeric ID, try direct lookup first
+    if query.isdigit():
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.get(
+                    f"https://api4.thetvdb.com/v4/series/{query}",
+                    headers={"Authorization": f"Bearer {tvdb_token}"}
+                )
+                if res.status_code == 200:
+                    data = res.json().get("data", {})
+                    if data:
+                        results.append({
+                            "tvdb_id": data.get("id"),
+                            "name": data.get("name"),
+                            "year": data.get("year"),
+                            "image": data.get("image"),
+                            "status": data.get("status", {}).get("name") if isinstance(data.get("status"), dict) else data.get("status"),
+                            "overview": (data.get("overview") or "")[:200],
+                        })
+                        return {"results": results}
+        except Exception:
+            pass  # Fall through to name search
+
+    # 3. Search by name
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.get(
+                "https://api4.thetvdb.com/v4/search",
+                params={"query": query, "type": "series", "limit": 15},
+                headers={"Authorization": f"Bearer {tvdb_token}"}
+            )
+            if res.status_code == 200:
+                search_data = res.json().get("data", [])
+                for item in search_data[:15]:
+                    tvdb_id = item.get("tvdb_id") or item.get("id")
+                    results.append({
+                        "tvdb_id": int(tvdb_id) if tvdb_id else None,
+                        "name": item.get("name"),
+                        "year": item.get("year"),
+                        "image": item.get("image_url") or item.get("thumbnail"),
+                        "status": item.get("status"),
+                        "overview": (item.get("overview") or "")[:200],
+                    })
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to search TVDB: {e}")
+
+    return {"results": results}
+
+
+@router.get("/tmdb-show-search")
+async def search_tmdb_shows_for_remapper(
+    q: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Search TMDB for series by name or ID. Simplified for the auto-remapper modal."""
+    from routers.media import get_user_tmdb_key, check_tmdb_key
+
+    tmdb_api_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_api_key):
+        raise HTTPException(status_code=400, detail="TMDB API key required")
+
+    query = q.strip()
+
+    # If query is a numeric ID, try direct TMDB lookup first
+    if query.isdigit():
+        tmdb_id = int(query)
+        try:
+            data = await tmdb.get_show_light(tmdb_id, api_key=tmdb_api_key)
+            return {"results": [{
+                "tmdb_id": tmdb_id,
+                "name": data.get("name") or data.get("original_name"),
+                "year": (data.get("first_air_date") or "")[:4] or None,
+                "poster_path": tmdb.poster_url(data.get("poster_path")) if data.get("poster_path") else None,
+                "status": data.get("status"),
+                "overview": (data.get("overview") or "")[:200],
+            }]}
+        except Exception:
+            pass  # Fall through to name search
+
+    # Name search
+    try:
+        data = await tmdb.search_shows(query, api_key=tmdb_api_key)
+        results = []
+        for item in (data.get("results") or [])[:15]:
+            results.append({
+                "tmdb_id": item.get("id"),
+                "name": item.get("name") or item.get("original_name"),
+                "year": (item.get("first_air_date") or "")[:4] or None,
+                "poster_path": tmdb.poster_url(item.get("poster_path")) if item.get("poster_path") else None,
+                "status": None,
+                "overview": (item.get("overview") or "")[:200],
+            })
+        return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to search TMDB: {e}")
+
+
 @router.post("/auto-map-tvdb-tmdb/preview")
 async def auto_map_tvdb_tmdb_preview(
     body: schemas.AutoMapPreviewRequest,
@@ -3178,9 +3333,6 @@ async def auto_map_tvdb_tmdb_preview(
                 if not episodes:
                     break
                 for ep in episodes:
-                    # Ignore specials (season 0)
-                    if ep.get("seasonNumber") == 0:
-                        continue
                     tvdb_episodes.append({
                         "season": ep.get("seasonNumber"),
                         "episode": ep.get("number"),
@@ -3211,8 +3363,6 @@ async def auto_map_tvdb_tmdb_preview(
         seasons = show_data.get("seasons") or []
         for s in seasons:
             season_num = s.get("season_number")
-            if season_num == 0:  # Ignore specials
-                continue
             season_data = await tmdb.get_season(body.tmdb_show_id, season_num, api_key=tmdb_key)
             episodes = season_data.get("episodes") or []
             for ep in episodes:
@@ -3238,56 +3388,124 @@ async def auto_map_tvdb_tmdb_preview(
         t = " ".join(t.split())
         return t
 
-    # Build title and air date lookup for TMDB episodes
-    tmdb_by_air_date = {}
-    tmdb_by_title = {}
-    for ep in tmdb_episodes:
-        if ep["air_date"]:
-            tmdb_by_air_date[ep["air_date"]] = ep
-        norm = normalize_title(ep["title"])
-        if norm:
-            tmdb_by_title[norm] = ep
+    import difflib
+    from datetime import datetime
+
+    def parse_date(date_str: str | None) -> datetime | None:
+        if not date_str:
+            return None
+        try:
+            return datetime.strptime(date_str[:10], "%Y-%m-%d")
+        except Exception:
+            return None
+
+    def get_date_similarity(date1_str: str | None, date2_str: str | None) -> float:
+        d1 = parse_date(date1_str)
+        d2 = parse_date(date2_str)
+        if not d1 or not d2:
+            return 0.0
+        
+        diff_days = abs((d1 - d2).days)
+        if diff_days == 0:
+            return 1.0
+        elif diff_days == 1:
+            return 0.9  # timezone differences are extremely common (1-day offsets)
+        elif diff_days == 2:
+            return 0.8
+        elif diff_days <= 7:
+            return 0.5
+        elif diff_days <= 14:
+            return 0.2
+        else:
+            return 0.0
+
+    def get_title_similarity(t1: str | None, t2: str | None) -> float:
+        norm1 = normalize_title(t1)
+        norm2 = normalize_title(t2)
+        if not norm1 or not norm2:
+            return 0.0
+        return difflib.SequenceMatcher(None, norm1, norm2).ratio()
 
     for tv_ep in tvdb_episodes:
-        matched = False
+        best_candidate = None
+        best_score = 0.0
+        best_title_sim = 0.0
+        best_date_sim = 0.0
+        best_coord_match = False
         
-        # Strategy A: Air Date Match
-        if tv_ep["air_date"] and tv_ep["air_date"] in tmdb_by_air_date:
-            target = tmdb_by_air_date[tv_ep["air_date"]]
+        for tmdb_ep in tmdb_episodes:
+            title_sim = get_title_similarity(tv_ep["title"], tmdb_ep["title"])
+            date_sim = get_date_similarity(tv_ep["air_date"], tmdb_ep["air_date"])
+            coord_match = (tv_ep["season"] == tmdb_ep["season"]) and (tv_ep["episode"] == tmdb_ep["episode"])
+            
+            has_dates = tv_ep["air_date"] is not None and tmdb_ep["air_date"] is not None
+            
+            if has_dates:
+                score = (title_sim * 60.0) + (date_sim * 40.0)
+            else:
+                score = title_sim * 100.0
+            
+            if coord_match:
+                score = min(100.0, score + 15.0)
+                
+            if score > best_score:
+                best_score = score
+                best_candidate = tmdb_ep
+                best_title_sim = title_sim
+                best_date_sim = date_sim
+                best_coord_match = coord_match
+
+        # Determine matched status & reasoning
+        matched = False
+        confidence = 0
+        match_reason = "No Match"
+        
+        if best_candidate and best_score >= 35.0:
+            matched = True
+            confidence = int(round(best_score))
+            
+            if best_title_sim == 1.0 and best_date_sim == 1.0:
+                match_reason = "Exact Title & Date Match"
+            elif best_title_sim == 1.0:
+                match_reason = "Exact Title Match"
+            elif best_date_sim == 1.0 and best_title_sim > 0.7:
+                match_reason = "Date Match with Title Similarity"
+            elif best_date_sim == 1.0:
+                match_reason = "Exact Date Match"
+            elif best_title_sim > 0.85:
+                match_reason = f"High Title Similarity ({int(best_title_sim*100)}%)"
+            elif best_date_sim >= 0.9 and best_title_sim > 0.6:
+                match_reason = "Close Date & Title Match"
+            elif best_coord_match and best_title_sim > 0.5:
+                match_reason = "Coordinate Match with Title Similarity"
+            else:
+                match_reason = "Partial Title / Coordinate Match"
+                
+        # Fallback for exact coordinates match if no other TMDB episode matched better
+        if not matched:
+            for tmdb_ep in tmdb_episodes:
+                if (tv_ep["season"] == tmdb_ep["season"]) and (tv_ep["episode"] == tmdb_ep["episode"]):
+                    best_candidate = tmdb_ep
+                    matched = True
+                    confidence = 50
+                    match_reason = "Coordinate Match Only"
+                    break
+
+        if matched and best_candidate:
             matches.append({
                 "source_season": tv_ep["season"],
                 "source_episode": tv_ep["episode"],
                 "source_title": tv_ep["title"],
                 "source_air_date": tv_ep["air_date"],
-                "target_season": target["season"],
-                "target_episode": target["episode"],
-                "target_title": target["title"],
-                "target_air_date": target["air_date"],
-                "match_reason": "Air Date Match",
+                "target_season": best_candidate["season"],
+                "target_episode": best_candidate["episode"],
+                "target_title": best_candidate["title"],
+                "target_air_date": best_candidate["air_date"],
+                "match_reason": match_reason,
+                "confidence": confidence,
                 "matched": True,
             })
-            matched = True
-            
-        # Strategy B: Exact normalized Title Match
-        if not matched:
-            norm_tv = normalize_title(tv_ep["title"])
-            if norm_tv and norm_tv in tmdb_by_title:
-                target = tmdb_by_title[norm_tv]
-                matches.append({
-                    "source_season": tv_ep["season"],
-                    "source_episode": tv_ep["episode"],
-                    "source_title": tv_ep["title"],
-                    "source_air_date": tv_ep["air_date"],
-                    "target_season": target["season"],
-                    "target_episode": target["episode"],
-                    "target_title": target["title"],
-                    "target_air_date": target["air_date"],
-                    "match_reason": "Title Match",
-                    "matched": True,
-                })
-                matched = True
-                
-        if not matched:
+        else:
             matches.append({
                 "source_season": tv_ep["season"],
                 "source_episode": tv_ep["episode"],
@@ -3298,6 +3516,7 @@ async def auto_map_tvdb_tmdb_preview(
                 "target_title": None,
                 "target_air_date": None,
                 "match_reason": "No Match",
+                "confidence": 0,
                 "matched": False,
             })
 

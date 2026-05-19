@@ -352,7 +352,17 @@ try {
                           <!-- Individual Overrides in Season -->
                           <div class="grid grid-cols-1 divide-y divide-zinc-850/40">
                             {sortedOverrides.map((override: any) => (
-                              <div class="override-row-container flex flex-col lg:flex-row items-center justify-between p-5 gap-6 hover:bg-zinc-800/10 transition-colors duration-200">
+                              <div 
+                                class="override-row-container flex flex-col lg:flex-row items-center justify-between p-5 gap-6 hover:bg-zinc-800/10 transition-colors duration-200"
+                                data-source-season={override.source_season_number}
+                                data-source-episode={override.source_episode_number}
+                                data-target-season={override.target_season_number}
+                                data-target-episode={override.target_episode_number}
+                                data-source-title={(override.source_episode_title || "").toLowerCase()}
+                                data-target-title={(override.target_episode_title || "").toLowerCase()}
+                                data-show-title={showGroup.show_title.toLowerCase()}
+                                data-show-tmdb={showGroup.show_tmdb_id}
+                              >
                                 
                                 <!-- Bulk Select Checkbox + Source coordinates -->
                                 <div class="flex items-center gap-4 w-full lg:w-2/5 min-w-0">
@@ -741,30 +751,56 @@ try {
         <!-- Input Configuration Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-zinc-950/40 border border-zinc-850 p-5 rounded-2xl">
           
-          <!-- Left: Show Details -->
-          <div class="space-y-4">
-            <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">1. Target Show Identification</h4>
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-[10px] font-bold text-zinc-500 mb-1">TMDB Show ID</label>
-                <input type="number" id="auto-tmdb-id" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="e.g. 30985" />
-              </div>
-              <div>
-                <label class="block text-[10px] font-bold text-zinc-500 mb-1">TVDB Show ID</label>
-                <input type="number" id="auto-tvdb-id" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="e.g. 74796" />
-              </div>
+          <!-- Left: TMDB Show Search -->
+          <div class="space-y-3">
+            <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">1. TMDB Show</h4>
+            <div class="flex gap-2">
+              <input type="text" id="auto-tmdb-search" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Search by name or TMDB ID..." />
+              <button id="auto-tmdb-search-btn" type="button" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer shrink-0">Search</button>
             </div>
+            <!-- TMDB Search Results -->
+            <div id="auto-tmdb-results" class="hidden max-h-48 overflow-y-auto border border-zinc-850 rounded-xl bg-zinc-950/60 divide-y divide-zinc-850/50"></div>
+            <!-- TMDB Selected Show Card -->
+            <div id="auto-tmdb-selected" class="hidden flex items-center gap-3 p-3 bg-emerald-950/20 border border-emerald-900/30 rounded-xl">
+              <img id="auto-tmdb-selected-poster" src="" class="w-9 h-13 rounded-lg object-cover hidden shrink-0 border border-zinc-800" />
+              <div id="auto-tmdb-selected-no-poster" class="w-9 h-13 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[7px] text-zinc-600 font-bold shrink-0 hidden">NO ART</div>
+              <div class="min-w-0 flex-1">
+                <span class="text-[8px] font-extrabold uppercase text-emerald-400 tracking-wider">TMDB Show Selected</span>
+                <h4 id="auto-tmdb-selected-title" class="text-zinc-100 font-bold truncate text-xs mt-0.5"></h4>
+                <span id="auto-tmdb-selected-meta" class="text-[9px] text-zinc-500 font-medium"></span>
+              </div>
+              <button id="auto-tmdb-change-btn" type="button" class="px-2.5 py-1 bg-zinc-850 hover:bg-zinc-800 text-zinc-400 font-bold text-[10px] rounded-lg cursor-pointer transition shrink-0">Change</button>
+            </div>
+            <!-- Hidden input for actual ID -->
+            <input type="hidden" id="auto-tmdb-id" />
           </div>
 
-          <!-- Right: API Configuration -->
-          <div class="space-y-4">
-            <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">2. API Configuration</h4>
-            <div class="space-y-3">
-              <div>
-                <label class="block text-[10px] font-bold text-zinc-500 mb-1">TVDB API Key (v4)</label>
-                <input type="text" id="auto-tvdb-key" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Paste TVDB v4 key" />
-              </div>
+          <!-- Right: TVDB Show Search + API Key -->
+          <div class="space-y-3">
+            <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">2. TVDB Show</h4>
+            <div>
+              <label class="block text-[10px] font-bold text-zinc-500 mb-1">TVDB API Key (v4)</label>
+              <input type="text" id="auto-tvdb-key" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Paste TVDB v4 key" />
             </div>
+            <div class="flex gap-2">
+              <input type="text" id="auto-tvdb-search" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Search by name or TVDB ID..." />
+              <button id="auto-tvdb-search-btn" type="button" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer shrink-0">Search</button>
+            </div>
+            <!-- TVDB Search Results -->
+            <div id="auto-tvdb-results" class="hidden max-h-48 overflow-y-auto border border-zinc-850 rounded-xl bg-zinc-950/60 divide-y divide-zinc-850/50"></div>
+            <!-- TVDB Selected Show Card -->
+            <div id="auto-tvdb-selected" class="hidden flex items-center gap-3 p-3 bg-indigo-950/20 border border-indigo-900/30 rounded-xl">
+              <img id="auto-tvdb-selected-poster" src="" class="w-9 h-13 rounded-lg object-cover hidden shrink-0 border border-zinc-800" />
+              <div id="auto-tvdb-selected-no-poster" class="w-9 h-13 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[7px] text-zinc-600 font-bold shrink-0 hidden">NO ART</div>
+              <div class="min-w-0 flex-1">
+                <span class="text-[8px] font-extrabold uppercase text-indigo-400 tracking-wider">TVDB Show Selected</span>
+                <h4 id="auto-tvdb-selected-title" class="text-zinc-100 font-bold truncate text-xs mt-0.5"></h4>
+                <span id="auto-tvdb-selected-meta" class="text-[9px] text-zinc-500 font-medium"></span>
+              </div>
+              <button id="auto-tvdb-change-btn" type="button" class="px-2.5 py-1 bg-zinc-850 hover:bg-zinc-800 text-zinc-400 font-bold text-[10px] rounded-lg cursor-pointer transition shrink-0">Change</button>
+            </div>
+            <!-- Hidden input for actual ID -->
+            <input type="hidden" id="auto-tvdb-id" />
           </div>
 
         </div>
@@ -830,12 +866,13 @@ try {
 
           <!-- Matching List Grid -->
           <div class="border border-zinc-850 rounded-2xl overflow-hidden bg-zinc-950/20">
-            <div class="px-4 py-2.5 bg-zinc-950 border-b border-zinc-850 flex items-center justify-between text-[10px] font-black uppercase text-zinc-500 tracking-wider shrink-0">
-              <div>Episode Mappings (Source ➜ Target)</div>
-              <div>Coordinates (S : E)</div>
+            <div class="px-4 py-3 bg-zinc-950 border-b border-zinc-850 grid grid-cols-12 text-[10px] font-black uppercase text-zinc-500 tracking-wider shrink-0 hidden lg:grid gap-4">
+              <div class="col-span-5">TVDB Source Episode</div>
+              <div class="col-span-3 text-center">Match Integrity & Confidence</div>
+              <div class="col-span-4">TMDB Target Selector</div>
             </div>
             
-            <div id="preview-matches-list" class="divide-y divide-zinc-850/60 overflow-y-auto max-h-[300px] text-xs">
+            <div id="preview-matches-list" class="divide-y divide-zinc-850/60 overflow-y-auto max-h-[480px] text-xs scrollbar-thin">
               <!-- Dynamically populated rows -->
             </div>
           </div>
@@ -1093,6 +1130,10 @@ try {
 
     // Fetch shows in user's collection
     async function fetchLocalShows() {
+      if (localShowsList && localShowsList.length > 0) {
+        populateLocalShowsDropdown();
+        return;
+      }
       try {
         const res = await fetch("/api/proxy/sync/source-shows", {
           headers: { "Authorization": `Bearer ${token}` }
@@ -1734,11 +1775,26 @@ try {
         const panels = document.querySelectorAll(".show-episodes-panel");
         let totalVisibleEpisodes = 0;
 
+        // Parse query for patterns
+        const sxeRegex = /s(\d+)\s*e(\d+)/i;
+        const crossRegex = /(\d+)\s*x\s*(\d+)/i;
+        const sRegex = /^s(\d+)$/i;
+        const eRegex = /^e(\d+)$/i;
+
+        const sxeMatch = query.match(sxeRegex);
+        const crossMatch = query.match(crossRegex);
+        const sMatch = query.match(sRegex);
+        const eMatch = query.match(eRegex);
+        const isNum = /^\d+$/.test(query);
+        const queryNum = isNum ? parseInt(query, 10) : null;
+
         panels.forEach(panel => {
-          const showHeader = panel.querySelector("[data-show-toggle]");
-          const showTitle = showHeader?.querySelector("h3")?.textContent?.toLowerCase() || "";
+          const showTitleAttr = (panel.getAttribute("data-show-title") || "").toLowerCase();
           const showTmdbId = panel.getAttribute("data-show-tmdb") || "";
           
+          const showHeader = panel.querySelector("[data-show-toggle]");
+          const showTitle = showTitleAttr || showHeader?.querySelector("h3")?.textContent?.toLowerCase() || "";
+
           let showHasVisibleEpisodes = false;
 
           // Process season containers within this show panel
@@ -1749,8 +1805,53 @@ try {
             // Process individual episode rows within this season
             const rows = seasonContainer.querySelectorAll(".override-row-container");
             rows.forEach(row => {
+              const srcSeason = parseInt(row.getAttribute("data-source-season") || "0", 10);
+              const srcEpisode = parseInt(row.getAttribute("data-source-episode") || "0", 10);
+              const tgtSeason = parseInt(row.getAttribute("data-target-season") || "0", 10);
+              const tgtEpisode = parseInt(row.getAttribute("data-target-episode") || "0", 10);
+              
+              const srcTitle = (row.getAttribute("data-source-title") || "").toLowerCase();
+              const tgtTitle = (row.getAttribute("data-target-title") || "").toLowerCase();
+
               const rowText = row.textContent?.toLowerCase() || "";
-              const match = rowText.includes(query) || showTitle.includes(query) || showTmdbId.includes(query);
+
+              let match = false;
+
+              if (query === "") {
+                match = true;
+              } else if (sxeMatch) {
+                // SxxExx format
+                const qSeason = parseInt(sxeMatch[1], 10);
+                const qEpisode = parseInt(sxeMatch[2], 10);
+                match = (srcSeason === qSeason && srcEpisode === qEpisode) ||
+                        (tgtSeason === qSeason && tgtEpisode === qEpisode);
+              } else if (crossMatch) {
+                // 1x02 format
+                const qSeason = parseInt(crossMatch[1], 10);
+                const qEpisode = parseInt(crossMatch[2], 10);
+                match = (srcSeason === qSeason && srcEpisode === qEpisode) ||
+                        (tgtSeason === qSeason && tgtEpisode === qEpisode);
+              } else if (sMatch) {
+                // Season only (S01)
+                const qSeason = parseInt(sMatch[1], 10);
+                match = (srcSeason === qSeason || tgtSeason === qSeason);
+              } else if (eMatch) {
+                // Episode only (E02)
+                const qEpisode = parseInt(eMatch[1], 10);
+                match = (srcEpisode === qEpisode || tgtEpisode === qEpisode);
+              } else if (isNum && queryNum !== null) {
+                // Lone number: check exact episode numbers, season numbers or TMDB show ID
+                match = (srcEpisode === queryNum || tgtEpisode === queryNum || 
+                         srcSeason === queryNum || tgtSeason === queryNum ||
+                         showTmdbId === query);
+              } else {
+                // General text search on titles, overview, show title, etc.
+                match = showTitle.includes(query) || 
+                        showTmdbId.includes(query) || 
+                        srcTitle.includes(query) || 
+                        tgtTitle.includes(query) ||
+                        rowText.includes(query);
+              }
               
               if (match) {
                 row.classList.remove("hidden");
@@ -2414,6 +2515,28 @@ try {
     const autoTmdbIdInput = document.getElementById("auto-tmdb-id") as HTMLInputElement;
     const autoTvdbIdInput = document.getElementById("auto-tvdb-id") as HTMLInputElement;
     const autoTvdbKeyInput = document.getElementById("auto-tvdb-key") as HTMLInputElement;
+
+    // TMDB search elements
+    const autoTmdbSearchInput = document.getElementById("auto-tmdb-search") as HTMLInputElement;
+    const autoTmdbSearchBtn = document.getElementById("auto-tmdb-search-btn")!;
+    const autoTmdbResults = document.getElementById("auto-tmdb-results")!;
+    const autoTmdbSelected = document.getElementById("auto-tmdb-selected")!;
+    const autoTmdbSelectedPoster = document.getElementById("auto-tmdb-selected-poster") as HTMLImageElement;
+    const autoTmdbSelectedNoPoster = document.getElementById("auto-tmdb-selected-no-poster")!;
+    const autoTmdbSelectedTitle = document.getElementById("auto-tmdb-selected-title")!;
+    const autoTmdbSelectedMeta = document.getElementById("auto-tmdb-selected-meta")!;
+    const autoTmdbChangeBtn = document.getElementById("auto-tmdb-change-btn")!;
+
+    // TVDB search elements
+    const autoTvdbSearchInput = document.getElementById("auto-tvdb-search") as HTMLInputElement;
+    const autoTvdbSearchBtn = document.getElementById("auto-tvdb-search-btn")!;
+    const autoTvdbResults = document.getElementById("auto-tvdb-results")!;
+    const autoTvdbSelected = document.getElementById("auto-tvdb-selected")!;
+    const autoTvdbSelectedPoster = document.getElementById("auto-tvdb-selected-poster") as HTMLImageElement;
+    const autoTvdbSelectedNoPoster = document.getElementById("auto-tvdb-selected-no-poster")!;
+    const autoTvdbSelectedTitle = document.getElementById("auto-tvdb-selected-title")!;
+    const autoTvdbSelectedMeta = document.getElementById("auto-tvdb-selected-meta")!;
+    const autoTvdbChangeBtn = document.getElementById("auto-tvdb-change-btn")!;
     
     const previewMatchStats = document.getElementById("preview-match-stats")!;
     const previewMatchPct = document.getElementById("preview-match-pct")!;
@@ -2430,14 +2553,191 @@ try {
     let selectOptionsHtml = "";
     let currentFilter = "all";
 
-    // Restore inputs from localStorage if present
+    // Restore TVDB key from localStorage
     const storedTvdbKey = localStorage.getItem("scrob_auto_tvdb_key");
-    const storedTmdbId = localStorage.getItem("scrob_auto_tmdb_id");
-    const storedTvdbId = localStorage.getItem("scrob_auto_tvdb_id");
-    
     if (storedTvdbKey) autoTvdbKeyInput.value = storedTvdbKey;
-    if (storedTmdbId) autoTmdbIdInput.value = storedTmdbId;
-    if (storedTvdbId) autoTvdbIdInput.value = storedTvdbId;
+
+    // --- TMDB Show Search Logic ---
+    async function performTmdbSearch() {
+      const q = autoTmdbSearchInput.value.trim();
+      if (!q) return;
+
+      autoTmdbSearchBtn.textContent = "...";
+      try {
+        const res = await fetch(`/api/proxy/sync/tmdb-show-search?q=${encodeURIComponent(q)}`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          renderAutoSearchResults(data.results || [], "tmdb");
+        } else {
+          window.showToast?.("TMDB search failed", "error");
+        }
+      } catch (err) {
+        window.showToast?.("Error searching TMDB", "error");
+      } finally {
+        autoTmdbSearchBtn.textContent = "Search";
+      }
+    }
+
+    autoTmdbSearchBtn.addEventListener("click", performTmdbSearch);
+    autoTmdbSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); performTmdbSearch(); }
+    });
+
+    autoTmdbChangeBtn.addEventListener("click", () => {
+      autoTmdbIdInput.value = "";
+      autoTmdbSelected.classList.add("hidden");
+      autoTmdbSearchInput.value = "";
+      autoTmdbSearchInput.classList.remove("hidden");
+      autoTmdbSearchBtn.classList.remove("hidden");
+      autoTmdbResults.classList.add("hidden");
+    });
+
+    // --- TVDB Show Search Logic ---
+    async function performTvdbSearch() {
+      const q = autoTvdbSearchInput.value.trim();
+      const tvdbKey = autoTvdbKeyInput.value.trim();
+      if (!q) return;
+      if (!tvdbKey) {
+        window.showToast?.("Enter your TVDB API Key first", "error");
+        autoTvdbKeyInput.focus();
+        return;
+      }
+
+      autoTvdbSearchBtn.textContent = "...";
+      try {
+        const res = await fetch("/api/proxy/sync/tvdb-search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ query: q, tvdb_api_key: tvdbKey })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          renderAutoSearchResults(data.results || [], "tvdb");
+        } else {
+          const err = await res.json().catch(() => ({}));
+          window.showToast?.(err.detail || "TVDB search failed", "error");
+        }
+      } catch (err) {
+        window.showToast?.("Error searching TVDB", "error");
+      } finally {
+        autoTvdbSearchBtn.textContent = "Search";
+      }
+    }
+
+    autoTvdbSearchBtn.addEventListener("click", performTvdbSearch);
+    autoTvdbSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); performTvdbSearch(); }
+    });
+
+    autoTvdbChangeBtn.addEventListener("click", () => {
+      autoTvdbIdInput.value = "";
+      autoTvdbSelected.classList.add("hidden");
+      autoTvdbSearchInput.value = "";
+      autoTvdbSearchInput.classList.remove("hidden");
+      autoTvdbSearchBtn.classList.remove("hidden");
+      autoTvdbResults.classList.add("hidden");
+    });
+
+    // --- Shared render for search results ---
+    function renderAutoSearchResults(results: any[], source: "tmdb" | "tvdb") {
+      const container = source === "tmdb" ? autoTmdbResults : autoTvdbResults;
+      container.innerHTML = "";
+
+      if (results.length === 0) {
+        container.innerHTML = '<div class="p-4 text-center text-xs text-zinc-500">No shows found. Try a different search.</div>';
+        container.classList.remove("hidden");
+        return;
+      }
+
+      results.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "flex items-center gap-3 p-2.5 hover:bg-zinc-800/40 cursor-pointer transition-colors";
+
+        const id = source === "tmdb" ? item.tmdb_id : item.tvdb_id;
+        const poster = source === "tmdb" ? item.poster_path : item.image;
+        const name = item.name || "Unknown";
+        const year = item.year || "N/A";
+
+        let imgHtml = `<div class="w-7 h-10 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[6px] text-zinc-600 font-bold shrink-0">N/A</div>`;
+        if (poster) {
+          imgHtml = `<img src="${poster}" alt="" class="w-7 h-10 rounded object-cover border border-zinc-800 shrink-0" loading="lazy" />`;
+        }
+
+        const idLabel = source === "tmdb" ? "TMDB" : "TVDB";
+
+        row.innerHTML = `
+          ${imgHtml}
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-bold text-zinc-200 truncate">${name}</div>
+            <div class="text-[9px] text-zinc-500 font-medium">${year} • ${idLabel}: ${id || 'N/A'}</div>
+          </div>
+        `;
+
+        row.addEventListener("click", () => {
+          selectAutoShow(source, {
+            id,
+            name,
+            year,
+            poster
+          });
+        });
+
+        container.appendChild(row);
+      });
+
+      container.classList.remove("hidden");
+    }
+
+    function selectAutoShow(source: "tmdb" | "tvdb", show: { id: number | null; name: string; year: string; poster: string | null }) {
+      if (source === "tmdb") {
+        autoTmdbIdInput.value = show.id?.toString() || "";
+        autoTmdbSelectedTitle.textContent = show.name;
+        autoTmdbSelectedMeta.textContent = `${show.year} • TMDB ID: ${show.id}`;
+
+        if (show.poster) {
+          autoTmdbSelectedPoster.src = show.poster;
+          autoTmdbSelectedPoster.classList.remove("hidden");
+          autoTmdbSelectedNoPoster.classList.add("hidden");
+        } else {
+          autoTmdbSelectedPoster.classList.add("hidden");
+          autoTmdbSelectedNoPoster.classList.remove("hidden");
+        }
+
+        autoTmdbSelected.classList.remove("hidden");
+        autoTmdbResults.classList.add("hidden");
+        autoTmdbSearchInput.classList.add("hidden");
+        autoTmdbSearchBtn.classList.add("hidden");
+
+        // Save to localStorage
+        localStorage.setItem("scrob_auto_tmdb_id", show.id?.toString() || "");
+      } else {
+        autoTvdbIdInput.value = show.id?.toString() || "";
+        autoTvdbSelectedTitle.textContent = show.name;
+        autoTvdbSelectedMeta.textContent = `${show.year} • TVDB ID: ${show.id}`;
+
+        if (show.poster) {
+          autoTvdbSelectedPoster.src = show.poster;
+          autoTvdbSelectedPoster.classList.remove("hidden");
+          autoTvdbSelectedNoPoster.classList.add("hidden");
+        } else {
+          autoTvdbSelectedPoster.classList.add("hidden");
+          autoTvdbSelectedNoPoster.classList.remove("hidden");
+        }
+
+        autoTvdbSelected.classList.remove("hidden");
+        autoTvdbResults.classList.add("hidden");
+        autoTvdbSearchInput.classList.add("hidden");
+        autoTvdbSearchBtn.classList.add("hidden");
+
+        // Save to localStorage
+        localStorage.setItem("scrob_auto_tvdb_id", show.id?.toString() || "");
+      }
+    }
 
     function openAutoModal() {
       autoModal.classList.remove("opacity-0", "pointer-events-none");
@@ -2518,37 +2818,63 @@ try {
         // Find index in original activeMappings to ensure correct referencing
         const origIndex = activeMappings.indexOf(m);
         const row = document.createElement("div");
-        row.className = "p-4 flex flex-col gap-3 border-b border-zinc-850 hover:bg-zinc-800/20 transition-colors";
+        row.className = "p-4 grid grid-cols-1 lg:grid-cols-12 items-center gap-4 border-b border-zinc-850 hover:bg-zinc-800/10 transition-all duration-200";
         
         row.innerHTML = `
-          <!-- Top Line: Source Title and Details (TVDB) -->
-          <div class="flex items-start gap-3 min-w-0">
-            <input type="checkbox" class="auto-include-checkbox mt-0.5 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer" data-index="${origIndex}" ${m.matched ? 'checked' : ''} />
+          <!-- Column 1: Source Title and Details (TVDB) -->
+          <div class="col-span-12 lg:col-span-5 flex items-start gap-3 min-w-0">
+            <input type="checkbox" class="auto-include-checkbox mt-1.5 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4.5 h-4.5 shrink-0" data-index="${origIndex}" ${m.matched ? 'checked' : ''} />
             
-            <div class="flex-1 min-w-0">
+            <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs bg-indigo-950 text-indigo-400 border border-indigo-900/60 px-1.5 py-0.5 rounded font-black uppercase tracking-wider text-[9px]">TVDB</span>
-                <span class="text-[10px] font-bold text-zinc-500">S${m.source_season.toString().padStart(2, '0')}E${m.source_episode.toString().padStart(2, '0')}</span>
-                <span class="text-[10px] text-zinc-500">• ${m.source_air_date || 'No Date'}</span>
+                <span class="text-[9px] bg-indigo-950/80 text-indigo-400 border border-indigo-900/40 px-1.5 py-0.5 rounded font-black tracking-wider uppercase">TVDB</span>
+                <span class="text-xs font-black text-zinc-350">S${m.source_season.toString().padStart(2, '0')}E${m.source_episode.toString().padStart(2, '0')}</span>
+                <span class="text-[10px] text-zinc-550 font-bold">• ${m.source_air_date || 'No Date'}</span>
               </div>
-              <div class="text-zinc-200 font-bold text-sm mt-1 leading-relaxed break-words">${m.source_title || 'Untitled Episode'}</div>
+              <div class="text-zinc-200 font-bold text-sm mt-1 leading-relaxed truncate" title="${m.source_title || 'Untitled Episode'}">${m.source_title || 'Untitled Episode'}</div>
             </div>
           </div>
 
-          <!-- Bottom Line: Target Selection Dropdown -->
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-950/40 border border-zinc-900/80 rounded-xl p-2.5 ml-7">
-            
-            <!-- Target Match Status -->
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="text-xs bg-emerald-950 text-emerald-400 border border-emerald-900/60 px-1.5 py-0.5 rounded font-black uppercase tracking-wider text-[9px] shrink-0">TMDB Target</span>
-              <span class="text-[9px] bg-zinc-800/80 text-zinc-400 border border-zinc-700/60 px-1.5 py-0.5 rounded font-bold shrink-0">${m.matched ? (m.match_reason === 'Air Date Match' ? 'DATE MATCH' : 'TITLE MATCH') : 'UNMATCHED'}</span>
+          <!-- Column 2: Connector & Match Confidence Status -->
+          <div class="col-span-12 lg:col-span-3 flex flex-row lg:flex-col items-center justify-between lg:justify-center gap-2 lg:gap-1 text-center bg-zinc-950/20 lg:bg-transparent p-2.5 lg:p-0 rounded-xl border border-zinc-850/50 lg:border-0 shrink-0 min-w-0">
+            <div class="flex items-center gap-1.5 justify-center">
+              ${m.matched ? (() => {
+                const conf = m.confidence || 0;
+                let badgeClass = "bg-rose-950/40 text-rose-400 border border-rose-900/30";
+                if (conf >= 85) {
+                  badgeClass = "bg-emerald-950/40 text-emerald-400 border border-emerald-900/30";
+                } else if (conf >= 50) {
+                  badgeClass = "bg-amber-950/40 text-amber-400 border border-amber-900/30";
+                }
+                return `
+                  <span class="text-[9px] ${badgeClass} px-2 py-0.5 rounded-full font-black tracking-wider shadow-sm shrink-0" title="${m.match_reason}">
+                    ${m.confidence}% MATCH
+                  </span>
+                `;
+              })() : `
+                <span class="text-[9px] bg-zinc-850/80 text-zinc-400 border border-zinc-700/60 px-2 py-0.5 rounded-full font-black tracking-wider shrink-0">
+                  UNMATCHED
+                </span>
+              `}
             </div>
+            
+            <div class="hidden lg:flex items-center justify-center text-zinc-650 mt-0.5">
+              <svg class="w-4 h-4 text-zinc-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </div>
+            
+            <div class="text-[10px] text-zinc-500 font-extrabold truncate w-full tracking-wide max-w-[150px] lg:max-w-none text-right lg:text-center" title="${m.match_reason || ''}">
+              ${m.matched ? m.match_reason : 'Manual override required'}
+            </div>
+          </div>
 
-            <!-- Custom Searchable Select Dropdown Component -->
-            <div class="w-full sm:w-[320px] shrink-0">
+          <!-- Column 3: Target Selector Dropdown (TMDB) -->
+          <div class="col-span-12 lg:col-span-4 flex items-center gap-2 min-w-0">
+            <span class="text-[9px] bg-emerald-950/80 text-emerald-400 border border-emerald-900/40 px-1.5 py-0.5 rounded font-black tracking-wider uppercase shrink-0 lg:hidden">TMDB</span>
+            
+            <div class="w-full">
               <div class="relative w-full custom-search-select-container" data-index="${origIndex}">
                 <!-- Search/Display Input -->
-                <div class="flex items-center w-full bg-zinc-900 border border-zinc-800 hover:border-zinc-700 focus-within:border-indigo-500 rounded-xl transition-all duration-200">
+                <div class="flex items-center w-full bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 focus-within:border-indigo-500 rounded-xl transition-all duration-200 shadow-inner">
                   <input 
                     type="text" 
                     class="custom-search-select-input w-full bg-transparent px-3 py-2 text-xs text-zinc-200 font-semibold focus:outline-none cursor-pointer" 
@@ -2571,13 +2897,12 @@ try {
                     />
                   </div>
                   <!-- Options container -->
-                  <div class="custom-search-select-options overflow-y-auto space-y-0.5 max-h-44 text-[11px] font-semibold text-zinc-400">
+                  <div class="custom-search-select-options overflow-y-auto space-y-0.5 max-h-44 text-[11px] font-semibold text-zinc-400 scrollbar-thin">
                     <!-- Loaded on click -->
                   </div>
                 </div>
               </div>
             </div>
-
           </div>
         `;
 
@@ -2734,15 +3059,17 @@ try {
       const tvdbId = parseInt(autoTvdbIdInput.value);
       const tvdbKey = autoTvdbKeyInput.value.trim();
       
-      if (!tmdbId || !tvdbId || !tvdbKey) {
-        window.showToast?.("TMDB ID, TVDB ID, and TVDB API Key are all required!", "error");
+      if (!tmdbId || !tvdbId) {
+        window.showToast?.("Please search and select both a TMDB show and a TVDB show!", "error");
+        return;
+      }
+      if (!tvdbKey) {
+        window.showToast?.("TVDB API Key is required!", "error");
         return;
       }
 
-      // Save keys to localStorage
+      // Save TVDB key to localStorage
       localStorage.setItem("scrob_auto_tvdb_key", tvdbKey);
-      localStorage.setItem("scrob_auto_tmdb_id", tmdbId.toString());
-      localStorage.setItem("scrob_auto_tvdb_id", tvdbId.toString());
 
       loader.classList.remove("hidden");
       previewArea.classList.add("hidden");
