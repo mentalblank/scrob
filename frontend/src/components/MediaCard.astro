@@ -50,15 +50,15 @@ const collectionPct = item.collection_pct ?? (item.in_library ? 100 : 0);
 const inLibrary = item.in_library ?? false;
 const isDvr = item.is_monitored === true;
 const isPartialWatched = !watched && (
-  (item.type === 'series' && (item.watched_episodes_count ?? 0) > 0) ||
+  ((item.type === 'series' || item.type === 'season') && (item.watched_episodes_count ?? 0) > 0) ||
   ((item.progress_percent ?? 0) > 0)
 );
-const isPartialCollected = item.type === 'series' && collectionPct > 0 && collectionPct < 100;
+const isPartialCollected = (item.type === 'series' || item.type === 'season') && collectionPct > 0 && collectionPct < 100;
 
 const progressPct = (item.type === 'series' || item.type === 'season') && item.total_episodes_count 
   ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
   : (item.progress_percent ?? 0);
-const showProgress = progressPct > 0;
+const showProgress = progressPct > 0 && !watched;
 ---
 
 <div
@@ -169,7 +169,7 @@ const showProgress = progressPct > 0;
       inLists={inLists}
       inLibrary={inLibrary}
       collectionPct={collectionPct}
-      isSeries={isSeries}
+      isSeries={isSeries || isSeason}
     />
   )}
 

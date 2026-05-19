@@ -179,28 +179,38 @@ async def enrich_with_state(
 
     watched_shows: set[int] = set()
     show_watched_count_map: dict[int, int] = {}
-    if show_tmdb_ids:
-        # Count distinct watched episodes per show, deduplicated by (season, episode).
-        # Use a join on ShowModel by tmdb_id to group episodes by their show's TMDB ID.
-        # This handles cases where multiple Show rows might exist for the same TMDB ID.
-        # Count distinct watched episodes per show, deduplicated by (season, episode).
-        # We need to find all watched episodes for these shows. 
-        # Most episodes will be linked via Media.show_id -> ShowModel.id -> ShowModel.tmdb_id.
-        # But some might have a null show_id. We can find those by matching their TMDB ID
-        # if we know which episode TMDB IDs belong to which show. 
-        # To keep it efficient and avoid extra TMDB lookups, let's use the show_id join
-        # but also allow matching by show_id directly if we have the local Show IDs.
-        
-        # 1. Get local Show IDs for the TMDB IDs we are interested in.
-        show_id_map_q = await db.execute(
-            select(ShowModel.tmdb_id, ShowModel.id)
-            .where(ShowModel.tmdb_id.in_(show_tmdb_ids))
-        )
-        show_tmdb_to_local_id = {r[0]: r[1] for r in show_id_map_q.all()}
-        local_show_ids = list(show_tmdb_to_local_id.values())
+    collected_map: dict[int, int] = {}
+    overrides_by_show = {}
+    show_seasons_map: dict[int, list] = {}
+    total_map: dict[int, int] = {}
+    show_status_map: dict[int, str] = {}
+    adjusted_show_season_ep_counts = {}
 
-        watched_eps_q = (
-            select(ShowModel.tmdb_id.label("show_tmdb_id"), Media.season_number, Media.episode_number)
+    if show_tmdb_ids:
+        # Load overrides
+        from models.season_override import ShowSeasonOverride
+        overrides_q = await db.execute(
+            select(ShowSeasonOverride).where(
+                ShowSeasonOverride.user_id == user_id,
+                or_(
+                    ShowSeasonOverride.source_show_tmdb_id.in_(show_tmdb_ids),
+                    ShowSeasonOverride.target_show_tmdb_id.in_(show_tmdb_ids),
+                )
+            )
+        )
+        overrides = overrides_q.scalars().all()
+
+        for override in overrides:
+            overrides_by_show.setdefault(override.source_show_tmdb_id, []).append(override)
+            overrides_by_show.setdefault(override.target_show_tmdb_id, []).append(override)
+
+        # Build sets of watched/collected episodes per show
+        show_watched_eps = {tid: set() for tid in show_tmdb_ids}
+        show_collected_eps = {tid: set() for tid in show_tmdb_ids}
+
+        # 1. Fetch raw watched episodes linked directly
+        watched_eps_q = await db.execute(
+            select(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
             .join(WatchEvent, WatchEvent.media_id == Media.id)
             .join(ShowModel, ShowModel.id == Media.show_id)
             .where(
@@ -211,26 +221,72 @@ async def enrich_with_state(
                 ShowModel.tmdb_id.in_(show_tmdb_ids),
             )
         )
-        if not include_specials:
-            watched_eps_q = watched_eps_q.where(Media.season_number != 0)
-            
-        watched_eps_sq = (
-            watched_eps_q
-            .group_by(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
-            .subquery()
-        )
-        watched_count_q = await db.execute(
-            select(watched_eps_sq.c.show_tmdb_id, func.count())
-            .group_by(watched_eps_sq.c.show_tmdb_id)
-        )
-        show_watched_count_map = {r[0]: r[1] for r in watched_count_q.all()}
+        for show_tmdb_id, sn, en in watched_eps_q.all():
+            if include_specials or sn != 0:
+                show_watched_eps[show_tmdb_id].add((sn, en))
 
-        # 2. Add episodes that might have a null show_id but are watched.
-        # This is harder without knowing episode TMDB IDs. 
-        # But if the user marked them watched via Scrob, they SHOULD have show_id set.
-        # Let's check if there are any episodes with null show_id that belong to these shows.
-        # Actually, let's just make the existing logic more robust by ensuring show_id is set
-        # when marking as watched (which we already do in history.py).
+        # 2. Fetch raw collected episodes linked directly
+        collected_eps_q = await db.execute(
+            select(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
+            .join(Collection, Collection.media_id == Media.id)
+            .join(ShowModel, ShowModel.id == Media.show_id)
+            .where(
+                Collection.user_id == user_id,
+                Media.media_type == MediaType.episode,
+                Media.season_number.isnot(None),
+                Media.episode_number.isnot(None),
+                ShowModel.tmdb_id.in_(show_tmdb_ids),
+            )
+        )
+        for show_tmdb_id, sn, en in collected_eps_q.all():
+            if include_specials or sn != 0:
+                show_collected_eps[show_tmdb_id].add((sn, en))
+
+        # 3. Merge overrides
+        async def merge_override(this_show_tmdb_id, this_season, other_show_tmdb_id, other_season):
+            other_show_q = await db.execute(
+                select(ShowModel).where(ShowModel.tmdb_id == other_show_tmdb_id)
+            )
+            other_show = other_show_q.scalar_one_or_none()
+            if other_show:
+                # Watched episodes
+                other_watched_q = await db.execute(
+                    select(Media.episode_number)
+                    .join(WatchEvent, WatchEvent.media_id == Media.id)
+                    .where(
+                        Media.show_id == other_show.id,
+                        WatchEvent.user_id == user_id,
+                        Media.media_type == MediaType.episode,
+                        Media.season_number == other_season,
+                        Media.episode_number.isnot(None),
+                    )
+                )
+                for (en,) in other_watched_q.all():
+                    show_watched_eps[this_show_tmdb_id].add((this_season, en))
+
+                # Collected episodes
+                other_coll_q = await db.execute(
+                    select(Media.episode_number)
+                    .join(Collection, Collection.media_id == Media.id)
+                    .where(
+                        Media.show_id == other_show.id,
+                        Collection.user_id == user_id,
+                        Media.media_type == MediaType.episode,
+                        Media.season_number == other_season,
+                        Media.episode_number.isnot(None),
+                    )
+                )
+                for (en,) in other_coll_q.all():
+                    show_collected_eps[this_show_tmdb_id].add((this_season, en))
+
+        for override in overrides:
+            if override.source_show_tmdb_id in show_tmdb_ids:
+                await merge_override(override.source_show_tmdb_id, override.source_season_number, override.target_show_tmdb_id, override.target_season_number)
+            if override.target_show_tmdb_id in show_tmdb_ids:
+                await merge_override(override.target_show_tmdb_id, override.target_season_number, override.source_show_tmdb_id, override.source_season_number)
+
+        show_watched_count_map = {tid: len(eps) for tid, eps in show_watched_eps.items()}
+        collected_map = {tid: len(eps) for tid, eps in show_collected_eps.items()}
 
     watched_episodes: set[int] = set()
     if ep_tmdb_ids:
@@ -313,83 +369,7 @@ async def enrich_with_state(
                             s.get("episode_count", 0) for s in seasons if (include_specials or s.get("season_number", 0) != 0)
                         )
 
-        # Count distinct watched episodes per show, deduplicated by (season, episode).
-        # We find episodes by their show_id link. 
-        # Primary path: show_id -> ShowModel.id -> ShowModel.tmdb_id
-        watched_eps_q = (
-            select(ShowModel.tmdb_id.label("show_tmdb_id"), Media.season_number, Media.episode_number)
-            .join(WatchEvent, WatchEvent.media_id == Media.id)
-            .join(ShowModel, ShowModel.id == Media.show_id)
-            .where(
-                WatchEvent.user_id == user_id,
-                Media.media_type == MediaType.episode,
-                Media.season_number.isnot(None),
-                Media.episode_number.isnot(None),
-                ShowModel.tmdb_id.in_(show_tmdb_ids),
-            )
-        )
-        if not include_specials:
-            watched_eps_q = watched_eps_q.where(Media.season_number != 0)
-            
-        watched_eps_sq = (
-            watched_eps_q
-            .group_by(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
-            .subquery()
-        )
-        watched_count_q = await db.execute(
-            select(watched_eps_sq.c.show_tmdb_id, func.count())
-            .group_by(watched_eps_sq.c.show_tmdb_id)
-        )
-        show_watched_count_map = {r[0]: r[1] for r in watched_count_q.all()}
 
-        # Count distinct collected episodes per show
-        ep_dedup_q = (
-            select(ShowModel.tmdb_id.label("show_tmdb_id"), Media.season_number, Media.episode_number)
-            .join(Collection, Collection.media_id == Media.id)
-            .join(ShowModel, ShowModel.id == Media.show_id)
-            .where(
-                Collection.user_id == user_id,
-                Media.media_type == MediaType.episode,
-                Media.season_number.isnot(None),
-                Media.episode_number.isnot(None),
-                ShowModel.tmdb_id.in_(show_tmdb_ids),
-            )
-        )
-        if not include_specials:
-            ep_dedup_q = ep_dedup_q.where(Media.season_number != 0)
-            
-        ep_dedup_sq = (
-            ep_dedup_q
-            .group_by(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
-            .subquery()
-        )
-        collected_q = await db.execute(
-            select(ep_dedup_sq.c.show_tmdb_id, func.count())
-            .group_by(ep_dedup_sq.c.show_tmdb_id)
-        )
-        collected_map = {r[0]: r[1] for r in collected_q.all()}
-
-        # Map to store adjusted show season ep counts for still-airing calculations
-        adjusted_show_season_ep_counts = {}
-        
-        # Apply overrides to get correct total episode counts
-        from models.season_override import ShowSeasonOverride
-        overrides_q = await db.execute(
-            select(ShowSeasonOverride).where(
-                ShowSeasonOverride.user_id == user_id,
-                or_(
-                    ShowSeasonOverride.source_show_tmdb_id.in_(show_tmdb_ids),
-                    ShowSeasonOverride.target_show_tmdb_id.in_(show_tmdb_ids),
-                )
-            )
-        )
-        overrides = overrides_q.scalars().all()
-
-        # Group overrides by show
-        overrides_by_show = {}
-        for override in overrides:
-            overrides_by_show.setdefault(override.source_show_tmdb_id, []).append(override)
-            overrides_by_show.setdefault(override.target_show_tmdb_id, []).append(override)
 
         for tmdb_id in show_tmdb_ids:
             # Get native seasons

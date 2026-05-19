@@ -341,9 +341,24 @@ async def get_show(
         # --- Per-season states ---
         season_states: dict = {}
 
+        # Get season overrides where this show is the target or the source
+        overrides_all_q = await db.execute(
+            select(ShowSeasonOverride).where(
+                ShowSeasonOverride.user_id == current_user.id,
+                or_(
+                    ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
+                    ShowSeasonOverride.target_show_tmdb_id == series_tmdb_id
+                )
+            )
+        )
+        overrides_all = overrides_all_q.scalars().all()
+
+        coll_eps_by_season = {}
+        watched_eps_by_season = {}
+
         # Collected episodes per season
-        coll_per_season_q = await db.execute(
-            select(Media.season_number, func.count(func.distinct(Media.episode_number)))
+        coll_eps_q = await db.execute(
+            select(Media.season_number, Media.episode_number)
             .join(Collection, Collection.media_id == Media.id)
             .where(
                 Media.show_id == show.id,
@@ -352,13 +367,13 @@ async def get_show(
                 Media.season_number.isnot(None),
                 Media.episode_number.isnot(None),
             )
-            .group_by(Media.season_number)
         )
-        coll_per_season: dict = dict(coll_per_season_q.all())
+        for sn, en in coll_eps_q.all():
+            coll_eps_by_season.setdefault(sn, set()).add(en)
 
         # Watched episodes per season (including those not in collection)
-        watched_per_season_q = await db.execute(
-            select(Media.season_number, func.count(func.distinct(Media.episode_number)))
+        watched_eps_q = await db.execute(
+            select(Media.season_number, Media.episode_number)
             .join(WatchEvent, WatchEvent.media_id == Media.id)
             .where(
                 Media.show_id == show.id,
@@ -367,9 +382,58 @@ async def get_show(
                 Media.season_number.isnot(None),
                 Media.episode_number.isnot(None),
             )
-            .group_by(Media.season_number)
         )
-        watched_per_season: dict = dict(watched_per_season_q.all())
+        for sn, en in watched_eps_q.all():
+            watched_eps_by_season.setdefault(sn, set()).add(en)
+
+        # Merge remapped seasons from overrides
+        for override in overrides_all:
+            if override.source_show_tmdb_id == series_tmdb_id:
+                this_season = override.source_season_number
+                other_show_tmdb_id = override.target_show_tmdb_id
+                other_season = override.target_season_number
+            else:
+                this_season = override.target_season_number
+                other_show_tmdb_id = override.source_show_tmdb_id
+                other_season = override.source_season_number
+
+            other_show_q = await db.execute(
+                select(ShowModel).where(ShowModel.tmdb_id == other_show_tmdb_id)
+            )
+            other_show = other_show_q.scalar_one_or_none()
+            if other_show:
+                # Fetch other show's collected episodes for other_season
+                other_coll_q = await db.execute(
+                    select(Media.episode_number)
+                    .join(Collection, Collection.media_id == Media.id)
+                    .where(
+                        Media.show_id == other_show.id,
+                        Collection.user_id == current_user.id,
+                        Media.media_type == MediaType.episode,
+                        Media.season_number == other_season,
+                        Media.episode_number.isnot(None),
+                    )
+                )
+                for (en,) in other_coll_q.all():
+                    coll_eps_by_season.setdefault(this_season, set()).add(en)
+
+                # Fetch other show's watched episodes for other_season
+                other_watched_q = await db.execute(
+                    select(Media.episode_number)
+                    .join(WatchEvent, WatchEvent.media_id == Media.id)
+                    .where(
+                        Media.show_id == other_show.id,
+                        WatchEvent.user_id == current_user.id,
+                        Media.media_type == MediaType.episode,
+                        Media.season_number == other_season,
+                        Media.episode_number.isnot(None),
+                    )
+                )
+                for (en,) in other_watched_q.all():
+                    watched_eps_by_season.setdefault(this_season, set()).add(en)
+
+        coll_per_season = {sn: len(eps) for sn, eps in coll_eps_by_season.items()}
+        watched_per_season = {sn: len(eps) for sn, eps in watched_eps_by_season.items()}
 
         # Season user ratings (stored against the show's Media row with season_number)
         show_media_q = await db.execute(
@@ -392,18 +456,6 @@ async def get_show(
             )
             season_ratings = dict(ratings_q.all())
 
-        # Get season overrides where this show is the target or the source
-        overrides_all_q = await db.execute(
-            select(ShowSeasonOverride).where(
-                ShowSeasonOverride.user_id == current_user.id,
-                or_(
-                    ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
-                    ShowSeasonOverride.target_show_tmdb_id == series_tmdb_id
-                )
-            )
-        )
-        overrides_all = overrides_all_q.scalars().all()
-
         # Episode counts per season from stored TMDB metadata
         season_ep_counts: dict = {
             s["season_number"]: s.get("episode_count", 0)
@@ -413,9 +465,10 @@ async def get_show(
         # Apply overrides to season_ep_counts
         for override in overrides_all:
             if override.source_show_tmdb_id == series_tmdb_id:
-                # Remapped away! Exclude this season from counts
-                if override.source_season_number in season_ep_counts:
-                    del season_ep_counts[override.source_season_number]
+                # Remapped away! Exclude this season from counts (intra-show only)
+                if override.source_show_tmdb_id == override.target_show_tmdb_id:
+                    if override.source_season_number in season_ep_counts:
+                        del season_ep_counts[override.source_season_number]
             elif override.target_show_tmdb_id == series_tmdb_id:
                 # Remapped to! Include the source season's episode count
                 src_show_q = await db.execute(
@@ -456,6 +509,8 @@ async def get_show(
                 "collection_pct": min(100, int((collected / total) * 100)) if total > 0 else 0,
                 "watched": watched >= total if total > 0 else False,
                 "user_rating": season_ratings.get(sn),
+                "watched_episodes_count": watched,
+                "total_episodes_count": total,
             }
 
         # Enhance seasons_meta with TMDB season IDs and ratings from the live TMDB call
@@ -463,10 +518,10 @@ async def get_show(
         if tmdb_extra:
             tmdb_season_map = {s["season_number"]: s for s in tmdb_extra.get("seasons", [])}
         
-        # Remove any seasons that are source of a season-level override
+        # Remove any seasons that are source of a season-level override (intra-show only)
         source_seasons_to_remove = {
             o.source_season_number for o in overrides_all
-            if o.source_show_tmdb_id == series_tmdb_id
+            if o.source_show_tmdb_id == series_tmdb_id and o.source_show_tmdb_id == o.target_show_tmdb_id
         }
         base_seasons_meta = [
             s for s in (show.tmdb_data or {}).get("seasons", [])
@@ -846,41 +901,97 @@ async def get_show_season(
                 ep.get("id") for ep in tmdb_episodes if ep.get("id")
             ]
 
-            watched_ep_ids: set = set()
-            episode_ratings: dict = {}
+            # Fetch all local episodes for both shows and seasons
+            show_ids = []
+            if show:
+                show_ids.append(show.id)
+            
+            other_show = None
+            if season_override:
+                other_show_q = await db.execute(
+                    select(ShowModel).where(ShowModel.tmdb_id == query_show_tmdb_id)
+                )
+                other_show = other_show_q.scalar_one_or_none()
+                if other_show and other_show.id not in show_ids:
+                    show_ids.append(other_show.id)
 
-            # Find all local Media rows for these episodes (even if show_id is null)
-            # and map them by TMDB ID for easy lookup.
-            local_media_by_tmdb: dict[int, Media] = {}
+            local_media_list = []
+            
+            # Query by show and season
+            if show_ids:
+                conditions = []
+                if show:
+                    conditions.append(and_(Media.show_id == show.id, Media.season_number == season_number))
+                if other_show:
+                    conditions.append(and_(Media.show_id == other_show.id, Media.season_number == query_season_number))
+                
+                local_by_show_q = await db.execute(
+                    select(Media).where(
+                        Media.media_type == MediaType.episode,
+                        or_(*conditions)
+                    )
+                )
+                local_media_list.extend(local_by_show_q.scalars().all())
+
+            # Query by TMDB IDs
             if season_ep_tmdb_ids:
-                media_q = await db.execute(
+                local_by_tmdb_q = await db.execute(
                     select(Media).where(
                         Media.media_type == MediaType.episode,
                         Media.tmdb_id.in_(season_ep_tmdb_ids)
                     )
                 )
-                for m in media_q.scalars().all():
-                    local_media_by_tmdb[m.tmdb_id] = m
+                local_media_list.extend(local_by_tmdb_q.scalars().all())
 
-            local_media_ids = [m.id for m in local_media_by_tmdb.values()]
+            # De-duplicate by Python set/id
+            seen_ids = set()
+            local_media = []
+            for m in local_media_list:
+                if m.id not in seen_ids:
+                    seen_ids.add(m.id)
+                    local_media.append(m)
 
+            local_media_by_ep: dict[int, list[Media]] = {}
+            for m in local_media:
+                if m.episode_number is not None:
+                    local_media_by_ep.setdefault(m.episode_number, []).append(m)
+
+            local_media_by_tmdb_id: dict[int, list[Media]] = {}
+            for m in local_media:
+                if m.tmdb_id is not None:
+                    local_media_by_tmdb_id.setdefault(m.tmdb_id, []).append(m)
+
+            local_media_ids = list(seen_ids)
+            watched_media_ids = set()
             if local_media_ids:
                 watched_q = await db.execute(
                     select(WatchEvent.media_id).where(
                         WatchEvent.user_id == current_user.id,
-                        WatchEvent.media_id.in_(local_media_ids),
+                        WatchEvent.media_id.in_(local_media_ids)
                     ).distinct()
                 )
-                watched_ep_ids = {r[0] for r in watched_q.all()}
+                watched_media_ids = {r[0] for r in watched_q.all()}
 
-                ep_ratings_q = await db.execute(
+            episode_ratings = {}
+            if local_media_ids:
+                ratings_q = await db.execute(
                     select(Rating.media_id, Rating.rating).where(
                         Rating.user_id == current_user.id,
                         Rating.media_id.in_(local_media_ids),
-                        Rating.season_number.is_(None),
+                        Rating.season_number.is_(None)
                     )
                 )
-                episode_ratings = {r[0]: r[1] for r in ep_ratings_q.all()}
+                episode_ratings = {r[0]: r[1] for r in ratings_q.all()}
+
+            collected_media_ids = set()
+            if local_media_ids:
+                coll_q = await db.execute(
+                    select(Collection.media_id).where(
+                        Collection.user_id == current_user.id,
+                        Collection.media_id.in_(local_media_ids)
+                    ).distinct()
+                )
+                collected_media_ids = {r[0] for r in coll_q.all()}
 
             # Fetch list membership per episode
             episode_in_lists: dict[int, list[int]] = {}
@@ -902,58 +1013,34 @@ async def get_show_season(
                     for ep_tmdb_id, list_id in ep_lists_q.all():
                         episode_in_lists.setdefault(ep_tmdb_id, []).append(list_id)
 
-            # Merge local library status
-            local_map = {ep.episode_number: ep for ep in local_episodes}
-
-            # Subquery to check which (season, episode) pairs are in the user collection.
-            # Primary path: match by show_id. The outerjoin also catches rows where show_id
-            # points to a different DB row for the same TMDB show (duplicate show rows).
-            coll_show_conditions = [ShowModel.tmdb_id == series_tmdb_id]
-            if show:
-                coll_show_conditions.insert(0, Media.show_id == show.id)
-            user_coll_eps_q = await db.execute(
-                select(Media.season_number, Media.episode_number)
-                .join(Collection, Collection.media_id == Media.id)
-                .outerjoin(ShowModel, ShowModel.id == Media.show_id)
-                .where(
-                    Collection.user_id == current_user.id,
-                    Media.media_type == MediaType.episode,
-                    Media.season_number == season_number,
-                    or_(*coll_show_conditions)
-                )
-                .distinct()
-            )
-            user_collected_eps = {(r[0], r[1]) for r in user_coll_eps_q.all()}
-
-            # Fallback: also match by TMDB episode ID for rows where show_id is null.
-            if season_ep_tmdb_ids:
-                tmdb_id_coll_q = await db.execute(
-                    select(Media.season_number, Media.episode_number)
-                    .join(Collection, Collection.media_id == Media.id)
-                    .where(
-                        Collection.user_id == current_user.id,
-                        Media.media_type == MediaType.episode,
-                        Media.tmdb_id.in_(season_ep_tmdb_ids),
-                        Media.show_id.is_(None),
-                    )
-                    .distinct()
-                )
-                user_collected_eps |= {(r[0], r[1]) for r in tmdb_id_coll_q.all()}
-
             episodes = []
             seen_ep_nums = set()
             for ep in tmdb_episodes:
                 ep_num = ep.get("episode_number")
+                ep_tmdb_id = ep.get("id")
                 seen_ep_nums.add(ep_num)
-                local_ep = local_map.get(ep_num) or local_media_by_tmdb.get(ep.get("id"))
-                local_media_id = local_ep.id if local_ep else None
-                
-                is_in_library = (season_number, ep_num) in user_collected_eps
+
+                # Find all corresponding local Media rows
+                eps_for_num = local_media_by_ep.get(ep_num, [])
+                eps_for_tmdb = local_media_by_tmdb_id.get(ep_tmdb_id, []) if ep_tmdb_id else []
+                matching_media = list({m.id: m for m in (eps_for_num + eps_for_tmdb)}.values())
+
+                is_watched = any(m.id in watched_media_ids for m in matching_media)
+                is_in_library = any(m.id in collected_media_ids for m in matching_media)
+
+                local_media_id = matching_media[0].id if matching_media else None
+                local_ep = matching_media[0] if matching_media else None
+
+                user_rating = None
+                for m in matching_media:
+                    if m.id in episode_ratings:
+                        user_rating = episode_ratings[m.id]
+                        break
 
                 episodes.append(
                     {
                         "id": local_media_id,
-                        "tmdb_id": ep.get("id"),
+                        "tmdb_id": ep_tmdb_id,
                         "type": "episode",
                         "title": (local_ep.custom_title or ep.get("name")) if local_ep else ep.get("name"),
                         "overview": ep.get("overview"),
@@ -966,20 +1053,22 @@ async def get_show_season(
                         "tmdb_rating": ep.get("vote_average"),
                         "in_library": is_in_library,
                         "runtime": ep.get("runtime"),
-                        "watched": local_media_id in watched_ep_ids if local_media_id else False,
-                        "user_rating": episode_ratings.get(local_media_id) if local_media_id else None,
-                        "in_lists": episode_in_lists.get(ep.get("id"), []),
+                        "watched": is_watched,
+                        "user_rating": user_rating,
+                        "in_lists": episode_in_lists.get(ep_tmdb_id, []) if ep_tmdb_id else [],
                     }
                 )
 
             # Merge any local episodes that aren't in TMDB episodes list (e.g. custom remapped/extra episodes)
-            for local_ep in local_episodes:
+            for local_ep in local_media:
                 ep_num = local_ep.episode_number
                 if ep_num in seen_ep_nums:
                     continue
                 seen_ep_nums.add(ep_num)
                 local_media_id = local_ep.id
-                is_in_library = (season_number, ep_num) in user_collected_eps
+                is_watched = local_media_id in watched_media_ids
+                is_in_library = local_media_id in collected_media_ids
+                user_rating = episode_ratings.get(local_media_id)
 
                 episodes.append(
                     {
@@ -995,8 +1084,8 @@ async def get_show_season(
                         "tmdb_rating": local_ep.tmdb_rating or 0.0,
                         "in_library": is_in_library,
                         "runtime": local_ep.runtime,
-                        "watched": local_media_id in watched_ep_ids,
-                        "user_rating": episode_ratings.get(local_media_id),
+                        "watched": is_watched,
+                        "user_rating": user_rating,
                         "in_lists": [],
                     }
                 )
@@ -1004,78 +1093,12 @@ async def get_show_season(
             show_state: dict = {"tmdb_id": series_tmdb_id, "type": "series"}
             await enrich_with_state(db, current_user.id, [show_state])
 
-            # Season-level stats: watched, in_library, collection_pct, user_rating
-            collected_in_season = 0
-            if show:
-                # Count collected episodes in this season.
-                # Primary path: match by show_id.
-                coll_q = await db.execute(
-                    select(func.count(func.distinct(Media.episode_number)))
-                    .join(Collection, Collection.media_id == Media.id)
-                    .where(
-                        Media.show_id == show.id,
-                        Media.season_number == season_number,
-                        Collection.user_id == current_user.id,
-                        Media.media_type == MediaType.episode,
-                        Media.episode_number.isnot(None),
-                    )
-                )
-                collected_in_season = coll_q.scalar_one()
-
-                # Fallback: count any collected episodes matched only by TMDB ID (show_id null).
-                # This covers rows created before show_id was reliably set on manual collects.
-                if season_ep_tmdb_ids:
-                    null_show_coll_q = await db.execute(
-                        select(Media.episode_number)
-                        .join(Collection, Collection.media_id == Media.id)
-                        .where(
-                            Collection.user_id == current_user.id,
-                            Media.media_type == MediaType.episode,
-                            Media.tmdb_id.in_(season_ep_tmdb_ids),
-                            Media.show_id.is_(None),
-                            Media.episode_number.isnot(None),
-                        )
-                        .distinct()
-                    )
-                    null_show_ep_nums = {r[0] for r in null_show_coll_q.all()}
-                    
-                    # Merge: avoid double-counting episodes already found via show_id.
-                    already_by_show_q = await db.execute(
-                        select(Media.episode_number)
-                        .join(Collection, Collection.media_id == Media.id)
-                        .where(
-                            Media.show_id == show.id,
-                            Media.season_number == season_number,
-                            Collection.user_id == current_user.id,
-                            Media.media_type == MediaType.episode,
-                            Media.episode_number.isnot(None),
-                        )
-                        .distinct()
-                    )
-                    already_ep_nums = {r[0] for r in already_by_show_q.all()}
-                    extra = null_show_ep_nums - already_ep_nums
-                    collected_in_season += len(extra)
-            elif season_ep_tmdb_ids:
-                # If no local show, just count by TMDB IDs
-                coll_q = await db.execute(
-                    select(func.count(func.distinct(Media.episode_number)))
-                    .join(Collection, Collection.media_id == Media.id)
-                    .where(
-                        Collection.user_id == current_user.id,
-                        Media.media_type == MediaType.episode,
-                        Media.tmdb_id.in_(season_ep_tmdb_ids),
-                        Media.episode_number.isnot(None),
-                    )
-                )
-                collected_in_season = coll_q.scalar_one()
+            collected_in_season = sum(1 for ep in episodes if ep.get("in_library"))
+            watched_count = sum(1 for ep in episodes if ep.get("watched"))
 
             season_in_library = collected_in_season > 0
             aired_denom = total_aired_in_season if total_aired_in_season > 0 else total_in_season
             season_collection_pct = min(100, int((collected_in_season / aired_denom) * 100)) if aired_denom > 0 else 0
-
-            # Count unique episodes in this season that have been watched
-            # episodes list contains "watched": True/False for each episode.
-            watched_count = sum(1 for ep in episodes if ep.get("watched"))
             season_watched = watched_count >= aired_denom if aired_denom > 0 else False
 
             # Season user rating (stored against show's Media row with season_number)

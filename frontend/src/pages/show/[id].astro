@@ -318,11 +318,14 @@ const logoPath = show?.logo_path ?? null;
 
             {show.genres?.length > 0 && (
               <div class="flex flex-wrap gap-2 mb-12">
-                {show.genres.map(g => (
-                  <span class="px-4 py-1.5 bg-zinc-900/80 border border-zinc-800 hover:border-zinc-700 transition-colors text-zinc-400 text-xs rounded-full font-bold uppercase tracking-widest">
-                    {g}
-                  </span>
-                ))}
+                {show.genres.map(g => {
+                  const name = typeof g === 'object' && g !== null ? g.name : g;
+                  return (
+                    <span class="px-4 py-1.5 bg-zinc-900/80 border border-zinc-800 hover:border-zinc-700 transition-colors text-zinc-400 text-xs rounded-full font-bold uppercase tracking-widest">
+                      {name}
+                    </span>
+                  );
+                })}
               </div>
             )}
 
@@ -400,8 +403,8 @@ const logoPath = show?.logo_path ?? null;
                 const episodes = show.seasons?.[`season_${seasonNum}`] || [];
                 const poster = s.poster_path || show.poster_path;
                 const seasonState = show.season_states?.[seasonNum] ?? { watched: false, in_library: episodes.length > 0, collection_pct: 0, user_rating: null };
-                const watchedCount = episodes.filter(e => e.watched).length;
-                const progressPct = episodes.length > 0 ? (watchedCount / episodes.length) * 100 : (seasonState.watched ? 100 : 0);
+                const totalEpisodes = seasonState.total_episodes_count || s.episode_count || episodes.length;
+                const watchedCount = typeof seasonState.watched_episodes_count === 'number' ? seasonState.watched_episodes_count : episodes.filter(e => e.watched).length;
 
                 return (
                   <MediaCard
@@ -412,7 +415,7 @@ const logoPath = show?.logo_path ?? null;
                       title: s.name || `Season ${seasonNum}`,
                       show_title: show.title,
                       poster_path: poster,
-                      total_episodes_count: s.episode_count || episodes.length,
+                      total_episodes_count: totalEpisodes,
                       watched_episodes_count: watchedCount,
                       show_tmdb_id: Number(id),
                       season_number: seasonNum,

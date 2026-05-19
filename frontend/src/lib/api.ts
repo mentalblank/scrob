@@ -102,6 +102,8 @@ export interface SeasonState {
   in_library: boolean;
   collection_pct: number;
   user_rating: number | null;
+  watched_episodes_count?: number;
+  total_episodes_count?: number;
 }
 
 export interface EpisodeItem {
