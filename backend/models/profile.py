@@ -17,6 +17,7 @@ class UserProfileData(Base):
     country             : Mapped[Optional[str]]        = mapped_column(String(2))
     movie_genres        : Mapped[Optional[list[str]]]  = mapped_column(JSONB)
     show_genres         : Mapped[Optional[list[str]]]  = mapped_column(JSONB)
+    disliked_genres     : Mapped[Optional[list[str]]]  = mapped_column(JSONB)
     streaming_services  : Mapped[Optional[list[str]]]  = mapped_column(JSONB)
     content_language    : Mapped[Optional[str]]        = mapped_column(String(10))
     privacy_level       : Mapped[PrivacyLevel]         = mapped_column(SQLEnum(PrivacyLevel), default=PrivacyLevel.private, nullable=False, server_default=PrivacyLevel.private.value)

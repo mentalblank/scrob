@@ -22,4 +22,6 @@ class GlobalSettings(Base):
     sonarr_root_folder     : Mapped[Optional[str]] = mapped_column(String(500))
     sonarr_quality_profile : Mapped[Optional[int]] = mapped_column(Integer)
     sonarr_tags            : Mapped[Optional[list]] = mapped_column(JSONB)
-    sonarr_season_folder   : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="true")
+    sonarr_season_folder         : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="true")
+    radarr_require_approval      : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="false")
+    sonarr_require_approval      : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="false")

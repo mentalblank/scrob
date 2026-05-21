@@ -139,6 +139,12 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                     ))}
                   </div>
                 </div>
+                <label class="flex items-center gap-3 cursor-pointer select-none pt-1">
+                  <input type="checkbox" name="radarr_require_approval" id="radarr_require_approval" value="true"
+                    checked={globalSettings.radarr_require_approval ?? false}
+                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-950 text-blue-500 focus:ring-blue-500 cursor-pointer" />
+                  <span class="text-sm text-zinc-300">Require admin approval for requests</span>
+                </label>
               </div>
             </div>
           </div>
@@ -213,6 +219,12 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                   <span class="text-sm text-zinc-300">Use season folders</span>
                   <input type="checkbox" name="sonarr_season_folder" id="sonarr_season_folder" value="true" class="sr-only peer" checked={globalSettings.sonarr_season_folder !== false} />
                   <div class="relative w-10 h-5 bg-zinc-700 peer-checked:bg-blue-600 rounded-full transition-colors pointer-events-none shrink-0 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5"></div>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer select-none pt-1">
+                  <input type="checkbox" name="sonarr_require_approval" id="sonarr_require_approval" value="true"
+                    checked={globalSettings.sonarr_require_approval ?? false}
+                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-950 text-blue-500 focus:ring-blue-500 cursor-pointer" />
+                  <span class="text-sm text-zinc-300">Require admin approval for requests</span>
                 </label>
               </div>
             </div>
@@ -325,15 +337,29 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2 mb-6">Maintenance</h2>
       <p class="text-zinc-400 text-sm mb-6">Server-wide operations that run across all users' collections.</p>
 
-      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center gap-4">
-        <div class="flex-1">
-          <h3 class="font-semibold text-zinc-100 mb-1">Heal missing metadata</h3>
-          <p class="text-sm text-zinc-400">Re-enrich all items across every user's collection that are missing poster or date metadata. Requires a global TMDB API key to be set.</p>
+      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        <div class="p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div class="flex-1">
+            <h3 class="font-semibold text-zinc-100 mb-1">Heal missing metadata</h3>
+            <p class="text-sm text-zinc-400">Re-enrich all items across every user's collection that are missing poster or date metadata. Requires a global TMDB API key to be set.</p>
+          </div>
+          <button id="admin-heal-btn"
+            class="shrink-0 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+            Run Heal
+          </button>
         </div>
-        <button id="admin-heal-btn"
-          class="shrink-0 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-          Run Heal
-        </button>
+        <div id="admin-heal-progress" class="hidden border-t border-zinc-800 px-6 py-3">
+          <div class="flex justify-between items-center mb-1.5">
+            <span id="admin-heal-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
+            <span id="admin-heal-job-pct" class="text-xs font-bold text-zinc-400"></span>
+          </div>
+          <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+            <div id="admin-heal-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-blue-600 animate-pulse" style="width: 100%"></div>
+          </div>
+          <div class="flex justify-between text-xs text-zinc-500 mt-1">
+            <span id="admin-heal-job-items"></span>
+          </div>
+        </div>
       </div>
 
       <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center gap-4 mt-4">
@@ -628,6 +654,80 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
     }
   });
 
+  // ── Auto connection check on page load ──
+  async function checkConnections() {
+    const radarrUrl = (document.getElementById('radarr_url') as HTMLInputElement | null)?.value.trim();
+    const radarrToken = (document.getElementById('radarr_token') as HTMLInputElement | null)?.value.trim();
+    const sonarrUrl = (document.getElementById('sonarr_url') as HTMLInputElement | null)?.value.trim();
+    const sonarrToken = (document.getElementById('sonarr_token') as HTMLInputElement | null)?.value.trim();
+
+    const checks: Promise<void>[] = [];
+
+    if (radarrUrl && radarrToken) {
+      setConnStatus('radarr-conn-status', 'checking');
+      checks.push((async () => {
+        try {
+          const testRes = await fetch(`/api/proxy/auth/test-radarr?url=${encodeURIComponent(radarrUrl)}&token=${encodeURIComponent(radarrToken)}`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (!testRes.ok) { setConnStatus('radarr-conn-status', 'disconnected'); return; }
+          const profRes = await fetch(`/api/proxy/auth/radarr/profiles?url=${encodeURIComponent(radarrUrl)}&token=${encodeURIComponent(radarrToken)}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          const profData = await profRes.json();
+          const rootSelect = document.getElementById('radarr_root_folder') as HTMLSelectElement;
+          const qualSelect = document.getElementById('radarr_quality_profile') as HTMLSelectElement;
+          const currentFolder = rootSelect.value;
+          const currentProfile = qualSelect.value;
+          rootSelect.innerHTML = '<option value="">-- Select Folder --</option>' +
+            profData.root_folders.map((f: { path: string; freeSpace: number }) =>
+              `<option value="${esc(f.path)}" ${f.path === currentFolder ? 'selected' : ''}>${esc(f.path)} (${(f.freeSpace / 1024**3).toFixed(1)}GB free)</option>`).join('');
+          qualSelect.innerHTML = '<option value="">-- Select Profile --</option>' +
+            profData.quality_profiles.map((p: { id: number; name: string }) =>
+              `<option value="${esc(String(p.id))}" ${String(p.id) === currentProfile ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+          const tagContainer = document.getElementById('radarr_tags_list')!;
+          const selectedTags = Array.from(tagContainer.querySelectorAll<HTMLInputElement>('input[name="radarr_tags"]')).map(i => parseInt(i.value));
+          renderTags('radarr_tags_list', profData.tags, selectedTags, 'radarr');
+          setConnStatus('radarr-conn-status', 'connected');
+        } catch { setConnStatus('radarr-conn-status', 'disconnected'); }
+      })());
+    }
+
+    if (sonarrUrl && sonarrToken) {
+      setConnStatus('sonarr-conn-status', 'checking');
+      checks.push((async () => {
+        try {
+          const testRes = await fetch(`/api/proxy/auth/test-sonarr?url=${encodeURIComponent(sonarrUrl)}&token=${encodeURIComponent(sonarrToken)}`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (!testRes.ok) { setConnStatus('sonarr-conn-status', 'disconnected'); return; }
+          const profRes = await fetch(`/api/proxy/auth/sonarr/profiles?url=${encodeURIComponent(sonarrUrl)}&token=${encodeURIComponent(sonarrToken)}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          const profData = await profRes.json();
+          const rootSelect = document.getElementById('sonarr_root_folder') as HTMLSelectElement;
+          const qualSelect = document.getElementById('sonarr_quality_profile') as HTMLSelectElement;
+          const currentFolder = rootSelect.value;
+          const currentProfile = qualSelect.value;
+          rootSelect.innerHTML = '<option value="">-- Select Folder --</option>' +
+            profData.root_folders.map((f: { path: string; freeSpace: number }) =>
+              `<option value="${esc(f.path)}" ${f.path === currentFolder ? 'selected' : ''}>${esc(f.path)} (${(f.freeSpace / 1024**3).toFixed(1)}GB free)</option>`).join('');
+          qualSelect.innerHTML = '<option value="">-- Select Profile --</option>' +
+            profData.quality_profiles.map((p: { id: number; name: string }) =>
+              `<option value="${esc(String(p.id))}" ${String(p.id) === currentProfile ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+          const tagContainer = document.getElementById('sonarr_tags_list')!;
+          const selectedTags = Array.from(tagContainer.querySelectorAll<HTMLInputElement>('input[name="sonarr_tags"]')).map(i => parseInt(i.value));
+          renderTags('sonarr_tags_list', profData.tags, selectedTags, 'sonarr');
+          setConnStatus('sonarr-conn-status', 'connected');
+        } catch { setConnStatus('sonarr-conn-status', 'disconnected'); }
+      })());
+    }
+
+    await Promise.all(checks);
+  }
+
+  checkConnections();
+
   // ── Global settings form ──
   document.getElementById('global-settings-form')!.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -647,7 +747,9 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       const v = ((fd.get(f) as string) ?? '').trim();
       body[f] = v ? parseInt(v) : null;
     }
-    body['sonarr_season_folder'] = fd.get('sonarr_season_folder') === 'true';
+    body['sonarr_season_folder']      = fd.get('sonarr_season_folder') === 'true';
+    body['radarr_require_approval']   = fd.get('radarr_require_approval') === 'true';
+    body['sonarr_require_approval']   = fd.get('sonarr_require_approval') === 'true';
 
     const radarrTags = fd.getAll('radarr_tags').map(v => parseInt(v as string)).filter(n => !isNaN(n));
     body['radarr_tags'] = radarrTags.length ? radarrTags : null;
@@ -908,6 +1010,88 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
     adminHealModal.classList.add('hidden');
   });
 
+  // ── Admin heal progress tracking ─────────────────────────────────────────
+  let adminHealPoller: ReturnType<typeof setTimeout> | null = null;
+
+  function renderAdminHealProgress(job: any) {
+    const strip = document.getElementById('admin-heal-progress');
+    const bar   = document.getElementById('admin-heal-job-bar');
+    const pctEl = document.getElementById('admin-heal-job-pct');
+    const label = document.getElementById('admin-heal-job-label');
+    const items = document.getElementById('admin-heal-job-items');
+    if (!strip) return;
+
+    if (!job) { strip.classList.add('hidden'); return; }
+    strip.classList.remove('hidden');
+
+    const isFailed    = job.status === 'failed';
+    const isCompleted = job.status === 'completed';
+    const isPending   = job.status === 'pending';
+
+    if (isFailed) {
+      if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500'; bar.style.width = '100%'; }
+      if (label) label.textContent = 'Heal failed';
+      if (pctEl) pctEl.textContent = '';
+      if (items) items.textContent = job.error_message || 'Unknown error';
+      return;
+    }
+    if (isCompleted) {
+      if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-blue-600'; bar.style.width = '100%'; }
+      if (label) label.textContent = 'Heal complete';
+      if (pctEl) pctEl.textContent = '100%';
+      if (items) items.textContent = `${job.processed_items} item${job.processed_items !== 1 ? 's' : ''} healed`;
+      return;
+    }
+
+    const pct = job.total_items > 0 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100)) : 0;
+    const indeterminate = isPending || pct === 0;
+    if (bar) {
+      bar.className = `h-1.5 rounded-full transition-all duration-500 bg-blue-600${indeterminate ? ' animate-pulse' : ''}`;
+      bar.style.width = indeterminate ? '100%' : `${pct}%`;
+    }
+    if (label) label.textContent = isPending ? 'Heal queued…' : 'Healing…';
+    if (pctEl) pctEl.textContent = pct > 0 ? `${pct}%` : '';
+    if (items) items.textContent = job.total_items > 0 ? `${job.processed_items} / ${job.total_items} items` : 'Loading…';
+  }
+
+  async function pollAdminHealJob() {
+    try {
+      const res = await fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) return;
+      const jobs: any[] = await res.json();
+      const job = jobs.find((j: any) => j.source === 'tmdb' && j.job_type === 'heal');
+      const isActive = job && (job.status === 'pending' || job.status === 'running');
+      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed')
+        && new Date(job.updated_at).getTime() > Date.now() - 8000;
+      renderAdminHealProgress((isActive || isRecentDone) ? job : null);
+      if (isActive) {
+        adminHealPoller = setTimeout(pollAdminHealJob, 2000);
+      } else if (isRecentDone) {
+        adminHealPoller = setTimeout(() => { renderAdminHealProgress(null); adminHealPoller = null; }, 4000);
+      } else {
+        adminHealPoller = null;
+      }
+    } catch {
+      adminHealPoller = null;
+    }
+  }
+
+  function startAdminHealPoller() {
+    if (adminHealPoller != null) clearTimeout(adminHealPoller);
+    pollAdminHealJob();
+  }
+
+  // Resume active heal on page load
+  (async () => {
+    try {
+      const res = await fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) return;
+      const jobs: any[] = await res.json();
+      const job = jobs.find((j: any) => j.source === 'tmdb' && j.job_type === 'heal');
+      if (job && (job.status === 'pending' || job.status === 'running')) startAdminHealPoller();
+    } catch { /* non-fatal */ }
+  })();
+
   document.getElementById('admin-heal-confirm-btn')?.addEventListener('click', async () => {
     adminHealModal.classList.add('hidden');
     adminHealBtn.disabled = true;
@@ -918,7 +1102,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) throw new Error((await res.json()).detail || 'Failed to start heal');
-      showMessage('Server-wide metadata heal started — it will run in the background.');
+      startAdminHealPoller();
     } catch (err: unknown) {
       showMessage(err instanceof Error ? err.message : 'Failed to start heal', 'error');
     } finally {

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime
 from models.base import UserRole, MediaType, PrivacyLevel
@@ -72,6 +72,7 @@ class TotpBackupCodesResponse(BaseModel):
 class UserSettings(BaseModel):
     tmdb_api_key: Optional[str] = None
     has_effective_tmdb_key: bool = False
+    has_global_tmdb_key: bool = False
 
     # Radarr integration
     radarr_url: Optional[str] = None
@@ -104,6 +105,15 @@ class UserSettings(BaseModel):
     trakt_partial_sync_interval: Optional[int] = None
     last_trakt_full_sync: Optional[datetime] = None
     last_trakt_partial_sync: Optional[datetime] = None
+
+    # Simkl — client_id only (PIN flow, no secret); OAuth token managed via /simkl/* endpoints
+    simkl_client_id: Optional[str] = None
+    simkl_connected: Optional[bool] = None  # read-only, derived from token presence
+    simkl_sync_watched: Optional[bool] = None
+    simkl_sync_ratings: Optional[bool] = None
+    simkl_sync_lists: Optional[bool] = None
+    simkl_push_watched: Optional[bool] = None
+    simkl_push_ratings: Optional[bool] = None
 
     preferences: Optional[dict] = None
     blur_explicit: Optional[bool] = None
@@ -230,6 +240,7 @@ class UserProfileUpdate(BaseModel):
     country: Optional[str] = None
     movie_genres: Optional[list[str]] = None
     show_genres: Optional[list[str]] = None
+    disliked_genres: Optional[list[str]] = None
     streaming_services: Optional[list[str]] = None
     content_language: Optional[str] = None
     privacy_level: Optional[PrivacyLevel] = None
@@ -241,11 +252,17 @@ class UserProfileResponse(BaseModel):
     country: Optional[str] = None
     movie_genres: list[str] = []
     show_genres: list[str] = []
+    disliked_genres: list[str] = []
     streaming_services: list[str] = []
     content_language: Optional[str] = None
     privacy_level: PrivacyLevel = PrivacyLevel.private
     avatar_url: Optional[str] = None
     pagination_type: str = "infinite_scroll"
+
+    @field_validator('movie_genres', 'show_genres', 'disliked_genres', 'streaming_services', mode='before')
+    @classmethod
+    def _none_to_list(cls, v: object) -> list:
+        return v if v is not None else []
 
     class Config:
         from_attributes = True
@@ -293,7 +310,25 @@ class GlobalSettings(BaseModel):
     sonarr_root_folder     : Optional[str] = None
     sonarr_quality_profile : Optional[int] = None
     sonarr_tags            : Optional[list] = None
-    sonarr_season_folder   : bool = True
+    sonarr_season_folder        : bool = True
+    radarr_require_approval     : bool = False
+    sonarr_require_approval     : bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class MediaRequestOut(BaseModel):
+    id          : int
+    user_id     : int
+    tmdb_id     : int
+    media_type  : str
+    title       : str
+    poster_path : Optional[str]
+    status      : str
+    reviewed_by : Optional[int]
+    created_at  : datetime
+    updated_at  : datetime
 
     class Config:
         from_attributes = True

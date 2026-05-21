@@ -1,0 +1,213 @@
+---
+import Base from "../layouts/Base.astro";
+import { api, type MediaRequestItem } from "../lib/api";
+
+const { token, user } = Astro.locals;
+
+if (!user?.is_admin) {
+  return Astro.redirect("/");
+}
+
+const requests: MediaRequestItem[] = await api.admin.getRequests(token!);
+
+const pending  = requests.filter(r => r.status === "pending");
+const approved = requests.filter(r => r.status === "approved");
+const rejected = requests.filter(r => r.status === "rejected");
+
+const itemUrl = (r: MediaRequestItem) =>
+  r.media_type === "movie" ? `/media/movie/${r.tmdb_id}` : `/show/${r.tmdb_id}`;
+---
+
+<Base title="Requests">
+  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+
+  <div class="max-w-4xl mx-auto py-8">
+    <h1 class="text-3xl font-bold text-zinc-100 mb-2">Media Requests</h1>
+    <p class="text-zinc-500 mb-8">{pending.length} pending · {approved.length} approved · {rejected.length} rejected</p>
+
+    <!-- Pending -->
+    <section class="mb-10">
+      <h2 class="text-sm font-black text-zinc-500 uppercase tracking-widest mb-4">Awaiting Approval ({pending.length})</h2>
+      {pending.length === 0 ? (
+        <p class="text-zinc-600 text-sm">No pending requests.</p>
+      ) : (
+        <div class="space-y-3">
+          {pending.map(r => (
+            <div class="flex items-center gap-4 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3" data-request-id={r.id}>
+              <a href={itemUrl(r)} class="flex items-center gap-4 flex-1 min-w-0 transition-all active:scale-95 active:opacity-70">
+              {r.poster_path && (
+                <img src={r.poster_path} alt={r.title} class="w-10 h-14 rounded object-cover shrink-0" />
+              )}
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-zinc-100 truncate">{r.title}</p>
+                <p class="text-xs text-zinc-500">{r.media_type === "movie" ? "Movie" : "Show"} · requested by <span class="text-zinc-400">{r.user.display_name || r.user.username}</span></p>
+                <p class="text-xs text-zinc-600">{new Date(r.created_at).toLocaleDateString()}</p>
+              </div>
+              </a>
+              <div class="flex gap-2 shrink-0">
+                <button
+                  class="approve-btn px-3 py-1.5 text-xs font-bold bg-green-600/20 hover:bg-green-600/40 text-green-400 border border-green-500/30 rounded-lg transition-colors cursor-pointer"
+                  data-id={r.id}
+                >
+                  Approve
+                </button>
+                <button
+                  class="reject-btn px-3 py-1.5 text-xs font-bold bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 rounded-lg transition-colors cursor-pointer"
+                  data-id={r.id}
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+
+    <!-- Approved -->
+    <section class="mb-10">
+      <button
+        id="toggle-approved"
+        class="flex items-center gap-2 text-sm font-black text-zinc-500 uppercase tracking-widest mb-4 cursor-pointer hover:text-zinc-400 transition-colors"
+      >
+        <svg id="approved-chevron" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+        Approved ({approved.length})
+      </button>
+      <div id="approved-list" class="hidden space-y-2">
+      {approved.length === 0 ? (
+        <p class="text-zinc-600 text-sm">No approved requests.</p>
+      ) : (
+        <div class="space-y-2">
+          {approved.map(r => (
+            <div class="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800/60 rounded-xl px-4 py-3 opacity-75">
+              <a href={itemUrl(r)} class="flex items-center gap-4 flex-1 min-w-0 transition-all active:scale-95 active:opacity-70">
+              {r.poster_path && (
+                <img src={r.poster_path} alt={r.title} class="w-8 h-12 rounded object-cover shrink-0" />
+              )}
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-zinc-300 truncate">{r.title}</p>
+                <p class="text-xs text-zinc-500">{r.media_type === "movie" ? "Movie" : "Show"} · {r.user.display_name || r.user.username} · {new Date(r.updated_at).toLocaleDateString()}</p>
+              </div>
+              </a>
+              <span class="text-xs font-bold text-green-500 bg-green-500/10 border border-green-500/20 px-2 py-1 rounded-lg shrink-0">Approved</span>
+            </div>
+          ))}
+        </div>
+      )}
+      </div>
+    </section>
+
+    <!-- Rejected (collapsible) -->
+    <section>
+      <button
+        id="toggle-rejected"
+        class="flex items-center gap-2 text-sm font-black text-zinc-500 uppercase tracking-widest mb-4 cursor-pointer hover:text-zinc-400 transition-colors"
+      >
+        <svg id="rejected-chevron" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+        Rejected ({rejected.length})
+      </button>
+      <div id="rejected-list" class="hidden space-y-2">
+        {rejected.length === 0 ? (
+          <p class="text-zinc-600 text-sm">No rejected requests.</p>
+        ) : (
+          rejected.map(r => (
+            <div class="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800/60 rounded-xl px-4 py-3 opacity-75" data-request-id={r.id}>
+              <a href={itemUrl(r)} class="flex items-center gap-4 flex-1 min-w-0 transition-all active:scale-95 active:opacity-70">
+              {r.poster_path && (
+                <img src={r.poster_path} alt={r.title} class="w-8 h-12 rounded object-cover shrink-0" />
+              )}
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-zinc-300 truncate">{r.title}</p>
+                <p class="text-xs text-zinc-500">{r.media_type === "movie" ? "Movie" : "Show"} · {r.user.display_name || r.user.username} · {new Date(r.updated_at).toLocaleDateString()}</p>
+              </div>
+              </a>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-xs font-bold text-red-500 bg-red-500/10 border border-red-500/20 px-2 py-1 rounded-lg">Rejected</span>
+                <button
+                  class="approve-btn px-3 py-1.5 text-xs font-bold bg-green-600/20 hover:bg-green-600/40 text-green-400 border border-green-500/30 rounded-lg transition-colors cursor-pointer"
+                  data-id={r.id}
+                >
+                  Approve
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-sm font-semibold shadow-2xl"></div>
+</Base>
+
+<script>
+  const token = (document.getElementById('app-data') as HTMLElement).dataset.token ?? '';
+
+  function showToast(msg: string, type: 'success' | 'error' = 'success') {
+    const el = document.getElementById('toast')!;
+    el.textContent = msg;
+    el.className = `fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-sm font-semibold shadow-2xl ${type === 'error' ? 'bg-red-600 text-white' : 'bg-zinc-100 text-zinc-900'}`;
+    setTimeout(() => { el.className = 'hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-sm font-semibold shadow-2xl'; }, 4000);
+  }
+
+  async function handleApprove(id: string, btn: HTMLButtonElement) {
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const res = await fetch(`/api/proxy/admin/requests/${id}/approve`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+      showToast('Request approved and sent to Radarr/Sonarr.');
+      setTimeout(() => location.reload(), 1200);
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed to approve', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Approve';
+    }
+  }
+
+  async function handleReject(id: string, btn: HTMLButtonElement) {
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const res = await fetch(`/api/proxy/admin/requests/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+      showToast('Request rejected.');
+      setTimeout(() => location.reload(), 1200);
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed to reject', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Reject';
+    }
+  }
+
+  document.querySelectorAll<HTMLButtonElement>('.approve-btn').forEach(btn => {
+    btn.addEventListener('click', () => handleApprove(btn.dataset.id!, btn));
+  });
+  document.querySelectorAll<HTMLButtonElement>('.reject-btn').forEach(btn => {
+    btn.addEventListener('click', () => handleReject(btn.dataset.id!, btn));
+  });
+
+  document.getElementById('toggle-approved')?.addEventListener('click', () => {
+    const list = document.getElementById('approved-list')!;
+    const chevron = document.getElementById('approved-chevron')!;
+    const hidden = list.classList.toggle('hidden');
+    chevron.style.transform = hidden ? '' : 'rotate(180deg)';
+  });
+
+  document.getElementById('toggle-rejected')?.addEventListener('click', () => {
+    const list = document.getElementById('rejected-list')!;
+    const chevron = document.getElementById('rejected-chevron')!;
+    const hidden = list.classList.toggle('hidden');
+    chevron.style.transform = hidden ? '' : 'rotate(180deg)';
+  });
+</script>

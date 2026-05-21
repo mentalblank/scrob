@@ -22,6 +22,7 @@ from models.ratings import Rating
 from models.playback_progress import PlaybackProgress
 from models.base import MediaType, CollectionSource
 from models.lists import List as UserList, ListItem
+from models.media_request import MediaRequest, RequestStatus
 from models.profile import UserProfileData
 from core import tmdb
 from dependencies import get_current_user
@@ -61,6 +62,48 @@ TV_GENRE_IDS: dict[str, int] = {
     "Sci-Fi & Fantasy": 10765, "Soap": 10766, "Talk": 10767,
     "War & Politics": 10768, "Western": 37,
 }
+
+MOVIE_GENRE_NAMES: dict[int, str] = {v: k for k, v in MOVIE_GENRE_IDS.items()}
+TV_GENRE_NAMES: dict[int, str] = {v: k for k, v in TV_GENRE_IDS.items()}
+
+
+def _genre_weight(genre_ids: list[int], liked: set[str], disliked: set[str], name_map: dict[int, str]) -> float:
+    """Weighted random score for an item based on user genre preferences.
+
+    Liked genres add +2, disliked genres subtract 1.5.  Items with only
+    disliked genres get a near-zero weight; mixed items can still surface.
+    """
+    if not liked and not disliked:
+        return 1.0
+    score = 1.0
+    for gid in genre_ids:
+        name = name_map.get(gid)
+        if name in liked:
+            score += 2.0
+        elif name in disliked:
+            score -= 1.5
+    return max(0.05, score)
+
+
+def _filter_disliked(
+    results: list[dict],
+    disliked: set[str],
+    liked: set[str],
+    name_map: dict[int, str],
+) -> list[dict]:
+    """Drop items whose only genres are disliked and none are liked."""
+    if not disliked:
+        return results
+    out = []
+    for r in results:
+        gids = r.get("genre_ids", [])
+        names = {name_map.get(gid) for gid in gids} - {None}
+        has_liked = bool(names & liked)
+        has_only_disliked = bool(names) and names <= disliked
+        if not has_only_disliked or has_liked:
+            out.append(r)
+    return out
+
 
 TV_STATUS_IDS: dict[str, int] = {
     "Returning Series": 0, "Planned": 1, "In Production": 2,
@@ -166,6 +209,28 @@ async def enrich_with_state(
                 t = item.get("type")
                 if t == "movie": request_enabled_map[tid] = radarr_ready
                 elif t == "series": request_enabled_map[tid] = sonarr_ready
+
+    # --- Pending/rejected request state ---
+    request_status_map: dict[int, str] = {}
+    if len(items) == 1:
+        item = items[0]
+        tid = item.get("tmdb_id")
+        t   = item.get("type")
+        if t in ("movie", "series") and tid:
+            req_q = await db.execute(
+                select(MediaRequest)
+                .where(
+                    MediaRequest.user_id == user_id,
+                    MediaRequest.tmdb_id == tid,
+                    MediaRequest.media_type == t,
+                    MediaRequest.status.in_([RequestStatus.pending, RequestStatus.rejected]),
+                )
+                .order_by(MediaRequest.updated_at.desc())
+                .limit(1)
+            )
+            req = req_q.scalar_one_or_none()
+            if req:
+                request_status_map[tid] = req.status.value
 
     # --- Watched state ---
     watched_movies: set[int] = set()
@@ -587,6 +652,7 @@ async def enrich_with_state(
         item["in_lists"] = list_membership.get(tid, [])
         item["is_monitored"] = monitored_status.get(tid, False)
         item["request_enabled"] = request_enabled_map.get(tid, False)
+        item["request_status"] = request_status_map.get(tid)
         item["user_rating"] = user_ratings.get((tid, t))
         item["play_count"] = play_count_map.get(tid, 0)
 
@@ -791,6 +857,7 @@ async def search_media(
     type: str | None = Query(None),
     year: int | None = Query(None),
     page: int = Query(1, ge=1),
+    in_library: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -874,6 +941,37 @@ async def search_media(
         for item in formatted:
             item["in_library"] = True
         return {"page": 1, "total_pages": 1, "total_results": len(formatted), "results": formatted}
+
+    # Collection-only filter: search local DB, skip TMDB entirely
+    if in_library:
+        PAGE_SIZE = 24
+        lib_q = (
+            select(Media)
+            .options(joinedload(Media.show))
+            .join(Collection, Collection.media_id == Media.id)
+            .where(
+                Collection.user_id == current_user.id,
+                or_(Media.title.ilike(f"%{q}%"), Media.original_title.ilike(f"%{q}%")),
+            )
+        )
+        if type and type in {m.value for m in MediaType}:
+            lib_q = lib_q.where(Media.media_type == type)
+        else:
+            lib_q = lib_q.where(Media.media_type != MediaType.episode)
+        count_result = await db.execute(select(func.count()).select_from(lib_q.subquery()))
+        total = count_result.scalar_one()
+        lib_q = lib_q.order_by(Media.title).offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE)
+        items_result = await db.execute(lib_q)
+        items = items_result.scalars().all()
+        formatted = [format_media(m) for m in items]
+        for item in formatted:
+            item["in_library"] = True
+        return {
+            "page": page,
+            "total_pages": max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE),
+            "total_results": total,
+            "results": formatted,
+        }
 
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
 
@@ -1467,9 +1565,12 @@ async def recently_added(
 
 
 
+_PERSON_PAGE_SIZE = 20
+
 @router.get("/person/{person_id}")
 async def get_person_details(
     person_id: int,
+    page: int = Query(1, ge=1),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1483,6 +1584,16 @@ async def get_person_details(
         formatted_credits = []
         for c in cast_credits:
             m_type = "movie" if c.get("media_type") == "movie" else "series"
+            popularity = c.get("popularity", 0)
+            # Role weight: how significant was this person's role?
+            # Movies: billing order (0 = lead, higher = smaller part)
+            # TV: episode count (more episodes = regular cast, not a guest)
+            if c.get("media_type") == "tv":
+                episode_count = c.get("episode_count") or 0
+                role_weight = min(episode_count, 20) / 20.0
+            else:
+                order = c.get("order") or 0
+                role_weight = max(0.05, 1.0 - order * 0.05)
             formatted_credits.append(
                 {
                     "tmdb_id": c.get("id"),
@@ -1491,17 +1602,37 @@ async def get_person_details(
                     "poster_path": tmdb.poster_url(c.get("poster_path")),
                     "release_date": c.get("release_date") or c.get("first_air_date"),
                     "character": c.get("character"),
-                    "popularity": c.get("popularity", 0),
+                    "popularity": popularity,
                     "adult": c.get("adult", False),
                     "genre_ids": c.get("genre_ids"),
                     "overview": c.get("overview"),
+                    "_score": popularity * max(role_weight, 0.05),
                 }
             )
-        formatted_credits.sort(key=lambda x: x["popularity"], reverse=True)
-        # Take more to allow for filtering blocked items
-        candidate_credits = formatted_credits[:100]
-        await enrich_with_state(db, current_user.id, candidate_credits)
-        top_credits = [c for c in candidate_credits if not c.get("is_blocked")][:40]
+        # Deduplicate by tmdb_id — a person may appear in multiple episodes of the
+        # same show; keep the entry with the highest score.
+        seen: dict[int, int] = {}  # tmdb_id -> index in formatted_credits
+        deduped: list[dict] = []
+        for credit in formatted_credits:
+            tid = credit["tmdb_id"]
+            if tid in seen:
+                if credit["_score"] > deduped[seen[tid]]["_score"]:
+                    deduped[seen[tid]] = credit
+            else:
+                seen[tid] = len(deduped)
+                deduped.append(credit)
+
+        # Enrich the full list to support correct blocklist filtering
+        await enrich_with_state(db, current_user.id, deduped)
+        non_blocked = [c for c in deduped if not c.get("is_blocked")]
+
+        non_blocked.sort(key=lambda x: x["_score"], reverse=True)
+        for credit in non_blocked:
+            del credit["_score"]
+
+        total_credits = len(non_blocked)
+        start = (page - 1) * _PERSON_PAGE_SIZE
+        top_credits = non_blocked[start:start + _PERSON_PAGE_SIZE]
 
         # Which of the user's lists contain this person?
         user_list_ids_q = await db.execute(select(UserList.id).where(UserList.user_id == current_user.id))
@@ -1528,6 +1659,9 @@ async def get_person_details(
             "place_of_birth": data.get("place_of_birth"),
             "known_for_department": data.get("known_for_department"),
             "credits": top_credits,
+            "total_credits": total_credits,
+            "page": page,
+            "page_size": _PERSON_PAGE_SIZE,
             "in_lists": person_in_lists,
         }
     except Exception as e:
@@ -2072,6 +2206,7 @@ async def for_you(
 
     movie_genres = profile.movie_genres or []
     show_genres = profile.show_genres or []
+    disliked_genres: set[str] = set(profile.disliked_genres or [])
     language: str | None = getattr(profile, "content_language", None)
 
     if not movie_genres and not show_genres:
@@ -2121,9 +2256,12 @@ async def for_you(
         else:
             show_raw.extend(raw)
 
+    movie_liked_set = set(movie_genres)
+    show_liked_set = set(show_genres)
+
     seen: set[int] = set()
     unique_movies: list[dict] = []
-    for r in movie_raw:
+    for r in _filter_disliked(movie_raw, disliked_genres, movie_liked_set, MOVIE_GENRE_NAMES):
         rid = r.get("id")
         if rid and rid not in seen:
             seen.add(rid)
@@ -2131,7 +2269,7 @@ async def for_you(
 
     seen2: set[int] = set()
     unique_shows: list[dict] = []
-    for r in show_raw:
+    for r in _filter_disliked(show_raw, disliked_genres, show_liked_set, TV_GENRE_NAMES):
         rid = r.get("id")
         if rid and rid not in seen2:
             seen2.add(rid)
@@ -2311,9 +2449,16 @@ async def recommended(
     current_user: User = Depends(get_current_user),
 ):
     import random
+    from models.profile import UserProfileData
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(tmdb_key):
         return {"results": []}
+
+    profile_q = await db.execute(select(UserProfileData).where(UserProfileData.user_id == current_user.id))
+    _rec_profile = profile_q.scalar_one_or_none()
+    _rec_disliked: set[str] = set(_rec_profile.disliked_genres or []) if _rec_profile else set()
+    _rec_movie_liked: set[str] = set(_rec_profile.movie_genres or []) if _rec_profile else set()
+    _rec_show_liked: set[str] = set(_rec_profile.show_genres or []) if _rec_profile else set()
 
     # Bulk-load all collected IDs for filtering later
     all_movie_ids_q = await db.execute(
@@ -2389,7 +2534,10 @@ async def recommended(
 
     for i, batch in enumerate(all_results):
         is_show = i >= n_movies
-        for item in batch:
+        name_map = TV_GENRE_NAMES if is_show else MOVIE_GENRE_NAMES
+        liked_set = _rec_show_liked if is_show else _rec_movie_liked
+        filtered_batch = _filter_disliked(batch, _rec_disliked, liked_set, name_map)
+        for item in filtered_batch:
             tmdb_id = item.get("id")
             if not tmdb_id or tmdb_id in seen:
                 continue
@@ -2890,10 +3038,49 @@ async def request_media(
     settings = settings_q.scalar_one_or_none()
     gs = await _get_global_settings(db)
 
+    async def _upsert_request(media_type_str: str, title: str, poster_path: str | None) -> dict:
+        """Create or update a pending media request, return 202 response."""
+        existing_q = await db.execute(
+            select(MediaRequest).where(
+                MediaRequest.user_id == current_user.id,
+                MediaRequest.tmdb_id == tmdb_id,
+                MediaRequest.media_type == media_type_str,
+            )
+        )
+        existing = existing_q.scalar_one_or_none()
+        if existing:
+            if existing.status == RequestStatus.approved:
+                raise HTTPException(status_code=409, detail="Already approved and added")
+            existing.status = RequestStatus.pending
+            existing.updated_at = func.now()
+        else:
+            db.add(MediaRequest(
+                user_id=current_user.id,
+                tmdb_id=tmdb_id,
+                media_type=media_type_str,
+                title=title,
+                poster_path=poster_path,
+                status=RequestStatus.pending,
+            ))
+        await db.commit()
+        return {"status": "pending_approval", "message": "Request submitted for admin approval"}
+
     if type == MediaType.movie:
         radarr_cfg = _effective_radarr(settings, gs)
         if not radarr_cfg:
             raise HTTPException(status_code=400, detail="Radarr not configured in settings")
+
+        uses_global = gs and radarr_cfg is gs and not current_user.is_admin
+        if uses_global and gs.radarr_require_approval:
+            tmdb_key = await get_user_tmdb_key(db, current_user.id)
+            title, poster = "", None
+            try:
+                from core import tmdb as tmdb_core
+                movie_data = await tmdb_core.get_movie(tmdb_id, api_key=tmdb_key)
+                title = movie_data.get("title") or ""
+                poster = tmdb_core.poster_url(movie_data.get("poster_path")) if movie_data.get("poster_path") else None
+            except Exception: pass
+            return await _upsert_request("movie", title, poster)
 
         from core import radarr
         try:
@@ -2914,6 +3101,18 @@ async def request_media(
         sonarr_cfg = _effective_sonarr(settings, gs)
         if not sonarr_cfg:
             raise HTTPException(status_code=400, detail="Sonarr not configured in settings")
+
+        uses_global = gs and sonarr_cfg is gs and not current_user.is_admin
+        if uses_global and gs.sonarr_require_approval:
+            tmdb_key = await get_user_tmdb_key(db, current_user.id)
+            title, poster = "", None
+            try:
+                from core import tmdb as tmdb_core
+                show_data = await tmdb_core.get_show(tmdb_id, api_key=tmdb_key)
+                title = show_data.get("name") or ""
+                poster = tmdb_core.poster_url(show_data.get("poster_path")) if show_data.get("poster_path") else None
+            except Exception: pass
+            return await _upsert_request("series", title, poster)
 
         from core import sonarr, tmdb
         try:
@@ -4086,6 +4285,7 @@ async def get_media_details(
             "collection_pct": state_item.get("collection_pct", 100 if local_info["in_library"] else 0),
             "is_monitored": state_item.get("is_monitored", False),
             "request_enabled": state_item.get("request_enabled", False),
+            "request_status": state_item.get("request_status"),
             "title": data.get("title") or data.get("name"),
             "original_title": data.get("original_title") or data.get("original_name"),
             "overview": data.get("overview"),
@@ -4279,6 +4479,7 @@ async def pick_for_me(
     # ── Streaming pool (progressive fallback) ─────────────────────────────
     streaming_candidates: list[dict] = []
     if streaming_ids and check_tmdb_key(tmdb_key):
+        disliked: set[str] = set(profile.disliked_genres or []) if profile else set()
         user_genres = ((profile.movie_genres if type == "movie" else profile.show_genres) or []) if profile else []
         genre_map = MOVIE_GENRE_IDS if type == "movie" else TV_GENRE_IDS
         genre_ids = [genre_map[g] for g in user_genres if g in genre_map]
@@ -4348,7 +4549,21 @@ async def pick_for_me(
     if not all_candidates:
         raise HTTPException(status_code=404, detail="no_results")
 
-    pick = random.choice(all_candidates)
+    liked_set = set(user_genres)
+    if disliked or liked_set:
+        weights = []
+        for item in all_candidates:
+            item_genres: list[str] = item.get("genres") or []
+            score = 1.0
+            for g in item_genres:
+                if g in liked_set:
+                    score += 2.0
+                elif g in disliked:
+                    score -= 1.5
+            weights.append(max(0.05, score))
+        pick = random.choices(all_candidates, weights=weights, k=1)[0]
+    else:
+        pick = random.choice(all_candidates)
 
     # ── Fetch local object for the picked item (to find local sources) ─────
     local_media = None

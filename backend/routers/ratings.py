@@ -156,6 +156,12 @@ async def submit_rating(
             push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, body.rating))
         elif media_type == MediaType.series:
             push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, body.rating))
+    if settings and settings.simkl_push_ratings and settings.simkl_access_token and settings.simkl_client_id and media.tmdb_id:
+        from core import simkl as simkl_client
+        if media_type == MediaType.movie:
+            push_tasks.append(simkl_client.set_movie_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id, body.rating))
+        elif media_type == MediaType.series:
+            push_tasks.append(simkl_client.set_show_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id, body.rating))
     if push_tasks:
         await asyncio.gather(*push_tasks, return_exceptions=True)
 
@@ -266,6 +272,12 @@ async def delete_rating(
             push_tasks.append(trakt_client.remove_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
         elif mt == MediaType.series:
             push_tasks.append(trakt_client.remove_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
+    if settings and settings.simkl_push_ratings and settings.simkl_access_token and settings.simkl_client_id and media.tmdb_id:
+        from core import simkl as simkl_client
+        if mt == MediaType.movie:
+            push_tasks.append(simkl_client.remove_movie_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id))
+        elif mt == MediaType.series:
+            push_tasks.append(simkl_client.remove_show_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id))
     if push_tasks:
         await asyncio.gather(*push_tasks, return_exceptions=True)
 

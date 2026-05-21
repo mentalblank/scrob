@@ -20,6 +20,7 @@ const prefs: UserPreferences = {
   country: null,
   movie_genres: [],
   show_genres: [],
+  disliked_genres: [],
   streaming_services: [],
   content_language: null,
   privacy_level: "private",
@@ -44,10 +45,12 @@ const SHOW_GENRES = (showGenresRes?.genres || []).map(g => g.name).sort();
 const watchRegion = prefs.country || "US";
 const providersRes = await api.media.getWatchProviders("movie", watchRegion, token).catch(() => ({ results: [] }));
 const allProviders = providersRes.results || [];
+const ALL_GENRES = [...new Set([...MOVIE_GENRES, ...SHOW_GENRES])].sort();
 
 const COUNTRIES = (countriesRes || [])
   .map(c => [c.iso_3166_1, c.english_name])
   .sort((a, b) => a[1].localeCompare(b[1]));
+
 ---
 
 <Base title="Profile">
@@ -346,6 +349,32 @@ const COUNTRIES = (countriesRes || [])
         </div>
       </section>
 
+      <!-- Disliked Genres -->
+      <section>
+        <div class="mb-4 border-b border-zinc-800 pb-2">
+          <h2 class="text-xl font-bold text-zinc-100">Disliked Genres</h2>
+          <p class="text-xs text-zinc-500 mt-1">Genres you want to avoid. Items that <em>only</em> have disliked genres are filtered out of recommendations and picks. A genre can't be in both lists — selecting one here removes it from your favourites.</p>
+        </div>
+        <div id="disliked-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.disliked_genres || [])}>
+          {ALL_GENRES.map((genre) => {
+            const active = (prefs.disliked_genres || []).includes(genre);
+            return (
+              <button
+                type="button"
+                data-genre-type="disliked"
+                data-value={genre}
+                class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-900/50 ${active ? "bg-red-600/10 border-red-500/40 text-red-400 ring-2 ring-red-500/20" : "bg-zinc-900 border-zinc-800 text-zinc-500"}`}
+              >
+                {genre}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+        </div>
+      </section>
+
       <!-- Save -->
       <div class="pt-6 pb-8">
         <button
@@ -455,19 +484,27 @@ const COUNTRIES = (countriesRes || [])
     const streamingList = document.getElementById('streaming-services-list');
     const movieGenreList = document.getElementById('movie-genre-list');
     const showGenreList = document.getElementById('show-genre-list');
+    const dislikedGenreList = document.getElementById('disliked-genre-list');
     
     const selectedStreaming = new Set(JSON.parse(streamingList?.dataset.selected || '[]'));
     const selectedMovieGenres = new Set(JSON.parse(movieGenreList?.dataset.selected || '[]'));
     const selectedShowGenres = new Set(JSON.parse(showGenreList?.dataset.selected || '[]'));
+    const selectedDislikedGenres = new Set(JSON.parse(dislikedGenreList?.dataset.selected || '[]'));
 
-    function refreshButton(btn: HTMLElement, active: boolean) {
+    function refreshButton(btn: HTMLElement, active: boolean, isDislike = false) {
       if (active) {
-        btn.classList.add('bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20');
+        const activeClasses = isDislike 
+          ? ['bg-red-600/10', 'border-red-500/40', 'text-red-400', 'ring-2', 'ring-red-500/20']
+          : ['bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20'];
+        btn.classList.add(...activeClasses);
         btn.classList.remove('bg-zinc-900', 'border-zinc-800', 'text-zinc-500');
         const check = btn.querySelector('.absolute');
         if (check) check.classList.remove('hidden');
       } else {
-        btn.classList.remove('bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20');
+        const activeClasses = isDislike
+          ? ['bg-red-600/10', 'border-red-500/40', 'text-red-400', 'ring-2', 'ring-red-500/20']
+          : ['bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20'];
+        btn.classList.remove(...activeClasses);
         btn.classList.add('bg-zinc-900', 'border-zinc-800', 'text-zinc-500');
         const check = btn.querySelector('.absolute');
         if (check) check.classList.add('hidden');
@@ -486,7 +523,17 @@ const COUNTRIES = (countriesRes || [])
       const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
       if (!btn) return;
       const val = btn.dataset.value!;
-      if (selectedMovieGenres.has(val)) selectedMovieGenres.delete(val); else selectedMovieGenres.add(val);
+      if (selectedMovieGenres.has(val)) {
+        selectedMovieGenres.delete(val);
+      } else {
+        selectedMovieGenres.add(val);
+        // Mutual exclusivity: remove from disliked
+        if (selectedDislikedGenres.has(val)) {
+          selectedDislikedGenres.delete(val);
+          const dislikedBtn = dislikedGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
+          if (dislikedBtn) refreshButton(dislikedBtn, false, true);
+        }
+      }
       refreshButton(btn, selectedMovieGenres.has(val));
     });
 
@@ -494,8 +541,41 @@ const COUNTRIES = (countriesRes || [])
       const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
       if (!btn) return;
       const val = btn.dataset.value!;
-      if (selectedShowGenres.has(val)) selectedShowGenres.delete(val); else selectedShowGenres.add(val);
+      if (selectedShowGenres.has(val)) {
+        selectedShowGenres.delete(val);
+      } else {
+        selectedShowGenres.add(val);
+        // Mutual exclusivity: remove from disliked
+        if (selectedDislikedGenres.has(val)) {
+          selectedDislikedGenres.delete(val);
+          const dislikedBtn = dislikedGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
+          if (dislikedBtn) refreshButton(dislikedBtn, false, true);
+        }
+      }
       refreshButton(btn, selectedShowGenres.has(val));
+    });
+
+    dislikedGenreList?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
+      if (!btn) return;
+      const val = btn.dataset.value!;
+      if (selectedDislikedGenres.has(val)) {
+        selectedDislikedGenres.delete(val);
+      } else {
+        selectedDislikedGenres.add(val);
+        // Mutual exclusivity: remove from movie and show genres
+        if (selectedMovieGenres.has(val)) {
+          selectedMovieGenres.delete(val);
+          const movieBtn = movieGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
+          if (movieBtn) refreshButton(movieBtn, false);
+        }
+        if (selectedShowGenres.has(val)) {
+          selectedShowGenres.delete(val);
+          const showBtn = showGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
+          if (showBtn) refreshButton(showBtn, false);
+        }
+      }
+      refreshButton(btn, selectedDislikedGenres.has(val), true);
     });
 
     // Region Change - Refresh providers (Reload page for simplicity, like in nosocial)
@@ -582,9 +662,11 @@ const COUNTRIES = (countriesRes || [])
       const country = (document.getElementById('country') as HTMLSelectElement | null)?.value ?? '';
       const contentLanguage = (document.getElementById('content_language') as HTMLSelectElement | null)?.value ?? '';
 
-      const activeChips = (group: string) =>
-        Array.from(document.querySelectorAll<HTMLButtonElement>(`button[data-chip="${group}"].bg-blue-500\\/20`))
+      const activeChips = (group: string) => {
+        const activeClass = group === 'disliked-genre' ? 'bg-red-500\\/20' : 'bg-blue-500\\/20';
+        return Array.from(document.querySelectorAll<HTMLButtonElement>(`button[data-chip="${group}"].${activeClass}`))
           .map(b => b.dataset.value ?? '');
+      };
 
       try {
         const unifiedFilters = (document.querySelector('input[name="unified_filters"]:checked') as HTMLInputElement | null)?.value === 'true';
@@ -605,6 +687,7 @@ const COUNTRIES = (countriesRes || [])
             streaming_services: Array.from(selectedStreaming),
             movie_genres: Array.from(selectedMovieGenres),
             show_genres: Array.from(selectedShowGenres),
+            disliked_genres: Array.from(selectedDislikedGenres),
           }),
         });
 

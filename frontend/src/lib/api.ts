@@ -205,6 +205,9 @@ export interface PersonDetail {
   birthday: string | null;
   place_of_birth: string | null;
   credits: PersonCredit[];
+  total_credits: number;
+  page: number;
+  page_size: number;
   in_lists: number[];
 }
 
@@ -316,6 +319,21 @@ export interface GlobalSettings {
   sonarr_quality_profile: number | null;
   sonarr_tags: number[] | null;
   sonarr_season_folder: boolean;
+  radarr_require_approval: boolean;
+  sonarr_require_approval: boolean;
+}
+
+export interface MediaRequestItem {
+  id: number;
+  tmdb_id: number;
+  media_type: string;
+  title: string;
+  poster_path: string | null;
+  status: "pending" | "approved" | "rejected";
+  reviewed_by: number | null;
+  created_at: string;
+  updated_at: string;
+  user: { id: number; username: string; display_name: string };
 }
 
 export interface LoginResponse {
@@ -374,6 +392,7 @@ export interface UserPreferences {
   country: string | null;
   movie_genres: string[];
   show_genres: string[];
+  disliked_genres: string[];
   streaming_services: string[];
   content_language: string | null;
   privacy_level: PrivacyLevel;
@@ -386,6 +405,7 @@ export interface UserPreferences {
 export interface UserSettings {
   tmdb_api_key: string | null;
   has_effective_tmdb_key: boolean;
+  has_global_tmdb_key: boolean;
 
   radarr_url: string | null;
   radarr_token: string | null;
@@ -408,6 +428,15 @@ export interface UserSettings {
   trakt_push_watched: boolean;
   trakt_push_ratings: boolean;
   trakt_push_lists: boolean;
+
+  // Simkl
+  simkl_client_id: string | null;
+  simkl_connected: boolean;
+  simkl_sync_watched: boolean;
+  simkl_sync_ratings: boolean;
+  simkl_sync_lists: boolean;
+  simkl_push_watched: boolean;
+  simkl_push_ratings: boolean;
 
   preferences: UserPreferences | null;
   blur_explicit: boolean;
@@ -490,6 +519,7 @@ export interface ConnectionStatus {
   radarr: ServiceStatus;
   sonarr: ServiceStatus;
   trakt: ServiceStatus;
+  simkl: ServiceStatus;
 }
 
 export interface MediaItem {
@@ -897,6 +927,19 @@ export const api = {
       post<{ status: string; job_id: number; message: string }>("/trakt/sync", undefined, token),
   },
 
+  simkl: {
+    pinStart: (token: string) =>
+      post<{ user_code: string; url: string; expires_in: number; interval: number }>("/simkl/auth/pin/start", undefined, token),
+    pinPoll: (token: string) =>
+      post<{ status: "pending" | "connected" }>("/simkl/auth/pin/poll", undefined, token),
+    disconnect: (token: string) =>
+      del<{ status: string }>("/simkl/auth/disconnect", token),
+    sync: (token: string) =>
+      post<{ status: string; job_id: number; message: string }>("/simkl/sync", undefined, token),
+    push: (token: string) =>
+      post<{ status: string; message: string }>("/simkl/push", undefined, token),
+  },
+
   media: {
     list: (params?: { type?: string; sort?: string; page?: number; genre?: string; year?: number }, token?: string) =>
       get<{ page: number; page_size: number; total_pages: number; total_results: number; results: MediaItem[] }>("/media", params, token),
@@ -907,8 +950,8 @@ export const api = {
     getRecommendations: (type: string, tmdbId: number, token?: string) =>
       get<{ results: MediaItem[] }>(`/media/${type}/${tmdbId}/recommendations`, undefined, token),
 
-    getPerson: (personId: number, token?: string) =>
-      get<PersonDetail>(`/media/person/${personId}`, undefined, token),
+    getPerson: (personId: number, page: number = 1, token?: string) =>
+      get<PersonDetail>(`/media/person/${personId}`, { page }, token),
 
     getCollection: (collectionId: number, token?: string) =>
       get<CollectionDetail>(`/media/collection/${collectionId}`, undefined, token),
@@ -928,8 +971,8 @@ export const api = {
     unblock: (tmdbId: number, mediaType: string, token?: string) =>
       del<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType }, token),
 
-    search: (q: string, type?: string, page: number = 1, year?: number, token?: string) =>
-      get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/search", { q, ...(type ? { type } : {}), page, ...(year ? { year } : {}) }, token),
+    search: (q: string, type?: string, page: number = 1, year?: number, token?: string, inLibrary?: boolean) =>
+      get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/search", { q, ...(type ? { type } : {}), page, ...(year ? { year } : {}), ...(inLibrary ? { in_library: true } : {}) }, token),
 
     recentlyAdded: (type?: string, token?: string) =>
       get<{ results: MediaItem[] }>("/media/recently-added", type ? { type } : {}, token),
@@ -1147,6 +1190,14 @@ export const api = {
       patch<AdminUser>(`/admin/users/${userId}/toggle-admin`, undefined, token),
     deleteUser: (userId: number, token: string) =>
       del<{ status: string }>(`/admin/users/${userId}`, token),
+    getPendingCount: (token: string) =>
+      get<{ pending: number }>("/admin/requests/pending-count", undefined, token),
+    getRequests: (token: string) =>
+      get<MediaRequestItem[]>("/admin/requests", undefined, token),
+    approveRequest: (requestId: number, token: string) =>
+      post<{ status: string }>(`/admin/requests/${requestId}/approve`, undefined, token),
+    rejectRequest: (requestId: number, token: string) =>
+      post<{ status: string }>(`/admin/requests/${requestId}/reject`, undefined, token),
   },
 
   contentFilters: {

@@ -86,6 +86,28 @@ async def _push_watch_state(
                     else:
                         tasks.append(emby_client.mark_unwatched(conn.url, conn.token, conn.server_user_id, coll_file.source_id))
 
+    push_simkl = settings and settings.simkl_push_watched and settings.simkl_access_token
+    if push_simkl and settings.simkl_client_id:
+        from core import simkl as simkl_client
+        simkl_media_res = await db.execute(select(Media).where(Media.id.in_(media_ids)))
+        simkl_media_items = simkl_media_res.scalars().all()
+        for media in simkl_media_items:
+            if not media.tmdb_id:
+                continue
+            if media.media_type == MediaType.movie:
+                if watched:
+                    tasks.append(simkl_client.add_movie_to_history(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id))
+                else:
+                    tasks.append(simkl_client.remove_movie_from_history(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id))
+            elif media.media_type == MediaType.episode and media.show_id and media.season_number is not None and media.episode_number is not None:
+                show_res = await db.execute(select(Show).where(Show.id == media.show_id))
+                show = show_res.scalar_one_or_none()
+                if show and show.tmdb_id:
+                    if watched:
+                        tasks.append(simkl_client.add_episode_to_history(settings.simkl_client_id, settings.simkl_access_token, show.tmdb_id, media.season_number, media.episode_number))
+                    else:
+                        tasks.append(simkl_client.remove_episode_from_history(settings.simkl_client_id, settings.simkl_access_token, show.tmdb_id, media.season_number, media.episode_number))
+
     if push_trakt and settings.trakt_client_id:
         media_res = await db.execute(
             select(Media).where(Media.id.in_(media_ids))

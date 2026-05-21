@@ -8,9 +8,10 @@ export const prerender = false;
 
 const { id } = Astro.params;
 const { token } = Astro.locals;
-const person = await api.media.getPerson(Number(id), token);
+const person = await api.media.getPerson(Number(id), 1, token);
 
 const credits = person.credits || [];
+const totalPages = Math.ceil(person.total_credits / person.page_size);
 ---
 
 <Base title={person.name}>
@@ -82,7 +83,7 @@ const credits = person.credits || [];
 
       <div>
         <h2 class="text-xl font-bold text-zinc-100 mb-6">Known For</h2>
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div id="credits-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {credits.map((item) => (
             <div class="flex flex-col gap-1">
               <MediaCard item={item as unknown as MediaItem} />
@@ -92,6 +93,13 @@ const credits = person.credits || [];
             </div>
           ))}
         </div>
+        {totalPages > 1 && (
+          <div id="credits-pagination" class="flex items-center justify-center gap-3 mt-8">
+            <button id="credits-prev" disabled class="px-4 py-2 text-sm rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-zinc-700 transition-colors">← Prev</button>
+            <span id="credits-page-info" class="text-sm text-zinc-400">Page 1 of {totalPages}</span>
+            <button id="credits-next" class="px-4 py-2 text-sm rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-zinc-700 transition-colors">Next →</button>
+          </div>
+        )}
       </div>
 
       <CommentsSection
@@ -101,3 +109,49 @@ const credits = person.credits || [];
     </div>
   </div>
 </Base>
+
+<script define:vars={{ personId: person.tmdb_id, totalCredits: person.total_credits, pageSize: person.page_size }}>
+  const totalPages = Math.ceil(totalCredits / pageSize);
+  let currentPage = 1;
+  let loading = false;
+
+  const grid = document.getElementById('credits-grid');
+  const prevBtn = document.getElementById('credits-prev');
+  const nextBtn = document.getElementById('credits-next');
+  const pageInfo = document.getElementById('credits-page-info');
+
+  function updatePagination() {
+    if (!prevBtn || !nextBtn || !pageInfo) return;
+    prevBtn.disabled = currentPage <= 1;
+    nextBtn.disabled = currentPage >= totalPages;
+    pageInfo.textContent = 'Page ' + currentPage + ' of ' + totalPages;
+  }
+
+  async function loadPage(page) {
+    if (loading || !grid) return;
+    loading = true;
+    grid.style.opacity = '0.5';
+    grid.style.pointerEvents = 'none';
+
+    try {
+      const res = await fetch('/partials/person-credits?person_id=' + personId + '&page=' + page);
+      if (!res.ok) return;
+      const html = await res.text();
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      const wrapper = tmp.firstElementChild;
+      if (!wrapper) return;
+      grid.innerHTML = wrapper.innerHTML;
+      currentPage = page;
+      updatePagination();
+      grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } finally {
+      grid.style.opacity = '';
+      grid.style.pointerEvents = '';
+      loading = false;
+    }
+  }
+
+  if (prevBtn) prevBtn.addEventListener('click', function() { if (currentPage > 1) loadPage(currentPage - 1); });
+  if (nextBtn) nextBtn.addEventListener('click', function() { if (currentPage < totalPages) loadPage(currentPage + 1); });
+</script>

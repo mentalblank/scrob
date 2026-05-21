@@ -2279,16 +2279,28 @@ async def heal_metadata(
         raise HTTPException(status_code=400, detail="TMDB API key required")
 
     effective_key = await _get_effective_tmdb_key(db, settings)
-    background_tasks.add_task(run_heal, current_user.id, effective_key)
+    job = SyncJob(user_id=current_user.id, source=CollectionSource.tmdb, job_type="heal", status=SyncStatus.pending)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    background_tasks.add_task(run_heal, current_user.id, effective_key, job.id)
     return {"status": "started", "message": "Metadata heal is running in the background"}
 
 
-async def run_heal(user_id: int, api_key: str):
+async def run_heal(user_id: int, api_key: str, job_id: int | None = None):
     from models.show import Show
     from routers.webhooks import _find_or_create_show
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
+        async def _update_job(**kwargs):
+            if job_id is None:
+                return
+            await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(updated_at=func.now(), **kwargs))
+            await db.commit()
+
         try:
+            await _update_job(status=SyncStatus.running)
+
             # ── Phase 1: Re-enrich items that have show linkage but missing poster ──
             coll_q = await db.execute(
                 select(Media)
@@ -2317,11 +2329,14 @@ async def run_heal(user_id: int, api_key: str):
                 to_enrich = [(m, None) for m in movies] + [
                     (m, show_tmdb_map[m.show_id]) for m in episodes if m.show_id in show_tmdb_map
                 ]
+                await _update_job(total_items=len(to_enrich), processed_items=0)
                 await batch_enrich_items(to_enrich, api_key=api_key)
                 await db.commit()
+                await _update_job(processed_items=len(to_enrich))
                 print(f"Heal: re-enriched {len(to_enrich)} items for user {user_id}")
             else:
                 print(f"Heal: nothing to re-enrich for user {user_id}")
+                await _update_job(total_items=0, processed_items=0)
 
             # ── Phase 2: Recover orphaned episodes via Jellyfin/Emby ─────────────
             # Webhook-created episodes may have show_id=None if the show wasn't in
@@ -2374,10 +2389,13 @@ async def run_heal(user_id: int, api_key: str):
                     await db.commit()
                 print(f"Heal: recovered {recovered}/{len(seen)} orphaned episode(s) for user {user_id}")
 
+            await _update_job(status=SyncStatus.completed, stats={"healed": True})
+
         except Exception as e:
             print(f"Heal failed for user {user_id}: {e}")
             import traceback
             traceback.print_exc()
+            await _update_job(status=SyncStatus.failed, error_message=str(e)[:900])
 
 
 @router.post("/abort")

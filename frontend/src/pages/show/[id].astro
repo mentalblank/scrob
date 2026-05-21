@@ -223,6 +223,7 @@ const logoPath = show?.logo_path ?? null;
                           showTmdbId={Number(id)}
                           isMonitored={show.is_monitored ?? false}
                           requestEnabled={show.request_enabled ?? false}
+                          requestStatus={show.request_status ?? null}
                           userRating={show.user_rating ?? null}
                           isBlocked={show.is_blocked ?? false}
                           isDropped={show.is_dropped ?? false}
@@ -350,9 +351,11 @@ const logoPath = show?.logo_path ?? null;
                             <div class="flex items-center gap-2.5 p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-xl hover:border-blue-500/30 transition-colors group">
                               {s.logo ? (
                                 <img src={s.logo} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
+                              ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
+                                <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-6 h-6 rounded-md object-contain shadow-lg" />
                               ) : (
                                 <div class="w-6 h-6 bg-zinc-800 rounded-md flex items-center justify-center text-[10px]">
-                                  {s.type === "plex" ? "🟡" : s.type === "jellyfin" ? "🟣" : s.type === "emby" ? "🟢" : "▶"}
+                                  ▶
                                 </div>
                               )}
                               <div class="min-w-0 text-left">
@@ -373,6 +376,8 @@ const logoPath = show?.logo_path ?? null;
                             <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/40 border border-zinc-800/50 rounded-lg hover:border-zinc-700 transition-colors group">
                               {s.logo ? (
                                 <img src={s.logo} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                              ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
+                                <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-4 h-4 rounded-sm object-contain opacity-70 group-hover:opacity-100 transition-opacity" />
                               ) : (
                                 <span class="text-[10px]">▶</span>
                               )}

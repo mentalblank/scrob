@@ -503,6 +503,7 @@ async def add_list_item(
     await db.commit()
 
     # --- Sonarr/Radarr Auto-Add ---
+    approval_enqueued = False
     if body.media_type in (MediaType.movie, MediaType.series):
         from models.users import UserSettings
         from models.global_settings import GlobalSettings
@@ -515,48 +516,102 @@ async def add_list_item(
         if body.media_type == MediaType.movie and list_obj.radarr_auto_add:
             radarr_cfg = _effective_radarr(settings, gs)
             if radarr_cfg:
-                from core import radarr
-                try:
-                    await radarr.add_movie(
-                        url=radarr_cfg.radarr_url,
-                        token=radarr_cfg.radarr_token,
-                        tmdb_id=body.tmdb_id,
-                        title=media.title,
-                        root_folder=list_obj.radarr_root_folder or radarr_cfg.radarr_root_folder,
-                        quality_profile_id=list_obj.radarr_quality_profile or radarr_cfg.radarr_quality_profile,
-                        tags=list_obj.radarr_tags,
-                        monitored=list_obj.radarr_monitor != "none" if list_obj.radarr_monitor else True,
-                        monitor=list_obj.radarr_monitor or "movieOnly",
+                uses_global = gs and radarr_cfg is gs and not current_user.is_admin
+                if uses_global and gs.radarr_require_approval:
+                    approval_enqueued = True
+                    from models.media_request import MediaRequest, RequestStatus
+                    existing_q = await db.execute(
+                        select(MediaRequest).where(
+                            MediaRequest.user_id == current_user.id,
+                            MediaRequest.tmdb_id == body.tmdb_id,
+                            MediaRequest.media_type == "movie",
+                        )
                     )
-                except Exception as e:
-                    print(f"Radarr auto-add failed: {e}")
+                    existing = existing_q.scalar_one_or_none()
+                    if existing:
+                        if existing.status != RequestStatus.approved:
+                            existing.status = RequestStatus.pending
+                            existing.updated_at = func.now()
+                    else:
+                        db.add(MediaRequest(
+                            user_id=current_user.id,
+                            tmdb_id=body.tmdb_id,
+                            media_type="movie",
+                            title=media.title or "",
+                            poster_path=media.poster_path,
+                            status=RequestStatus.pending,
+                        ))
+                    await db.commit()
+                else:
+                    from core import radarr
+                    try:
+                        await radarr.add_movie(
+                            url=radarr_cfg.radarr_url,
+                            token=radarr_cfg.radarr_token,
+                            tmdb_id=body.tmdb_id,
+                            title=media.title,
+                            root_folder=list_obj.radarr_root_folder or radarr_cfg.radarr_root_folder,
+                            quality_profile_id=list_obj.radarr_quality_profile or radarr_cfg.radarr_quality_profile,
+                            tags=list_obj.radarr_tags,
+                            monitored=list_obj.radarr_monitor != "none" if list_obj.radarr_monitor else True,
+                            monitor=list_obj.radarr_monitor or "movieOnly",
+                        )
+                    except Exception as e:
+                        print(f"Radarr auto-add failed: {e}")
 
         elif body.media_type == MediaType.series and list_obj.sonarr_auto_add:
             sonarr_cfg = _effective_sonarr(settings, gs)
             if sonarr_cfg:
-                from core import sonarr
-                try:
-                    tvdb_id = (media.tmdb_data or {}).get("external_ids", {}).get("tvdb_id")
-                    if not tvdb_id:
-                        from core import tmdb as tmdb_core
-                        ext_ids = await tmdb_core.get_external_ids(body.tmdb_id, "tv", api_key=api_key)
-                        tvdb_id = ext_ids.get("tvdb_id")
-
-                    if tvdb_id:
-                        await sonarr.add_series(
-                            url=sonarr_cfg.sonarr_url,
-                            token=sonarr_cfg.sonarr_token,
-                            tvdb_id=tvdb_id,
-                            root_folder=list_obj.sonarr_root_folder or sonarr_cfg.sonarr_root_folder,
-                            quality_profile_id=list_obj.sonarr_quality_profile or sonarr_cfg.sonarr_quality_profile,
-                            tags=list_obj.sonarr_tags,
-                            monitored=list_obj.sonarr_monitor != "none" if list_obj.sonarr_monitor else True,
-                            season_folder=list_obj.sonarr_season_folder,
-                            series_type=list_obj.sonarr_series_type or "standard",
-                            monitor=list_obj.sonarr_monitor or "all",
+                uses_global = gs and sonarr_cfg is gs and not current_user.is_admin
+                if uses_global and gs.sonarr_require_approval:
+                    approval_enqueued = True
+                    from models.media_request import MediaRequest, RequestStatus
+                    existing_q = await db.execute(
+                        select(MediaRequest).where(
+                            MediaRequest.user_id == current_user.id,
+                            MediaRequest.tmdb_id == body.tmdb_id,
+                            MediaRequest.media_type == "series",
                         )
-                except Exception as e:
-                    print(f"Sonarr auto-add failed: {e}")
+                    )
+                    existing = existing_q.scalar_one_or_none()
+                    if existing:
+                        if existing.status != RequestStatus.approved:
+                            existing.status = RequestStatus.pending
+                            existing.updated_at = func.now()
+                    else:
+                        db.add(MediaRequest(
+                            user_id=current_user.id,
+                            tmdb_id=body.tmdb_id,
+                            media_type="series",
+                            title=media.title or "",
+                            poster_path=media.poster_path,
+                            status=RequestStatus.pending,
+                        ))
+                    await db.commit()
+                else:
+                    from core import sonarr
+                    try:
+                        tvdb_id = (media.tmdb_data or {}).get("external_ids", {}).get("tvdb_id")
+                        if not tvdb_id:
+                            from core import tmdb as tmdb_core
+                            ext_ids = await tmdb_core.get_external_ids(body.tmdb_id, "tv", api_key=api_key)
+                            tvdb_id = ext_ids.get("tvdb_id")
+
+                        if tvdb_id:
+                            await sonarr.add_series(
+                                url=sonarr_cfg.sonarr_url,
+                                token=sonarr_cfg.sonarr_token,
+                                tvdb_id=tvdb_id,
+                                root_folder=list_obj.sonarr_root_folder or sonarr_cfg.sonarr_root_folder,
+                                quality_profile_id=list_obj.sonarr_quality_profile or sonarr_cfg.sonarr_quality_profile,
+                                tags=list_obj.sonarr_tags,
+                                monitored=list_obj.sonarr_monitor != "none" if list_obj.sonarr_monitor else True,
+                                season_folder=list_obj.sonarr_season_folder,
+                                series_type=list_obj.sonarr_series_type or "standard",
+                                monitor=list_obj.sonarr_monitor or "all",
+                            )
+                    except Exception as e:
+                        print(f"Sonarr auto-add failed: {e}")
 
     # --- Trakt Sync Push ---
     if list_obj.trakt_slug:
@@ -569,6 +624,8 @@ async def add_list_item(
     )
     formatted = _format_item(item_result.scalar_one())
     await enrich_with_state(db, current_user.id, [formatted["media"]])
+    if approval_enqueued:
+        formatted["auto_add_status"] = "pending_approval"
     return formatted
 
 

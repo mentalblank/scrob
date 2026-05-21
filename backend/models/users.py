@@ -88,6 +88,22 @@ class UserSettings(Base):
     trakt_push_lists         : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_watchlist_split    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
+    # Simkl OAuth credentials (PIN flow — client_id only, no secret needed)
+    simkl_client_id          : Mapped[Optional[str]]  = mapped_column(String(255))
+
+    # Simkl OAuth token
+    simkl_access_token       : Mapped[Optional[str]]  = mapped_column(String(2000))
+    simkl_device_code        : Mapped[Optional[str]]  = mapped_column(String(255))  # user_code during PIN auth
+
+    # Simkl inbound sync flags (Simkl → Scrob)
+    simkl_sync_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,  server_default="true")
+    simkl_sync_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,  server_default="true")
+    simkl_sync_lists         : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,  server_default="true")
+
+    # Simkl outbound push flags (Scrob → Simkl)
+    simkl_push_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    simkl_push_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
     preferences    : Mapped[Optional[dict]] = mapped_column(JSONB)
     blur_explicit  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     show_comments  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")

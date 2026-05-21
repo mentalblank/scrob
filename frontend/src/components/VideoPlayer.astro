@@ -139,12 +139,14 @@ const { tmdbId, mediaType, inLibrary, title, token, secondary = false } = Astro.
         sourcesEl.innerHTML = '<span class="text-xs text-zinc-500">No playback source found.</span>';
         return;
       }
+      const LOCAL_SOURCES = ['plex', 'jellyfin', 'emby'];
       sourcesEl.innerHTML = sources.map((s, i) =>
         `<button
-          class="source-btn px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${i === 0 ? 'bg-blue-600 border-blue-500 text-white' : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:border-zinc-500'}"
+          class="source-btn flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${i === 0 ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-500' : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:border-zinc-500'}"
           data-connection-id="${s.connection_id}"
           data-subtitles="${esc(JSON.stringify(s.subtitles || []))}"
         >
+          ${LOCAL_SOURCES.includes(s.source) ? `<img src="/icons/${esc(s.source)}.svg" alt="${esc(s.source)}" class="w-4 h-4 rounded shrink-0" />` : ''}
           ${esc(s.name)}${s.resolution ? ` <span class="opacity-60 font-mono">${esc(s.resolution)}</span>` : ''}
         </button>`
       ).join('');
@@ -152,11 +154,11 @@ const { tmdbId, mediaType, inLibrary, title, token, secondary = false } = Astro.
       sourcesEl.querySelectorAll<HTMLButtonElement>('.source-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           sourcesEl.querySelectorAll('.source-btn').forEach(b => {
-            b.classList.remove('bg-blue-600', 'border-blue-500', 'text-white');
-            b.classList.add('bg-zinc-900', 'border-zinc-700', 'text-zinc-300');
+            b.classList.remove('bg-blue-600', 'border-blue-500', 'text-white', 'hover:bg-blue-500');
+            b.classList.add('bg-zinc-900', 'border-zinc-700', 'text-zinc-300', 'hover:border-zinc-500');
           });
-          btn.classList.add('bg-blue-600', 'border-blue-500', 'text-white');
-          btn.classList.remove('bg-zinc-900', 'border-zinc-700', 'text-zinc-300');
+          btn.classList.add('bg-blue-600', 'border-blue-500', 'text-white', 'hover:bg-blue-500');
+          btn.classList.remove('bg-zinc-900', 'border-zinc-700', 'text-zinc-300', 'hover:border-zinc-500');
           loadSource(btn.dataset.connectionId!, JSON.parse(btn.dataset.subtitles || '[]'));
         });
       });

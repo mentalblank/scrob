@@ -14,9 +14,10 @@ const q = Astro.url.searchParams.get("q") || "";
 const type = Astro.url.searchParams.get("type") || undefined;
 const page = parseInt(Astro.url.searchParams.get("page") || "1");
 const year = Astro.url.searchParams.get("year") ? Number(Astro.url.searchParams.get("year")) : undefined;
+const inLibrary = Astro.url.searchParams.get("in_library") === "true";
 
 const isUserSearch = type === "user";
-const showYearFilter = type === "movie" || type === "series";
+const showYearFilter = (type === "movie" || type === "series") && !inLibrary;
 
 const settings = await api.auth.getSettings(token!);
 const profile = await api.profile.get(token!);
@@ -36,7 +37,7 @@ if (q.length >= 2) {
       userResults = data.results;
       totalResults = userResults.length;
     } else {
-      const data = await api.media.search(q, type, page, showYearFilter ? year : undefined, token);
+      const data = await api.media.search(q, type, page, showYearFilter ? year : undefined, token, inLibrary);
       results = data.results;
       totalPages = data.total_pages;
       totalResults = data.total_results;
@@ -46,7 +47,7 @@ if (q.length >= 2) {
   }
 }
 
-const baseUrl = `/search?q=${encodeURIComponent(q)}${type ? `&type=${type}` : ""}${showYearFilter && year ? `&year=${year}` : ""}`;
+const baseUrl = `/search?q=${encodeURIComponent(q)}${type ? `&type=${type}` : ""}${showYearFilter && year ? `&year=${year}` : ""}${inLibrary ? "&in_library=true" : ""}`;
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: currentYear - 1899 }, (_, i) => currentYear - i);
 
@@ -84,11 +85,24 @@ const tabs: [string | undefined, string][] = [
       ))}
     </div>
 
-    {!hasTmdbKey && q.length >= 2 && !isUserSearch && (
-      <div class="text-xs text-zinc-500 bg-zinc-900/50 px-3 py-1.5 rounded-lg border border-zinc-800">
-        Showing local results only. <a href="/settings" class="text-blue-500 hover:underline">Add TMDB Key</a> for more.
-      </div>
-    )}
+    <div class="flex items-center gap-2">
+      {!isUserSearch && type !== "person" && type !== "collection" && (
+        <a
+          href={`/search?q=${encodeURIComponent(q)}${type ? `&type=${type}` : ""}${!inLibrary ? "&in_library=true" : ""}`}
+          class={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition ${inLibrary ? 'bg-blue-600/20 border-blue-500/40 text-blue-400' : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+          </svg>
+          In My Collection
+        </a>
+      )}
+      {!hasTmdbKey && q.length >= 2 && !isUserSearch && (
+        <div class="text-xs text-zinc-500 bg-zinc-900/50 px-3 py-1.5 rounded-lg border border-zinc-800">
+          Showing local results only. <a href="/settings" class="text-blue-500 hover:underline">Add TMDB Key</a> for more.
+        </div>
+      )}
+    </div>
   </div>
 
   <!-- Filter bar -->

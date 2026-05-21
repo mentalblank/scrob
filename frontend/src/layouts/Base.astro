@@ -2,10 +2,19 @@
 import "../styles/global.css";
 import logo from "../assets/scrob.png";
 import WatchedAtPicker from "../components/WatchedAtPicker.astro";
+import { api } from "../lib/api";
 
 interface Props { title: string; hideNav?: boolean }
 const { title, hideNav } = Astro.props;
 const { user, token } = Astro.locals;
+
+let pendingRequestCount = 0;
+if (user?.is_admin && token) {
+  try {
+    const data = await api.admin.getPendingCount(token);
+    pendingRequestCount = data.pending;
+  } catch {}
+}
 const blurExplicit = Astro.cookies.get("blur_explicit")?.value !== "false";
 
 const pathname = Astro.url.pathname;
@@ -151,8 +160,11 @@ const bottomNavItem = (active: boolean) =>
           <!-- User menu (click-toggled) -->
           {user ? (
             <div class="relative">
-              <button id="user-menu-btn" class="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-100 transition-colors p-3 rounded-xl bg-zinc-900 border border-zinc-800 cursor-pointer sm:p-1 sm:bg-transparent sm:border-transparent">
+              <button id="user-menu-btn" class="relative flex items-center gap-1.5 text-zinc-400 hover:text-zinc-100 transition-colors p-3 rounded-xl bg-zinc-900 border border-zinc-800 cursor-pointer sm:p-1 sm:bg-transparent sm:border-transparent">
                 <span class="hidden sm:inline font-medium text-zinc-100 text-sm">{user.display_name}</span>
+                {pendingRequestCount > 0 && (
+                  <span class="absolute -top-1 -right-1 sm:top-0 sm:right-0 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-zinc-950"></span>
+                )}
                 <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sm:hidden text-zinc-400"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
                 <svg id="user-chevron" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="opacity-50 hidden sm:block transition-transform duration-200"><path d="m6 9 6 6 6-6"/></svg>
               </button>
@@ -167,6 +179,14 @@ const bottomNavItem = (active: boolean) =>
                   <a href="/remaps" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Metadata Overrides</a>
                   {user.is_admin && (
                     <a href="/admin" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Admin</a>
+                  )}
+                  {user.is_admin && (
+                    <a href="/requests" class="flex items-center justify-between px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
+                      Requests
+                      {pendingRequestCount > 0 && (
+                        <span class="ml-2 min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center text-[10px] font-bold bg-blue-500 text-white rounded-full">{pendingRequestCount}</span>
+                      )}
+                    </a>
                   )}
                   <a href="/about" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">About</a>
                   <div class="h-px bg-zinc-800 my-1 mx-1"></div>
@@ -1397,6 +1417,11 @@ const bottomNavItem = (active: boolean) =>
             btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-500"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-green-500">' + (res.status === 'added' ? 'Added' : 'Exists') + '</span>';
             btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
             btn.classList.add('bg-green-500/10', 'text-green-500');
+            (btn as HTMLButtonElement).disabled = true;
+          } else if (res.status === 'pending_approval') {
+            btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-amber-400"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-amber-400">Pending</span>';
+            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
+            btn.classList.add('bg-amber-500/10', 'text-amber-400');
             (btn as HTMLButtonElement).disabled = true;
           } else {
             throw new Error('Failed to request');

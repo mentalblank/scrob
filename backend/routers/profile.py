@@ -787,7 +787,8 @@ async def get_user_stats(
     for (genres_list,) in movie_genres_q.all():
         if genres_list:
             for g in genres_list:
-                movie_genre_counts[g] = movie_genre_counts.get(g, 0) + 1
+                name = g["name"] if isinstance(g, dict) else g
+                movie_genre_counts[name] = movie_genre_counts.get(name, 0) + 1
 
     # Shows Genres
     show_genres_q = await db.execute(
@@ -805,7 +806,8 @@ async def get_user_stats(
     for (genres_list,) in show_genres_q.all():
         if genres_list:
             for g in genres_list:
-                show_genre_counts[g] = show_genre_counts.get(g, 0) + 1
+                name = g["name"] if isinstance(g, dict) else g
+                show_genre_counts[name] = show_genre_counts.get(name, 0) + 1
 
     top_movie_genres = sorted(
         [{"name": k, "count": v} for k, v in movie_genre_counts.items()],

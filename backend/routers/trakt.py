@@ -704,8 +704,12 @@ async def push_trakt(
         raise HTTPException(status_code=400, detail="Trakt is not connected")
     if not settings.trakt_push_watched and not settings.trakt_push_ratings:
         raise HTTPException(status_code=400, detail="Enable 'Scrob → Trakt' push flags first")
-    background_tasks.add_task(_run_trakt_push, current_user.id)
-    return {"status": "started", "message": "Trakt push is running in the background"}
+    job = SyncJob(user_id=current_user.id, source=CollectionSource.trakt, status=SyncStatus.pending, job_type="push")
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    background_tasks.add_task(_run_trakt_push, current_user.id, job.id)
+    return {"status": "started", "job_id": job.id, "message": "Trakt push is running in the background"}
 
 
 async def _sync_trakt_ratings(db: AsyncSession, user_id: int, client_id: str, access_token: str, api_key: str | None, stats: dict, _new_ratings: dict):

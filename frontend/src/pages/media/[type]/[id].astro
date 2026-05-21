@@ -198,6 +198,7 @@ const logoPath = item?.logo_path ?? null;
                 episodeNumber={item.episode_number}
                 isMonitored={item.is_monitored ?? false}
                 requestEnabled={item.request_enabled ?? false}
+                requestStatus={item.request_status ?? null}
                 mediaId={item.id}
                 userRating={item.user_rating ?? null}
                 isBlocked={item.is_blocked ?? false}
@@ -323,7 +324,6 @@ const logoPath = item?.logo_path ?? null;
               </div>
             )}
 
-            <!-- Where to Watch -->
             {item.where_to_watch && item.where_to_watch.length > 0 && (() => {
               const subscribed = item.where_to_watch.filter(s => s.is_subscribed);
               const others = item.where_to_watch.filter(s => !s.is_subscribed);
@@ -344,9 +344,11 @@ const logoPath = item?.logo_path ?? null;
                             <div class="flex items-center gap-2.5 p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-xl hover:border-blue-500/30 transition-colors group">
                               {s.logo ? (
                                 <img src={s.logo} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
+                              ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
+                                <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-6 h-6 rounded-md object-contain shadow-lg" />
                               ) : (
                                 <div class="w-6 h-6 bg-zinc-800 rounded-md flex items-center justify-center text-[10px]">
-                                  {s.type === "plex" ? "🟡" : s.type === "jellyfin" ? "🟣" : s.type === "emby" ? "🟢" : "▶"}
+                                  ▶
                                 </div>
                               )}
                               <div class="min-w-0 text-left">
@@ -359,6 +361,7 @@ const logoPath = item?.logo_path ?? null;
                       </div>
                     )}
 
+
                     {others.length > 0 && (
                       <div class="space-y-3 w-full flex flex-col items-center md:items-start">
                         <p class="text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-center md:text-left">{subscribed.length > 0 ? "Other Options" : "Available On"}</p>
@@ -367,6 +370,8 @@ const logoPath = item?.logo_path ?? null;
                             <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/40 border border-zinc-800/50 rounded-lg hover:border-zinc-700 transition-colors group">
                               {s.logo ? (
                                 <img src={s.logo} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                              ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
+                                <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-4 h-4 rounded-sm object-contain opacity-70 group-hover:opacity-100 transition-opacity" />
                               ) : (
                                 <span class="text-[10px]">▶</span>
                               )}

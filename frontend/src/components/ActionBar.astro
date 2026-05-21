@@ -13,6 +13,7 @@ interface Props {
   hideLists?: boolean;
   isMonitored?: boolean;
   requestEnabled?: boolean;
+  requestStatus?: string | null;
   mediaId?: number | null;
   userRating?: number | null;
   isBlocked?: boolean;
@@ -36,6 +37,7 @@ const {
   hideLists = false,
   isMonitored = false,
   requestEnabled = false,
+  requestStatus = null,
   mediaId = null,
   userRating = null,
   isBlocked = false,
@@ -79,13 +81,21 @@ const collectedCls = inLibrary
   ? "bg-purple-500/50 text-purple-300 hover:bg-purple-400/50"
   : "bg-zinc-800 text-zinc-500 hover:bg-purple-500/50 hover:text-purple-400";
 
-const requestCls  = isMonitored
+const requestBlocked = isMonitored || !!requestStatus;
+const requestCls  = requestBlocked
   ? "bg-orange-500/50 text-orange-300 hover:bg-orange-400/50"
   : "bg-zinc-800 text-zinc-500 hover:bg-orange-300/60 hover:text-orange-400";
-
 const dropCls = isDropped
   ? "bg-amber-500/50  text-amber-300  hover:bg-amber-400/50"
   : "bg-zinc-800 text-zinc-500 hover:bg-amber-400/50  hover:text-amber-400";
+
+const requestTitle = isMonitored
+  ? (isSeries ? "Already in Sonarr" : "Already in Radarr")
+  : requestStatus === "pending"
+    ? "Awaiting admin approval"
+    : requestStatus === "rejected"
+      ? "Request rejected"
+      : (isSeries ? "Request on Sonarr" : "Request on Radarr");
 ---
 
 <div
@@ -180,13 +190,9 @@ const dropCls = isDropped
     {!listOnly && showRequest && (
       <button
         data-action="request"
-        data-state={(isMonitored || collectionPct === 100 || (inLibrary && !isSeries)) ? "active" : "inactive"}
-        title={
-          (isMonitored || collectionPct === 100 || (inLibrary && !isSeries))
-            ? (isSeries ? "Already in Sonarr" : "Already in Radarr")
-            : (isSeries ? "Request on Sonarr" : "Request on Radarr")
-        }
-        disabled={isMonitored || collectionPct === 100 || (inLibrary && !isSeries)}
+        data-state={(requestBlocked || collectionPct === 100 || (inLibrary && !isSeries)) ? "active" : "inactive"}
+        title={requestTitle}
+        disabled={requestBlocked || collectionPct === 100 || (inLibrary && !isSeries)}
         class={`${btn} ${btnW} disabled:cursor-not-allowed border-r border-zinc-800/60 ${requestCls}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
