@@ -99,7 +99,7 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
               <div class="min-w-0 flex flex-col items-center md:items-start w-full">
                 <div class="flex items-center justify-center md:justify-start gap-3 flex-wrap mb-2">
                   <h1 class="text-3xl md:text-5xl font-black text-zinc-100 tracking-tight leading-tight">{episode.title}</h1>
-                  <div class="flex items-center gap-1 shrink-0">
+                  <div class="hidden md:flex items-center gap-1 shrink-0">
                     <button id="rename-episode-btn" class="p-2 text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded-full transition cursor-pointer" data-media-id={episode.id} data-current-title={episode.custom_title || episode.title} title="Set a custom title for this episode">
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                     </button>
@@ -157,7 +157,7 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
             </div>
 
             <div class="flex justify-center md:justify-start mb-8 w-full">
-              <div class="flex flex-wrap items-center gap-4 text-zinc-300 text-sm bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm">
+              <div class="flex flex-wrap items-center gap-2.5 md:gap-4 text-zinc-300 text-xs md:text-sm bg-zinc-900/40 p-2.5 md:p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm">
                 {episode.air_date && (
                   <span class="font-bold">
                     {new Date(episode.air_date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
@@ -165,12 +165,12 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
                 )}
                 {rating && (
                   <span class="flex items-center gap-1.5 text-yellow-400 font-black">
-                    <span class="text-lg leading-none">★</span> {rating}
+                    <span class="text-base md:text-lg leading-none">★</span> {rating}
                   </span>
                 )}
                 {episode.runtime && (
                   <span class="flex items-center gap-1.5 font-medium">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 text-zinc-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="hidden md:inline-block w-4 h-4 text-zinc-500">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                     </svg>
                     {episode.runtime} min
@@ -212,7 +212,7 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
             {(!!episode.play_count || episode.library) && (
               <div class="mb-4 flex flex-wrap gap-2 justify-center md:justify-start">
                 {!!episode.play_count && (
-                  <span id="play-count-badge" class="inline-flex items-center px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-bold cursor-pointer hover:bg-zinc-800/80 hover:text-zinc-100 hover:border-zinc-700 transition-all duration-200" title="Click to view/remove specific plays" data-tmdb-id={episode.tmdb_id} data-media-type="episode">
+                  <span id="play-count-badge" class="inline-flex items-center px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-bold cursor-pointer hover:bg-zinc-800/80 hover:text-zinc-100 hover:border-zinc-700 transition-all duration-200" title="Click to view/remove specific plays" data-tmdb-id={episode.tmdb_id} data-media-type="episode">
                     {episode.play_count} {episode.play_count === 1 ? 'Play' : 'Plays'}
                   </span>
                 )}
@@ -222,17 +222,17 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
                   episode.library.audio_codec,
                   episode.library.audio_channels,
                 ].filter(Boolean).map(tag => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold">
+                  <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold">
                     {tag}
                   </span>
                 ))}
                 {episode.library?.audio_languages?.map((lang: string) => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
+                  <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
                     <span class="opacity-50">🔊</span> {lang}
                   </span>
                 ))}
                 {episode.library?.subtitle_languages?.map((lang: string) => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
+                  <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
                     <span class="opacity-50">💬</span> {lang}
                   </span>
                 ))}
@@ -266,11 +266,11 @@ const thumbnail = episode?.still_path || show?.poster_path || null;
 
             {episode.overview && (
               <div class="flex flex-col items-center md:items-start text-center md:text-left">
-                <h2 class="text-xl font-black text-zinc-100 mb-4 flex items-center gap-2 uppercase tracking-tight">
+                <h2 class="text-lg md:text-xl font-black text-zinc-100 mb-3 md:mb-4 flex items-center gap-2 uppercase tracking-tight">
                   <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
                   Overview
                 </h2>
-                <p class="text-zinc-300 leading-relaxed text-lg max-w-3xl font-medium opacity-90">
+                <p class="text-zinc-300 leading-relaxed text-base md:text-lg max-w-3xl font-medium opacity-90">
                   {episode.overview}
                 </p>
               </div>

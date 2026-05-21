@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file. This projec
 ---
 
 ### Changed
+- **Mobile Detail Pages**: Cleaned up layout structure, margins, and typography for show, movie, season, and episode detail pages on mobile viewports. Relocated production/network logos inside the metadata info box, optimized padding and font sizes of tags, hid secondary SVG icons to save screen space, and reduced overview description typography scale.
 - **History Card Badges**: Removed redundant blue season/episode badge and green checkmark badge overlay on watch history cards.
 - **Mobile Details Alignment**: Centered logos, titles, action bars, metadata, and overview text blocks when viewed on mobile viewports for show, season, episode, and movie detail pages.
 - **Continue Watching Cards**: Replaced the vertical card design with landscape episode cards across homepage and continue-watching lists.
