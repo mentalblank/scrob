@@ -3360,7 +3360,7 @@ async def get_where_to_watch(
         )
         for cf, conn in files_q.all():
             name = conn.name if conn else cf.source.value.title()
-            _add({"type": cf.source.value, "name": name, "logo": None, "category": "local", "is_subscribed": True})
+            _add({"type": cf.source.value, "name": name, "logo": None, "category": "local", "is_subscribed": True, "connection_id": conn.id if conn else None})
 
     elif media_type == MediaType.series and show:
         files_q = await db.execute(
@@ -3375,9 +3375,9 @@ async def get_where_to_watch(
                 Media.media_type == MediaType.episode,
             )
         )
-        for _cid, src, conn_name in files_q.all():
+        for cid, src, conn_name in files_q.all():
             name = conn_name if conn_name else src.value.title()
-            _add({"type": src.value, "name": name, "logo": None, "category": "local", "is_subscribed": True})
+            _add({"type": src.value, "name": name, "logo": None, "category": "local", "is_subscribed": True, "connection_id": cid})
 
     # ── TMDB streaming providers ──────────────────────────────────────────────
     if tmdb_key and check_tmdb_key(tmdb_key):
@@ -3418,7 +3418,8 @@ async def get_where_to_watch(
                         "name": p.get("provider_name"), 
                         "logo": logo,
                         "category": category,
-                        "is_subscribed": is_subscribed
+                        "is_subscribed": is_subscribed,
+                        "url": country_data.get("link")
                     })
         except Exception:
             pass
@@ -3433,50 +3434,78 @@ def _srt_to_vtt(srt: str) -> str:
 
 @router.get("/playback/{type}/{tmdb_id}")
 async def get_playback_sources(
-    type: MediaType,
+    type: str,
     tmdb_id: int,
+    season_number: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return available local-server playback sources for a movie or episode."""
-    if type not in (MediaType.movie, MediaType.episode):
-        raise HTTPException(400, "Only movie/episode streaming supported")
+    """Return available local-server playback sources for a movie, episode, show, or season."""
+    if type not in ("movie", "episode", "series"):
+        raise HTTPException(400, "Only movie/episode/series streaming supported")
 
-    media_q = await db.execute(
-        select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
-    )
-    media = media_q.scalars().first()
-    if not media:
-        return []
+    from models.show import Show
 
-    files_q = await db.execute(
-        select(CollectionFile, MediaServerConnection)
-        .join(Collection, Collection.id == CollectionFile.collection_id)
-        .outerjoin(MediaServerConnection, MediaServerConnection.id == CollectionFile.connection_id)
+    # Base query for files
+    q = select(CollectionFile, MediaServerConnection)\
+        .join(Collection, Collection.id == CollectionFile.collection_id)\
+        .join(Media, Media.id == Collection.media_id)\
+        .outerjoin(MediaServerConnection, MediaServerConnection.id == CollectionFile.connection_id)\
         .where(
-            Collection.media_id == media.id,
             Collection.user_id == current_user.id,
             CollectionFile.source.in_([CollectionSource.jellyfin, CollectionSource.emby, CollectionSource.plex]),
             CollectionFile.connection_id.isnot(None),
             CollectionFile.source_id.isnot(None),
         )
-    )
+
+    if type in ("movie", "episode"):
+        q = q.where(Media.tmdb_id == tmdb_id, Media.media_type == type)
+    elif type == "season":
+        # Find the first episode of the requested season
+        q = q.join(Show, Show.id == Media.show_id)\
+            .where(Show.tmdb_id == tmdb_id, Media.media_type == "episode")
+        if season_number is not None:
+            q = q.where(Media.season_number == season_number)
+        q = q.order_by(Media.episode_number.asc()).limit(1)
+    elif type == "series":
+        # Find any episode of this show
+        q = q.join(Show, Show.id == Media.show_id).where(Show.tmdb_id == tmdb_id)
+        if season_number is not None:
+            q = q.where(Media.season_number == season_number)
+        # Order by season and episode to get the earliest available
+        q = q.order_by(Media.season_number.asc(), Media.episode_number.asc()).limit(1)
+
+    result = await db.execute(q)
+    files = result.all()
+
+    if not files:
+        return []
 
     from core import jellyfin as jellyfin_core
     from core import plex as plex_core
 
     sources = []
-    for cf, conn in files_q.all():
+    for cf, conn in files:
         if not conn:
             continue
         resolution = cf.resolution
         subtitles: list[dict] = []
         audio_tracks: list[dict] = []
+        external_url: Optional[str] = None
 
         if cf.source.value in ("jellyfin", "emby") and cf.source_id:
             try:
                 item = await jellyfin_core.get_item(conn.url, conn.token, cf.source_id, user_id=conn.server_user_id)
                 if item:
+                    if conn.external_server_url:
+                        base = conn.external_server_url.rstrip("/")
+                        target_key = cf.source_id
+                        if type == "series" and "SeriesId" in item:
+                            target_key = item["SeriesId"]
+                        elif type == "season" and "SeasonId" in item:
+                            target_key = item["SeasonId"]
+                        external_url = f"{base}/web/index.html#!/details?id={target_key}"
+
                     if resolution is None:
                         q = jellyfin_core.extract_quality(item.get("MediaStreams", []))
                         resolution = q.get("resolution")
@@ -3511,6 +3540,20 @@ async def get_playback_sources(
             try:
                 item = await plex_core.get_item(conn.url, conn.token, cf.source_id)
                 if item:
+                    # Construct external URL if provided
+                    if conn.external_server_url:
+                        base = conn.external_server_url.rstrip("/")
+                        target_key = cf.source_id
+                        if type == "series" and "grandparentRatingKey" in item:
+                            target_key = item["grandparentRatingKey"]
+                        elif type == "season" and "parentRatingKey" in item:
+                            target_key = item["parentRatingKey"]
+                        machine_id = await plex_core.get_machine_identifier(conn.url, conn.token)
+                        if machine_id:
+                            external_url = f"{base}/web/index.html#!/server/{machine_id}/details?key=%2Flibrary%2Fmetadata%2F{target_key}"
+                        else:
+                            external_url = f"{base}/web/index.html#!/details?key=%2Flibrary%2Fmetadata%2F{target_key}"
+
                     media_list = item.get("Media", [])
                     if media_list and media_list[0].get("Part"):
                         for stream in media_list[0]["Part"][0].get("Stream", []):
@@ -3546,6 +3589,7 @@ async def get_playback_sources(
             "resolution": resolution,
             "subtitles": subtitles,
             "audio_tracks": audio_tracks,
+            "external_url": external_url,
         })
 
     return sources
@@ -4051,6 +4095,193 @@ async def report_session(
         pass  # Best-effort; non-critical
 
     return {"ok": True}
+
+
+# ── Blocklist ───────────────────────────────────────────────────────────────
+
+@router.get("/blocklist")
+async def get_blocklist(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all blocked and dropped items for the current user."""
+    q = select(BlocklistItem).where(BlocklistItem.user_id == current_user.id)
+    result = await db.execute(q)
+    blocked = result.scalars().all()
+    return [{"tmdb_id": b.tmdb_id, "media_type": b.media_type, "is_dropped": b.is_dropped} for b in blocked]
+
+
+@router.get("/blocklist/enriched")
+async def get_blocklist_enriched(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all blocked and dropped items for the current user, fully enriched with metadata."""
+    q = select(BlocklistItem).where(BlocklistItem.user_id == current_user.id)
+    result = await db.execute(q)
+    blocked = result.scalars().all()
+
+    if not blocked:
+        return []
+
+    tmdb_api_key = await get_user_tmdb_key(db, current_user.id)
+    
+    from models.show import Show
+
+    movie_ids = [b.tmdb_id for b in blocked if b.media_type == MediaType.movie]
+    show_ids = [b.tmdb_id for b in blocked if b.media_type == MediaType.series]
+
+    local_movies = {}
+    if movie_ids:
+        mq = await db.execute(select(Media).where(Media.media_type == MediaType.movie, Media.tmdb_id.in_(movie_ids)))
+        for m in mq.scalars().all():
+            local_movies[m.tmdb_id] = m
+
+    local_shows = {}
+    if show_ids:
+        sq = await db.execute(select(Show).where(Show.tmdb_id.in_(show_ids)))
+        for s in sq.scalars().all():
+            local_shows[s.tmdb_id] = s
+
+    sem = asyncio.Semaphore(20)
+
+    async def fetch_movie(tmdb_id: int):
+        if tmdb_id in local_movies:
+            m = local_movies[tmdb_id]
+            return {
+                "id": m.id,
+                "tmdb_id": tmdb_id,
+                "type": "movie",
+                "title": m.title,
+                "release_date": m.release_date,
+                "poster_path": m.poster_path,
+                "backdrop_path": m.backdrop_path,
+                "overview": m.overview,
+                "tmdb_rating": m.tmdb_rating,
+            }
+        async with sem:
+            try:
+                data = await tmdb.get_movie_light(tmdb_id, api_key=tmdb_api_key)
+                return {
+                    "tmdb_id": tmdb_id,
+                    "type": "movie",
+                    "title": data.get("title"),
+                    "release_date": data.get("release_date"),
+                    "poster_path": tmdb.poster_url(data.get("poster_path")),
+                    "backdrop_path": tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
+                    "overview": data.get("overview"),
+                    "tmdb_rating": data.get("vote_average"),
+                }
+            except Exception:
+                return None
+
+    async def fetch_show(tmdb_id: int):
+        if tmdb_id in local_shows:
+            s = local_shows[tmdb_id]
+            return {
+                "id": s.id,
+                "tmdb_id": tmdb_id,
+                "type": "series",
+                "title": s.title,
+                "release_date": s.first_air_date,
+                "poster_path": s.poster_path,
+                "backdrop_path": s.backdrop_path,
+                "overview": s.overview,
+                "tmdb_rating": s.tmdb_rating,
+            }
+        async with sem:
+            try:
+                data = await tmdb.get_show_light(tmdb_id, api_key=tmdb_api_key)
+                return {
+                    "tmdb_id": tmdb_id,
+                    "type": "series",
+                    "title": data.get("name"),
+                    "release_date": data.get("first_air_date"),
+                    "poster_path": tmdb.poster_url(data.get("poster_path")),
+                    "backdrop_path": tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
+                    "overview": data.get("overview"),
+                    "tmdb_rating": data.get("vote_average"),
+                }
+            except Exception:
+                return None
+
+    tasks = []
+    for b in blocked:
+        if b.media_type == MediaType.movie:
+            tasks.append((b, fetch_movie(b.tmdb_id)))
+        elif b.media_type == MediaType.series:
+            tasks.append((b, fetch_show(b.tmdb_id)))
+
+    results = await asyncio.gather(*(t[1] for t in tasks))
+    
+    output = []
+    for (b, _), data in zip(tasks, results):
+        if data:
+            data["is_dropped"] = b.is_dropped
+            output.append(data)
+            
+    return output
+
+
+
+class BlockRequest(BaseModel):
+    tmdb_id: int
+    media_type: MediaType
+    is_dropped: bool = False
+
+
+@router.post("/blocklist")
+async def block_item(
+    req: BlockRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Block or drop a media item."""
+    existing_q = await db.execute(
+        select(BlocklistItem).where(
+            BlocklistItem.user_id == current_user.id,
+            BlocklistItem.tmdb_id == req.tmdb_id,
+            BlocklistItem.media_type == req.media_type,
+        )
+    )
+    existing = existing_q.scalar_one_or_none()
+    if existing:
+        existing.is_dropped = req.is_dropped
+        await db.commit()
+        return {"status": "updated", "is_dropped": req.is_dropped}
+
+    new_block = BlocklistItem(
+        user_id=current_user.id,
+        tmdb_id=req.tmdb_id,
+        media_type=req.media_type,
+        is_dropped=req.is_dropped
+    )
+    db.add(new_block)
+    await db.commit()
+    return {"status": "ok", "is_dropped": req.is_dropped}
+
+
+@router.delete("/blocklist")
+async def unblock_item(
+    tmdb_id: int,
+    media_type: MediaType,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unblock or undrop a media item."""
+    q = select(BlocklistItem).where(
+        BlocklistItem.user_id == current_user.id,
+        BlocklistItem.tmdb_id == tmdb_id,
+        BlocklistItem.media_type == media_type,
+    )
+    result = await db.execute(q)
+    block = result.scalar_one_or_none()
+    if not block:
+        return {"status": "not blocked"}
+
+    await db.delete(block)
+    await db.commit()
+    return {"status": "unblocked"}
 
 
 @router.get("/{type}/{tmdb_id}")
@@ -4622,78 +4853,7 @@ async def pick_for_me(
     return pick
 
 
-# ── Blocklist ───────────────────────────────────────────────────────────────
 
-@router.get("/blocklist")
-async def get_blocklist(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Get all blocked and dropped items for the current user."""
-    q = select(BlocklistItem).where(BlocklistItem.user_id == current_user.id)
-    result = await db.execute(q)
-    blocked = result.scalars().all()
-    return [{"tmdb_id": b.tmdb_id, "media_type": b.media_type, "is_dropped": b.is_dropped} for b in blocked]
-
-
-class BlockRequest(BaseModel):
-    tmdb_id: int
-    media_type: MediaType
-    is_dropped: bool = False
-
-
-@router.post("/blocklist")
-async def block_item(
-    req: BlockRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Block or drop a media item."""
-    existing_q = await db.execute(
-        select(BlocklistItem).where(
-            BlocklistItem.user_id == current_user.id,
-            BlocklistItem.tmdb_id == req.tmdb_id,
-            BlocklistItem.media_type == req.media_type,
-        )
-    )
-    existing = existing_q.scalar_one_or_none()
-    if existing:
-        existing.is_dropped = req.is_dropped
-        await db.commit()
-        return {"status": "updated", "is_dropped": req.is_dropped}
-
-    new_block = BlocklistItem(
-        user_id=current_user.id,
-        tmdb_id=req.tmdb_id,
-        media_type=req.media_type,
-        is_dropped=req.is_dropped
-    )
-    db.add(new_block)
-    await db.commit()
-    return {"status": "ok", "is_dropped": req.is_dropped}
-
-
-@router.delete("/blocklist")
-async def unblock_item(
-    tmdb_id: int,
-    media_type: MediaType,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Unblock or undrop a media item."""
-    q = select(BlocklistItem).where(
-        BlocklistItem.user_id == current_user.id,
-        BlocklistItem.tmdb_id == tmdb_id,
-        BlocklistItem.media_type == media_type,
-    )
-    result = await db.execute(q)
-    block = result.scalar_one_or_none()
-    if not block:
-        return {"status": "not blocked"}
-
-    await db.delete(block)
-    await db.commit()
-    return {"status": "unblocked"}
 
 
 # ── Content Filters (genre / keyword / regex) ───────────────────────────────

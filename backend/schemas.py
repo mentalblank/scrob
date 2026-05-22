@@ -132,6 +132,7 @@ class MediaServerConnectionBase(BaseModel):
     token: str
     server_user_id: Optional[str] = None
     server_username: Optional[str] = None
+    external_server_url: Optional[str] = None
     sync_collection: bool = True
     sync_watched: bool = True
     sync_ratings: bool = True
@@ -156,6 +157,7 @@ class MediaServerConnectionUpdate(BaseModel):
     token: Optional[str] = None
     server_user_id: Optional[str] = None
     server_username: Optional[str] = None
+    external_server_url: Optional[str] = None
     sync_collection: Optional[bool] = None
     sync_watched: Optional[bool] = None
     sync_ratings: Optional[bool] = None

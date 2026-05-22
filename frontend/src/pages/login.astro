@@ -93,7 +93,7 @@ if (token) {
 ---
 
 <Base title="Login" hideNav>
-  <div class="max-w-md mx-auto mt-16 p-8 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl relative">
+  <div class="max-w-md mx-auto mt-16 p-8 bg-zinc-900/40 border border-zinc-800 rounded-3xl shadow-2xl backdrop-blur-md relative">
     <button
       id="theme-toggle"
       tabindex="1"
@@ -203,7 +203,7 @@ if (token) {
             <button
               type="submit"
               tabindex="6"
-              class="w-full bg-zinc-100 text-zinc-950 font-bold py-2 rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer mt-4"
+              class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95 duration-200 cursor-pointer mt-4"
             >
               Sign In
             </button>
@@ -243,7 +243,7 @@ if (token) {
         </div>
         <button
           type="submit"
-          class="w-full bg-zinc-100 text-zinc-950 font-bold py-2 rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer mt-4"
+          class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95 duration-200 cursor-pointer mt-4"
         >
           Verify
         </button>
@@ -261,7 +261,7 @@ if (token) {
         <span class="text-xs text-zinc-600">or restore from backup</span>
         <div class="flex-1 border-t border-zinc-800"></div>
       </div>
-      <div class="p-6 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl">
+      <div class="p-6 bg-zinc-900/40 border border-zinc-800 rounded-2xl shadow-2xl backdrop-blur-md">
         <h2 class="font-semibold text-zinc-100 mb-1">Restore Database</h2>
         <p class="text-sm text-zinc-400 mb-4">Upload a <code class="text-zinc-300">.bak</code> file to restore a previous installation.</p>
         <div class="flex flex-col gap-3">
@@ -281,7 +281,7 @@ if (token) {
 <!-- Bootstrap Restore Confirmation Modal -->
 <div id="bootstrap-restore-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div id="bootstrap-restore-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+  <div class="relative bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-xl overflow-hidden">
     <h2 class="text-xl font-black text-zinc-100 mb-2">Restore Database?</h2>
     <p class="text-sm text-zinc-400 mb-1">Restoring from:</p>
     <p id="bootstrap-restore-modal-filename" class="text-sm text-zinc-100 font-medium mb-4 break-all"></p>
@@ -290,11 +290,11 @@ if (token) {
     </div>
     <div class="flex gap-3">
       <button type="button" id="bootstrap-restore-cancel-btn"
-        class="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        class="flex-1 px-4 py-3 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-300 font-bold rounded-xl transition-all text-sm cursor-pointer border border-zinc-700/40 active:scale-95">
         Cancel
       </button>
       <button type="button" id="bootstrap-restore-confirm-btn"
-        class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all text-sm cursor-pointer active:scale-95">
         Restore
       </button>
     </div>

@@ -414,7 +414,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
 <!-- Admin Heal Confirmation Modal -->
 <div id="admin-heal-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div id="admin-heal-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+  <div class="relative bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-xl overflow-hidden">
     <h2 class="text-xl font-black text-zinc-100 mb-2">Run server-wide heal?</h2>
     <p class="text-sm text-zinc-400 mb-6">This will re-enrich all items across every user's collection that are missing poster or date metadata. It runs in the background and may take a while on large libraries.</p>
     <div class="flex gap-3">
@@ -433,7 +433,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
 <!-- Delete User Confirmation Modal -->
 <div id="delete-user-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div id="delete-user-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+  <div class="relative bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-xl overflow-hidden">
     <h2 class="text-xl font-black text-zinc-100 mb-2">Delete User?</h2>
     <p id="delete-user-modal-body" class="text-sm text-zinc-400 mb-6"></p>
     <div class="flex gap-3">
@@ -452,7 +452,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
 <!-- Restore Confirmation Modal -->
 <div id="restore-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div id="restore-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+  <div class="relative bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-xl overflow-hidden">
     <h2 class="text-xl font-black text-zinc-100 mb-2">Restore Database?</h2>
     <p class="text-sm text-zinc-400 mb-1">Restoring from:</p>
     <p id="restore-modal-filename" class="text-sm text-zinc-100 font-medium mb-4 break-all"></p>
@@ -475,7 +475,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
 <!-- Clear Database Confirmation Modal -->
 <div id="clear-database-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div id="clear-database-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+  <div class="relative bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-xl overflow-hidden">
     <h2 class="text-xl font-black text-zinc-100 mb-2">Clear Entire Database?</h2>
     <p class="text-sm text-zinc-400 mb-6">This will delete all media, history, collections, and lists globally across all users. This is a highly destructive operation. Only user settings and admin settings will remain.</p>
     <div class="flex gap-3">

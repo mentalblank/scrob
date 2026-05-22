@@ -104,8 +104,8 @@ function skeletonWide() {
 
   <!-- Pick for me modal -->
   <div id="pick-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
-    <div id="pick-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-    <div class="relative w-full max-w-lg max-h-[90vh] bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+    <div id="pick-modal-backdrop" class="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+    <div class="relative w-full max-w-lg max-h-[90vh] bg-zinc-900/90 border border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col backdrop-blur-xl ring-1 ring-white/10">
       <button id="pick-modal-close" class="absolute top-4 right-4 z-10 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100 rounded-full transition active:scale-95 cursor-pointer" aria-label="Close">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
@@ -302,7 +302,7 @@ function skeletonWide() {
                   <a href={`/shows?provider_id=${id}&provider_name=${encodeURIComponent(PROVIDER_NAMES[id])}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id={`streaming-show-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-                  <Fragment set:html={skeletonWide()} />
+                  <Fragment set:html={skeleton()} />
                 </div>
               </section>
             </Fragment>
@@ -324,7 +324,7 @@ function skeletonWide() {
                   <a href="/shows?provider_id=8&provider_name=Netflix" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id="fallback-show-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-                  <Fragment set:html={skeletonWide()} />
+                  <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-6">
@@ -342,13 +342,13 @@ function skeletonWide() {
                   <a href="/shows?provider_id=337&provider_name=Disney%2B" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id="fallback-show-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-                  <Fragment set:html={skeletonWide()} />
+                  <Fragment set:html={skeleton()} />
                 </div>
               </section>
             </Fragment>
           )
       }
-
+ 
       <!-- TV Show Genres (static) -->
       <section class="mb-10">
         <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest mb-4">Discover TV Shows</h2>
@@ -364,7 +364,7 @@ function skeletonWide() {
           ))}
         </div>
       </section>
-
+ 
       <!-- Favourite show genre rows (backdrop) -->
       {hasProfileData && topShowGenres.map((genre, i) => (
         <section data-section class="mb-10">
@@ -373,24 +373,24 @@ function skeletonWide() {
             <a href={`/shows?genre=${encodeURIComponent(genre)}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
           </div>
           <div id={`show-genre-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-            <Fragment set:html={skeletonWide()} />
+            <Fragment set:html={skeleton()} />
           </div>
         </section>
       ))}
-
+ 
       <!-- On Air This Week (backdrop) -->
       <section data-section class="mb-10">
         <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On Air This Week</h2>
         <div id="on-air-this-week" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-          <Fragment set:html={skeletonWide()} />
+          <Fragment set:html={skeleton()} />
         </div>
       </section>
-
+ 
       <!-- Top Rated Shows (backdrop) -->
       <section data-section class="mb-10">
         <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Top Rated Shows</h2>
         <div id="top-rated-shows" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-          <Fragment set:html={skeletonWide()} />
+          <Fragment set:html={skeleton()} />
         </div>
       </section>
 
@@ -423,33 +423,46 @@ function skeletonWide() {
     return '/media/movie/' + item.tmdb_id;
   }
 
-  // 2:3 poster card — movies
+  // 2:3 poster card — movies and shows
   function posterCard(item) {
-    const url = itemUrl(item);
+    const isSeries = item.type === 'series';
+    const href = isSeries
+      ? '/show/' + item.tmdb_id
+      : '/media/movie/' + item.tmdb_id;
     const year = item.release_date ? item.release_date.slice(0, 4) : '';
     const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : '';
     const watched = item.watched ?? false;
+    const inLists = item.in_lists ?? [];
     const inLibrary = item.in_library ?? false;
-    const listed = (item.in_lists ?? []).length > 0;
-    const progressPct = item.type === 'series' && item.total_episodes_count 
+    const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
+    const progressPct = isSeries && item.total_episodes_count 
       ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
       : (item.progress_percent ?? 0);
     const showProgress = progressPct > 0;
+    const collectStyle = isSeries && collectionPct > 0
+      ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
+      : '';
+    const watchedFill = watched ? 'currentColor' : 'none';
+    const typeLabel = isSeries ? 'Show' : 'Movie';
 
-    return `<div class="flex-shrink-0 w-40 group relative" data-card 
-      data-tmdb-id="${esc(item.tmdb_id)}" 
+    return `<div
+      class="flex-shrink-0 w-40 group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
+      data-card
+      data-tmdb-id="${esc(String(item.tmdb_id))}"
       data-media-type="${esc(item.type)}"
+      data-show-tmdb-id=""
+      data-season=""
       data-watched="${watched}"
       data-collected="${inLibrary}"
-      data-listed="${listed}">
-      <a href="${esc(url)}" class="block active:scale-95 active:opacity-70 transition-all duration-150">
-        <div class="relative aspect-[2/3] rounded-2xl overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
+      data-listed="${inLists.length > 0}"
+    >
+      <a href="${esc(href)}" class="block">
+        <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
           ${item.poster_path
-            ? `<img src="${esc(item.poster_path)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy">`
-            : `<div class="w-full h-full flex items-center justify-center text-zinc-400 text-xs text-center px-2">${esc(item.title)}</div>`
+            ? `<img src="${esc(item.poster_path)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" decoding="async" />`
+            : `<div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center"><span class="text-3xl mb-2 opacity-30">🎬</span><span class="text-xs font-bold uppercase tracking-widest">${esc(item.title)}</span></div>`
           }
-          <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-          <!-- Block button -->
+          <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           <button
             data-action="block"
             title="Don't show this again"
@@ -459,64 +472,52 @@ function skeletonWide() {
               <circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>
             </svg>
           </button>
+          ${rating ? `<div class="absolute top-2 right-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
           ${showProgress ? `
             <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
               <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
             </div>
           ` : ''}
         </div>
-        <p class="text-sm font-bold text-zinc-500 dark:text-zinc-300 truncate group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors leading-snug">${esc(item.title)}</p>
-        <p class="text-xs text-zinc-500 mt-0.5">${rating ? '★ ' + esc(rating) : ''}${rating && year ? ' · ' : ''}${esc(year)}${showProgress ? ` · ${Math.round(progressPct)}%` : ''}</p>
       </a>
-    </div>`;
-  }
-
-  // 3:2 backdrop card — shows (title overlaid inside)
-  function backdropCard(item) {
-    const url = itemUrl(item);
-    const year = item.release_date ? item.release_date.slice(0, 4) : '';
-    const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : '';
-    const img = item.backdrop_path || item.poster_path;
-    const meta = [rating ? '★ ' + rating : '', year].filter(Boolean).join(' · ');
-    const watched = item.watched ?? false;
-    const inLibrary = item.in_library ?? false;
-    const listed = (item.in_lists ?? []).length > 0;
-    const progressPct = item.type === 'series' && item.total_episodes_count 
-      ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
-      : (item.progress_percent ?? 0);
-    const showProgress = progressPct > 0;
-
-    return `<div class="flex-shrink-0 w-56 group relative" data-card 
-      data-tmdb-id="${esc(item.tmdb_id)}" 
-      data-media-type="${esc(item.type)}"
-      data-watched="${watched}"
-      data-collected="${inLibrary}"
-      data-listed="${listed}">
-      <a href="${esc(url)}" class="block active:scale-95 active:opacity-70 transition-all duration-150">
-        <div class="relative aspect-[3/2] rounded-xl overflow-hidden bg-zinc-800 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
-          ${img
-            ? `<img src="${esc(img)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy">`
-            : `<div class="w-full h-full bg-zinc-800"></div>`
-          }
-          <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
-          <!-- Block button -->
-          <button
-            data-action="block"
-            title="Don't show this again"
-            class="absolute top-2 left-2 z-10 bg-black/60 backdrop-blur-md text-zinc-400 hover:text-red-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 border border-zinc-800 hover:border-red-500/50 cursor-pointer"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>
-            </svg>
-          </button>
-          ${showProgress ? `
-            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
-              <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
-            </div>
-          ` : ''}
-          <div class="absolute bottom-0 left-0 right-0 p-3">
-            <p class="text-sm font-bold text-white leading-snug line-clamp-2">${esc(item.title)}</p>
-            ${meta ? `<p class="text-xs text-white/60 mt-0.5">${esc(meta)}${showProgress ? ` · ${Math.round(progressPct)}%` : ''}</p>` : ''}
+      <div class="card-action-bar">
+        <button data-action="watched" data-watched="${watched}" data-state="${watched ? 'active' : 'inactive'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}"
+          class="card-action-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3" fill="${watchedFill}"/>
+          </svg>
+          <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Watched</span>
+        </button>
+        <button data-action="list" data-in-lists="${esc(JSON.stringify(inLists))}" data-state="${inLists.length > 0 ? 'active' : 'inactive'}" title="Add to list"
+          class="card-action-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+            <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+          <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Lists</span>
+        </button>
+        <button data-action="collected" data-in-library="${inLibrary}" data-collection-pct="${collectionPct}" data-state="${(inLibrary || collectionPct > 0) ? 'active' : 'inactive'}"
+          title="${isSeries ? `${collectionPct}% in library` : (inLibrary ? 'In collection' : 'Add to collection')}"
+          style="${esc(collectStyle)}"
+          class="card-action-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+            <path d="M15 22v-4a3 3 0 0 0-6 0v4"/>
+            <path d="M2 7h20"/>
+          </svg>
+          <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${collectionPct}%` : 'Collected'}</span>
+        </button>
+      </div>
+      <a href="${esc(href)}" class="block p-3 bg-transparent flex-1">
+        <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">${esc(item.title)}</h3>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            ${year ? `<span class="text-[11px] font-medium text-zinc-500 tracking-wide">${esc(year)}</span>` : ''}
+          </div>
+          <div class="flex items-center gap-2">
+            ${showProgress ? `<span class="text-[10px] font-bold text-zinc-500 tabular-nums">${Math.round(progressPct)}%</span>` : ''}
+            <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">${typeLabel}</span>
           </div>
         </div>
       </a>
@@ -588,8 +589,8 @@ function skeletonWide() {
   loadTrailers('trending-trailers');
   loadSection('coming-soon',      '/media/upcoming');
   loadSection('top-rated-movies', '/media/top-rated-movies');
-  loadSection('on-air-this-week', '/media/on-air-this-week', 'backdrop');
-  loadSection('top-rated-shows',  '/media/top-rated-shows',  'backdrop');
+  loadSection('on-air-this-week', '/media/on-air-this-week', 'poster');
+  loadSection('top-rated-shows',  '/media/top-rated-shows',  'poster');
   loadSection('hidden-gems',      '/media/hidden-gems?type=movie');
 
   // For You (poster — consistent in a mixed row)
@@ -602,20 +603,20 @@ function skeletonWide() {
     loadSection(`movie-genre-${i}`, `/media/tmdb/list?type=movie&genre=${encodeURIComponent(genre)}&category=popular`);
   });
   topShowGenres.forEach((genre, i) => {
-    loadSection(`show-genre-${i}`, `/media/tmdb/list?type=series&genre=${encodeURIComponent(genre)}&category=popular`, 'backdrop');
+    loadSection(`show-genre-${i}`, `/media/tmdb/list?type=series&genre=${encodeURIComponent(genre)}&category=popular`, 'poster');
   });
 
   // Streaming rows (movies + shows paired per service)
   if (hasProfileData && userServices.length > 0) {
     userServices.forEach((id, i) => {
       loadSection(`streaming-movie-${i}`, `/media/streaming?provider_id=${id}&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
-      loadSection(`streaming-show-${i}`,  `/media/streaming?provider_id=${id}&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+      loadSection(`streaming-show-${i}`,  `/media/streaming?provider_id=${id}&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'poster');
     });
   } else if (!hasProfileData) {
     loadSection('fallback-movie-0', `/media/streaming?provider_id=8&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
-    loadSection('fallback-show-0',  `/media/streaming?provider_id=8&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+    loadSection('fallback-show-0',  `/media/streaming?provider_id=8&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'poster');
     loadSection('fallback-movie-1', `/media/streaming?provider_id=9&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
-    loadSection('fallback-show-1',  `/media/streaming?provider_id=337&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+    loadSection('fallback-show-1',  `/media/streaming?provider_id=337&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'poster');
   }
 
   // ── Pick for me ──────────────────────────────────────────────────────────────

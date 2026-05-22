@@ -34,54 +34,267 @@ if (me.totp_enabled) {
 
     <div id="js-message" class="hidden p-4 rounded-lg mb-8"></div>
 
+    <!-- Tabs Header Navigation -->
+    <div class="flex flex-wrap gap-2 mb-8 border-b border-zinc-800/80 pb-4">
+      <button type="button" data-settings-tab-btn="general" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer">General</button>
+      <button type="button" data-settings-tab-btn="media-servers" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer">Media Servers</button>
+      <button type="button" data-settings-tab-btn="trackers" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer">Trackers</button>
+      <button type="button" data-settings-tab-btn="integrations" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer">Integrations</button>
+      <button type="button" data-settings-tab-btn="advanced" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer">Security & Advanced</button>
+    </div>
+
     <div class="space-y-12">
-      <!-- General Settings -->
-      <section>
-        <div class="flex items-center justify-between mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-semibold text-zinc-100">General</h2>
-          <button
-            type="button"
-            data-action="test_tmdb"
-            class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-          >
-            Test Key
-          </button>
-        </div>
-        <form id="settings-form" class="space-y-6">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="space-y-2">
-              <label for="tmdb_api_key" class="block text-sm font-medium text-zinc-400">TMDB API Key</label>
-              <div class="relative group/field">
-                <input
-                  type="password"
-                  name="tmdb_api_key"
-                  id="tmdb_api_key"
-                  value={settings.tmdb_api_key || ""}
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                />
-                <button
-                  type="button"
-                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
-                  aria-label="Toggle password visibility"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                  </svg>
-                </button>
-              </div>
-              {settings.has_global_tmdb_key && !settings.tmdb_api_key ? (
-                <p class="text-xs text-blue-400">A server-wide TMDB key is configured by your admin. You can leave this blank to use it, or enter your own key to override it.</p>
-              ) : settings.has_global_tmdb_key && settings.tmdb_api_key ? (
-                <p class="text-xs text-blue-400">A server-wide TMDB key is configured, but you are using your own key. Clear this field to fall back to the server key.</p>
-              ) : (
-                <p class="text-xs text-zinc-500">Required for fetching metadata and posters. Will be validated before saving.</p>
-              )}
+      <form id="settings-form" class="space-y-6">
+        <!-- Tab Panel: General -->
+        <div data-settings-tab="general" class="space-y-12">
+          <!-- General Settings Section -->
+          <section>
+            <div class="flex items-center justify-between mb-4 border-b border-zinc-800 pb-2">
+              <h2 class="text-xl font-semibold text-zinc-100">General</h2>
+              <button
+                type="button"
+                data-action="test_tmdb"
+                class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Test Key
+              </button>
             </div>
-          </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div class="space-y-2">
+                <label for="tmdb_api_key" class="block text-sm font-medium text-zinc-400">TMDB API Key</label>
+                <div class="relative group/field">
+                  <input
+                    type="password"
+                    name="tmdb_api_key"
+                    id="tmdb_api_key"
+                    value={settings.tmdb_api_key || ""}
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                  <button
+                    type="button"
+                    class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
+                    aria-label="Toggle password visibility"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                    </svg>
+                  </button>
+                </div>
+                {settings.has_global_tmdb_key && !settings.tmdb_api_key ? (
+                  <p class="text-xs text-blue-400">A server-wide TMDB key is configured by your admin. You can leave this blank to use it, or enter your own key to override it.</p>
+                ) : settings.has_global_tmdb_key && settings.tmdb_api_key ? (
+                  <p class="text-xs text-blue-400">A server-wide TMDB key is configured, but you are using your own key. Clear this field to fall back to the server key.</p>
+                ) : (
+                  <p class="text-xs text-zinc-500">Required for fetching metadata and posters. Will be validated before saving.</p>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <!-- Explore Visibility -->
+          <section class="mt-12">
+            <div class="flex flex-col gap-4 mb-6 border-b border-zinc-800 pb-4">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 class="text-xl font-semibold text-zinc-100 mb-1">Explore Visibility</h2>
+                  <p class="text-sm text-zinc-400">Choose how items you've already watched or collected appear on Explore pages.</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <a href="/blocklist" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm font-medium transition-all active:scale-95">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                    Manage Blocklist
+                  </a>
+                  <a href="/remaps" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm font-medium transition-all active:scale-95">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
+                    Metadata Overrides
+                  </a>
+                </div>
+              </div>
+
+              <!-- Content filter summary chips -->
+              <div class="flex flex-wrap gap-2 mt-2">
+                <a href="/blocklist?tab=genres" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_genres.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17"/></svg>
+                  {contentFilters.blocked_genres.length > 0 ? `${contentFilters.blocked_genres.length} genre filter${contentFilters.blocked_genres.length !== 1 ? 's' : ''}` : 'No genre filters'}
+                </a>
+                <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_keywords.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/></svg>
+                  {contentFilters.blocked_keywords.length > 0 ? `${contentFilters.blocked_keywords.length} keyword filter${contentFilters.blocked_keywords.length !== 1 ? 's' : ''}` : 'No keyword filters'}
+                </a>
+                <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_regexes.length > 0 ? 'bg-violet-900/30 border-violet-700/50 text-violet-300 hover:bg-violet-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="m9 9 6 6m0-6-6 6"/></svg>
+                  {contentFilters.blocked_regexes.length > 0 ? `${contentFilters.blocked_regexes.length} regex filter${contentFilters.blocked_regexes.length !== 1 ? 's' : ''}` : 'No regex filters'}
+                </a>
+              </div>
+            </div>
+            
+            <div class="space-y-3">
+              {[
+                { key: 'watched', label: 'Watched' },
+                { key: 'unwatched', label: 'Not Watched' },
+                { key: 'collected', label: 'In Library' },
+                { key: 'uncollected', label: 'Not In Library' },
+                { key: 'listed', label: 'Listed' },
+                { key: 'unlisted', label: 'Not Listed' },
+              ].map(({ key, label }) => (
+                <div class="flex items-center justify-between p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                  <div>
+                    <p class="text-sm font-semibold text-zinc-100">{label}</p>
+                  </div>
+                  <div class="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-1" data-v-group={key}>
+                    {['show', 'fade', 'hide'].map((action) => (
+                      <button
+                        type="button"
+                        data-v-action={action}
+                        class={`px-3 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all cursor-pointer ${settings.preferences?.explore_filters?.[key] === action || (!settings.preferences?.explore_filters?.[key] && action === 'show') ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
+                      >
+                        {action}
+                      </button>
+                    ))}
+                    <input type="hidden" name={`v_${key}`} value={settings.preferences?.explore_filters?.[key] || 'show'} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <!-- Appearance -->
+          <section class="mt-12">
+            <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Appearance</h2>
+            <div class="space-y-6">
+              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                <div>
+                  <p class="text-sm font-semibold text-zinc-100 mb-1">Blur explicit content</p>
+                  <p class="text-xs text-zinc-400">Blur posters flagged as adult content by TMDB. Click a blurred poster to reveal it.</p>
+                </div>
+                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+                  <input
+                    type="checkbox"
+                    name="blur_explicit"
+                    id="blur-explicit-toggle"
+                    class="sr-only peer"
+                    checked={settings.blur_explicit !== false}
+                  />
+                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+              </div>
+              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                <div>
+                  <p class="text-sm font-semibold text-zinc-100 mb-1">24-hour time format</p>
+                  <p class="text-xs text-zinc-400">Display watch times in 24-hour format (e.g. 23:31) instead of 12-hour (e.g. 11:31 PM).</p>
+                </div>
+                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+                  <input
+                    type="checkbox"
+                    name="time_format_24h"
+                    id="time-format-24h-toggle"
+                    class="sr-only peer"
+                    checked={settings.time_format_24h !== false}
+                  />
+                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+              </div>
+
+              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                <div>
+                  <p class="text-sm font-semibold text-zinc-100 mb-1">Show comments</p>
+                  <p class="text-xs text-zinc-400">Show user comments on media detail pages site-wide.</p>
+                </div>
+                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+                  <input
+                    type="checkbox"
+                    name="show_comments"
+                    id="show-comments-toggle"
+                    class="sr-only peer"
+                    checked={settings.show_comments !== false}
+                  />
+                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+              </div>
+
+              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                <div>
+                  <p class="text-sm font-semibold text-zinc-100 mb-1">Show user ratings</p>
+                  <p class="text-xs text-zinc-400">Show ratings from users of this app. TMDB ratings will still be visible.</p>
+                </div>
+                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+                  <input
+                    type="checkbox"
+                    name="show_user_ratings"
+                    id="show-user-ratings-toggle"
+                    class="sr-only peer"
+                    checked={settings.show_user_ratings !== false}
+                  />
+                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+              </div>
+
+              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                <div>
+                  <p class="text-sm font-semibold text-zinc-100 mb-1">Media server enrichment</p>
+                  <p class="text-xs text-zinc-400">Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.</p>
+                </div>
+                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+                  <input
+                    type="checkbox"
+                    name="media_server_enrichment"
+                    id="media-server-enrichment-toggle"
+                    class="sr-only peer"
+                    checked={settings.preferences?.media_server_enrichment !== false}
+                  />
+                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+              </div>
+
+              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                <div>
+                  <p class="text-sm font-semibold text-zinc-100 mb-1">Include specials in counts</p>
+                  <p class="text-xs text-zinc-400">Include Specials (Season 0) when calculating show and season watch/collection progress.</p>
+                </div>
+                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+                  <input
+                    type="checkbox"
+                    name="include_specials"
+                    id="include-specials-toggle"
+                    class="sr-only peer"
+                    checked={settings.preferences?.include_specials === true}
+                  />
+                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+              </div>
+              <div>
+                <p class="text-sm text-zinc-400 font-semibold mb-3">Accent color</p>
+                <div class="flex flex-wrap gap-3" id="accent-swatches">
+                  {[
+                    { id: 'blue',   label: 'Blue',   color: '#3b82f6' },
+                    { id: 'purple', label: 'Purple', color: '#a855f7' },
+                    { id: 'pink',   label: 'Pink',   color: '#ec4899' },
+                    { id: 'red',    label: 'Red',    color: '#ef4444' },
+                    { id: 'green',  label: 'Green',  color: '#22c55e' },
+                    { id: 'yellow', label: 'Yellow', color: '#eab308' },
+                    { id: 'orange', label: 'Orange', color: '#f97316' },
+                  ].map(({ id, label, color }) => (
+                    <button
+                      type="button"
+                      data-accent-id={id}
+                      class="accent-swatch flex items-center gap-2.5 px-5 py-3 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-600 transition-all cursor-pointer text-sm text-zinc-400 hover:text-zinc-100"
+                    >
+                      <span class="w-5 h-5 rounded-full shrink-0" style={`background-color: ${color}`}></span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+          <!-- Tab Panel: Media Servers -->
+          <div data-settings-tab="media-servers" class="space-y-6 hidden">
 
           <!-- ======== SYNC SECTION ======== -->
           <div class="space-y-3 mt-8">
@@ -152,6 +365,12 @@ if (me.totp_enabled) {
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Server URL</label>
                         <input type="url" class="conn-url-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.url} data-conn-id={conn.id} />
+                      </div>
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-zinc-400">
+                          External Server URL <span class="text-xs text-zinc-600">(Optional)</span>
+                        </label>
+                        <input type="url" class="conn-external-url-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.external_server_url || ""} data-conn-id={conn.id} />
                       </div>
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">{conn.type === "plex" ? "X-Plex-Token" : "API Token"}</label>
@@ -334,6 +553,13 @@ if (me.totp_enabled) {
                     <div class="space-y-2">
                       <label for="new-conn-url" class="block text-sm font-medium text-zinc-400">Server URL</label>
                       <input type="url" id="new-conn-url" placeholder="http://192.168.1.100:8096" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    <div class="space-y-2">
+                      <label for="new-conn-external-url" class="block text-sm font-medium text-zinc-400">
+                        External Server URL <span class="text-xs text-zinc-600">(Optional)</span>
+                      </label>
+                      <input type="url" id="new-conn-external-url" placeholder="https://app.plex.tv/desktop/#!/server/12345" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <p class="text-xs text-zinc-500 mt-1">If set, the Play button will redirect to this URL instead of the internal player. For Plex, use the base web URL including your machine identifier.</p>
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-token" class="block text-sm font-medium text-zinc-400">Token</label>
@@ -533,7 +759,10 @@ if (me.totp_enabled) {
               </div>
             </div>
           </div>
+          </div>
 
+          <!-- Tab Panel: Trackers -->
+          <div data-settings-tab="trackers" class="space-y-6 hidden">
           <!-- ======== CONNECTIONS SECTION ======== -->
           <div class="space-y-3 mt-8">
             <h2 class="text-xl font-semibold text-zinc-100 border-b border-zinc-800 pb-2">Connections</h2>
@@ -827,9 +1056,13 @@ if (me.totp_enabled) {
                     </div>
                   )}
                 </div>
-              </div>
             </div>
+          </div>
+          </div>
+          </div>
 
+          <!-- Tab Panel: Integrations -->
+          <div data-settings-tab="integrations" class="space-y-6 hidden">
             <!-- Radarr collapsible row -->
             <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="radarr-body">
@@ -968,7 +1201,7 @@ if (me.totp_enabled) {
             </div>
           </div>
 
-          <div class="pt-6">
+          <div id="save-settings-footer" class="pt-6 border-t border-zinc-800/60 mt-8 flex justify-end">
             <button
               id="save-settings-btn"
               type="submit"
@@ -978,202 +1211,9 @@ if (me.totp_enabled) {
             </button>
           </div>
         </form>
-      </section>
- 
 
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-zinc-800 pb-2">
-          <div>
-            <h2 class="text-xl font-semibold text-zinc-100 mb-1">Explore Visibility</h2>
-            <p class="text-sm text-zinc-400">Choose how items you've already watched or collected appear on Explore pages.</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <a href="/blocklist" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm font-medium transition-all active:scale-95">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
-              Manage Blocklist
-            </a>
-            <a href="/remaps" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm font-medium transition-all active:scale-95">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
-              Metadata Overrides
-            </a>
-          </div>
-        </div>
-
-        <!-- Content filter summary chips -->
-        <div class="flex flex-wrap gap-2 mt-4">
-          <a href="/blocklist?tab=genres" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_genres.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17"/></svg>
-            {contentFilters.blocked_genres.length > 0 ? `${contentFilters.blocked_genres.length} genre filter${contentFilters.blocked_genres.length !== 1 ? 's' : ''}` : 'No genre filters'}
-          </a>
-          <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_keywords.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/></svg>
-            {contentFilters.blocked_keywords.length > 0 ? `${contentFilters.blocked_keywords.length} keyword filter${contentFilters.blocked_keywords.length !== 1 ? 's' : ''}` : 'No keyword filters'}
-          </a>
-          <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_regexes.length > 0 ? 'bg-violet-900/30 border-violet-700/50 text-violet-300 hover:bg-violet-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="m9 9 6 6m0-6-6 6"/></svg>
-            {contentFilters.blocked_regexes.length > 0 ? `${contentFilters.blocked_regexes.length} regex filter${contentFilters.blocked_regexes.length !== 1 ? 's' : ''}` : 'No regex filters'}
-          </a>
-        </div>
-        
-        <div class="space-y-3">
-          {[
-            { key: 'watched', label: 'Watched' },
-            { key: 'unwatched', label: 'Not Watched' },
-            { key: 'collected', label: 'In Library' },
-            { key: 'uncollected', label: 'Not In Library' },
-            { key: 'listed', label: 'Listed' },
-            { key: 'unlisted', label: 'Not Listed' },
-          ].map(({ key, label }) => (
-            <div class="flex items-center justify-between p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-              <div>
-                <p class="text-sm font-semibold text-zinc-100">{label}</p>
-              </div>
-              <div class="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-1" data-v-group={key}>
-                {['show', 'fade', 'hide'].map((action) => (
-                  <button
-                    type="button"
-                    data-v-action={action}
-                    class={`px-3 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all cursor-pointer ${settings.preferences?.explore_filters?.[key] === action || (!settings.preferences?.explore_filters?.[key] && action === 'show') ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  >
-                    {action}
-                  </button>
-                ))}
-                <input type="hidden" name={`v_${key}`} value={settings.preferences?.explore_filters?.[key] || 'show'} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <!-- Appearance -->
-      <section>
-        <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Appearance</h2>
-        <div class="space-y-6">
-          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-            <div>
-              <p class="text-sm font-semibold text-zinc-100 mb-1">Blur explicit content</p>
-              <p class="text-xs text-zinc-400">Blur posters flagged as adult content by TMDB. Click a blurred poster to reveal it.</p>
-            </div>
-            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-              <input
-                type="checkbox"
-                name="blur_explicit"
-                id="blur-explicit-toggle"
-                class="sr-only peer"
-                checked={settings.blur_explicit !== false}
-              />
-              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-            </label>
-          </div>
-          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-            <div>
-              <p class="text-sm font-semibold text-zinc-100 mb-1">24-hour time format</p>
-              <p class="text-xs text-zinc-400">Display watch times in 24-hour format (e.g. 23:31) instead of 12-hour (e.g. 11:31 PM).</p>
-            </div>
-            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-              <input
-                type="checkbox"
-                name="time_format_24h"
-                id="time-format-24h-toggle"
-                class="sr-only peer"
-                checked={settings.time_format_24h !== false}
-              />
-              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-            </label>
-          </div>
-
-          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-            <div>
-              <p class="text-sm font-semibold text-zinc-100 mb-1">Show comments</p>
-              <p class="text-xs text-zinc-400">Show user comments on media detail pages site-wide.</p>
-            </div>
-            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-              <input
-                type="checkbox"
-                name="show_comments"
-                id="show-comments-toggle"
-                class="sr-only peer"
-                checked={settings.show_comments !== false}
-              />
-              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-            </label>
-          </div>
-
-          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-            <div>
-              <p class="text-sm font-semibold text-zinc-100 mb-1">Show user ratings</p>
-              <p class="text-xs text-zinc-400">Show ratings from users of this app. TMDB ratings will still be visible.</p>
-            </div>
-            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-              <input
-                type="checkbox"
-                name="show_user_ratings"
-                id="show-user-ratings-toggle"
-                class="sr-only peer"
-                checked={settings.show_user_ratings !== false}
-              />
-              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-            </label>
-          </div>
-
-          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-            <div>
-              <p class="text-sm font-semibold text-zinc-100 mb-1">Media server enrichment</p>
-              <p class="text-xs text-zinc-400">Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.</p>
-            </div>
-            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-              <input
-                type="checkbox"
-                name="media_server_enrichment"
-                id="media-server-enrichment-toggle"
-                class="sr-only peer"
-                checked={settings.preferences?.media_server_enrichment !== false}
-              />
-              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-            </label>
-          </div>
-
-          <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-            <div>
-              <p class="text-sm font-semibold text-zinc-100 mb-1">Include specials in counts</p>
-              <p class="text-xs text-zinc-400">Include Specials (Season 0) when calculating show and season watch/collection progress.</p>
-            </div>
-            <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-              <input
-                type="checkbox"
-                name="include_specials"
-                id="include-specials-toggle"
-                class="sr-only peer"
-                checked={settings.preferences?.include_specials === true}
-              />
-              <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-            </label>
-          </div>
-          <div>
-            <p class="text-sm text-zinc-400">Accent color</p>
-            <div class="flex flex-wrap gap-3 mt-3" id="accent-swatches">
-              {[
-                { id: 'blue',   label: 'Blue',   color: '#3b82f6' },
-                { id: 'purple', label: 'Purple', color: '#a855f7' },
-                { id: 'pink',   label: 'Pink',   color: '#ec4899' },
-                { id: 'red',    label: 'Red',    color: '#ef4444' },
-                { id: 'green',  label: 'Green',  color: '#22c55e' },
-                { id: 'yellow', label: 'Yellow', color: '#eab308' },
-                { id: 'orange', label: 'Orange', color: '#f97316' },
-              ].map(({ id, label, color }) => (
-                <button
-                  type="button"
-                  data-accent-id={id}
-                  class="accent-swatch flex items-center gap-2.5 px-5 py-3 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-600 transition-all cursor-pointer text-sm text-zinc-400 hover:text-zinc-100"
-                >
-                  <span class="w-5 h-5 rounded-full shrink-0" style={`background-color: ${color}`}></span>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
+      <!-- Tab Panel: Advanced -->
+      <div data-settings-tab="advanced" class="space-y-12 hidden">
       <!-- Maintenance -->
       <section>
         <h2 class="text-xl font-semibold text-zinc-100 mb-4 border-b border-zinc-800 pb-2">Maintenance</h2>
@@ -1551,12 +1591,13 @@ if (me.totp_enabled) {
           </button>
         </div>
       </section>
+      </div>
     </div>
   </div>
 
   <!-- Delete Confirmation Modal -->
   <div id="confirm-action-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
-    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-md w-full shadow-2xl">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl overflow-hidden">
       <h2 id="confirm-action-title" class="text-2xl font-bold text-zinc-100 mb-2"></h2>
       <p id="confirm-action-body" class="text-zinc-400 mb-8 text-sm leading-relaxed"></p>
       <div class="flex gap-3">
@@ -1567,7 +1608,7 @@ if (me.totp_enabled) {
   </div>
 
   <div id="heal-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
-    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-md w-full shadow-2xl">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl overflow-hidden">
       <h2 class="text-2xl font-bold text-zinc-100 mb-2">Heal missing metadata?</h2>
       <p class="text-zinc-400 mb-8 text-sm leading-relaxed">
         This will re-fetch posters and dates for collection items that are missing them. It runs in the background and may take a few minutes.
@@ -1584,7 +1625,7 @@ if (me.totp_enabled) {
   </div>
 
   <div id="delete-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
-    <div class="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-md w-full shadow-2xl">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl overflow-hidden">
       <h2 class="text-2xl font-bold text-zinc-100 mb-2">Are you sure?</h2>
       <p class="text-zinc-400 mb-8 text-sm leading-relaxed">
         This will permanently delete your account and remove all your data. This action cannot be undone.
@@ -1602,7 +1643,7 @@ if (me.totp_enabled) {
 
   <!-- Season remap modal -->
   <div id="season-remap-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
-    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh]">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh] backdrop-blur-xl overflow-hidden">
       <div class="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
         <div>
           <h2 class="text-lg font-bold text-zinc-100">Remap Season</h2>
@@ -1649,6 +1690,66 @@ if (me.totp_enabled) {
 <script>
   const appData = document.getElementById('app-data');
   const token = appData?.dataset.token ?? '';
+
+  // ── Tab Management ────────────────────────────────────────────────────────
+  function setupTabs() {
+    const buttons = document.querySelectorAll('[data-settings-tab-btn]');
+    const panes = document.querySelectorAll('[data-settings-tab]');
+
+    function switchTab(tabId) {
+      panes.forEach(pane => {
+        if (pane.getAttribute('data-settings-tab') === tabId) {
+          pane.classList.remove('hidden');
+        } else {
+          pane.classList.add('hidden');
+        }
+      });
+
+      buttons.forEach(btn => {
+        if (btn.getAttribute('data-settings-tab-btn') === tabId) {
+          btn.className = "px-5 py-2.5 rounded-xl text-sm font-semibold transition-all bg-blue-600/10 border border-blue-500/30 text-zinc-100 shadow-md shadow-blue-500/5 cursor-pointer";
+        } else {
+          btn.className = "px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer";
+        }
+      });
+
+      const saveFooter = document.getElementById('save-settings-footer');
+      if (saveFooter) {
+        if (tabId === 'advanced') {
+          saveFooter.classList.add('hidden');
+        } else {
+          saveFooter.classList.remove('hidden');
+        }
+      }
+
+      localStorage.setItem('active-settings-tab', tabId);
+      history.replaceState(null, '', `#tab-${tabId}`);
+    }
+
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tabId = btn.getAttribute('data-settings-tab-btn');
+        switchTab(tabId);
+      });
+    });
+
+    let initialTab = 'general';
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#tab-')) {
+      initialTab = hash.substring(5);
+    } else {
+      const stored = localStorage.getItem('active-settings-tab');
+      if (stored) initialTab = stored;
+    }
+
+    if (!document.querySelector(`[data-settings-tab-btn="${initialTab}"]`)) {
+      initialTab = 'general';
+    }
+
+    switchTab(initialTab);
+  }
+
+  setupTabs();
 
   function esc(s) {
     if (s == null) return '';
@@ -2294,6 +2395,7 @@ if (me.totp_enabled) {
             const body: Record<string, any> = {
               name: (card?.querySelector('.conn-name-input') as HTMLInputElement)?.value || undefined,
               url: (card?.querySelector('.conn-url-input') as HTMLInputElement)?.value || undefined,
+              external_server_url: (card?.querySelector('.conn-external-url-input') as HTMLInputElement)?.value || null,
               token: (card?.querySelector('.conn-token-input') as HTMLInputElement)?.value || undefined,
               server_user_id: (card?.querySelector('.conn-user-id-input') as HTMLInputElement)?.value || null,
               server_username: (card?.querySelector('.conn-username-input') as HTMLInputElement)?.value || null,
@@ -2960,10 +3062,10 @@ if (me.totp_enabled) {
   }
 
   function setupAccentSwatches() {
-    const saved = localStorage.getItem('accentTheme') || 'blue';
+    const saved = localStorage.getItem('accentTheme') || 'purple';
 
     function applyAccent(id) {
-      if (id === 'blue') {
+      if (id === 'purple') {
         document.documentElement.removeAttribute('data-accent');
       } else {
         document.documentElement.setAttribute('data-accent', id);
@@ -3148,8 +3250,10 @@ if (me.totp_enabled) {
         const orig = createBtn.textContent;
         createBtn.textContent = 'Adding…';
 
+        const externalUrl = (document.getElementById('new-conn-external-url') as HTMLInputElement)?.value || null;
+
         const body: Record<string, any> = {
-          name, type, url: u, token: t,
+          name, type, url: u, token: t, external_server_url: externalUrl,
           sync_collection: (document.getElementById('new-sync-collection') as HTMLInputElement)?.checked ?? true,
           sync_watched: (document.getElementById('new-sync-watched') as HTMLInputElement)?.checked ?? true,
           sync_ratings: (document.getElementById('new-sync-ratings') as HTMLInputElement)?.checked ?? true,
@@ -3374,24 +3478,24 @@ if (me.totp_enabled) {
         ] as const;
         const syncPrefs: Record<string, boolean> = {};
         for (const key of syncKeys) {
-          const el = form.querySelector<HTMLInputElement>(`[name="${key}"]`);
+          const el = document.querySelector<HTMLInputElement>(`[name="${key}"]`);
           if (el) syncPrefs[key] = el.checked;
         }
 
         // Sync blur_explicit to a cookie (read server-side by Base.astro) and apply immediately
-        const blurEl = form.querySelector<HTMLInputElement>('[name="blur_explicit"]');
+        const blurEl = document.querySelector<HTMLInputElement>('[name="blur_explicit"]');
         if (blurEl) {
           const val = blurEl.checked ? 'true' : 'false';
           document.cookie = `blur_explicit=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
           document.documentElement.classList.toggle('blur-explicit', blurEl.checked);
         }
-        const commentsEl = form.querySelector<HTMLInputElement>('[name="show_comments"]');
+        const commentsEl = document.querySelector<HTMLInputElement>('[name="show_comments"]');
         if (commentsEl) {
           const val = commentsEl.checked ? 'true' : 'false';
           document.cookie = `show_comments=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
           document.documentElement.classList.toggle('show-comments', commentsEl.checked);
         }
-        const ratingsEl = form.querySelector<HTMLInputElement>('[name="show_user_ratings"]');
+        const ratingsEl = document.querySelector<HTMLInputElement>('[name="show_user_ratings"]');
         if (ratingsEl) {
           const val = ratingsEl.checked ? 'true' : 'false';
           document.cookie = `show_user_ratings=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
@@ -3400,7 +3504,7 @@ if (me.totp_enabled) {
 
         // Gather visibility filters
         const visibilityFilters: Record<string, string> = {};
-        form.querySelectorAll('[data-v-group]').forEach(group => {
+        document.querySelectorAll('[data-v-group]').forEach(group => {
           const key = group.getAttribute('data-v-group')!;
           const input = group.querySelector(`input[name="v_${key}"]`) as HTMLInputElement;
           visibilityFilters[key] = input.value;
@@ -3420,7 +3524,7 @@ if (me.totp_enabled) {
           appData.dataset.preferences = JSON.stringify(updatedPreferences);
         }
 
-        const timeFormatEl = form.querySelector<HTMLInputElement>('[name="time_format_24h"]');
+        const timeFormatEl = document.querySelector<HTMLInputElement>('[name="time_format_24h"]');
         if (timeFormatEl) {
           document.cookie = `time_format_24h=${timeFormatEl.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
         }

@@ -40,19 +40,27 @@
   --color-brand-jellyfin: #a855f7; /* purple-500 */
   --color-brand-plex: #eab308;    /* yellow-500 */
 
-  /* Accent color scale — default: blue */
-  --accent-400: #60a5fa;
-  --accent-500: #3b82f6;
-  --accent-600: #2563eb;
-  --accent-900: #1e3a8a;
-}
-
-/* ── Accent themes ─────────────────────────────────────── */
-html[data-accent="purple"] {
+  /* Accent color scale — default: purple */
   --accent-400: #c084fc;
   --accent-500: #a855f7;
   --accent-600: #9333ea;
   --accent-900: #3b0764;
+
+  /* Premium Design Tokens */
+  --color-hero-fade: #09090b;
+  --color-glass-bg: rgba(24, 24, 27, 0.4);
+  --color-glass-border: rgba(255, 255, 255, 0.05);
+  --color-glass-hover-border: rgba(59, 130, 246, 0.3);
+  --color-nav-bg: rgba(9, 9, 11, 0.65);
+  --color-nav-border: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Accent themes ─────────────────────────────────────── */
+html[data-accent="blue"] {
+  --accent-400: #60a5fa;
+  --accent-500: #3b82f6;
+  --accent-600: #2563eb;
+  --accent-900: #1e3a8a;
 }
 
 html[data-accent="pink"] {
@@ -104,6 +112,14 @@ html.light {
   
   --color-brand-jellyfin: #7e22ce; /* purple-700 */
   --color-brand-plex: #a16207;    /* yellow-700 (darker yellow for contrast) */
+
+  /* Premium Design Tokens (Light Mode) */
+  --color-hero-fade: #f9fafb;
+  --color-glass-bg: rgba(255, 255, 255, 0.45);
+  --color-glass-border: rgba(0, 0, 0, 0.06);
+  --color-glass-hover-border: rgba(59, 130, 246, 0.3);
+  --color-nav-bg: rgba(249, 250, 251, 0.65);
+  --color-nav-border: rgba(0, 0, 0, 0.06);
 }
 
 /* ── App-like feel ─────────────────────────────────────────────────────────── */
@@ -113,10 +129,103 @@ html {
 }
 
 body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   /* No rubber-band bounce on the shell */
   overscroll-behavior: none;
   /* Prevent iOS text size adjustment after orientation change */
   -webkit-text-size-adjust: 100%;
+}
+
+h1, h2, h3, h4, h5, h6, .font-black, .font-bold {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+/* Glass card design styles */
+.glass-card {
+  background-color: var(--color-glass-bg);
+  border: 1px solid var(--color-glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--color-glass-hover-border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+/* Card Action Bar customization */
+.card-action-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-glass-border);
+  background-color: rgba(0, 0, 0, 0.15);
+}
+
+html.light .card-action-bar {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.card-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 0;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  color: var(--color-text-description);
+}
+
+.card-action-btn:not(:last-child) {
+  border-right: 1px solid var(--color-glass-border);
+}
+
+/* Hover & Active states for card actions */
+/* Watched (green) */
+.card-action-btn[data-action="watched"]:hover {
+  background-color: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+.card-action-btn[data-action="watched"][data-state="active"] {
+  background-color: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+}
+html.light .card-action-btn[data-action="watched"][data-state="active"] {
+  background-color: rgba(22, 163, 74, 0.15);
+  color: #16a34a;
+}
+
+/* Lists (sky) */
+.card-action-btn[data-action="list"]:hover {
+  background-color: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+.card-action-btn[data-action="list"][data-state="active"] {
+  background-color: rgba(14, 165, 233, 0.18);
+  color: #38bdf8;
+}
+html.light .card-action-btn[data-action="list"][data-state="active"] {
+  background-color: rgba(3, 105, 161, 0.15);
+  color: #0369a1;
+}
+
+/* Collected (purple) */
+.card-action-btn[data-action="collected"]:hover {
+  background-color: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
+.card-action-btn[data-action="collected"][data-state="active"] {
+  background-color: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+}
+html.light .card-action-btn[data-action="collected"][data-state="active"] {
+  background-color: rgba(126, 34, 206, 0.15);
+  color: #7e22ce;
 }
 
 /* Remove tap highlight flash on all interactive elements */
@@ -370,4 +479,201 @@ body[data-v-not-partial-collected="hide"] :is([data-card][data-partial-collected
   justify-content: center;
   background: var(--color-bg-card);
   color: var(--color-text-dim);
+}
+
+/* ── Premium Glass overrides for standard containers, popovers, and modals ── */
+
+/* 1. Modal/Popover containers */
+#rating-popover,
+#list-popover,
+#watched-at-picker > div,
+#create-list-modal > div,
+#confirm-dialog > div,
+#pick-modal > div:not(#pick-modal-backdrop),
+#pwa-banner > div,
+#user-menu > div {
+  background-color: var(--color-glass-bg) !important;
+  border: 1px solid var(--color-glass-border) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+}
+
+html.light #rating-popover,
+html.light #list-popover,
+html.light #watched-at-picker > div,
+html.light #create-list-modal > div,
+html.light #confirm-dialog > div,
+html.light #pick-modal > div:not(#pick-modal-backdrop),
+html.light #pwa-banner > div,
+html.light #user-menu > div {
+  background-color: rgba(255, 255, 255, 0.75) !important;
+  border: 1px solid var(--color-glass-border) !important;
+}
+
+/* 2. Settings panels & block cards */
+.bg-zinc-900.border.border-zinc-800.rounded-3xl,
+.bg-zinc-900.border.border-zinc-800.rounded-2xl,
+.bg-zinc-900.border.border-zinc-800.rounded-xl,
+.bg-zinc-900\/20,
+.bg-zinc-900\/40,
+.bg-zinc-900\/50,
+.bg-zinc-900\/60,
+.bg-zinc-900\/80,
+.bg-zinc-950\/20,
+.bg-zinc-950\/40 {
+  background-color: var(--color-glass-bg) !important;
+  border: 1px solid var(--color-glass-border) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1) !important;
+}
+
+html.light .bg-zinc-900.border.border-zinc-800.rounded-3xl,
+html.light .bg-zinc-900.border.border-zinc-800.rounded-2xl,
+html.light .bg-zinc-900.border.border-zinc-800.rounded-xl,
+html.light .bg-zinc-900\/20,
+html.light .bg-zinc-900\/40,
+html.light .bg-zinc-900\/50,
+html.light .bg-zinc-900\/60,
+html.light .bg-zinc-900\/80,
+html.light .bg-zinc-950\/20,
+html.light .bg-zinc-950\/40 {
+  background-color: rgba(255, 255, 255, 0.65) !important;
+  border: 1px solid var(--color-glass-border) !important;
+}
+
+html.light .bg-zinc-950,
+html.light .bg-zinc-950\/30,
+html.light .bg-zinc-950\/50,
+html.light .bg-zinc-950\/80,
+html.light .bg-zinc-950\/85 {
+  background-color: rgba(244, 244, 245, 0.85) !important;
+}
+
+/* 3. Inputs, selects, and textareas */
+input[type="text"],
+input[type="url"],
+input[type="password"],
+input[type="number"],
+input[type="datetime-local"],
+select,
+textarea {
+  background-color: rgba(0, 0, 0, 0.15) !important;
+  border: 1px solid var(--color-glass-border) !important;
+  color: var(--color-text-primary) !important;
+  border-radius: 0.75rem !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+html.light input[type="text"],
+html.light input[type="url"],
+html.light input[type="password"],
+html.light input[type="number"],
+html.light input[type="datetime-local"],
+html.light select,
+html.light textarea {
+  background-color: rgba(255, 255, 255, 0.5) !important;
+  border: 1px solid var(--color-glass-border) !important;
+}
+
+input[type="text"]:focus,
+input[type="url"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="datetime-local"]:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent-500) !important;
+  box-shadow: 0 0 0 2px var(--accent-900)/20 !important;
+  outline: none !important;
+}
+
+/* 4. Action button glows */
+button.bg-blue-600,
+button.bg-blue-500,
+button.bg-brand-primary,
+.bg-blue-600,
+.bg-blue-500 {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+button.bg-blue-600:hover,
+button.bg-blue-500:hover,
+button.bg-brand-primary:hover,
+.bg-blue-600:hover,
+.bg-blue-500:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3) !important;
+}
+
+/* 5. Custom premium scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-glass-border);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-500);
+}
+
+/* 6. HTML Dialog Modals & Backdrops */
+dialog {
+  background-color: var(--color-glass-bg) !important;
+  border: 1px solid var(--color-glass-border) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4) !important;
+  color: var(--color-text-primary) !important;
+}
+
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+}
+
+html.light dialog {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid var(--color-glass-border) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1) !important;
+}
+
+html.light dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.35) !important;
+}
+
+/* 7. Light Theme Text & Border Contrast Helper Overrides */
+html.light .text-zinc-50,
+html.light .text-zinc-100,
+html.light .text-white {
+  color: var(--color-text-primary) !important;
+}
+html.light .text-zinc-200 {
+  color: var(--color-text-primary) !important;
+}
+html.light .text-zinc-300 {
+  color: var(--color-text-secondary) !important;
+}
+html.light .text-zinc-400 {
+  color: var(--color-text-description) !important;
+}
+html.light .text-zinc-500 {
+  color: var(--color-text-muted) !important;
+}
+
+html.light .border-zinc-800,
+html.light .border-zinc-700,
+html.light .border-zinc-800\/50,
+html.light .border-zinc-700\/40,
+html.light .border-zinc-700\/50,
+html.light .border-zinc-700\/60,
+html.light .border-zinc-800\/30 {
+  border-color: var(--color-glass-border) !important;
 }

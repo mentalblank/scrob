@@ -273,6 +273,29 @@ const COUNTRIES = (countriesRes || [])
         </div>
       </section>
 
+      <!-- Disliked Genres -->
+      <section>
+        <div class="mb-4 border-b border-zinc-800 pb-2">
+          <h2 class="text-xl font-bold text-zinc-100">Disliked Genres</h2>
+          <p class="text-xs text-zinc-500 mt-1">Genres you want to avoid. Items that <em>only</em> have disliked genres are filtered out of recommendations and picks. A genre can't be in both lists — selecting one here removes it from your favourites.</p>
+        </div>
+        <div id="disliked-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.disliked_genres || [])}>
+          {ALL_GENRES.map((genre) => {
+            const active = (prefs.disliked_genres || []).includes(genre);
+            return (
+              <button
+                type="button"
+                data-genre-type="disliked"
+                data-value={genre}
+                class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-900/50 ${active ? "bg-red-600/10 border-red-500/40 text-red-400 ring-2 ring-red-500/20" : "bg-zinc-900 border-zinc-800 text-zinc-500"}`}
+              >
+                {genre}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       <!-- Interface Preferences -->
       <section>
         <div class="mb-6 border-b border-zinc-800 pb-3">
@@ -346,29 +369,6 @@ const COUNTRIES = (countriesRes || [])
               </label>
             </div>
           </div>
-        </div>
-      </section>
-
-      <!-- Disliked Genres -->
-      <section>
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-bold text-zinc-100">Disliked Genres</h2>
-          <p class="text-xs text-zinc-500 mt-1">Genres you want to avoid. Items that <em>only</em> have disliked genres are filtered out of recommendations and picks. A genre can't be in both lists — selecting one here removes it from your favourites.</p>
-        </div>
-        <div id="disliked-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.disliked_genres || [])}>
-          {ALL_GENRES.map((genre) => {
-            const active = (prefs.disliked_genres || []).includes(genre);
-            return (
-              <button
-                type="button"
-                data-genre-type="disliked"
-                data-value={genre}
-                class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-900/50 ${active ? "bg-red-600/10 border-red-500/40 text-red-400 ring-2 ring-red-500/20" : "bg-zinc-900 border-zinc-800 text-zinc-500"}`}
-              >
-                {genre}
-              </button>
-            );
-          })}
         </div>
       </section>
 

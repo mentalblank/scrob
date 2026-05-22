@@ -128,7 +128,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
       <!-- Edit Modal -->
       <div id="edit-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
         <div id="edit-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-        <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+        <div class="relative bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-xl overflow-hidden">
           <button type="button" id="edit-close-x" class="absolute top-6 right-6 p-2 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 rounded-xl transition-all cursor-pointer z-10" aria-label="Close modal">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -156,7 +156,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
                 value={list.name}
                 maxlength="255"
                 required
-                class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
               />
             </div>
             <div>
@@ -164,7 +164,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
               <textarea
                 id="edit-desc"
                 rows="2"
-                class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none"
               >{list.description || ""}</textarea>
             </div>
 
@@ -180,7 +180,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
       <!-- Automation Modal -->
       <div id="automation-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm hidden">
         <div id="automation-backdrop" class="absolute inset-0"></div>
-        <div class="relative w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-3xl p-8 shadow-2xl overflow-hidden">
+        <div class="relative w-full max-w-lg bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 shadow-2xl overflow-hidden backdrop-blur-xl">
           <button type="button" id="auto-close-x" class="absolute top-6 right-6 p-2 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 rounded-xl transition-all cursor-pointer z-10" aria-label="Close modal">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -215,20 +215,20 @@ Astro.response.headers.set("Cache-Control", "no-store");
                   <div class="grid grid-cols-2 gap-4">
                     <div>
                       <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Root Folder</label>
-                      <select id="auto-radarr-root" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                      <select id="auto-radarr-root" class="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all">
                         {list.radarr_root_folder ? <option value={list.radarr_root_folder}>{list.radarr_root_folder}</option> : <option value="">Loading...</option>}
                       </select>
                     </div>
                     <div>
                       <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Quality Profile</label>
-                      <select id="auto-radarr-quality" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                      <select id="auto-radarr-quality" class="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all">
                         {list.radarr_quality_profile ? <option value={list.radarr_quality_profile}>{list.radarr_quality_profile}</option> : <option value="">Loading...</option>}
                       </select>
                     </div>
                   </div>
                   <div>
                     <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Monitor</label>
-                    <select id="auto-radarr-monitor" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                    <select id="auto-radarr-monitor" class="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all">
                       <option value="movieOnly" selected={list.radarr_monitor === "movieOnly"}>Movie Only</option>
                       <option value="movieAndCollection" selected={list.radarr_monitor === "movieAndCollection"}>Movie and Collection</option>
                       <option value="none" selected={list.radarr_monitor === "none"}>None</option>
@@ -245,7 +245,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 group-focus-within:text-blue-500 transition-colors">
                             <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
                           </svg>
-                          <input type="text" id="auto-radarr-tags-search" placeholder="Search or type tags..." class="w-full bg-zinc-900/50 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all" />
+                          <input type="text" id="auto-radarr-tags-search" placeholder="Search or type tags..." class="w-full bg-zinc-950/60 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all" />
                         </div>
                         <div class="space-y-1.5">
                           <p class="text-[9px] font-bold text-zinc-600 uppercase tracking-tight ml-1">Available Tags (Click to add)</p>
@@ -274,13 +274,13 @@ Astro.response.headers.set("Cache-Control", "no-store");
                   <div class="grid grid-cols-2 gap-4">
                     <div>
                       <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Root Folder</label>
-                      <select id="auto-sonarr-root" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                      <select id="auto-sonarr-root" class="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all">
                         {list.sonarr_root_folder ? <option value={list.sonarr_root_folder}>{list.sonarr_root_folder}</option> : <option value="">Loading...</option>}
                       </select>
                     </div>
                     <div>
                       <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Quality Profile</label>
-                      <select id="auto-sonarr-quality" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                      <select id="auto-sonarr-quality" class="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all">
                         {list.sonarr_quality_profile ? <option value={list.sonarr_quality_profile}>{list.sonarr_quality_profile}</option> : <option value="">Loading...</option>}
                       </select>
                     </div>
@@ -288,7 +288,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
                   <div class="grid grid-cols-2 gap-4">
                     <div>
                       <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Series Type</label>
-                      <select id="auto-sonarr-type" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                      <select id="auto-sonarr-type" class="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all">
                         <option value="standard" selected={list.sonarr_series_type === "standard"}>Standard</option>
                         <option value="daily" selected={list.sonarr_series_type === "daily"}>Daily</option>
                         <option value="anime" selected={list.sonarr_series_type === "anime"}>Anime</option>
@@ -296,7 +296,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
                     </div>
                     <div>
                       <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Monitor</label>
-                      <select id="auto-sonarr-monitor" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all">
+                      <select id="auto-sonarr-monitor" class="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all">
                         <option value="all" selected={list.sonarr_monitor === "all"}>All Episodes</option>
                         <option value="future" selected={list.sonarr_monitor === "future"}>Future Episodes</option>
                         <option value="missing" selected={list.sonarr_monitor === "missing"}>Missing Episodes</option>
@@ -319,7 +319,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 group-focus-within:text-blue-500 transition-colors">
                             <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
                           </svg>
-                          <input type="text" id="auto-sonarr-tags-search" placeholder="Search or type tags..." class="w-full bg-zinc-900/50 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all" />
+                          <input type="text" id="auto-sonarr-tags-search" placeholder="Search or type tags..." class="w-full bg-zinc-950/60 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all" />
                         </div>
                         <div class="space-y-1.5">
                           <p class="text-[9px] font-bold text-zinc-600 uppercase tracking-tight ml-1">Available Tags (Click to add)</p>
@@ -357,9 +357,9 @@ Astro.response.headers.set("Cache-Control", "no-store");
             type="text"
             id="search-input"
             placeholder="Search for a movie, show, or person to add..."
-            class="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-zinc-400"
+            class="flex-1 bg-zinc-950/60 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all placeholder:text-zinc-450"
           />
-          <div class="flex gap-1.5 bg-zinc-950 border border-zinc-800 rounded-xl p-1 shrink-0">
+          <div class="flex gap-1.5 bg-zinc-950/40 border border-zinc-800/40 rounded-xl p-1 shrink-0">
             {[
               { value: "all", label: "All" },
               { value: "movie", label: "Movies" },
@@ -370,7 +370,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
                 class="search-filter-btn px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer"
                 class:list={[
                   f.value === "all"
-                    ? "bg-zinc-800 text-zinc-100"
+                    ? "bg-zinc-800/80 text-zinc-100"
                     : "text-zinc-500 hover:text-zinc-300"
                 ]}
                 data-filter={f.value}

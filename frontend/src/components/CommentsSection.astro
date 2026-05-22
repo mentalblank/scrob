@@ -35,7 +35,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
       </svg>
       Comments
-      <span class="text-sm font-bold text-zinc-500 bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800 ml-2">
+      <span class="text-sm font-bold text-zinc-400 bg-zinc-900/40 px-3 py-1 rounded-full border border-zinc-800/80 ml-2">
         {comments.length}
       </span>
     </h2>
@@ -43,7 +43,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
 
   <div class="w-full">
     {token ? (
-      <div class="mb-12 bg-zinc-900/40 border border-zinc-800 p-6 rounded-3xl backdrop-blur-sm">
+      <div class="mb-12 bg-zinc-950/40 border border-zinc-800/80 p-6 rounded-3xl backdrop-blur-md">
         <form id="comment-form" class="space-y-4">
           <input type="hidden" name="mediaType" value={mediaType} />
           <input type="hidden" name="tmdbId" value={tmdbId} />
@@ -55,7 +55,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
               name="content"
               rows="3"
               placeholder="What are your thoughts?"
-              class="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all resize-none"
+              class="w-full bg-zinc-950/60 border border-zinc-850 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-450 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none"
               required
             ></textarea>
           </div>
@@ -71,7 +71,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
         </form>
       </div>
     ) : (
-      <div class="mb-12 p-8 bg-zinc-900/20 border border-dashed border-zinc-800 rounded-3xl text-center">
+      <div class="mb-12 p-8 bg-zinc-950/20 border border-dashed border-zinc-800/80 rounded-3xl text-center backdrop-blur-md">
         <p class="text-zinc-400 font-medium">Please <a href="/login" class="text-blue-500 hover:underline">log in</a> to leave a comment.</p>
       </div>
     )}
@@ -88,14 +88,14 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
           return (
             <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500" data-comment-id={comment.id}>
               {canSeeProfile ? (
-                <a href={`/profile/${comment.user_id}`} class="w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg hover:border-blue-500/50 transition-colors">
+                <a href={`/profile/${comment.user_id}`} class="w-12 h-12 rounded-2xl bg-zinc-900/20 border border-zinc-800/80 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg hover:border-blue-500/50 transition-colors">
                   {comment.avatar_url
                     ? <img src={`/api/proxy${comment.avatar_url}`} alt={comment.display_name} class="w-full h-full object-cover" loading="lazy" />
                     : comment.display_name[0].toUpperCase()
                   }
                 </a>
               ) : (
-                <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg">
+                <div class="w-12 h-12 rounded-2xl bg-zinc-900/20 border border-zinc-800/80 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg">
                   {comment.avatar_url
                     ? <img src={`/api/proxy${comment.avatar_url}`} alt={comment.display_name} class="w-full h-full object-cover" loading="lazy" />
                     : comment.display_name[0].toUpperCase()
@@ -110,7 +110,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
                     ) : (
                       <span class="font-black text-zinc-100 truncate">{comment.display_name}</span>
                     )}
-                    <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded shrink-0">
+                    <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900/20 border border-zinc-800/80 rounded-lg shrink-0">
                       {new Date(comment.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
                   </div>
@@ -118,7 +118,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
                     <div class="flex items-center gap-1 shrink-0">
                       {isOwner && (
                         <button
-                          class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-lg hover:bg-zinc-800"
+                          class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-lg hover:bg-zinc-900/40 border border-transparent hover:border-zinc-800/50"
                           data-id={comment.id}
                           title="Edit Comment"
                         >
@@ -129,7 +129,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
                         </button>
                       )}
                       <button
-                        class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-800"
+                        class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-900/40 border border-transparent hover:border-zinc-800/50"
                         data-id={comment.id}
                         title="Delete Comment"
                       >
@@ -140,11 +140,11 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
                     </div>
                   )}
                 </div>
-                <p class="comment-text text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap break-words">{comment.content}</p>
+                <p class="comment-text text-zinc-350 leading-relaxed font-medium whitespace-pre-wrap break-words">{comment.content}</p>
                 <div class="edit-form hidden mt-3 space-y-2">
                   <textarea
                     rows="3"
-                    class="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all resize-none text-sm"
+                    class="w-full bg-zinc-950/60 border border-zinc-850 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-450 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none text-sm"
                   >{comment.content}</textarea>
                   <div class="flex gap-2 justify-end">
                     <button class="cancel-edit px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
@@ -221,19 +221,19 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
           ? `<img src="/api/proxy${esc(comment.avatar_url)}" alt="${esc(comment.display_name)}" class="w-full h-full object-cover" />`
           : esc(comment.display_name[0].toUpperCase());
         const avatarHtml = canSeeProfile
-          ? `<a href="/profile/${esc(String(comment.user_id))}" class="w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg hover:border-blue-500/50 transition-colors">${avatarInner}</a>`
-          : `<div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg">${avatarInner}</div>`;
+          ? `<a href="/profile/${esc(String(comment.user_id))}" class="w-12 h-12 rounded-2xl bg-zinc-900/20 border border-zinc-800/80 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg hover:border-blue-500/50 transition-colors">${avatarInner}</a>`
+          : `<div class="w-12 h-12 rounded-2xl bg-zinc-900/20 border border-zinc-800/80 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg">${avatarInner}</div>`;
 
         const nameHtml = canSeeProfile
           ? `<a href="/profile/${esc(String(comment.user_id))}" class="font-black text-zinc-100 truncate hover:text-blue-400 transition-colors">${esc(comment.display_name)}</a>`
           : `<span class="font-black text-zinc-100 truncate">${esc(comment.display_name)}</span>`;
 
         const editBtnHtml = (currentUserId === comment.user_id)
-          ? `<button class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-lg hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Edit Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
+          ? `<button class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-lg hover:bg-zinc-900/40 border border-transparent hover:border-zinc-800/50" data-id="${esc(String(comment.id))}" title="Edit Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
           : '';
 
         const deleteBtnHtml = (currentUserId === comment.user_id || isAdmin)
-          ? `<button class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Delete Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>`
+          ? `<button class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-900/40 border border-transparent hover:border-zinc-800/50" data-id="${esc(String(comment.id))}" title="Delete Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>`
           : '';
 
         const actionBtns = (currentUserId === comment.user_id || isAdmin)
@@ -246,13 +246,13 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
             <div class="flex items-center gap-3 mb-1.5">
               <div class="flex items-center gap-3 flex-1 min-w-0">
                 ${nameHtml}
-                <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded shrink-0">${esc(dateStr)}</span>
+                <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900/20 border border-zinc-800/80 rounded-lg shrink-0">${esc(dateStr)}</span>
               </div>
               ${actionBtns}
             </div>
             <p class="comment-text text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap break-words">${esc(comment.content)}</p>
             <div class="edit-form hidden mt-3 space-y-2">
-              <textarea rows="3" class="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all resize-none text-sm">${esc(comment.content)}</textarea>
+              <textarea rows="3" class="w-full bg-zinc-950/60 border border-zinc-855 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-450 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none text-sm">${esc(comment.content)}</textarea>
               <div class="flex gap-2 justify-end">
                 <button class="cancel-edit px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
                 <button class="save-edit px-5 py-2 text-sm font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all active:scale-95 disabled:opacity-50" data-id="${esc(String(comment.id))}">Save</button>
@@ -374,6 +374,4 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
 
   attachListeners();
 </script>
-) : (
-  <div class="mt-24"></div>
-)}
+) : null}

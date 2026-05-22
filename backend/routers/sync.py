@@ -2468,11 +2468,13 @@ async def list_season_overrides(
         if settings and settings.tmdb_api_key:
             tmdb_api_key = settings.tmdb_api_key
         if tmdb_api_key:
+            sem = asyncio.Semaphore(15)
             async def fetch_light(tid: int):
-                try:
-                    return tid, await tmdb.get_show_light(tid, api_key=tmdb_api_key)
-                except Exception:
-                    return tid, None
+                async with sem:
+                    try:
+                        return tid, await tmdb.get_show_light(tid, api_key=tmdb_api_key)
+                    except Exception:
+                        return tid, None
             results = await asyncio.gather(*[fetch_light(tid) for tid in missing_tmdb_ids])
             for tid, data in results:
                 if data:

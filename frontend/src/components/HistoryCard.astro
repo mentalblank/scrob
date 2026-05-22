@@ -39,7 +39,7 @@ const showProgress = !event.completed && progressPct > 0;
 ---
 
 <div 
-  class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70"
+  class="group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
   data-watched-at={watched_at}
   data-media-type={media.type}
   data-media-title={title}
@@ -58,9 +58,9 @@ const showProgress = !event.completed && progressPct > 0;
           decoding="async"
         />
       ) : (
-        <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-[#18181b]">
+        <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-zinc-900/40">
           <span class="text-3xl mb-2 opacity-30">{isEpisode ? '📺' : '🎬'}</span>
-          <span class="text-xs font-bold uppercase tracking-widest text-[#52525b]">{showTitle ?? title}</span>
+          <span class="text-xs font-bold uppercase tracking-widest text-zinc-500">{showTitle ?? title}</span>
         </div>
       )}
 
@@ -68,7 +68,7 @@ const showProgress = !event.completed && progressPct > 0;
 
       <!-- Time badge / Delete button container -->
       <div class="absolute top-2 right-2 z-30 flex items-center justify-end">
-        <div class="time-badge bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-md border border-white/10 shadow-lg uppercase tracking-wider group-hover:scale-0 origin-right transition-transform duration-200">
+        <div class="time-badge bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[10px] font-bold px-2 py-1 rounded-lg border border-zinc-800/80 shadow-lg uppercase tracking-wider group-hover:scale-0 origin-right transition-transform duration-200">
           {timeString}
         </div>
         <button 
@@ -91,7 +91,7 @@ const showProgress = !event.completed && progressPct > 0;
   </a>
 
   <!-- Info -->
-  <a href={href} class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+  <a href={href} class="block p-3 bg-transparent flex-1">
     {showTitle && (
       <p class="text-xs font-medium text-zinc-400 truncate mb-0.5">{showTitle}</p>
     )}
@@ -108,9 +108,9 @@ const showProgress = !event.completed && progressPct > 0;
           <span class="text-[10px] font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
         )}
         {isEpisode ? (
-          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">EPISODE</span>
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">EPISODE</span>
         ) : (
-          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">MOVIE</span>
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">MOVIE</span>
         )}
       </div>
     </div>

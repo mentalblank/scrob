@@ -19,6 +19,7 @@ class MediaServerConnection(Base):
     token            : Mapped[str]           = mapped_column(String(500), nullable=False)
     server_user_id   : Mapped[Optional[str]] = mapped_column(String(255))  # jellyfin/emby user ID
     server_username  : Mapped[Optional[str]] = mapped_column(String(255))  # plex username for webhook attribution
+    external_server_url : Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Inbound sync flags (source → Scrob)
     sync_collection  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,  server_default="true")

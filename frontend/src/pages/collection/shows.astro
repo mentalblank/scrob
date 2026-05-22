@@ -49,7 +49,7 @@ const baseUrl = `/collection/shows?${baseParams.toString()}`;
 
 <Base title="My Shows">
   <div class="flex items-center justify-between gap-4 mb-6">
-    <div class="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-xl p-1 w-fit">
+    <div class="flex items-center gap-1 bg-zinc-900/40 border border-zinc-800/50 rounded-xl p-1 w-fit backdrop-blur-md">
       <a href="/shows" class="px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors active:scale-95 active:opacity-70">Explore</a>
       <a href="/collection/shows" class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 text-white transition-colors active:scale-95 active:opacity-70">My Collection</a>
     </div>
@@ -64,7 +64,7 @@ const baseUrl = `/collection/shows?${baseParams.toString()}`;
     <!-- Sort controls -->
     <select
       id="sort-select"
-      class="bg-zinc-900 border border-zinc-800 text-zinc-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+      class="bg-zinc-900/40 border border-zinc-800/80 hover:border-zinc-700 text-zinc-200 text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-700 cursor-pointer transition-all"
     >
       {[
         { value: "title", label: "A–Z" },
@@ -81,21 +81,21 @@ const baseUrl = `/collection/shows?${baseParams.toString()}`;
   <!-- Filter bar -->
   <div class="flex flex-wrap justify-between items-center gap-4 mb-8">
     <div class="flex flex-wrap gap-3 items-center">
-      <select id="filter-genre" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+      <select id="filter-genre" class="bg-zinc-900/40 border border-zinc-800/80 hover:border-zinc-700 text-zinc-300 text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-700 cursor-pointer transition-all">
         <option value="">All Genres</option>
         {TV_GENRES.map(g => (
           <option value={g} selected={genre === g}>{g}</option>
         ))}
       </select>
 
-      <select id="filter-year" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+      <select id="filter-year" class="bg-zinc-900/40 border border-zinc-800/80 hover:border-zinc-700 text-zinc-300 text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-700 cursor-pointer transition-all">
         <option value="">All Years</option>
         {years.map(y => (
           <option value={y} selected={year === y}>{y}</option>
         ))}
       </select>
 
-      <select id="filter-status" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+      <select id="filter-status" class="bg-zinc-900/40 border border-zinc-800/80 hover:border-zinc-700 text-zinc-300 text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-700 cursor-pointer transition-all">
         <option value="">Any Status</option>
         {TV_STATUSES.map(s => (
           <option value={s} selected={status === s}>{s}</option>
@@ -110,12 +110,12 @@ const baseUrl = `/collection/shows?${baseParams.toString()}`;
   </div>
 
   {data.results.length === 0 ? (
-    <div class="bg-zinc-900/50 rounded-2xl p-12 text-center border border-dashed border-zinc-800">
+    <div class="bg-zinc-950/40 backdrop-blur-md rounded-2xl p-12 text-center border border-dashed border-zinc-800/80">
       <div class="text-zinc-500 mb-4 text-lg">
         {(genre || year || status) ? "No shows match the selected filters" : "Your library is empty"}
       </div>
       {!(genre || year || status) && (
-        <a href="/settings" class="inline-flex items-center px-6 py-3 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition">
+        <a href="/settings" class="inline-flex items-center px-6 py-3.5 bg-zinc-900/40 hover:bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 text-zinc-100 font-bold rounded-xl transition-all hover:scale-[1.02] active:scale-95 duration-200 cursor-pointer">
           Set up Sync
         </a>
       )}

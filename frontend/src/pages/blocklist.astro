@@ -18,41 +18,18 @@ let filters: ContentFilters = { blocked_genres: [], blocked_keywords: [], blocke
 let error = "";
 
 try {
-  const [blocklist, cf] = await Promise.all([
-    api.media.getBlocklist(token),
+  const [blocklistEnriched, cf] = await Promise.all([
+    api.media.getBlocklistEnriched(token),
     api.contentFilters.get(token),
   ]);
   
-  const actualBlocklist = blocklist?.filter(i => !i.is_dropped) || [];
-  const actualDroplist = blocklist?.filter(i => i.is_dropped) || [];
+  blockedItems = blocklistEnriched?.filter(i => !i.is_dropped) || [];
+  droppedItems = blocklistEnriched?.filter(i => i.is_dropped) || [];
   
-  blockedItemsCount = actualBlocklist.length;
-  droppedItemsCount = actualDroplist.length;
+  blockedItemsCount = blockedItems.length;
+  droppedItemsCount = droppedItems.length;
   filters = cf;
 
-  if (tab === "items" && actualBlocklist.length > 0) {
-    const detailPromises = actualBlocklist.map(item => {
-      if (item.media_type === 'series') {
-        return api.shows.get(item.tmdb_id, token)
-          .then(show => ({ ...show, type: 'series' as const, release_date: show.first_air_date }))
-          .catch(() => null);
-      }
-      return api.media.get(item.media_type, item.tmdb_id, token).catch(() => null);
-    });
-    const results = await Promise.all(detailPromises);
-    blockedItems = results.filter((item): item is MediaItem => item !== null);
-  } else if (tab === "dropped" && actualDroplist.length > 0) {
-    const detailPromises = actualDroplist.map(item => {
-      if (item.media_type === 'series') {
-        return api.shows.get(item.tmdb_id, token)
-          .then(show => ({ ...show, type: 'series' as const, release_date: show.first_air_date }))
-          .catch(() => null);
-      }
-      return api.media.get(item.media_type, item.tmdb_id, token).catch(() => null);
-    });
-    const results = await Promise.all(detailPromises);
-    droppedItems = results.filter((item): item is MediaItem => item !== null);
-  }
 } catch (e: any) {
   error = e.message;
 }
@@ -107,7 +84,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
   )}
 
   <!-- Tab Bar -->
-  <div class="flex items-center gap-1 p-1 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-fit max-w-full mb-8 overflow-x-auto no-scrollbar">
+  <div class="flex flex-wrap gap-2 mb-8 border-b border-zinc-800/80 pb-4 w-full overflow-x-auto no-scrollbar">
     {[
       { id: "items",     label: "Blocked Items",       icon: "M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" },
       { id: "dropped",   label: "Dropped Shows",       icon: "M19 14l-7 7-7-7" },
@@ -117,24 +94,24 @@ const LANGUAGE_NAMES: Record<string, string> = {
     ].map(t => (
       <a
         href={`/blocklist?tab=${t.id}`}
-        class={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all shrink-0 ${tab === t.id ? "bg-zinc-700 text-zinc-100 shadow-sm" : "text-zinc-400 hover:text-zinc-200"}`}
+        class={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shrink-0 cursor-pointer ${tab === t.id ? "bg-blue-600/10 border border-blue-500/30 text-zinc-100 shadow-md shadow-blue-500/5" : "border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d={t.icon}/></svg>
         {t.label}
         {t.id === "items" && blockedItemsCount > 0 && (
-          <span class="ml-1 bg-zinc-600 text-zinc-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{blockedItemsCount}</span>
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-blue-500/20 text-blue-300" : "bg-zinc-800 text-zinc-400"}`}>{blockedItemsCount}</span>
         )}
         {t.id === "dropped" && droppedItemsCount > 0 && (
-          <span class="ml-1 bg-amber-900/60 text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{droppedItemsCount}</span>
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-amber-500/20 text-amber-300" : "bg-zinc-800 text-zinc-400"}`}>{droppedItemsCount}</span>
         )}
         {t.id === "genres" && filters.blocked_genres.length > 0 && (
-          <span class="ml-1 bg-rose-900/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{filters.blocked_genres.length}</span>
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{filters.blocked_genres.length}</span>
         )}
         {t.id === "languages" && (filters.filter_languages || []).length > 0 && (
-          <span class="ml-1 bg-rose-900/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{(filters.filter_languages || []).length}</span>
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{(filters.filter_languages || []).length}</span>
         )}
         {t.id === "keywords" && (filters.blocked_keywords.length + filters.blocked_regexes.length) > 0 && (
-          <span class="ml-1 bg-rose-900/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{filters.blocked_keywords.length + filters.blocked_regexes.length}</span>
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{filters.blocked_keywords.length + filters.blocked_regexes.length}</span>
         )}
       </a>
     ))}
@@ -262,9 +239,9 @@ const LANGUAGE_NAMES: Record<string, string> = {
             id="kw-input"
             type="text"
             placeholder="e.g. reality"
-            class="flex-1 bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-xl px-4 py-2.5 text-sm text-zinc-100 focus:outline-none transition-colors"
+            class="flex-1 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
           />
-          <button id="kw-add-btn" class="px-4 py-2.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-100 text-sm font-bold rounded-xl transition-colors cursor-pointer">Add</button>
+          <button id="kw-add-btn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">Add</button>
         </div>
         <div id="kw-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
       </div>
@@ -294,11 +271,11 @@ const LANGUAGE_NAMES: Record<string, string> = {
               id="re-input"
               type="text"
               placeholder="e.g. ^The\s"
-              class="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-xl px-4 py-2.5 pr-10 text-sm text-violet-300 font-mono focus:outline-none transition-colors"
+              class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 pr-10 text-sm text-violet-300 font-mono placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
             />
             <span id="re-validity" class="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold hidden"></span>
           </div>
-          <button id="re-add-btn" class="px-4 py-2.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-100 text-sm font-bold rounded-xl transition-colors cursor-pointer">Add</button>
+          <button id="re-add-btn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">Add</button>
         </div>
         <div id="re-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
       </div>
@@ -366,7 +343,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
           <div class="flex gap-2">
             <select
               id="lang-select"
-              class="flex-1 bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-xl px-4 py-2.5 text-sm text-zinc-100 focus:outline-none transition-colors"
+              class="flex-1 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-205 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
             >
               <option value="">Select a common language...</option>
               {Object.entries(LANGUAGE_NAMES)
@@ -379,10 +356,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
               id="lang-custom-input"
               type="text"
               placeholder="Or code (e.g. ja)"
-              class="w-32 bg-zinc-900 border border-zinc-800 focus:border-zinc-600 rounded-xl px-4 py-2.5 text-sm text-zinc-100 focus:outline-none transition-colors font-mono text-center"
+              class="w-32 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all font-mono text-center"
               maxlength="3"
             />
-            <button id="lang-add-btn" class="px-4 py-2.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-100 text-sm font-bold rounded-xl transition-colors cursor-pointer">Add</button>
+            <button id="lang-add-btn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">Add</button>
           </div>
         </div>
         <div id="lang-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>

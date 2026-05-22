@@ -201,6 +201,14 @@ async def validate_connection(url: str, token: str) -> bool:
     except Exception:
         return False
 
+async def get_machine_identifier(url: str, token: str) -> Optional[str]:
+    """Return the server's machineIdentifier from the Plex root endpoint."""
+    try:
+        data = await _get(f"{url.rstrip('/')}/", token)
+        return data.get("MediaContainer", {}).get("machineIdentifier")
+    except Exception:
+        return None
+
 async def get_libraries(url: str, token: str) -> List[Dict]:
     data = await _get(f"{url.rstrip('/')}/library/sections", token)
     return data.get("MediaContainer", {}).get("Directory", [])

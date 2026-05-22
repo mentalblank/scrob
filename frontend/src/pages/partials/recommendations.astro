@@ -1,5 +1,5 @@
 ---
-import MediaRow from "../../components/MediaRow.astro";
+import MediaCard from "../../components/MediaCard.astro";
 import { api } from "../../lib/api";
 
 export const partial = true;
@@ -30,4 +30,17 @@ if (recommendations.length === 0) {
 }
 ---
 
-<MediaRow title="More like this" items={recommendations} />
+<section class="mb-16">
+  <div class="flex items-center justify-between mb-8 group">
+    <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
+      <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
+      More like this
+    </h2>
+  </div>
+
+  <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-3 md:gap-4">
+    {recommendations.map(item => (
+      <MediaCard item={item} />
+    ))}
+  </div>
+</section>

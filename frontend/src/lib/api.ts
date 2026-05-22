@@ -570,7 +570,7 @@ export interface MediaItem {
     audio_languages: string[];
     subtitle_languages: string[];
   } | null;
-  where_to_watch?: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string }[];
+  where_to_watch?: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string; url?: string | null; connection_id?: number | null }[];
   collection?: {
     id: number;
     name: string;
@@ -688,7 +688,7 @@ export interface Show {
   user_rating?: number | null;
   first_air_date: string | null;
   last_air_date: string | null;
-  where_to_watch?: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string }[];
+  where_to_watch?: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string; url?: string | null; connection_id?: number | null }[];
   trailer_youtube_id?: string | null;
   logo_path?: string | null;
   include_specials?: boolean;
@@ -961,6 +961,9 @@ export const api = {
 
     getBlocklist: (token?: string) =>
       get<{ tmdb_id: number; media_type: string; is_dropped: boolean }[]>("/media/blocklist", undefined, token),
+
+    getBlocklistEnriched: (token?: string) =>
+      get<MediaItem[]>("/media/blocklist/enriched", undefined, token),
 
     block: (tmdbId: number, mediaType: string, token?: string) =>
       post<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType, is_dropped: false }, token),

@@ -39,6 +39,9 @@ const bottomNavItem = (active: boolean) =>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>{title} — Scrob</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.ico" />
@@ -76,7 +79,7 @@ const bottomNavItem = (active: boolean) =>
 
     // Accent color initialization to avoid FOUC
     const accent = localStorage.getItem('accentTheme');
-    if (accent && accent !== 'blue') {
+    if (accent && accent !== 'purple') {
       document.documentElement.setAttribute('data-accent', accent);
     } else {
       document.documentElement.removeAttribute('data-accent');
@@ -112,9 +115,14 @@ const bottomNavItem = (active: boolean) =>
     })();
   </script>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen overflow-x-hidden">
+<body class="bg-[var(--color-bg-page)] text-zinc-100 min-h-screen overflow-x-hidden relative">
+  <!-- Dynamic Ambient Glow Blobs -->
+  <div class="fixed top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-blue-500/5 dark:bg-[var(--accent-900)]/10 blur-[120px] pointer-events-none z-0"></div>
+  <div class="fixed bottom-[10%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-purple-500/5 dark:bg-purple-900/10 blur-[120px] pointer-events-none z-0"></div>
+
   {!hideNav && (
-    <nav class="px-4 md:px-6 py-3 md:py-4 text-sm sticky top-0 z-40 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800/50 transition-colors">
+    <nav class="sticky top-0 md:top-4 z-40 w-full max-w-6xl mx-auto mt-0 md:mt-4 px-4 md:px-6 py-3 md:py-3.5 text-sm transition-all shadow-lg">
+      <div class="absolute inset-0 bg-[var(--color-nav-bg)] backdrop-blur-md border-b md:border border-[var(--color-nav-border)] md:rounded-2xl pointer-events-none -z-10"></div>
       <!-- Default bar -->
       <div id="nav-default" class="flex items-center justify-between gap-3 safe-area-top">
         <!-- Left: logo + desktop links -->
@@ -131,19 +139,26 @@ const bottomNavItem = (active: boolean) =>
             <a href="/history" class={navLink(activeHistory)}>History</a>
           </div>
           <!-- Desktop search -->
-          <form action="/search" method="GET" class="relative hidden md:block">
-            <input
-              id="desktop-search-input"
-              type="text"
-              name="q"
-              placeholder="Search movies & shows..."
-              class="bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 w-64 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 focus:border-zinc-700 transition-all placeholder:text-zinc-400"
-            />
-            <kbd class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400 font-sans pointer-events-none border border-zinc-800 rounded px-1.5 py-0.5 bg-zinc-950">/</kbd>
-          </form>
+          <div class="relative hidden md:block" id="desktop-search-wrapper">
+            <form action="/search" method="GET" autocomplete="off">
+              <input
+                id="desktop-search-input"
+                type="text"
+                name="q"
+                placeholder="Search movies & shows..."
+                class="bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 w-64 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 focus:border-zinc-700 transition-all placeholder:text-zinc-400"
+                autocomplete="off"
+              />
+              <kbd id="desktop-search-kbd" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400 font-sans pointer-events-none border border-zinc-800 rounded px-1.5 py-0.5 bg-zinc-950">/</kbd>
+            </form>
+            <!-- Desktop predictive dropdown -->
+            <div id="desktop-search-dropdown" class="hidden absolute top-full left-0 right-0 mt-2 z-50 bg-zinc-950/70 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+              <div id="desktop-search-results" class="py-1.5 max-h-80 overflow-y-auto"></div>
+            </div>
+          </div>
         </div>
         <!-- Right: mobile search icon + theme + user -->
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 shrink-0">
           <!-- Mobile search icon -->
           <button id="mobile-search-open" class="md:hidden p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors" aria-label="Search">
             <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -169,7 +184,7 @@ const bottomNavItem = (active: boolean) =>
                 <svg id="user-chevron" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="opacity-50 hidden sm:block transition-transform duration-200"><path d="m6 9 6 6 6-6"/></svg>
               </button>
               <div id="user-menu" class="hidden absolute top-full right-0 mt-2 w-48 z-50">
-                <div class="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl p-2">
+                <div class="bg-zinc-950/70 backdrop-blur-2xl border border-[var(--color-nav-border)] rounded-xl shadow-2xl p-2">
                   <a href="/discover" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Discover</a>
                   <a href="/profile" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Profile</a>
                   <a href={`/stats/${user.id}`} class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">Statistics</a>
@@ -207,21 +222,30 @@ const bottomNavItem = (active: boolean) =>
         <button id="mobile-search-close" class="p-2 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0" aria-label="Close search">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
-        <form action="/search" method="GET" class="flex-1 flex items-center gap-2">
-          <input
-            id="mobile-search-input"
-            type="text"
-            name="q"
-            placeholder="Search movies & shows..."
-            class="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-zinc-500"
-          />
-          <button type="submit" class="self-stretch px-4 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-full transition-colors shrink-0">Go</button>
-        </form>
+        <div class="flex-1 relative" id="mobile-search-wrapper">
+          <form action="/search" method="GET" autocomplete="off" class="flex items-center gap-2">
+            <input
+              id="mobile-search-input"
+              type="text"
+              name="q"
+              placeholder="Search movies & shows..."
+              class="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-zinc-500"
+              autocomplete="off"
+            />
+            <button type="submit" class="self-stretch px-4 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-full transition-colors shrink-0">Go</button>
+          </form>
+          <!-- Mobile predictive dropdown -->
+          <div id="mobile-search-dropdown" class="hidden absolute top-full left-0 right-0 mt-2 z-50 bg-zinc-950/70 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+            <div id="mobile-search-results" class="py-1.5 max-h-64 overflow-y-auto"></div>
+          </div>
+        </div>
       </div>
     </nav>
   )}
 
-  {pathname === "/" && <div id="now-playing-section" class="relative z-30"></div>}
+  {pathname === "/" && (
+    <div id="now-playing-section" class="relative z-30 w-full max-w-6xl mx-auto px-4 md:px-6 mt-3 md:mt-4"></div>
+  )}
 
   <main class:list={[
     "px-6 md:px-6 pb-24 md:pb-8 max-w-screen-xl mx-auto",
@@ -233,7 +257,7 @@ const bottomNavItem = (active: boolean) =>
 
   <!-- Mobile bottom nav -->
   {!hideNav && (
-    <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-900 border-t border-zinc-800 flex items-stretch safe-area-bottom">
+    <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--color-nav-bg)] backdrop-blur-md border-t border-[var(--color-nav-border)] flex items-stretch safe-area-bottom">
       <a href="/" class={bottomNavItem(activeHome)}>
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         Home
@@ -277,7 +301,7 @@ const bottomNavItem = (active: boolean) =>
   </div>
 
   <!-- List popover (shared, repositioned on use) -->
-  <div id="list-popover" class="hidden absolute z-50 w-64 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+  <div id="list-popover" class="hidden absolute z-50 w-64 bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
     <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
       <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Add to list</span>
       <button id="list-popover-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer" aria-label="Close">
@@ -327,7 +351,7 @@ const bottomNavItem = (active: boolean) =>
 
   <!-- Confirm dialog -->
   <div id="confirm-dialog" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl shadow-2xl p-6 w-full max-w-sm mx-4 backdrop-blur-xl overflow-hidden">
       <h3 id="confirm-title" class="text-base font-bold text-zinc-100 mb-2"></h3>
       <p id="confirm-body" class="text-sm text-zinc-400 mb-6"></p>
       <div class="flex gap-2 justify-end">
@@ -388,13 +412,15 @@ const bottomNavItem = (active: boolean) =>
       navSearch?.classList.add('hidden');
       navSearch?.classList.remove('flex');
       navDefault?.classList.remove('hidden');
+      closeMobileDropdown();
     };
 
     document.getElementById('mobile-search-close')?.addEventListener('click', closeSearch);
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !navSearch?.classList.contains('hidden')) {
-        closeSearch();
+      if (e.key === 'Escape') {
+        if (!navSearch?.classList.contains('hidden')) { closeSearch(); return; }
+        closeDesktopDropdown();
         return;
       }
       if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
@@ -409,6 +435,124 @@ const bottomNavItem = (active: boolean) =>
           mobileSearchInput?.focus();
         }
       }
+    });
+
+    // ── Predictive search dropdown ─────────────────────────────────────────────
+    const desktopInput    = document.getElementById('desktop-search-input') as HTMLInputElement | null;
+    const desktopKbd      = document.getElementById('desktop-search-kbd');
+    const desktopDropdown = document.getElementById('desktop-search-dropdown')!;
+    const desktopResults  = document.getElementById('desktop-search-results')!;
+    const mobileDropdown  = document.getElementById('mobile-search-dropdown')!;
+    const mobileResults   = document.getElementById('mobile-search-results')!;
+
+    let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+    function closeDesktopDropdown() {
+      desktopDropdown?.classList.add('hidden');
+    }
+    function closeMobileDropdown() {
+      mobileDropdown?.classList.add('hidden');
+    }
+
+    const searchSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`;
+    const movieSvg  = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>`;
+    const tvSvg     = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="15" x="2" y="7" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>`;
+    const personSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+
+    function buildDropdownHtml(query: string, results: any[]): string {
+      const esc = (s: unknown) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      let html = '';
+
+      results.slice(0, 6).forEach(item => {
+        const isMovie = item.type === 'movie';
+        const isPerson = item.type === 'person';
+        const href = isMovie
+          ? `/media/movie/${item.tmdb_id}`
+          : (isPerson ? `/person/${item.tmdb_id}` : `/show/${item.tmdb_id}`);
+        const icon = isMovie ? movieSvg : (isPerson ? personSvg : tvSvg);
+        
+        let badge = '';
+        if (isMovie) {
+          badge = `<span class="text-[9px] font-bold uppercase tracking-wider text-blue-400 px-1.5 py-0.5 rounded bg-blue-500/10 shrink-0">Movie</span>`;
+        } else if (isPerson) {
+          badge = `<span class="text-[9px] font-bold uppercase tracking-wider text-green-400 px-1.5 py-0.5 rounded bg-green-500/10 shrink-0">Person</span>`;
+        } else {
+          badge = `<span class="text-[9px] font-bold uppercase tracking-wider text-purple-400 px-1.5 py-0.5 rounded bg-purple-500/10 shrink-0">Show</span>`;
+        }
+
+        const year = item.release_date
+          ? new Date(item.release_date).getFullYear()
+          : '';
+
+        html += `<a href="${esc(href)}" class="nav-dropdown-item flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800/60 transition-colors group cursor-pointer">
+          <div class="shrink-0 text-zinc-500 group-hover:text-zinc-300 transition-colors">${icon}</div>
+          ${ item.poster_path
+              ? `<img src="${esc(item.poster_path)}" class="w-7 h-10 rounded object-cover shrink-0 border border-zinc-800" loading="lazy" />`
+              : `<div class="w-7 h-10 rounded bg-zinc-800 shrink-0"></div>` }
+          <div class="flex-1 min-w-0 pr-2">
+            <p class="text-sm font-semibold text-zinc-100 truncate">${esc(item.title)}</p>
+            <p class="text-[10px] text-zinc-500">${esc(year)}</p>
+          </div>
+          ${badge}
+        </a>`;
+      });
+
+      // Always append the full-search fallback
+      html += `<a href="/search?q=${encodeURIComponent(query)}" class="nav-dropdown-item flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800/60 transition-colors border-t border-zinc-800/60 group cursor-pointer">
+        <div class="shrink-0 text-zinc-400">${searchSvg}</div>
+        <p class="text-sm text-zinc-400 group-hover:text-zinc-100 transition-colors">Search for <strong class="text-zinc-200">&ldquo;${String(query).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}&rdquo;</strong></p>
+      </a>`;
+
+      return html;
+    }
+
+    async function fetchSuggestions(query: string, resultsEl: HTMLElement, dropdownEl: HTMLElement) {
+      if (!query.trim()) {
+        dropdownEl.classList.add('hidden');
+        return;
+      }
+      try {
+        const res = await fetch(`/api/proxy/media/search?q=${encodeURIComponent(query)}&page=1`, {
+          headers: { 'Authorization': `Bearer ${(window as any).__AUTH_TOKEN__ ?? ''}` }
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        resultsEl.innerHTML = buildDropdownHtml(query, data.results ?? []);
+        dropdownEl.classList.remove('hidden');
+      } catch {
+        // On error still show the fallback search link
+        resultsEl.innerHTML = buildDropdownHtml(query, []);
+        dropdownEl.classList.remove('hidden');
+      }
+    }
+
+    function attachPredictive(inputEl: HTMLInputElement | null, resultsEl: HTMLElement, dropdownEl: HTMLElement) {
+      if (!inputEl) return;
+      inputEl.addEventListener('input', () => {
+        if (searchDebounce) clearTimeout(searchDebounce);
+        const q = inputEl.value;
+        if (!q.trim()) { dropdownEl.classList.add('hidden'); return; }
+        searchDebounce = setTimeout(() => fetchSuggestions(q, resultsEl, dropdownEl), 220);
+      });
+      inputEl.addEventListener('focus', () => {
+        if (inputEl.value.trim()) fetchSuggestions(inputEl.value, resultsEl, dropdownEl);
+        // Hide the kbd hint when focused
+        desktopKbd?.classList.add('hidden');
+      });
+      inputEl.addEventListener('blur', () => {
+        // Delay so clicks on dropdown items register first
+        setTimeout(() => dropdownEl.classList.add('hidden'), 150);
+        desktopKbd?.classList.remove('hidden');
+      });
+    }
+
+    attachPredictive(desktopInput, desktopResults, desktopDropdown);
+    attachPredictive(mobileSearchInput, mobileResults, mobileDropdown);
+
+    // Close desktop dropdown when clicking outside
+    document.addEventListener('pointerdown', (e) => {
+      const wrapper = document.getElementById('desktop-search-wrapper');
+      if (wrapper && !wrapper.contains(e.target as Node)) closeDesktopDropdown();
     });
   </script>
 
@@ -483,7 +627,7 @@ const bottomNavItem = (active: boolean) =>
             <div class="absolute inset-0 overflow-hidden" ${backdropBg}>
               ${backdropUrl ? `<div class="absolute inset-0 bg-zinc-950/85 backdrop-blur-sm"></div>` : `<div class="absolute inset-0 bg-zinc-900"></div>`}
             </div>
-            ${href ? `<a href="${esc(href)}" class="relative flex items-center gap-3 px-6 md:px-8 py-2.5 max-w-screen-xl mx-auto hover:brightness-110 transition-all">` : `<div class="relative flex items-center gap-3 px-6 md:px-8 py-2.5 max-w-screen-xl mx-auto">`}
+            ${href ? `<a href="${esc(href)}" class="relative flex items-center gap-3 px-4 md:px-6 py-3 hover:brightness-110 transition-all">` : `<div class="relative flex items-center gap-3 px-4 md:px-6 py-3">`}
               ${indicator}
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-0.5">
@@ -513,7 +657,7 @@ const bottomNavItem = (active: boolean) =>
             </div>
           </div>`;
       }).join('');
-      return `<div class="bg-zinc-950 border-b border-zinc-800/30">${rows}</div>`;
+      return `<div class="bg-zinc-950/90 backdrop-blur-md border border-zinc-800/40 rounded-2xl shadow-xl overflow-hidden">${rows}</div>`;
     }
 
     function tickNowPlaying() {

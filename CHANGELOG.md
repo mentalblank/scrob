@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file. This project is a fork of [ellite/scrob](https://github.com/ellite/scrob).
 
-## [Unreleased] - 2026-05-19
+## [Unreleased]
 
 ### Added
 - **Language Filters**: Added a new content filter section allowing users to blacklist or whitelist specific languages to exclude/include them in discovery results.
@@ -30,6 +30,16 @@ All notable changes to this project will be documented in this file. This projec
 ---
 
 ### Changed
+- **Detail Page Action Buttons**: Redesigned buttons across movie, show, and episode detail pages into a unified, dynamically scaling grid to eliminate empty margins.
+- **Discover and Airing Today Cards**: Aligned discover page grids and home page airing today cards to use the vertical 2:3 `MediaCard` poster layout.
+- **Single-Season Breadcrumbs**: Simplified breadcrumbs on episode detail pages to skip the intermediate season level for single-season shows.
+- **Show Page Images**: Restored original poster/backdrop behavior in backend queries.
+- **Season and Episode Pages**: Restructured Movie, Show, Season, and Episode detail pages into a two-column sidebar layout.
+- **Empty Season Filtering**: Excluded seasons with zero episodes from show detail pages and the season selector navigation.
+- **Cross-Season Episode Navigation**: Changed episode page pagination to allow navigating to the next season's first episode or the previous season's last episode when reaching season boundaries.
+- **Hero/Backdrop Images**: Unified the layout, scaling, masking, height, and backdrop opacity of hero images on the Season detail, Episode detail, and Next Up dashboard sections to match the Show page backdrop behavior.
+- **Settings Tab Panels**: Reorganised settings page to use a tab layout.
+- **UI Redesign**: Overhauled the frontend visual styling system using modern glassmorphic card overlays, typography (Inter and Plus Jakarta Sans), and ambient background glows
 - **Mobile Detail Pages**: Cleaned up layout structure, margins, and typography for show, movie, season, and episode detail pages on mobile viewports. Relocated production/network logos inside the metadata info box, optimized padding and font sizes of tags, hid secondary SVG icons to save screen space, and reduced overview description typography scale.
 - **History Card Badges**: Removed redundant blue season/episode badge and green checkmark badge overlay on watch history cards.
 - **Mobile Details Alignment**: Centered logos, titles, action bars, metadata, and overview text blocks when viewed on mobile viewports for show, season, episode, and movie detail pages.
