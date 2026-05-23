@@ -549,6 +549,7 @@ export interface MediaItem {
   };
   production_companies?: ProductionCompany[];
   recommendations?: MediaItem[];
+  release_dates?: { digital?: string | null; physical?: string | null } | null;
 }
 
 export interface SubtitleTrack {

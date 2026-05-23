@@ -28,8 +28,20 @@ if (!item && !error) {
 const year = item?.release_date?.slice(0, 4) ?? null;
 const rating = item?.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
 const isEpisode = item?.type === "episode";
+const isMovie = item?.type === "movie";
 const collection = item?.collection;
 const showRefreshBtn = item?.in_library && (item.type === "movie" || (isEpisode && !!item.show_tmdb_id));
+
+const today = new Date();
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+function isPast(iso: string | null | undefined): boolean {
+  return !!iso && new Date(iso) <= today;
+}
+const theatricalDate = item?.release_date ?? null;
+const digitalDate = item?.release_dates?.digital ?? null;
+const physicalDate = item?.release_dates?.physical ?? null;
 const langNames = new Intl.DisplayNames(["en"], { type: "language" });
 const originalLanguage = item?.original_language
   ? langNames.of(item.original_language) ?? item.original_language
@@ -146,9 +158,15 @@ const refreshUrl = isEpisode
                   </a>
                 )}
                 {item.status && (
-                  <span class="capitalize px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-black text-zinc-400 tracking-widest">
-                    {item.status}
-                  </span>
+                  isMovie ? (
+                    <button id="release-schedule-btn" class="capitalize px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-black text-zinc-400 tracking-widest hover:bg-zinc-700 hover:text-zinc-300 transition-colors cursor-pointer">
+                      {item.status}
+                    </button>
+                  ) : (
+                    <span class="capitalize px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-black text-zinc-400 tracking-widest">
+                      {item.status}
+                    </span>
+                  )
                 )}
                 {originalLanguage && (
                   <span class="flex items-center gap-1.5 font-medium text-zinc-400">
@@ -349,6 +367,40 @@ const refreshUrl = isEpisode
       </div>
     </div>
   )}
+
+  {isMovie && item?.status && (
+    <div id="release-schedule-popover" class="hidden absolute z-50 w-52 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+      <div class="px-3 pt-2.5 pb-2 border-b border-zinc-800">
+        <p class="text-[10px] font-black text-zinc-500 tracking-widest uppercase">Release Schedule</p>
+      </div>
+      <div class="px-3 py-2.5 flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-zinc-500 text-xs">Theatrical</span>
+          {theatricalDate ? (
+            <span class={`text-xs font-mono font-bold ${isPast(theatricalDate) ? "text-zinc-300" : "text-blue-400"}`}>{fmtDate(theatricalDate)}</span>
+          ) : (
+            <span class="text-xs text-zinc-600">—</span>
+          )}
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-zinc-500 text-xs">Digital</span>
+          {digitalDate ? (
+            <span class={`text-xs font-mono font-bold ${isPast(digitalDate) ? "text-zinc-300" : "text-blue-400"}`}>{fmtDate(digitalDate)}</span>
+          ) : (
+            <span class="text-xs text-zinc-600">—</span>
+          )}
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-zinc-500 text-xs">Physical</span>
+          {physicalDate ? (
+            <span class={`text-xs font-mono font-bold ${isPast(physicalDate) ? "text-zinc-300" : "text-blue-400"}`}>{fmtDate(physicalDate)}</span>
+          ) : (
+            <span class="text-xs text-zinc-600">—</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )}
 </Base>
 
 <script>
@@ -450,4 +502,31 @@ const refreshUrl = isEpisode
     }
   }
 
+</script>
+
+<script>
+  const releaseBtn = document.getElementById('release-schedule-btn');
+  const releasePopover = document.getElementById('release-schedule-popover');
+
+  if (releaseBtn && releasePopover) {
+    releaseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const hidden = releasePopover.classList.toggle('hidden');
+      if (!hidden) {
+        const rect = releaseBtn.getBoundingClientRect();
+        const popW = releasePopover.offsetWidth;
+        const left = Math.min(rect.left + window.scrollX, window.innerWidth - popW - 8);
+        releasePopover.style.left = `${Math.max(8, left)}px`;
+        releasePopover.style.top = `${rect.bottom + window.scrollY + 6}px`;
+      }
+    });
+    document.addEventListener('click', (e) => {
+      if (!releasePopover.classList.contains('hidden') && !releasePopover.contains(e.target as Node)) {
+        releasePopover.classList.add('hidden');
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') releasePopover.classList.add('hidden');
+    });
+  }
 </script>

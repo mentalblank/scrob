@@ -619,6 +619,21 @@ def _extract_movie_certification(data: dict, country: str = "US") -> str | None:
     return None
 
 
+def _extract_movie_release_dates(data: dict, country: str = "US") -> dict:
+    results = data.get("release_dates", {}).get("results", [])
+    us_entry = next((e for e in results if e.get("iso_3166_1") == country), None)
+    digital = physical = None
+    if us_entry:
+        for rd in us_entry.get("release_dates", []):
+            t = rd.get("type")
+            d = (rd.get("release_date") or "")[:10] or None
+            if t == 4 and not digital:
+                digital = d
+            elif t == 5 and not physical:
+                physical = d
+    return {"digital": digital, "physical": physical}
+
+
 def _extract_show_content_rating(data: dict, country: str = "US") -> str | None:
     for entry in data.get("content_ratings", {}).get("results", []):
         if entry.get("iso_3166_1") == country:
@@ -3938,6 +3953,7 @@ async def get_media_details(
             "genres": [g["name"] for g in data.get("genres", [])],
             "original_language": data.get("original_language"),
             "age_rating": _extract_movie_certification(data),
+            "release_dates": _extract_movie_release_dates(data),
             "imdb_id": data.get("imdb_id"),
             "adult": data.get("adult", False),
             "collection": collection,

@@ -2,6 +2,20 @@ from core import tmdb
 from models.media import Media, MediaType
 
 
+def _extract_release_dates(results: list) -> dict:
+    us_entry = next((e for e in results if e.get("iso_3166_1") == "US"), None)
+    digital = physical = None
+    if us_entry:
+        for rd in us_entry.get("release_dates", []):
+            t = rd.get("type")
+            d = (rd.get("release_date") or "")[:10] or None
+            if t == 4 and not digital:
+                digital = d
+            elif t == 5 and not physical:
+                physical = d
+    return {"digital": digital, "physical": physical}
+
+
 async def enrich_media(media: Media, api_key: str = None, series_tmdb_id: int = None) -> None:
     """Fetch TMDB metadata and update the media record in place."""
     if media.media_type == MediaType.movie and not media.tmdb_id:
@@ -29,6 +43,7 @@ async def enrich_media(media: Media, api_key: str = None, series_tmdb_id: int = 
                 "tagline": data.get("tagline"),
                 "status": data.get("status"),
                 "adult": data.get("adult", False),
+                "release_dates": _extract_release_dates(data.get("release_dates", {}).get("results", [])),
             }
             media.adult = data.get("adult", False)
 
