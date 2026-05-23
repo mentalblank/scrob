@@ -83,7 +83,7 @@ def extract_quality(media_list: List[Dict]) -> Dict:
         resolution = "1080p"
     elif plex_res == "720":
         resolution = "720p"
-    elif plex_res == "480":
+    elif plex_res in ("480", "sd"):
         resolution = "480p"
     elif plex_res:
         resolution = f"{plex_res}p"
