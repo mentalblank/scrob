@@ -49,7 +49,6 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
           <input type="hidden" name="tmdbId" value={tmdbId} />
           {seasonNumber !== undefined && <input type="hidden" name="seasonNumber" value={seasonNumber} />}
           {episodeNumber !== undefined && <input type="hidden" name="episodeNumber" value={episodeNumber} />}
-
           <div class="relative">
             <textarea
               name="content"
@@ -59,7 +58,18 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
               required
             ></textarea>
           </div>
-          <div class="flex justify-end">
+          <div class="flex items-center justify-between">
+            <label class="flex items-center gap-2 cursor-pointer select-none group">
+              <input
+                type="checkbox"
+                id="is-spoiler-checkbox"
+                name="isSpoiler"
+                class="w-4 h-4 accent-amber-500 cursor-pointer"
+              />
+              <span class="text-sm font-medium text-zinc-400 group-hover:text-amber-400 transition-colors">
+                Mark as spoiler
+              </span>
+            </label>
             <button
               type="submit"
               id="submit-comment"
@@ -113,6 +123,9 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
                     <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900/20 border border-zinc-800/80 rounded-lg shrink-0">
                       {new Date(comment.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
+                    <span class={`spoiler-badge text-[10px] font-bold text-amber-400 uppercase tracking-widest px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded shrink-0${comment.is_spoiler ? '' : ' hidden'}`}>
+                      Spoiler
+                    </span>
                   </div>
                   {(isOwner || isAdmin) && (
                     <div class="flex items-center gap-1 shrink-0">
@@ -140,15 +153,31 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
                     </div>
                   )}
                 </div>
-                <p class="comment-text text-zinc-350 leading-relaxed font-medium whitespace-pre-wrap break-words">{comment.content}</p>
+                <!-- Spoiler wrapper: always present, overlay toggled via JS -->
+                <div class="comment-body relative">
+                  <p class={`comment-text text-zinc-350 leading-relaxed font-medium whitespace-pre-wrap break-words${comment.is_spoiler ? ' blur-sm select-none pointer-events-none' : ''}`}>{comment.content}</p>
+                  <div class={`spoiler-overlay absolute inset-0 flex items-center justify-center rounded-lg cursor-pointer bg-zinc-950/70 backdrop-blur-sm${comment.is_spoiler ? '' : ' hidden'}`}>
+                    <span class="text-amber-400 font-bold text-sm">Click to reveal</span>
+                  </div>
+                </div>
                 <div class="edit-form hidden mt-3 space-y-2">
                   <textarea
                     rows="3"
                     class="w-full bg-zinc-950/60 border border-zinc-850 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-450 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none text-sm"
                   >{comment.content}</textarea>
-                  <div class="flex gap-2 justify-end">
-                    <button class="cancel-edit px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
-                    <button class="save-edit px-5 py-2 text-sm font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all active:scale-95 disabled:opacity-50" data-id={comment.id}>Save</button>
+                  <div class="flex items-center justify-between">
+                    <label class="flex items-center gap-2 cursor-pointer select-none group">
+                      <input
+                        type="checkbox"
+                        class="spoiler-edit-checkbox w-4 h-4 accent-amber-500 cursor-pointer"
+                        checked={comment.is_spoiler}
+                      />
+                      <span class="text-sm font-medium text-zinc-400 group-hover:text-amber-400 transition-colors">Spoiler</span>
+                    </label>
+                    <div class="flex gap-2">
+                      <button class="cancel-edit px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+                      <button class="save-edit px-5 py-2 text-sm font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all active:scale-95 disabled:opacity-50" data-id={comment.id}>Save</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -166,6 +195,71 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  const SPOILER_OVERLAY_HTML = `<span class="text-amber-400 font-bold text-sm">Click to reveal</span>`;
+
+  function buildCommentHTML(comment, canSeeProfile, showActions) {
+    const dateStr = new Date(comment.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+    const avatarInner = comment.avatar_url
+      ? `<img src="/api/proxy${esc(comment.avatar_url)}" alt="${esc(comment.display_name)}" class="w-full h-full object-cover" />`
+      : esc(comment.display_name[0].toUpperCase());
+    const avatarCls = 'w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg';
+    const avatarHtml = canSeeProfile
+      ? `<a href="/profile/${esc(String(comment.user_id))}" class="${avatarCls} hover:border-blue-500/50 transition-colors">${avatarInner}</a>`
+      : `<div class="${avatarCls}">${avatarInner}</div>`;
+
+    const nameHtml = canSeeProfile
+      ? `<a href="/profile/${esc(String(comment.user_id))}" class="font-black text-zinc-100 truncate hover:text-blue-400 transition-colors">${esc(comment.display_name)}</a>`
+      : `<span class="font-black text-zinc-100 truncate">${esc(comment.display_name)}</span>`;
+
+    const spoilerBadgeHtml = `<span class="spoiler-badge text-[10px] font-bold text-amber-400 uppercase tracking-widest px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded shrink-0${comment.is_spoiler ? '' : ' hidden'}">Spoiler</span>`;
+
+    const editBtnHtml = showActions.edit
+      ? `<button class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-lg hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Edit Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
+      : '';
+    const deleteBtnHtml = showActions.delete
+      ? `<button class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Delete Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>`
+      : '';
+    const actionBtns = (showActions.edit || showActions.delete)
+      ? `<div class="flex items-center gap-1 shrink-0">${editBtnHtml}${deleteBtnHtml}</div>`
+      : '';
+
+    const textBlurCls = comment.is_spoiler ? ' blur-sm select-none pointer-events-none' : '';
+    const overlayCls = comment.is_spoiler ? '' : ' hidden';
+    const editCheckboxChecked = comment.is_spoiler ? 'checked' : '';
+
+    return `
+      ${avatarHtml}
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-3 mb-1.5">
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            ${nameHtml}
+            <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded shrink-0">${esc(dateStr)}</span>
+            ${spoilerBadgeHtml}
+          </div>
+          ${actionBtns}
+        </div>
+        <div class="comment-body relative">
+          <p class="comment-text text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap break-words${textBlurCls}">${esc(comment.content)}</p>
+          <div class="spoiler-overlay absolute inset-0 flex items-center justify-center rounded-lg cursor-pointer bg-zinc-950/70 backdrop-blur-sm${overlayCls}">${SPOILER_OVERLAY_HTML}</div>
+        </div>
+        <div class="edit-form hidden mt-3 space-y-2">
+          <textarea rows="3" class="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all resize-none text-sm">${esc(comment.content)}</textarea>
+          <div class="flex items-center justify-between">
+            <label class="flex items-center gap-2 cursor-pointer select-none group">
+              <input type="checkbox" class="spoiler-edit-checkbox w-4 h-4 accent-amber-500 cursor-pointer" ${editCheckboxChecked} />
+              <span class="text-sm font-medium text-zinc-400 group-hover:text-amber-400 transition-colors">Spoiler</span>
+            </label>
+            <div class="flex gap-2">
+              <button class="cancel-edit px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+              <button class="save-edit px-5 py-2 text-sm font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all active:scale-95 disabled:opacity-50" data-id="${esc(String(comment.id))}">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   const form = document.getElementById('comment-form');
   const submitBtn = document.getElementById('submit-comment');
   const commentsList = document.getElementById('comments-list');
@@ -180,6 +274,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
       const tmdbId = parseInt(formData.get('tmdbId'));
       const seasonNumber = formData.get('seasonNumber') ? parseInt(formData.get('seasonNumber')) : undefined;
       const episodeNumber = formData.get('episodeNumber') ? parseInt(formData.get('episodeNumber')) : undefined;
+      const isSpoiler = document.getElementById('is-spoiler-checkbox')?.checked ?? false;
 
       if (!content.trim()) return;
 
@@ -198,72 +293,28 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
             tmdb_id: tmdbId,
             season_number: seasonNumber,
             episode_number: episodeNumber,
-            content: content
+            content: content,
+            is_spoiler: isSpoiler,
           })
         });
 
         if (!res.ok) throw new Error('Failed to post comment');
 
         const comment = await res.json();
-
         form.reset();
-
         if (noComments) noComments.remove();
 
+        const canSeeProfile = comment.user_is_public || (currentUserId === comment.user_id || isAdmin);
         const div = document.createElement('div');
         div.className = 'flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500';
         div.dataset.commentId = comment.id;
-
-        const dateStr = new Date(comment.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-        const canSeeProfile = comment.user_is_public || (currentUserId === comment.user_id || isAdmin);
-
-        const avatarInner = comment.avatar_url
-          ? `<img src="/api/proxy${esc(comment.avatar_url)}" alt="${esc(comment.display_name)}" class="w-full h-full object-cover" />`
-          : esc(comment.display_name[0].toUpperCase());
-        const avatarHtml = canSeeProfile
-          ? `<a href="/profile/${esc(String(comment.user_id))}" class="w-12 h-12 rounded-2xl bg-zinc-900/20 border border-zinc-800/80 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg hover:border-blue-500/50 transition-colors">${avatarInner}</a>`
-          : `<div class="w-12 h-12 rounded-2xl bg-zinc-900/20 border border-zinc-800/80 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg">${avatarInner}</div>`;
-
-        const nameHtml = canSeeProfile
-          ? `<a href="/profile/${esc(String(comment.user_id))}" class="font-black text-zinc-100 truncate hover:text-blue-400 transition-colors">${esc(comment.display_name)}</a>`
-          : `<span class="font-black text-zinc-100 truncate">${esc(comment.display_name)}</span>`;
-
-        const editBtnHtml = (currentUserId === comment.user_id)
-          ? `<button class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-lg hover:bg-zinc-900/40 border border-transparent hover:border-zinc-800/50" data-id="${esc(String(comment.id))}" title="Edit Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
-          : '';
-
-        const deleteBtnHtml = (currentUserId === comment.user_id || isAdmin)
-          ? `<button class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-900/40 border border-transparent hover:border-zinc-800/50" data-id="${esc(String(comment.id))}" title="Delete Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>`
-          : '';
-
-        const actionBtns = (currentUserId === comment.user_id || isAdmin)
-          ? `<div class="flex items-center gap-1 shrink-0">${editBtnHtml}${deleteBtnHtml}</div>`
-          : '';
-
-        div.innerHTML = `
-          ${avatarHtml}
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-3 mb-1.5">
-              <div class="flex items-center gap-3 flex-1 min-w-0">
-                ${nameHtml}
-                <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900/20 border border-zinc-800/80 rounded-lg shrink-0">${esc(dateStr)}</span>
-              </div>
-              ${actionBtns}
-            </div>
-            <p class="comment-text text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap break-words">${esc(comment.content)}</p>
-            <div class="edit-form hidden mt-3 space-y-2">
-              <textarea rows="3" class="w-full bg-zinc-950/60 border border-zinc-855 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-450 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none text-sm">${esc(comment.content)}</textarea>
-              <div class="flex gap-2 justify-end">
-                <button class="cancel-edit px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
-                <button class="save-edit px-5 py-2 text-sm font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all active:scale-95 disabled:opacity-50" data-id="${esc(String(comment.id))}">Save</button>
-              </div>
-            </div>
-          </div>
-        `;
+        div.innerHTML = buildCommentHTML(comment, canSeeProfile, {
+          edit: currentUserId === comment.user_id,
+          delete: currentUserId === comment.user_id || isAdmin,
+        });
 
         commentsList.prepend(div);
         attachListeners();
-
       } catch (err) {
         alert(err.message);
       } finally {
@@ -273,48 +324,82 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
     });
   }
 
+  function setSpoilerState(commentEl, isSpoiler) {
+    const textEl = commentEl.querySelector('.comment-text');
+    const overlay = commentEl.querySelector('.spoiler-overlay');
+    const badge = commentEl.querySelector('.spoiler-badge');
+
+    if (isSpoiler) {
+      textEl.classList.add('blur-sm', 'select-none', 'pointer-events-none');
+      overlay?.classList.remove('hidden');
+      badge?.classList.remove('hidden');
+    } else {
+      textEl.classList.remove('blur-sm', 'select-none', 'pointer-events-none');
+      overlay?.classList.add('hidden');
+      badge?.classList.add('hidden');
+    }
+  }
+
   function attachListeners() {
+    // Spoiler reveal
+    document.querySelectorAll('.spoiler-overlay').forEach(overlay => {
+      const clone = overlay.cloneNode(true);
+      overlay.parentNode.replaceChild(clone, overlay);
+      clone.addEventListener('click', () => {
+        const commentEl = clone.closest('[data-comment-id]');
+        commentEl.querySelector('.comment-text').classList.remove('blur-sm', 'select-none', 'pointer-events-none');
+        clone.classList.add('hidden');
+      });
+    });
+
     // Edit buttons
     document.querySelectorAll('.edit-comment').forEach(btn => {
-      const newBtn = btn.cloneNode(true);
-      btn.parentNode.replaceChild(newBtn, btn);
-      newBtn.addEventListener('click', () => {
-        const commentEl = newBtn.closest('[data-comment-id]');
+      const clone = btn.cloneNode(true);
+      btn.parentNode.replaceChild(clone, btn);
+      clone.addEventListener('click', () => {
+        const commentEl = clone.closest('[data-comment-id]');
         const textEl = commentEl.querySelector('.comment-text');
         const editForm = commentEl.querySelector('.edit-form');
         const textarea = editForm.querySelector('textarea');
+        const spoilerCheckbox = editForm.querySelector('.spoiler-edit-checkbox');
+        const body = commentEl.querySelector('.comment-body');
+
         textarea.value = textEl.textContent;
-        textEl.classList.add('hidden');
+        if (spoilerCheckbox) {
+          spoilerCheckbox.checked = !commentEl.querySelector('.spoiler-badge').classList.contains('hidden');
+        }
+        body.classList.add('hidden');
         editForm.classList.remove('hidden');
         textarea.focus();
       });
     });
 
-    // Cancel edit buttons
+    // Cancel edit
     document.querySelectorAll('.cancel-edit').forEach(btn => {
-      const newBtn = btn.cloneNode(true);
-      btn.parentNode.replaceChild(newBtn, btn);
-      newBtn.addEventListener('click', () => {
-        const commentEl = newBtn.closest('[data-comment-id]');
-        commentEl.querySelector('.comment-text').classList.remove('hidden');
+      const clone = btn.cloneNode(true);
+      btn.parentNode.replaceChild(clone, btn);
+      clone.addEventListener('click', () => {
+        const commentEl = clone.closest('[data-comment-id]');
+        commentEl.querySelector('.comment-body').classList.remove('hidden');
         commentEl.querySelector('.edit-form').classList.add('hidden');
       });
     });
 
-    // Save edit buttons
+    // Save edit
     document.querySelectorAll('.save-edit').forEach(btn => {
-      const newBtn = btn.cloneNode(true);
-      btn.parentNode.replaceChild(newBtn, btn);
-      newBtn.addEventListener('click', async () => {
-        const commentId = newBtn.dataset.id;
-        const commentEl = newBtn.closest('[data-comment-id]');
-        const textarea = commentEl.querySelector('.edit-form textarea');
-        const content = textarea.value.trim();
+      const clone = btn.cloneNode(true);
+      btn.parentNode.replaceChild(clone, btn);
+      clone.addEventListener('click', async () => {
+        const commentId = clone.dataset.id;
+        const commentEl = clone.closest('[data-comment-id]');
+        const editForm = commentEl.querySelector('.edit-form');
+        const content = editForm.querySelector('textarea').value.trim();
+        const isSpoiler = editForm.querySelector('.spoiler-edit-checkbox')?.checked ?? false;
 
         if (!content) return;
 
-        newBtn.disabled = true;
-        newBtn.textContent = 'Saving...';
+        clone.disabled = true;
+        clone.textContent = 'Saving...';
 
         try {
           const res = await fetch(`/api/proxy/comments/${commentId}`, {
@@ -323,7 +408,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ content })
+            body: JSON.stringify({ content, is_spoiler: isSpoiler })
           });
 
           if (!res.ok) throw new Error('Failed to save');
@@ -331,26 +416,31 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
           const updated = await res.json();
           const textEl = commentEl.querySelector('.comment-text');
           textEl.textContent = updated.content;
-          textEl.classList.remove('hidden');
-          commentEl.querySelector('.edit-form').classList.add('hidden');
+          commentEl.querySelector('.comment-body').classList.remove('hidden');
+          editForm.classList.add('hidden');
+          setSpoilerState(commentEl, updated.is_spoiler);
+
+          // Update edit checkbox to reflect saved state
+          const editCheckbox = editForm.querySelector('.spoiler-edit-checkbox');
+          if (editCheckbox) editCheckbox.checked = updated.is_spoiler;
         } catch (err) {
           alert('Failed to save comment');
         } finally {
-          newBtn.disabled = false;
-          newBtn.textContent = 'Save';
+          clone.disabled = false;
+          clone.textContent = 'Save';
         }
       });
     });
 
     // Delete buttons
     document.querySelectorAll('.delete-comment').forEach(btn => {
-      const newBtn = btn.cloneNode(true);
-      btn.parentNode.replaceChild(newBtn, btn);
-      newBtn.addEventListener('click', async () => {
+      const clone = btn.cloneNode(true);
+      btn.parentNode.replaceChild(clone, btn);
+      clone.addEventListener('click', async () => {
         const ok = await window.showConfirm('Delete comment?', 'This cannot be undone.');
         if (!ok) return;
 
-        const commentId = newBtn.dataset.id;
+        const commentId = clone.dataset.id;
         try {
           const res = await fetch(`/api/proxy/comments/${commentId}`, {
             method: 'DELETE',

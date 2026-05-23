@@ -88,7 +88,7 @@ function skeletonWide() {
 
 <Base title="Discover">
   <div class="flex items-center justify-between mb-10">
-    <h1 class="text-3xl font-black text-zinc-100 tracking-tight">Discover</h1>
+    <h1 class="page-title">Discover</h1>
     <VisibilityFilters />
   </div>
 
@@ -158,7 +158,7 @@ function skeletonWide() {
       {hasProfileData && (topMovieGenres.length > 0 || topShowGenres.length > 0) && (
         <section data-section class="mb-10">
           <div class="flex items-baseline gap-3 mb-5">
-            <h2 class="text-2xl font-black text-zinc-100 tracking-tight">For You</h2>
+            <h2 class="section-headline">For You</h2>
             <span class="text-xs text-zinc-500 font-medium">Based on your favourite genres</span>
           </div>
           <div id="for-you" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -198,7 +198,7 @@ function skeletonWide() {
 
       <!-- Now Playing -->
       <section data-section class="mb-10">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Now Playing in Theaters</h2>
+        <h2 class="section-headline mb-5">Now Playing in Theaters</h2>
         <div id="now-playing" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
           <Fragment set:html={skeleton()} />
         </div>
@@ -206,7 +206,7 @@ function skeletonWide() {
 
       <!-- Trending Trailers -->
       <section data-section class="mb-10">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Trending Trailers</h2>
+        <h2 class="section-headline mb-5">Trending Trailers</h2>
         <div id="trending-trailers" class="flex gap-4 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
           <Fragment set:html={skeletonWide()} />
         </div>
@@ -232,7 +232,7 @@ function skeletonWide() {
       {hasProfileData && topMovieGenres.map((genre, i) => (
         <section data-section class="mb-10">
           <div class="flex items-baseline gap-3 mb-5">
-            <h2 class="text-2xl font-black text-zinc-100 tracking-tight">{genre} Movies</h2>
+            <h2 class="section-headline">{genre} Movies</h2>
             <a href={`/movies?genre=${encodeURIComponent(genre)}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
           </div>
           <div id={`movie-genre-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -243,7 +243,7 @@ function skeletonWide() {
 
       <!-- Coming Soon -->
       <section data-section class="mb-10">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Coming Soon</h2>
+        <h2 class="section-headline mb-5">Coming Soon</h2>
         <div id="coming-soon" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
           <Fragment set:html={skeleton()} />
         </div>
@@ -251,7 +251,7 @@ function skeletonWide() {
 
       <!-- Top Rated Movies -->
       <section data-section class="mb-10">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Top Rated Movies</h2>
+        <h2 class="section-headline mb-5">Top Rated Movies</h2>
         <div id="top-rated-movies" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
           <Fragment set:html={skeleton()} />
         </div>
@@ -289,7 +289,7 @@ function skeletonWide() {
             <Fragment>
               <section data-section class="mb-6">
                 <div class="flex items-baseline gap-3 mb-5">
-                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">On {PROVIDER_NAMES[id]}</h2>
+                  <h2 class="section-headline">On {PROVIDER_NAMES[id]}</h2>
                   <a href={`/movies?provider_id=${id}&provider_name=${encodeURIComponent(PROVIDER_NAMES[id])}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id={`streaming-movie-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -298,7 +298,7 @@ function skeletonWide() {
               </section>
               <section data-section class="mb-10">
                 <div class="flex items-baseline gap-3 mb-5">
-                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">{PROVIDER_NAMES[id]} Shows</h2>
+                  <h2 class="section-headline">{PROVIDER_NAMES[id]} Shows</h2>
                   <a href={`/shows?provider_id=${id}&provider_name=${encodeURIComponent(PROVIDER_NAMES[id])}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id={`streaming-show-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -311,7 +311,7 @@ function skeletonWide() {
             <Fragment>
               <section data-section class="mb-6">
                 <div class="flex items-baseline gap-3 mb-5">
-                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">On Netflix</h2>
+                  <h2 class="section-headline">On Netflix</h2>
                   <a href="/movies?provider_id=8&provider_name=Netflix" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id="fallback-movie-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -320,7 +320,7 @@ function skeletonWide() {
               </section>
               <section data-section class="mb-10">
                 <div class="flex items-baseline gap-3 mb-5">
-                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">Netflix Shows</h2>
+                  <h2 class="section-headline">Netflix Shows</h2>
                   <a href="/shows?provider_id=8&provider_name=Netflix" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id="fallback-show-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -329,7 +329,7 @@ function skeletonWide() {
               </section>
               <section data-section class="mb-6">
                 <div class="flex items-baseline gap-3 mb-5">
-                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">On Prime Video</h2>
+                  <h2 class="section-headline">On Prime Video</h2>
                   <a href="/movies?provider_id=9&provider_name=Prime%20Video" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id="fallback-movie-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -338,7 +338,7 @@ function skeletonWide() {
               </section>
               <section data-section class="mb-10">
                 <div class="flex items-baseline gap-3 mb-5">
-                  <h2 class="text-2xl font-black text-zinc-100 tracking-tight">Disney+ Shows</h2>
+                  <h2 class="section-headline">Disney+ Shows</h2>
                   <a href="/shows?provider_id=337&provider_name=Disney%2B" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
                 </div>
                 <div id="fallback-show-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -369,7 +369,7 @@ function skeletonWide() {
       {hasProfileData && topShowGenres.map((genre, i) => (
         <section data-section class="mb-10">
           <div class="flex items-baseline gap-3 mb-5">
-            <h2 class="text-2xl font-black text-zinc-100 tracking-tight">{genre} Shows</h2>
+            <h2 class="section-headline">{genre} Shows</h2>
             <a href={`/shows?genre=${encodeURIComponent(genre)}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
           </div>
           <div id={`show-genre-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
@@ -380,7 +380,7 @@ function skeletonWide() {
  
       <!-- On Air This Week (backdrop) -->
       <section data-section class="mb-10">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">On Air This Week</h2>
+        <h2 class="section-headline mb-5">On Air This Week</h2>
         <div id="on-air-this-week" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
           <Fragment set:html={skeleton()} />
         </div>
@@ -388,7 +388,7 @@ function skeletonWide() {
  
       <!-- Top Rated Shows (backdrop) -->
       <section data-section class="mb-10">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight mb-5">Top Rated Shows</h2>
+        <h2 class="section-headline mb-5">Top Rated Shows</h2>
         <div id="top-rated-shows" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
           <Fragment set:html={skeleton()} />
         </div>
@@ -397,7 +397,7 @@ function skeletonWide() {
       <!-- Hidden Gems (poster) -->
       <section data-section class="mb-10">
         <div class="flex items-baseline gap-3 mb-5">
-          <h2 class="text-2xl font-black text-zinc-100 tracking-tight">Hidden Gems</h2>
+          <h2 class="section-headline">Hidden Gems</h2>
           <span class="text-xs text-zinc-500 font-medium">Critically acclaimed · under the radar</span>
         </div>
         <div id="hidden-gems" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">

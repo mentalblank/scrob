@@ -770,6 +770,7 @@ def format_media(media: Media) -> dict:
         "episode_number": media.episode_number,
         "show_title": (media.show.custom_title or media.show.title) if media.show else None,
         "show_tmdb_id": media.show.tmdb_id if media.show else None,
+        "show_tvdb_id": media.show.tvdb_id if media.show else None,
         "show_poster_path": media.show.poster_path if media.show else None,
         "show_backdrop_path": media.show.backdrop_path if media.show else None,
         "genres": (media.tmdb_data or {}).get("genres", []),

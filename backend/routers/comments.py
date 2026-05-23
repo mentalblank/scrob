@@ -19,9 +19,11 @@ class CommentCreate(BaseModel):
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
     content: str
+    is_spoiler: bool = False
 
 class CommentUpdate(BaseModel):
     content: str
+    is_spoiler: bool = False
 
 class CommentResponse(BaseModel):
     id: int
@@ -85,6 +87,7 @@ async def list_comments(
             "avatar_url": f"/profile/avatar/{c.user_id}" if (c.user.profile and c.user.profile.avatar_path) else None,
             "user_is_public": c.user.profile.privacy_level == PrivacyLevel.public if c.user.profile else False,
             "content": c.content,
+            "is_spoiler": c.is_spoiler,
             "created_at": c.created_at.isoformat(),
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
         }
@@ -107,11 +110,12 @@ async def create_comment(
         season_number=body.season_number,
         episode_number=body.episode_number,
         content=body.content,
+        is_spoiler=body.is_spoiler,
     )
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
-    
+
     return {
         "id": comment.id,
         "user_id": comment.user_id,
@@ -120,6 +124,7 @@ async def create_comment(
         "avatar_url": f"/profile/avatar/{current_user.id}" if (current_user.profile and current_user.profile.avatar_path) else None,
         "user_is_public": current_user.profile.privacy_level == PrivacyLevel.public if current_user.profile else False,
         "content": comment.content,
+        "is_spoiler": comment.is_spoiler,
         "created_at": comment.created_at.isoformat(),
     }
 
@@ -144,12 +149,14 @@ async def update_comment(
         raise HTTPException(status_code=400, detail="Comment content cannot be empty")
 
     comment.content = stripped
+    comment.is_spoiler = body.is_spoiler
     await db.commit()
     await db.refresh(comment)
 
     return {
         "id": comment.id,
         "content": comment.content,
+        "is_spoiler": comment.is_spoiler,
         "updated_at": comment.updated_at.isoformat() if comment.updated_at else None,
     }
 

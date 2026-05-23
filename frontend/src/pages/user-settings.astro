@@ -56,7 +56,7 @@ const COUNTRIES = (countriesRes || [])
 <Base title="Profile">
   <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
   <div class="max-w-4xl mx-auto">
-    <h1 class="text-3xl font-bold text-zinc-100 mb-8">Profile</h1>
+    <h1 class="page-title mb-8">Profile</h1>
 
     <div id="js-message" class="hidden p-4 rounded-lg mb-8"></div>
 
@@ -65,7 +65,7 @@ const COUNTRIES = (countriesRes || [])
       <!-- Identity -->
       <section>
         <div class="flex items-center justify-between mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-semibold text-zinc-100">Identity</h2>
+          <h2 class="section-headline">Identity</h2>
         </div>
 
         <!-- Avatar -->
@@ -126,7 +126,7 @@ const COUNTRIES = (countriesRes || [])
       <!-- Privacy -->
       <section>
         <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-semibold text-zinc-100">Privacy</h2>
+          <h2 class="section-headline">Privacy</h2>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           {PRIVACY_LEVELS.map(([value, label, desc]) => (
@@ -149,9 +149,8 @@ const COUNTRIES = (countriesRes || [])
 
       <!-- Discovery Preferences -->
       <section>
-        <div class="mb-6 border-b border-zinc-800 pb-3">
-          <h2 class="text-xl font-bold text-zinc-100">Discovery Preferences</h2>
-          <p class="text-xs text-zinc-500 mt-1">Configure how media is discovered and recommendations are generated.</p>
+        <div class="mb-4 border-b border-zinc-800 pb-2">
+          <h2 class="section-headline">Discovery Preferences</h2>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
@@ -230,7 +229,7 @@ const COUNTRIES = (countriesRes || [])
       <!-- Favourite Movie Genres -->
       <section>
         <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-bold text-zinc-100">Favourite Movie Genres</h2>
+          <h2 class="section-headline">Favourite Movie Genres</h2>
           <p class="text-xs text-zinc-500 mt-1">Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.</p>
         </div>
         <div id="movie-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.movie_genres)}>
@@ -253,7 +252,7 @@ const COUNTRIES = (countriesRes || [])
       <!-- Favourite Show Genres -->
       <section>
         <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-bold text-zinc-100">Favourite Show Genres</h2>
+          <h2 class="section-headline">Favourite Show Genres</h2>
           <p class="text-xs text-zinc-500 mt-1">Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.</p>
         </div>
         <div id="show-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.show_genres)}>
@@ -276,7 +275,7 @@ const COUNTRIES = (countriesRes || [])
       <!-- Disliked Genres -->
       <section>
         <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="text-xl font-bold text-zinc-100">Disliked Genres</h2>
+          <h2 class="section-headline">Disliked Genres</h2>
           <p class="text-xs text-zinc-500 mt-1">Genres you want to avoid. Items that <em>only</em> have disliked genres are filtered out of recommendations and picks. A genre can't be in both lists — selecting one here removes it from your favourites.</p>
         </div>
         <div id="disliked-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.disliked_genres || [])}>

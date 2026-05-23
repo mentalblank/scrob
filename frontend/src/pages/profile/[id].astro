@@ -112,7 +112,7 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
           <div class="w-20 h-20 bg-zinc-900/40 border border-zinc-800/80 rounded-full flex items-center justify-center mx-auto mb-6">
             <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
           </div>
-          <h2 class="text-2xl font-black text-zinc-100 mb-2">Access Restricted</h2>
+          <h2 class="section-headline mb-2">Access Restricted</h2>
           <p class="text-zinc-400 font-medium mb-8">{error}</p>
           <a href="/" class="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl transition-all inline-block shadow-lg shadow-blue-600/20 active:scale-95 duration-200 cursor-pointer">
             Return Home
@@ -262,9 +262,8 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
             <!-- Recently Watched Movies -->
             {profile.recently_watched_movies.length > 0 && (
               <section>
-                <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <span class="w-1 h-3.5 bg-blue-500 rounded-full"></span>
-                  Recently Watched Movies
+                <h2 class="section-headline mb-4">
+Recently Watched Movies
                 </h2>
                 <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
                   {profile.recently_watched_movies.map((item) => {
@@ -291,9 +290,8 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
             <!-- Recently Watched Shows -->
             {profile.recently_watched_shows.length > 0 && (
               <section>
-                <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <span class="w-1 h-3.5 bg-blue-400 rounded-full"></span>
-                  Recently Watched Shows
+                <h2 class="section-headline mb-4">
+Recently Watched Shows
                 </h2>
                 <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
                   {profile.recently_watched_shows.map((item) => {
@@ -327,9 +325,8 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
             <!-- Top Rated Movies -->
             {showUserRatings && profile.top_rated_movies.length > 0 && (
               <section>
-                <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
-                  Top Rated Movies
+                <h2 class="section-headline mb-4">
+Top Rated Movies
                 </h2>
                 <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
                   {profile.top_rated_movies.map((item) => {
@@ -359,9 +356,8 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
             <!-- Top Rated Shows -->
             {showUserRatings && profile.top_rated_shows.length > 0 && (
               <section>
-                <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <span class="w-1 h-3.5 bg-yellow-400 rounded-full"></span>
-                  Top Rated Shows
+                <h2 class="section-headline mb-4">
+Top Rated Shows
                 </h2>
                 <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
                   {profile.top_rated_shows.map((item) => {
@@ -391,9 +387,8 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
             <!-- Recent Comments -->
             {showComments && profile.recent_comments.length > 0 && (
               <section>
-                <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <span class="w-1 h-3.5 bg-purple-500 rounded-full"></span>
-                  Recent Comments
+                <h2 class="section-headline mb-4">
+Recent Comments
                 </h2>
                 <div class="space-y-3">
                   {profile.recent_comments.map((comment) => {
@@ -427,9 +422,8 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
             <!-- Lists -->
             {profile.lists.length > 0 && (
               <section>
-                <h2 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <span class="w-1 h-3.5 bg-green-500 rounded-full"></span>
-                  Lists
+                <h2 class="section-headline mb-4">
+Lists
                 </h2>
                 <div class="space-y-2">
                   {profile.lists.map((list) => (
@@ -461,8 +455,7 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
 
             <!-- Bio -->
             <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
-              <h3 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                <span class="w-1 h-3.5 bg-zinc-500 rounded-full"></span>
+              <h3 class="group-label mb-4">
                 About
               </h3>
               {profile.bio ? (
@@ -475,8 +468,7 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
             <!-- Favorite Genres -->
             {(profile.movie_genres.length > 0 || profile.show_genres.length > 0) && (
               <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
-                <h3 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <span class="w-1 h-3.5 bg-zinc-500 rounded-full"></span>
+                <h3 class="group-label mb-4">
                   Favorite Genres
                 </h3>
 
@@ -485,7 +477,7 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
                     <p class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Movies</p>
                     <div class="flex flex-wrap gap-1.5">
                       {profile.movie_genres.map((g) => (
-                        <span class="px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold uppercase rounded-full tracking-wide">
+                        <span class="px-2.5 py-1 bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-bold uppercase rounded-full tracking-wide">
                           {g}
                         </span>
                       ))}
@@ -515,7 +507,7 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
                   <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
                     <h3 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center justify-between">
                       <span class="flex items-center gap-2">
-                        <span class="w-1 h-3.5 bg-zinc-500 rounded-full"></span>
+                        <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
                         Following
                       </span>
                       <span class="text-zinc-400 font-bold">{profile.following_count}</span>
@@ -541,7 +533,7 @@ const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false
                   <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
                     <h3 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center justify-between">
                       <span class="flex items-center gap-2">
-                        <span class="w-1 h-3.5 bg-zinc-500 rounded-full"></span>
+                        <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
                         Followers
                       </span>
                       <span class="text-zinc-400 font-bold">{profile.follower_count}</span>

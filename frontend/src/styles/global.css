@@ -266,20 +266,10 @@ img, a {
   }
 }
 
-/* ── Now Playing bar — always render on a dark surface ─────────────────────
-   The bar uses a video backdrop or dark bg-zinc-900. In light mode zinc-900
-   remaps to white, making green-400 text illegible. Restore dark zinc values
-   for just this section so the bar looks correct in both themes. */
-html.light #now-playing-section {
-  --color-zinc-950: #09090b;
-  --color-zinc-900: #18181b;
-  --color-zinc-800: #27272a;
-  --color-zinc-700: #3f3f46;
-  --color-zinc-500: #71717a;
-  --color-zinc-400: #a1a1aa;
-  --color-zinc-300: #d4d4d8;
-  --color-zinc-100: #f4f4f5;
-}
+/* ── Now Playing bar — light mode status label colours ──────────────────────
+   green-400 / yellow-400 are illegible on a white surface; use darker shades. */
+html.light #now-playing-section .text-green-400 { color: #15803d; }
+html.light #now-playing-section .text-yellow-400 { color: #a16207; }
 
 #now-playing-section:empty {
   display: none;
@@ -469,6 +459,29 @@ body[data-v-partial-collected="fade"] [data-card][data-partial-collected="true"]
 body[data-v-partial-collected="hide"] :is([data-card][data-partial-collected="true"], .group\/item:has([data-card][data-partial-collected="true"])) { display: none; }
 body[data-v-not-partial-collected="fade"] [data-card][data-partial-collected="false"] { opacity: 0.25; filter: grayscale(1); }
 body[data-v-not-partial-collected="hide"] :is([data-card][data-partial-collected="false"], .group\/item:has([data-card][data-partial-collected="false"])) { display: none; }
+
+/* ── Typography ─────────────────────────────────────────────────────────── */
+.page-title {
+  @apply text-3xl font-bold text-zinc-100 tracking-tight;
+}
+
+.section-headline {
+  @apply text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3;
+}
+
+.section-headline::before {
+  content: '';
+  @apply block w-1 h-6 bg-blue-600 rounded-full shrink-0;
+}
+
+.group-label {
+  @apply text-xs font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2;
+}
+
+.group-label::before {
+  content: '';
+  @apply block w-1 h-3.5 bg-blue-600 rounded-full shrink-0;
+}
 
 /* ── TMDB image fallback ────────────────────────────────────────────────── */
 .tmdb-img-fallback {

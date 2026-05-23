@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
 
 const { token } = Astro.locals;
 if (!token) {
@@ -12,15 +13,21 @@ let groupedShowsList = [];
 let customTitles = [];
 let groupedCustomTitlesList = [];
 let error = "";
+let hasTvdbKey = false;
 
 try {
   const BACKEND_PORT = (import.meta.env.BACKEND_PORT as string | undefined) ?? "7331";
   
-  const [resSeason, resEp, resTitles] = await Promise.all([
+  const [resSeason, resEp, resTitles, settings] = await Promise.all([
     fetch(`http://localhost:${BACKEND_PORT}/sync/season-overrides`, { headers: { 'Authorization': `Bearer ${token}` } }),
     fetch(`http://localhost:${BACKEND_PORT}/sync/episode-overrides`, { headers: { 'Authorization': `Bearer ${token}` } }),
-    fetch(`http://localhost:${BACKEND_PORT}/sync/custom-titles`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(`http://localhost:${BACKEND_PORT}/sync/custom-titles`, { headers: { 'Authorization': `Bearer ${token}` } }),
+    api.auth.getSettings(token)
   ]);
+  
+  if (settings) {
+    hasTvdbKey = settings.has_effective_tvdb_key;
+  }
   
   if (resSeason.ok) seasonOverrides = await resSeason.json();
   else error += "Failed to load season overrides. ";
@@ -84,7 +91,7 @@ try {
 ---
 
 <Base title="Metadata Overrides">
-  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+  <div id="app-data" data-token={token} data-has-tvdb-key={hasTvdbKey ? "true" : "false"} class="hidden" aria-hidden="true"></div>
 
   <div class="max-w-6xl mx-auto px-4 py-8">
     <!-- Header with Back Button -->
@@ -792,7 +799,7 @@ try {
             <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">2. TVDB Show</h4>
             <div>
               <label class="block text-[10px] font-bold text-zinc-500 mb-1">TVDB API Key (v4)</label>
-              <input type="text" id="auto-tvdb-key" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Paste TVDB v4 key" />
+              <input type="text" id="auto-tvdb-key" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder={hasTvdbKey ? "Using saved key from settings (optional)" : "Paste TVDB v4 key"} />
             </div>
             <div class="flex gap-2">
               <input type="text" id="auto-tvdb-search" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Search by name or TVDB ID..." />
@@ -1101,7 +1108,9 @@ try {
 
 <script>
   document.addEventListener("DOMContentLoaded", () => {
-    const token = document.getElementById("app-data")?.dataset.token;
+    const appData = document.getElementById("app-data");
+    const token = appData?.dataset.token;
+    const hasSavedTvdbKey = appData?.dataset.hasTvdbKey === "true";
     if (!token) return;
     // Modal Control Elements
     const remapModal = document.getElementById("remap-modal")!;
@@ -2951,8 +2960,8 @@ try {
       const q = autoTvdbSearchInput.value.trim();
       const tvdbKey = autoTvdbKeyInput.value.trim();
       if (!q) return;
-      if (!tvdbKey) {
-        window.showToast?.("Enter your TVDB API Key first", "error");
+      if (!tvdbKey && !hasSavedTvdbKey) {
+        window.showToast?.("Enter your TVDB API Key first or configure it in settings", "error");
         autoTvdbKeyInput.focus();
         return;
       }
@@ -2965,7 +2974,10 @@ try {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${token}`
           },
-          body: JSON.stringify({ query: q, tvdb_api_key: tvdbKey })
+          body: JSON.stringify({
+            query: q,
+            ...(tvdbKey ? { tvdb_api_key: tvdbKey } : {})
+          })
         });
         if (res.ok) {
           const data = await res.json();
@@ -3415,13 +3427,15 @@ try {
         window.showToast?.("Please search and select both a TMDB show and a TVDB show!", "error");
         return;
       }
-      if (!tvdbKey) {
-        window.showToast?.("TVDB API Key is required!", "error");
+      if (!tvdbKey && !hasSavedTvdbKey) {
+        window.showToast?.("TVDB API Key is required first, or configure it in settings!", "error");
         return;
       }
 
-      // Save TVDB key to localStorage
-      localStorage.setItem("scrob_auto_tvdb_key", tvdbKey);
+      // Save TVDB key to localStorage if provided
+      if (tvdbKey) {
+        localStorage.setItem("scrob_auto_tvdb_key", tvdbKey);
+      }
 
       loader.classList.remove("hidden");
       previewArea.classList.add("hidden");
@@ -3438,7 +3452,7 @@ try {
           body: JSON.stringify({
             tmdb_show_id: tmdbId,
             tvdb_show_id: tvdbId,
-            tvdb_api_key: tvdbKey
+            ...(tvdbKey ? { tvdb_api_key: tvdbKey } : {})
           })
         });
 
@@ -3506,6 +3520,7 @@ try {
 
     applyAutoRemapsBtn.addEventListener("click", async () => {
       const tmdbId = parseInt(autoTmdbIdInput.value);
+      const tvdbId = parseInt(autoTvdbIdInput.value);
       
       const mappingsToApply = activeMappings.filter(m => m.matched && m.target_season !== null && m.target_episode !== null);
       if (mappingsToApply.length === 0) {
@@ -3520,6 +3535,7 @@ try {
         const payload = {
           tmdb_show_id: tmdbId,
           target_show_tmdb_id: tmdbId,
+          tvdb_show_id: tvdbId,
           mappings: mappingsToApply.map(m => ({
             source_season: m.source_season,
             source_episode: m.source_episode,

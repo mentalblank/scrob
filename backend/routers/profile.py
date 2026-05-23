@@ -743,6 +743,28 @@ async def get_user_stats(
             activity_map[period_key]["episodes"] = cnt
     watch_activity = sorted(activity_map.values(), key=lambda x: x["month"])
 
+    # Watch time per period (same granularity as activity)
+    watch_time_activity_q = await db.execute(
+        select(
+            activity_expr.label("period"),
+            Media.media_type,
+            func.coalesce(func.sum(effective_runtime), 0).label("minutes"),
+        )
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+        .group_by(activity_expr, Media.media_type)
+        .order_by(activity_expr)
+    )
+    watch_time_map: dict[str, dict] = {}
+    for period_key, mtype, minutes in watch_time_activity_q.all():
+        if period_key not in watch_time_map:
+            watch_time_map[period_key] = {"month": period_key, "movie_minutes": 0, "show_minutes": 0}
+        if mtype == "movie":
+            watch_time_map[period_key]["movie_minutes"] = int(minutes)
+        else:
+            watch_time_map[period_key]["show_minutes"] = int(minutes)
+    watch_time_activity = sorted(watch_time_map.values(), key=lambda x: x["month"])
+
     # Average watches per weekday (0=Sun … 6=Sat)
     from sqlalchemy import extract
     dow_expr = func.extract("dow", WatchEvent.watched_at)
@@ -916,6 +938,7 @@ async def get_user_stats(
         "movie_watch_minutes": movie_watch_minutes,
         "show_watch_minutes": show_watch_minutes,
         "watch_activity": watch_activity,
+        "watch_time_activity": watch_time_activity,
         "rating_distribution": rating_distribution,
         "avg_movie_rating": avg_movie_rating,
         "avg_show_rating": avg_show_rating,

@@ -20,11 +20,22 @@ const totalPages = Math.ceil(person.total_credits / person.page_size);
     <div class="w-full md:w-72 shrink-0">
       <div class="sticky top-8">
         {person.profile_path ? (
-          <img
-            src={person.profile_path}
-            alt={person.name}
-            class="w-full rounded-2xl shadow-2xl mb-6 aspect-[2/3] object-cover"
-          />
+          <div class="relative w-full aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl mb-6 group/photo">
+            <button id="photo-zoom-btn" class="w-full h-full block cursor-zoom-in" aria-label={`Enlarge photo of ${person.name}`}>
+              <img
+                src={person.profile_path}
+                alt={person.name}
+                class="w-full h-full object-cover transition-transform duration-300 group-hover/photo:scale-105"
+                loading="eager"
+                decoding="async"
+              />
+              <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover/photo:opacity-100 transition-opacity duration-200 bg-black/30">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8 text-white drop-shadow-lg">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
+                </svg>
+              </div>
+            </button>
+          </div>
         ) : (
           <div class="w-full aspect-[2/3] bg-zinc-900 rounded-2xl flex items-center justify-center text-6xl mb-6 border border-zinc-800">
             👤
@@ -62,7 +73,7 @@ const totalPages = Math.ceil(person.total_credits / person.page_size);
     <!-- Main Content -->
     <div class="flex-1 min-w-0">
       <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
-        <h1 class="text-5xl font-extrabold text-zinc-100 tracking-tight">{person.name}</h1>
+        <h1 class="page-title">{person.name}</h1>
         <ActionBar
           tmdbId={person.tmdb_id}
           mediaType="person"
@@ -76,13 +87,13 @@ const totalPages = Math.ceil(person.total_credits / person.page_size);
 
       {person.biography && (
         <div class="mb-12">
-          <h2 class="text-xl font-bold text-zinc-100 mb-4">Biography</h2>
+          <h2 class="section-headline mb-4">Biography</h2>
           <p class="text-zinc-400 leading-relaxed text-lg whitespace-pre-wrap">{person.biography}</p>
         </div>
       )}
 
       <div>
-        <h2 class="text-xl font-bold text-zinc-100 mb-6">Known For</h2>
+        <h2 class="section-headline mb-6">Known For</h2>
         <div id="credits-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {credits.map((item) => (
             <div class="flex flex-col gap-1">
@@ -109,6 +120,49 @@ const totalPages = Math.ceil(person.total_credits / person.page_size);
     </div>
   </div>
 </Base>
+
+{person.profile_path && (
+  <div id="photo-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
+    <div id="photo-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
+    <img
+      src={person.profile_path}
+      alt={person.name}
+      class="relative max-h-[90vh] max-w-[85vw] md:max-w-[50vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
+    />
+    <button
+      id="photo-modal-close"
+      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
+      aria-label="Close"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+)}
+
+<script>
+  const zoomBtn = document.getElementById('photo-zoom-btn');
+  const modal = document.getElementById('photo-modal');
+  const backdrop = document.getElementById('photo-modal-backdrop');
+  const closeBtn = document.getElementById('photo-modal-close');
+
+  if (zoomBtn && modal) {
+    function openModal() {
+      modal.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeModal() {
+      modal.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    zoomBtn.addEventListener('click', openModal);
+    backdrop?.addEventListener('click', closeModal);
+    closeBtn?.addEventListener('click', closeModal);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+  }
+</script>
 
 <script define:vars={{ personId: person.tmdb_id, totalCredits: person.total_credits, pageSize: person.page_size }}>
   const totalPages = Math.ceil(totalCredits / pageSize);

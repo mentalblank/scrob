@@ -87,7 +87,9 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
     const rest = nextUp.slice(1);
     const heroHref = hero.show_tmdb_id && hero.season_number != null && hero.episode_number != null
       ? `/show/${hero.show_tmdb_id}/season/${hero.season_number}/${hero.episode_number}`
-      : `/media/${hero.type}/${hero.tmdb_id}`;
+      : hero.show_tvdb_id && hero.season_number != null && hero.episode_number != null
+        ? `/show/tvdb/${hero.show_tvdb_id}/season/${hero.season_number}/${hero.episode_number}`
+        : `/media/${hero.type}/${hero.tmdb_id}`;
     const episodeLabel = hero.season_number != null && hero.episode_number != null
       ? `S${hero.season_number} E${hero.episode_number}`
       : null;
@@ -114,10 +116,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
 
         <div class="relative aspect-[16/9] sm:aspect-[21/8] md:aspect-[21/5] flex flex-col">
           <div class="flex items-center justify-between pt-8 pb-0">
-            <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
-              <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
-              Next Up
-            </h2>
+            <h2 class="section-headline">Next Up</h2>
             <a href="/next-up" class="text-sm font-bold uppercase tracking-widest text-zinc-400 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
               See All
               <span class="group-hover/all:translate-x-1 transition-transform">→</span>
@@ -174,10 +173,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
   {continueWatching.length > 0 && (
     <section id="continue-watching-section" class="mb-16">
       <div class="flex items-center justify-between mb-8">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
-          <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
-          Continue Watching
-        </h2>
+        <h2 class="section-headline">Continue Watching</h2>
         <a href="/continue-watching" class="text-sm font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
           See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
         </a>
@@ -201,10 +197,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
   {recentMovies.results?.length > 0 && (
     <section class="mb-16">
       <div class="flex items-center justify-between mb-8">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
-          <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
-          Recently Added Movies
-        </h2>
+        <h2 class="section-headline">Recently Added Movies</h2>
         <a href="/collection/movies?sort=created_at" class="text-sm font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
           See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
         </a>
@@ -220,10 +213,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
   {recentShows.results?.length > 0 && (
     <section class="mb-16">
       <div class="flex items-center justify-between mb-8">
-        <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
-          <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
-          Recently Added Episodes
-        </h2>
+        <h2 class="section-headline">Recently Added Episodes</h2>
         <a href="/collection/shows?sort=created_at" class="text-sm font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
           See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
         </a>
@@ -262,10 +252,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
       <!-- Trending Movies -->
       <section class="mb-16" id="section-trending-movies">
         <div class="flex items-center justify-between mb-8">
-          <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
-            <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
-            Trending Movies
-          </h2>
+          <h2 class="section-headline">Trending Movies</h2>
           <a href="/trending/movies" class="text-sm font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
@@ -286,10 +273,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
       <!-- Trending Shows -->
       <section class="mb-16" id="section-trending-shows">
         <div class="flex items-center justify-between mb-8">
-          <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
-            <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
-            Trending Shows
-          </h2>
+          <h2 class="section-headline">Trending Shows</h2>
           <a href="/trending/shows" class="text-sm font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
@@ -310,10 +294,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
       <!-- Airing Today -->
       <section class="mb-16" id="section-airing-today">
         <div class="flex items-center justify-between mb-8">
-          <h2 class="text-2xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
-            <span class="w-1 h-6 bg-blue-600 rounded-full"></span>
-            Airing Today
-          </h2>
+          <h2 class="section-headline">Airing Today</h2>
           <a href="/airing-today" class="text-sm font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-all flex items-center gap-2 group/all">
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
@@ -364,10 +345,13 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           const inLists = item.in_lists ?? [];
           const inLibrary = item.in_library ?? false;
           const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
-          const progressPct = isSeries && item.total_episodes_count 
-            ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
-            : (item.progress_percent ?? 0);
+          const watchPct = item.watch_pct ?? (watched ? 100 : 0);
+          const watchActive = isSeries ? watchPct > 0 : watched;
+          const progressPct = isSeries ? watchPct : (item.progress_percent ?? 0);
           const showProgress = progressPct > 0;
+          const watchStyle = isSeries && watchPct > 0
+            ? `background: linear-gradient(to right, rgba(34,197,94,0.2) ${watchPct}%, transparent ${watchPct}%)`
+            : '';
           const collectStyle = isSeries && collectionPct > 0
             ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
             : '';
@@ -407,12 +391,14 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
               </div>
             </a>
             <div class="card-action-bar">
-              <button data-action="watched" data-watched="${watched}" data-state="${watched ? 'active' : 'inactive'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}"
+              <button data-action="watched" data-watched="${watched}" data-watch-pct="${watchPct}" data-state="${watchActive ? 'active' : 'inactive'}"
+                title="${isSeries ? `${watchPct}% watched` : (watched ? 'Mark as unwatched' : 'Mark as watched')}"
+                style="${esc(watchStyle)}"
                 class="card-action-btn">
                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3" fill="${watchedFill}"/>
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3" fill="${watchActive ? 'currentColor' : 'none'}"/>
                 </svg>
-                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Watched</span>
+                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${watchPct}%` : 'Watched'}</span>
               </button>
               <button data-action="list" data-in-lists="${esc(JSON.stringify(inLists))}" data-state="${inLists.length > 0 ? 'active' : 'inactive'}" title="Add to list"
                 class="card-action-btn">
@@ -454,9 +440,11 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           const isSeries = item.type === 'series';
           const href = item.show_tmdb_id && item.season_number != null && item.episode_number != null
             ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
-            : isSeries
-              ? `/show/${item.tmdb_id}`
-              : `/media/${item.type}/${item.tmdb_id}`;
+            : item.show_tvdb_id && item.season_number != null && item.episode_number != null
+              ? `/show/tvdb/${item.show_tvdb_id}/season/${item.season_number}/${item.episode_number}`
+              : isSeries
+                ? `/show/${item.tmdb_id}`
+                : `/media/${item.type}/${item.tmdb_id}`;
           const raw = isSeries ? (item.backdrop_path ?? item.poster_path) : item.poster_path;
           const imageUrl = raw
             ? (raw.startsWith('http') ? raw : `https://image.tmdb.org/t/p/w780${raw}`)

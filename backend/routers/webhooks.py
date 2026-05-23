@@ -791,6 +791,10 @@ def parse_plex_payload(payload: dict) -> dict | None:
     if media_type not in ("movie", "episode") and event not in ("library.new", "library.update"):
         return None
 
+    # Skip live TV streams — no stable media identity, creates junk history/sessions
+    if metadata.get("librarySectionType") == "livetv" or metadata.get("live"):
+        return None
+
     # Extract TMDB ID from Guid array: [{"id": "tmdb://12345"}, ...]
     guids = metadata.get("Guid") or []
     tmdb_id: Optional[str] = None

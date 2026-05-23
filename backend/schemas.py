@@ -74,6 +74,11 @@ class UserSettings(BaseModel):
     has_effective_tmdb_key: bool = False
     has_global_tmdb_key: bool = False
 
+    # TVDB
+    tvdb_api_key: Optional[str] = None
+    has_global_tvdb_key: bool = False
+    has_effective_tvdb_key: bool = False
+
     # Radarr integration
     radarr_url: Optional[str] = None
     radarr_token: Optional[str] = None
@@ -222,7 +227,8 @@ class WatchEventCreate(BaseModel):
 
 
 class ManualSessionStart(BaseModel):
-    tmdb_id: int
+    tmdb_id: Optional[int] = None
+    media_id: Optional[int] = None      # local DB id, preferred over tmdb_id for TVDB-only episodes
     media_type: MediaType
     title: Optional[str] = None
     runtime: Optional[int] = None       # minutes, used if Media.runtime is null
@@ -302,6 +308,7 @@ class PublicProfileResponse(BaseModel):
 
 class GlobalSettings(BaseModel):
     tmdb_api_key           : Optional[str] = None
+    tvdb_api_key           : Optional[str] = None
     radarr_url             : Optional[str] = None
     radarr_token           : Optional[str] = None
     radarr_root_folder     : Optional[str] = None
@@ -351,7 +358,7 @@ class AdminUser(BaseModel):
 class AutoMapPreviewRequest(BaseModel):
     tmdb_show_id: int
     tvdb_show_id: int
-    tvdb_api_key: str
+    tvdb_api_key: Optional[str] = None
     tmdb_api_key: Optional[str] = None
     match_strategy: Optional[str] = "auto"
 
@@ -367,4 +374,5 @@ class AutoMapApplyRequest(BaseModel):
     tmdb_show_id: int
     target_show_tmdb_id: int
     mappings: list[AutoMapMappingItem]
+    tvdb_show_id: Optional[int] = None
     tmdb_api_key: Optional[str] = None

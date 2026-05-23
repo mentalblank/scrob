@@ -4,13 +4,21 @@ interface Props {
   inLists: number[];
   inLibrary: boolean;
   collectionPct: number;
+  watchPct: number;
   isSeries: boolean;
 }
 
-const { watched, inLists, inLibrary, collectionPct, isSeries } = Astro.props;
+const { watched, inLists, inLibrary, collectionPct, watchPct, isSeries } = Astro.props;
+
+const watchActive = isSeries ? watchPct > 0 : watched;
+const collectActive = isSeries ? collectionPct > 0 : inLibrary;
 
 const collectStyle = isSeries && collectionPct > 0
   ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
+  : '';
+
+const watchStyle = isSeries && watchPct > 0
+  ? `background: linear-gradient(to right, rgba(34,197,94,0.2) ${watchPct}%, transparent ${watchPct}%)`
   : '';
 ---
 
@@ -19,13 +27,15 @@ const collectStyle = isSeries && collectionPct > 0
   <button
     data-action="watched"
     data-watched={String(watched)}
-    data-state={watched ? 'active' : 'inactive'}
-    title={watched ? 'Mark as unwatched' : 'Mark as watched'}
+    data-watch-pct={String(watchPct)}
+    data-state={watchActive ? 'active' : 'inactive'}
+    title={isSeries ? `${watchPct}% watched` : (watched ? 'Mark as unwatched' : 'Mark as watched')}
+    style={watchStyle}
     class="card-action-btn"
   >
     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
-      <circle cx="12" cy="12" r="3" fill={watched ? "currentColor" : "none"}/>
+      <circle cx="12" cy="12" r="3" fill={watchActive ? "currentColor" : "none"}/>
     </svg>
   </button>
 
@@ -52,7 +62,7 @@ const collectStyle = isSeries && collectionPct > 0
     data-action="collected"
     data-in-library={String(inLibrary)}
     data-collection-pct={String(collectionPct)}
-    data-state={inLibrary ? 'active' : 'inactive'}
+    data-state={collectActive ? 'active' : 'inactive'}
     title={isSeries ? `${collectionPct}% in library` : (inLibrary ? 'Remove from collection' : 'Add to collection')}
     style={collectStyle}
     class="card-action-btn"

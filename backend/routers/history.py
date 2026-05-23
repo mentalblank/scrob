@@ -1,6 +1,6 @@
 import asyncio
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, select, desc, func, delete
 from sqlalchemy.orm import selectinload
@@ -149,6 +149,11 @@ def format_event(event: WatchEvent | PlaybackProgress, media: Media) -> dict:
         "play_count": getattr(event, "play_count", 1),
     }
 
+    if media.media_type == MediaType.episode and media.show:
+        data["media"]["show_title"] = media.show.title
+        data["media"]["show_poster_path"] = media.show.poster_path
+        data["media"]["show_tmdb_id"] = media.show.tmdb_id
+        data["media"]["show_tvdb_id"] = media.show.tvdb_id
     return data
 
 
@@ -252,6 +257,19 @@ async def get_now_playing(
             "media": format_media(media),
         })
     return {"now_playing": sessions}
+
+
+@router.delete("/sessions")
+async def clear_now_playing_sessions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete all active playback sessions for the current user."""
+    await db.execute(
+        delete(PlaybackSession).where(PlaybackSession.user_id == current_user.id)
+    )
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/continue-watching")
@@ -459,10 +477,9 @@ async def get_next_up(
     # Sort by most recent activity date (descending) before applying limit
     next_up = [m for m in next_per_show.values() if m.id not in completed_ids]
     next_up.sort(
-        key=lambda m: show_last_watched.get(m.show_id) or "",
+        key=lambda m: show_last_watched.get(m.show_id) or datetime.min,
         reverse=True,
     )
-
     if limit is not None:
         next_up = next_up[:limit]
     
@@ -544,6 +561,45 @@ async def mark_as_watched(
         await _push_watch_state(db, current_user.id, [media.id], watched=True)
 
     return {"status": "ok", "message": f"Marked {media.title} as watched"}
+
+
+@router.delete("/event/{event_id}")
+async def delete_single_event(
+    event_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a single watch event by its ID."""
+    result = await db.execute(
+        select(WatchEvent).where(
+            WatchEvent.id == event_id,
+            WatchEvent.user_id == current_user.id,
+        )
+    )
+    event = result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    media_id = event.media_id
+    await db.execute(
+        delete(WatchEvent).where(
+            WatchEvent.id == event_id,
+            WatchEvent.user_id == current_user.id,
+        )
+    )
+    await db.commit()
+
+    # Only push "unwatched" to connected services if no events remain for this media
+    remaining = await db.execute(
+        select(func.count()).where(
+            WatchEvent.user_id == current_user.id,
+            WatchEvent.media_id == media_id,
+        )
+    )
+    if remaining.scalar() == 0:
+        await _push_watch_state(db, current_user.id, [media_id], watched=False)
+
+    return {"status": "ok"}
 
 
 @router.delete("")
@@ -999,16 +1055,26 @@ async def _get_or_create_media_for_session(
     body: schemas.ManualSessionStart,
     user_id: int,
 ) -> Media:
-    result = await db.execute(
-        select(Media).where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
-    )
-    media = result.scalars().first()
-    if media:
-        return media
+    # Prefer direct media_id lookup (used for TVDB-only episodes with no tmdb_id)
+    if body.media_id:
+        result = await db.execute(select(Media).where(Media.id == body.media_id))
+        media = result.scalar_one_or_none()
+        if media:
+            return media
+
+    if body.tmdb_id:
+        result = await db.execute(
+            select(Media).where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
+        )
+        media = result.scalar_one_or_none()
+        if media:
+            return media
 
     api_key = await get_user_tmdb_key(db, user_id)
 
     if body.media_type == MediaType.movie:
+        if not body.tmdb_id:
+            raise HTTPException(status_code=400, detail="tmdb_id required for movies")
         if not check_tmdb_key(api_key):
             raise HTTPException(status_code=404, detail="Movie not in library and TMDB key not configured")
         try:

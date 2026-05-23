@@ -23,14 +23,13 @@ try {
 }
 ---
 
-<Base title="My Lists">
+<Base title="Lists">
   <div>
+    <h1 class="page-title mb-10">Lists</h1>
+
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
       <div class="flex items-center gap-4">
-        <h1 class="text-3xl font-black text-zinc-100 tracking-tight flex items-center gap-3">
-          <span class="w-1.5 h-8 bg-blue-600 rounded-full"></span>
-          My Lists
-        </h1>
+        <h2 class="section-headline">My Lists</h2>
         <span id="lists-count" class="text-zinc-400 font-bold bg-zinc-900/60 border border-zinc-800/40 px-3 py-1 rounded-full text-sm">{lists.length}</span>
       </div>
       
@@ -56,6 +55,7 @@ try {
           New List
         </button>
       </div>
+    </div>
     </div>
 
     {error && (
@@ -199,7 +199,7 @@ try {
 
     {publicLists.length > 0 && (
       <div class="mt-16 pt-10 border-t border-zinc-800/50">
-        <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest mb-6">From the Community</h2>
+        <h2 class="section-headline mb-6">From the Community</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {publicLists.map((list) => (
             <ListCard

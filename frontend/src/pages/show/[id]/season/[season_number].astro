@@ -169,6 +169,7 @@ try {
                 inLists={[]}
                 inLibrary={season.season_in_library ?? season.show_in_library ?? false}
                 collectionPct={season.season_collection_pct ?? season.show_collection_pct ?? 0}
+                watchPct={season.season_watch_pct ?? 0}
                 seasonNumber={Number(season_number)}
                 isMonitored={season.show_is_monitored ?? false}
                 requestEnabled={false}
@@ -240,13 +241,15 @@ try {
             </div>
 
             {season.overview && (
-              <div class="space-y-3">
-                <h2 class="text-sm font-black text-zinc-500 uppercase tracking-[0.2em]">Season Overview</h2>
-                <p class="text-zinc-350 leading-relaxed text-base md:text-lg opacity-90">{season.overview}</p>
+              <div class="max-w-3xl">
+                <h2 class="text-xl font-black text-zinc-100 mb-3 flex items-center gap-2 uppercase tracking-tight">
+                  <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
+                  Season Overview
+                </h2>
+                <p class="text-zinc-300 leading-relaxed text-lg opacity-90">{season.overview}</p>
               </div>
             )}
-
-            <CommentsSection
+      <CommentsSection
               mediaType="series"
               tmdbId={Number(id)}
               seasonNumber={Number(season_number)}
