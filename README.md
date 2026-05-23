@@ -45,11 +45,12 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 - **Manual scrobble**: Start a watching session directly from any movie or episode page. Pause, resume, stop, or mark as watched - session progress shows live on the home screen.
 - **Trakt integration**: Sync your watched history and ratings from Trakt, and push Scrob activity back to Trakt automatically.
 - **Simkl integration**: Sync your watched history and ratings from Simkl, and push Scrob activity back to Simkl automatically.
-- **Watch history & ratings**: Track every movie and episode you've watched. Rate them on a 10-point scale with optional reviews.
+- **Watch history & ratings**: Track every movie and episode you've watched, including multiple plays with individual timestamps. Log plays manually with a custom date, or remove individual entries — all from the watched button on any movie or episode page. Rate them on a 10-point scale with optional reviews.
 - **Season ratings**: Rate individual seasons separately from the overall show.
 - **Personal lists**: Create and curate lists of movies and shows. Mark them public to share with other users on the same instance.
 - **Comments**: Leave comments on movies, shows, seasons, and episodes.
 - **Social**: Follow other users and see their activity.
+- **Release schedule**: Movie pages show the full release schedule ��� theatrical, digital, and physical dates — sourced from TMDB.
 - **TMDB integration**: Rich metadata for every title - posters, backdrops, cast, crew, trailers, collections, and more.
 - **Search**: Search TMDB across movies, shows, people, and collections, merged with your local library data.
 - **Pick a Movie / Pick a Show**: Get a suggestion on what to watch next from your library or your streaming services based on your preferences.
@@ -373,7 +374,7 @@ cd scrob
 docker compose -f docker-compose-test-db.yaml up -d
 
 # Copy and fill in the environment file
-cp .env.exanple .env
+cp .env.example .env
 # Edit .env - set POSTGRES_* and SECRET_KEY at minimum
 ```
 
