@@ -26,6 +26,7 @@ from models.global_settings import GlobalSettings
 from core import jellyfin, emby, plex, tmdb
 import core.trakt as trakt_client
 from core.enrichment import enrich_media
+from routers.media import get_user_content_language
 
 from dependencies import get_current_user, require_admin
 import schemas
@@ -3379,15 +3380,18 @@ async def search_tvdb_shows(
     if not tvdb_api_key:
         raise HTTPException(status_code=400, detail="TVDB API key required")
 
+    user_lang = await get_user_content_language(db, current_user.id)
+    tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
     query = body.query.strip()
     results = []
 
     # 2. If query is a numeric ID, try direct lookup first
     if query.isdigit():
         try:
-            raw = await tvdb_client.get_series(int(query), tvdb_api_key)
+            raw = await tvdb_client.get_series(int(query), tvdb_api_key, lang=tvdb_lang)
             if raw:
-                show_fmt = tvdb_client.format_series(raw)
+                show_fmt = tvdb_client.format_series(raw, lang=tvdb_lang)
                 results.append({
                     "tvdb_id": show_fmt["tvdb_id"],
                     "name": show_fmt["title"],
@@ -3402,7 +3406,7 @@ async def search_tvdb_shows(
 
     # 3. Search by name
     try:
-        raw_results = await tvdb_client.search_series(query, tvdb_api_key)
+        raw_results = await tvdb_client.search_series(query, tvdb_api_key, lang=tvdb_lang)
         for item in raw_results[:15]:
             results.append({
                 "tvdb_id": item["tvdb_id"],
@@ -3485,7 +3489,7 @@ async def auto_map_tvdb_tmdb_preview(
     tvdb_episodes = []
     try:
         from core import tvdb as tvdb_client
-        raw_eps = await tvdb_client.get_series_episodes_by_type(body.tvdb_show_id, tvdb_api_key, "default", "eng")
+        raw_eps = await tvdb_client.get_series_episodes_by_type(body.tvdb_show_id, tvdb_api_key, "official", "eng")
         for ep in raw_eps:
             tvdb_episodes.append({
                 "season": ep.get("seasonNumber"),
@@ -3938,15 +3942,18 @@ async def match_unmatched_show(
         if not tvdb_api_key:
             raise HTTPException(status_code=400, detail="TVDB API key required")
 
+        user_lang = await get_user_content_language(db, current_user.id)
+        tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
         # Find or create Show row keyed by tvdb_id
         target_show_result = await db.execute(select(Show).where(Show.tvdb_id == body.tvdb_id))
         target_show = target_show_result.scalar_one_or_none()
         if not target_show:
             try:
-                raw = await tvdb_client.get_series(body.tvdb_id, tvdb_api_key)
+                raw = await tvdb_client.get_series(body.tvdb_id, tvdb_api_key, lang=tvdb_lang)
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"Could not fetch show from TVDB: {e}")
-            show_fmt = tvdb_client.format_series(raw)
+            show_fmt = tvdb_client.format_series(raw, lang=tvdb_lang)
             target_show = Show(
                 tvdb_id=body.tvdb_id,
                 tmdb_id=None,
@@ -3967,7 +3974,7 @@ async def match_unmatched_show(
             nonlocal matched, skipped
             async with sem:
                 try:
-                    raw_eps = await tvdb_client.get_series_episodes(body.tvdb_id, season_number, tvdb_api_key)
+                    raw_eps = await tvdb_client.get_series_episodes(body.tvdb_id, season_number, tvdb_api_key, lang=tvdb_lang)
                 except Exception:
                     for media in season_episodes:
                         media.show_id = target_show.id

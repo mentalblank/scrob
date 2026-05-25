@@ -50,12 +50,19 @@ async def _get_token(api_key: str) -> str:
         return token
 
 
-async def _get(path: str, api_key: str, params: dict | None = None) -> dict:
+async def _get(path: str, api_key: str, params: dict | None = None, lang: str | None = None) -> dict:
     token = await _get_token(api_key)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    if lang:
+        headers["Accept-Language"] = lang
+
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         r = await client.get(
             f"{TVDB_BASE}{path}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            headers=headers,
             params=params or {},
         )
         r.raise_for_status()
@@ -122,9 +129,9 @@ async def validate_api_key(api_key: str) -> bool:
         return False
 
 
-async def search_series(query: str, api_key: str) -> list[dict]:
+async def search_series(query: str, api_key: str, lang: str | None = None) -> list[dict]:
     """Search for TV series by title. Returns list of simplified series dicts."""
-    data = await _get("/search", api_key, params={"query": query, "type": "series"})
+    data = await _get("/search", api_key, params={"query": query, "type": "series"}, lang=lang)
     results = []
     for item in data.get("data") or []:
         tvdb_id_str = item.get("tvdb_id") or item.get("id") or ""
@@ -132,10 +139,19 @@ async def search_series(query: str, api_key: str) -> list[dict]:
             tvdb_id = int(str(tvdb_id_str).lstrip("series-"))
         except (ValueError, TypeError):
             continue
+        
+        # Try to find a translated title/overview in search results
+        title = item.get("name")
+        overview = item.get("overview")
+        
+        # TVDB search results sometimes have a 'translations' dict for the title
+        if not title and "translations" in item:
+            title = item["translations"].get(lang or "eng") or item["translations"].get("eng")
+        
         results.append({
             "tvdb_id": tvdb_id,
-            "title": item.get("name") or item.get("translations", {}).get("eng", ""),
-            "overview": item.get("overview") or item.get("overviews", {}).get("eng"),
+            "title": title or "",
+            "overview": overview,
             "year": item.get("year"),
             "image_url": _image_url(item.get("image_url") or item.get("thumbnail")),
             "status": item.get("status"),
@@ -144,9 +160,9 @@ async def search_series(query: str, api_key: str) -> list[dict]:
     return results
 
 
-async def get_series(tvdb_id: int, api_key: str) -> dict:
+async def get_series(tvdb_id: int, api_key: str, lang: str | None = None) -> dict:
     """Fetch series extended info including episodes for accurate per-season counts."""
-    data = await _get(f"/series/{tvdb_id}/extended", api_key, params={"meta": "translations,episodes"})
+    data = await _get(f"/series/{tvdb_id}/extended", api_key, params={"meta": "translations,episodes"}, lang=lang)
     return data.get("data") or {}
 
 
@@ -160,10 +176,16 @@ async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, la
                 f"/series/{tvdb_id}/episodes/official/{lang}",
                 api_key,
                 params={"page": page, "season": season_number},
+                lang=lang
             )
             batch = (data.get("data") or {}).get("episodes") or []
             if not batch:
                 break
+            
+            # Client-side filter to ensure we only get the requested season, 
+            # in case the API ignores the season param when lang is provided
+            batch = [e for e in batch if e.get("seasonNumber") == season_number]
+            
             episodes.extend(batch)
             # TVDB paginates at 500; if we got fewer, we're done
             if len(batch) < 500:
@@ -176,6 +198,49 @@ async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, la
         else:
             raise
     return episodes
+
+
+def get_season_label(lang: str) -> str:
+    """Return a localized 'Season' label for common languages."""
+    labels = {
+        "eng": "Season",
+        "spa": "Temporada",
+        "fra": "Saison",
+        "deu": "Staffel",
+        "ita": "Stagione",
+        "por": "Temporada",
+        "nld": "Seizoen",
+        "rus": "Сезон",
+        "zho": "季",
+        "jpn": "シーズン",
+        "kor": "시즌",
+        "ara": "الموسم",
+        "pol": "Sezon",
+        "tur": "Sezon",
+        "dan": "Sæson",
+        "fin": "Kausi",
+        "nor": "Sesong",
+        "swe": "Säsong",
+    }
+    return labels.get(lang, "Season")
+
+
+def get_specials_label(lang: str) -> str:
+    """Return a localized 'Specials' label for common languages."""
+    labels = {
+        "eng": "Specials",
+        "spa": "Especiales",
+        "fra": "Hors-série",
+        "deu": "Specials",
+        "ita": "Speciali",
+        "por": "Especiais",
+        "nld": "Specials",
+        "rus": "Спецвыпуски",
+        "zho": "特别篇",
+        "jpn": "スペシャル",
+        "kor": "스페셜",
+    }
+    return labels.get(lang, "Specials")
 
 
 def format_series(raw: dict, lang: str = "eng") -> dict:
@@ -224,7 +289,13 @@ def format_series(raw: dict, lang: str = "eng") -> dict:
     # Count episodes per season and derive premiere dates from embedded episodes
     episode_counts: dict[int, int] = {}
     season_premiere_dates: dict[int, str] = {}
+    seen_episodes = set()
     for ep in raw.get("episodes") or []:
+        ep_id = ep.get("id")
+        if ep_id in seen_episodes:
+            continue
+        seen_episodes.add(ep_id)
+        
         sn = ep.get("seasonNumber")
         if sn is None:
             continue
@@ -233,14 +304,23 @@ def format_series(raw: dict, lang: str = "eng") -> dict:
             season_premiere_dates[sn] = ep["aired"]
 
     seasons = []
+    season_label = get_season_label(lang)
+    specials_label = get_specials_label(lang)
     for s in raw.get("seasons") or []:
         if s.get("type", {}).get("type") == "official":
             sn = s.get("number")
             count = episode_counts.get(sn) if sn in episode_counts else (s.get("episodeCount") or 0)
+            
+            # Use season name if provided (should be localized now via Accept-Language)
+            # otherwise fallback to localized "Season X"
+            name = s.get("name")
+            if not name:
+                name = f"{season_label} {sn}" if sn != 0 else specials_label
+
             seasons.append({
                 "season_number": sn,
-                "name": s.get("name") or f"Season {sn}",
-                "overview": None,
+                "name": name,
+                "overview": s.get("overview"),
                 "poster_path": _image_url(s.get("image")),
                 "episode_count": count,
                 "air_date": s.get("premiereDate") or season_premiere_dates.get(sn),
@@ -325,7 +405,7 @@ def format_episode(raw: dict) -> dict:
     }
 
 
-async def get_series_episodes_by_type(tvdb_id: int, api_key: str, season_type: str = "default", lang: str = "eng") -> list[dict]:
+async def get_series_episodes_by_type(tvdb_id: int, api_key: str, season_type: str = "official", lang: str = "eng") -> list[dict]:
     """Fetch all episodes for a series, paginated, using specific season_type and lang."""
     episodes = []
     page = 0
@@ -334,6 +414,7 @@ async def get_series_episodes_by_type(tvdb_id: int, api_key: str, season_type: s
             f"/series/{tvdb_id}/episodes/{season_type}/{lang}",
             api_key,
             params={"page": page},
+            lang=lang
         )
         batch = (data.get("data") or {}).get("episodes") or []
         if not batch:

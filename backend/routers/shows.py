@@ -1471,6 +1471,7 @@ async def get_episode_detail(
             "collection_pct": ep_state.get("collection_pct", 100 if local_ep else 0),
             "user_rating": ep_state.get("user_rating"),
             "play_count": ep_state.get("play_count", 0),
+            "progress_percent": ep_state.get("progress_percent"),
             "episode_number": episode_number,
             "season_number": season_number,
             "title": local_ep.custom_title or ep_data.get("name") if local_ep else ep_data.get("name"),
@@ -1634,7 +1635,7 @@ async def get_tvdb_show(
     tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
 
     try:
-        raw = await tvdb_client.get_series(tvdb_id, api_key)
+        raw = await tvdb_client.get_series(tvdb_id, api_key, lang=tvdb_lang)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
@@ -1778,14 +1779,20 @@ async def get_tvdb_season(
 
     try:
         raw_series, raw_episodes = await asyncio.gather(
-            tvdb_client.get_series(tvdb_id, api_key),
+            tvdb_client.get_series(tvdb_id, api_key, lang=tvdb_lang),
             tvdb_client.get_series_episodes(tvdb_id, season_number, api_key, lang=tvdb_lang),
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
     show_data = tvdb_client.format_series(raw_series, lang=tvdb_lang)
-    eps = [tvdb_client.format_episode(e) for e in raw_episodes]
+    
+    seen_eps = set()
+    eps = []
+    for e in raw_episodes:
+        if e.get("id") not in seen_eps:
+            seen_eps.add(e.get("id"))
+            eps.append(tvdb_client.format_episode(e))
 
     # Look up local Show row and episode states
     show_result = await db.execute(select(ShowModel).where(ShowModel.tvdb_id == tvdb_id))
@@ -1911,14 +1918,20 @@ async def get_tvdb_episode(
 
     try:
         raw_series, raw_episodes = await asyncio.gather(
-            tvdb_client.get_series(tvdb_id, api_key),
+            tvdb_client.get_series(tvdb_id, api_key, lang=tvdb_lang),
             tvdb_client.get_series_episodes(tvdb_id, season_number, api_key, lang=tvdb_lang),
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
     show_data = tvdb_client.format_series(raw_series, lang=tvdb_lang)
-    eps = [tvdb_client.format_episode(e) for e in raw_episodes]
+    
+    seen_eps = set()
+    eps = []
+    for e in raw_episodes:
+        if e.get("id") not in seen_eps:
+            seen_eps.add(e.get("id"))
+            eps.append(tvdb_client.format_episode(e))
     ep_data = next((e for e in eps if e.get("episode_number") == episode_number), None)
     if not ep_data:
         raise HTTPException(status_code=404, detail="Episode not found")
@@ -1932,6 +1945,7 @@ async def get_tvdb_episode(
     local_ep_id = None
     library_info = None
     play_count = 0
+    progress_percent = None
 
     if show:
         local_ep_q = await db.execute(
@@ -1969,6 +1983,15 @@ async def get_tvdb_episode(
             )
             user_rating = rating_q.scalar_one_or_none()
 
+            progress_q = await db.execute(
+                select(PlaybackProgress.progress_percent).where(
+                    PlaybackProgress.media_id == local_ep.id,
+                    PlaybackProgress.user_id == current_user.id
+                )
+            )
+            progress_pct = progress_q.scalar_one_or_none()
+            progress_percent = min(100, max(0, int(progress_pct * 100))) if progress_pct is not None else None
+
             if in_library:
                 coll_file_q = await db.execute(
                     select(CollectionFile)
@@ -2000,6 +2023,7 @@ async def get_tvdb_episode(
         "watched": watched,
         "user_rating": user_rating,
         "play_count": play_count,
+        "progress_percent": progress_percent,
         "in_lists": [],
         "library": library_info,
         "cast": cast,
@@ -2011,6 +2035,7 @@ async def get_tvdb_episode(
             "title": show_data["title"],
             "poster_path": show_data["poster_path"],
             "backdrop_path": show_data["backdrop_path"],
+            "seasons_meta": show_data["seasons"],
         },
         "season": {
             "name": season_meta.get("name") or f"Season {season_number}",
@@ -2039,7 +2064,7 @@ async def refresh_tvdb_show_metadata(
     tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
 
     try:
-        raw = await tvdb_client.get_series(tvdb_id, api_key)
+        raw = await tvdb_client.get_series(tvdb_id, api_key, lang=tvdb_lang)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 

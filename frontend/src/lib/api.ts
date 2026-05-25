@@ -121,6 +121,7 @@ export interface EpisodeItem {
   watched: boolean;
   user_rating: number | null;
   in_lists: number[];
+  progress_percent?: number;
 }
 
 export interface ShowSummary {
@@ -172,6 +173,7 @@ export interface EpisodeDetail {
   collection_pct: number;
   user_rating?: number | null;
   play_count?: number;
+  progress_percent?: number;
   cast: CastMember[];
   guest_stars: CastMember[];
   episodes: EpisodeItem[];
@@ -690,6 +692,7 @@ export interface TvdbEpisodeDetail {
   watched: boolean;
   user_rating: number | null;
   play_count: number;
+  progress_percent?: number;
   in_lists: number[];
   library: {
     resolution: string | null;

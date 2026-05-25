@@ -4,6 +4,7 @@ import ActionBar from "../../../../../components/ActionBar.astro";
 import CommentsSection from "../../../../../components/CommentsSection.astro";
 import VideoPlayer from "../../../../../components/VideoPlayer.astro";
 import ManualScrobble from "../../../../../components/ManualScrobble.astro";
+import ProgressStrip from "../../../../../components/ProgressStrip.astro";
 import { api, type EpisodeDetail } from "../../../../../lib/api";
 
 export const prerender = false;
@@ -183,6 +184,12 @@ const activeButtonsCount = [
                         <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
                       </svg>
                     </div>
+
+                    {episode.progress_percent !== undefined && episode.progress_percent !== null && episode.progress_percent > 0 && (
+                      <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+                        <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${episode.progress_percent}%`}></div>
+                      </div>
+                    )}
                   </button>
                 ) : (
                   <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
@@ -194,7 +201,7 @@ const activeButtonsCount = [
             </div>
 
             <!-- ActionBar -->
-            <div class="bg-zinc-900/20 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-2xl">
+            <div class="bg-zinc-900/20 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-2xl space-y-4">
               <ActionBar
                 tmdbId={episode.tmdb_id}
                 mediaType="episode"
@@ -209,6 +216,18 @@ const activeButtonsCount = [
                 userRating={episode.user_rating ?? null}
                 hideBlock={true}
               />
+
+              {episode && episode.progress_percent !== undefined && episode.progress_percent !== null && episode.progress_percent > 0 && (
+                <div class="pt-2 border-t border-zinc-800/60">
+                  <ProgressStrip
+                    progressPct={episode.progress_percent}
+                    title="Playback Progress"
+                    currentDuration={episode.runtime ? episode.runtime * (episode.progress_percent / 100) : undefined}
+                    totalDuration={episode.runtime ?? undefined}
+                    className="mt-0"
+                  />
+                </div>
+              )}
             </div>
 
             <!-- Action Buttons Container (Play, Session, Refresh) -->

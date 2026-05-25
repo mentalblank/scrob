@@ -263,6 +263,8 @@ try {
                 {season.episodes?.map((ep) => {
                   const item: MediaItem = {
                     ...ep,
+                    title: ep.name,
+                    poster_path: ep.image_url,
                     tmdb_id: ep.tvdb_id, // map tvdb_id to tmdb_id so card has a numeric ID for events
                     type: "episode",
                     release_date: ep.air_date,

@@ -6,6 +6,12 @@ interface Props {
   totalDurationWatched?: number;
   remainingEpisodesCount?: number;
   remainingDuration?: number;
+  currentDuration?: number;
+  totalDuration?: number;
+  progressPct?: number;
+  title?: string;
+  leftLabel?: string;
+  rightLabel?: string;
   className?: string;
 }
 
@@ -16,26 +22,50 @@ const {
   totalDurationWatched = 0,
   remainingEpisodesCount = 0,
   remainingDuration = 0,
+  currentDuration,
+  totalDuration,
+  progressPct: manualProgressPct,
+  title = "Progress",
+  leftLabel,
+  rightLabel,
   className = "",
 } = Astro.props;
 
-const progressPct = totalEpisodesCount > 0 ? Math.min(100, Math.round((watchedEpisodesCount / totalEpisodesCount) * 100)) : 0;
+const progressPct = manualProgressPct !== undefined 
+  ? manualProgressPct 
+  : (totalEpisodesCount > 0 ? Math.min(100, Math.round((watchedEpisodesCount / totalEpisodesCount) * 100)) : 0);
 
 function formatDuration(minutes: number) {
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
+  const m = Math.round(minutes);
+  if (m < 60) return `${m}m`;
+  const hours = Math.floor(m / 60);
+  const mins = m % 60;
   if (hours < 24) return `${hours}h ${mins}m`;
   const days = Math.floor(hours / 24);
   const h = hours % 24;
   return `${days}d ${h}h`;
 }
+
+const finalLeftLabel = leftLabel !== undefined 
+  ? leftLabel 
+  : (currentDuration !== undefined 
+      ? `${formatDuration(currentDuration)} Watched`
+      : `${watchedEpisodesCount} / ${totalEpisodesCount} Watched`
+    );
+
+const remainingCount = remainingEpisodesCount || (totalEpisodesCount - watchedEpisodesCount);
+
+const finalRightLabel = rightLabel !== undefined
+  ? rightLabel
+  : (currentDuration !== undefined && totalDuration !== undefined
+      ? `${formatDuration(Math.max(0, totalDuration - currentDuration))} Remaining`
+      : (remainingCount > 0 ? `${remainingCount} Remaining` : (remainingDuration > 0 ? `${formatDuration(remainingDuration)}` : null)));
 ---
 
 <div class={`flex flex-col gap-1.5 ${className}`}>
   <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-    <span>Progress</span>
-    <span class="text-zinc-300 tabular-nums">{progressPct}%</span>
+    <span>{title}</span>
+    <span class="text-zinc-300 tabular-nums">{Math.round(progressPct)}%</span>
   </div>
   
   <div class="h-1.5 w-full bg-zinc-950/60 border border-zinc-800/80 rounded-full overflow-hidden">
@@ -45,10 +75,12 @@ function formatDuration(minutes: number) {
     ></div>
   </div>
 
-  <div class="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">
-    <span>{watchedEpisodesCount} / {totalEpisodesCount} ep</span>
-    {remainingDuration > 0 && (
-      <span class="text-zinc-400" title="Estimated time left">-{formatDuration(remainingDuration)}</span>
-    )}
-  </div>
+  {(finalLeftLabel || finalRightLabel) && (
+    <div class="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">
+      <span>{finalLeftLabel}</span>
+      {finalRightLabel && (
+        <span class="text-zinc-400" title="Estimated time left">{finalRightLabel}</span>
+      )}
+    </div>
+  )}
 </div>
