@@ -2,9 +2,10 @@
 import Base from "../../../../../../layouts/Base.astro";
 import ActionBar from "../../../../../../components/ActionBar.astro";
 import CommentsSection from "../../../../../../components/CommentsSection.astro";
-import ManualScrobble from "../../../../../../components/ManualScrobble.astro";
 import VideoPlayer from "../../../../../../components/VideoPlayer.astro";
+import ManualScrobble from "../../../../../../components/ManualScrobble.astro";
 import { api, type TvdbEpisodeDetail } from "../../../../../../lib/api";
+
 export const prerender = false;
 
 const { id, season_number, episode_number } = Astro.params;
@@ -26,10 +27,22 @@ if (!episode && !error) {
 
 const show = episode?.show;
 const season = episode?.season;
+const seasonName = season?.name || `Season ${season_number}`;
 const thumbnail = episode?.image_url || show?.poster_path || null;
+
+const validSeasons = (show?.seasons_meta || [])
+  .filter((s) => s.season_number > 0 && s.episode_count > 0);
+const isSingleSeason = validSeasons.length === 1;
+
+const hasPlayableTmdbId = show?.tmdb_id_cross != null;
+const activeButtonsCount = [
+  episode && episode.in_library && hasPlayableTmdbId,
+  true, // ManualScrobble is always rendered
+  episode && episode.in_library
+].filter(Boolean).length;
 ---
 
-<Base title={episode ? `${show?.title} — ${episode.name ?? `Episode ${episode_number}`}` : "Episode Details"}>
+<Base title={episode ? `${show?.title} — ${seasonName} — ${episode.name ?? `Episode ${episode_number}`}` : "Episode Details"}>
   {error && !episode && (
     <div class="max-w-md mx-auto mt-20 text-center">
       <div class="bg-red-500/10 border border-red-500/20 text-red-500 p-6 rounded-2xl mb-6">
@@ -42,107 +55,216 @@ const thumbnail = episode?.image_url || show?.poster_path || null;
 
   {episode && (
     <div class="relative">
+      <!-- Backdrop from show -->
       {show?.backdrop_path && (
-        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[500px] overflow-hidden">
-          <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-transparent z-10"></div>
-          <img src={show.backdrop_path} alt="" class="w-full h-full object-cover opacity-30 blur-[1px]" />
+        <div class="absolute -top-20 md:-top-32 left-1/2 -translate-x-1/2 w-screen h-[600px] overflow-hidden" style="mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%);">
+          <div class="absolute inset-0 bg-gradient-to-t from-[var(--color-hero-fade)] via-[var(--color-hero-fade)]/40 to-transparent z-10"></div>
+          <img
+            src={show.backdrop_path}
+            alt=""
+            class="w-full h-full object-cover opacity-50 blur-[1px]"
+            loading="eager"
+            decoding="async"
+          />
         </div>
       )}
 
       <div class="relative z-20">
+        <!-- Breadcrumb -->
         <nav class="flex items-center gap-2 text-sm text-zinc-400 mb-8 overflow-hidden whitespace-nowrap">
           <a href="/shows" class="hover:text-zinc-100 transition shrink-0">Shows</a>
           <span class="text-zinc-700">/</span>
           <a href={`/show/tvdb/${id}`} class="hover:text-zinc-100 transition truncate">{show?.title}</a>
-          <span class="text-zinc-700 shrink-0">/</span>
-          <a href={`/show/tvdb/${id}/season/${season_number}`} class="hover:text-zinc-100 transition shrink-0">{season?.name ?? `Season ${season_number}`}</a>
+          {!isSingleSeason && (
+            <>
+              <span class="text-zinc-700 shrink-0">/</span>
+              <a href={`/show/tvdb/${id}/season/${season_number}`} class="hover:text-zinc-100 transition shrink-0">{seasonName}</a>
+            </>
+          )}
           <span class="text-zinc-700 shrink-0">/</span>
           <span class="text-zinc-100 font-bold shrink-0">Episode {episode_number}</span>
         </nav>
 
-        <div class="flex flex-col md:flex-row gap-8 lg:gap-12 mb-16">
-          <!-- Thumbnail -->
-          <div class="w-full md:w-80 shrink-0">
-            <div class="aspect-video rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative">
-              {thumbnail ? (
-                <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge thumbnail`}>
-                  <img
-                    src={thumbnail}
-                    alt={episode.name ?? ""}
-                    class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
-                    loading="eager"
-                    decoding="async"
-                  />
-                  <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover/poster:opacity-100 transition-opacity duration-200 bg-black/30">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8 text-white drop-shadow-lg">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
+        <!-- Title & Pagination -->
+        <div class="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div class="min-w-0">
+            <h1 class="text-3xl md:text-5xl font-black text-zinc-100 tracking-tight leading-tight text-center md:text-left">{episode.name ?? `Episode ${episode_number}`}</h1>
+          </div>
+          
+          {(() => {
+            const currentEpisode = Number(episode_number);
+            const currentSeasonNum = Number(season_number);
+            const episodes = (episode.episodes || [])
+              .sort((a, b) => a.episode_number - b.episode_number);
+            const currentIndex = episodes.findIndex((e) => e.episode_number === currentEpisode);
+            const prevEp = currentIndex > 0 ? episodes[currentIndex - 1] : null;
+            const nextEp = currentIndex < episodes.length - 1 ? episodes[currentIndex + 1] : null;
+
+            const validSeasons = (show?.seasons_meta || [])
+              .filter((s) => s.season_number > 0 && s.episode_count > 0)
+              .sort((a, b) => a.season_number - b.season_number);
+            const seasonIdx = validSeasons.findIndex((s) => s.season_number === currentSeasonNum);
+
+            let nextSeasonLink = null;
+            let prevSeasonLink = null;
+
+            if (!nextEp && seasonIdx !== -1 && seasonIdx < validSeasons.length - 1) {
+              const nextSeasonMeta = validSeasons[seasonIdx + 1];
+              nextSeasonLink = `/show/tvdb/${id}/season/${nextSeasonMeta.season_number}/1`;
+            }
+            if (!prevEp && seasonIdx > 0) {
+              const prevSeasonMeta = validSeasons[seasonIdx - 1];
+              prevSeasonLink = `/show/tvdb/${id}/season/${prevSeasonMeta.season_number}/${prevSeasonMeta.episode_count}`;
+            }
+
+            const hasNavigation = episodes.length > 1 || nextSeasonLink || prevSeasonLink;
+
+            if (!hasNavigation) return null;
+
+            return (
+              <div class="flex items-center justify-center md:justify-start gap-2 shrink-0">
+                {prevEp ? (
+                  <a href={`/show/tvdb/${id}/season/${season_number}/${prevEp.episode_number}`} class="flex items-center gap-1.5 px-3 py-2 bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/50 rounded-xl text-zinc-400 hover:text-zinc-100 hover:border-blue-500/50 hover:bg-zinc-800/60 active:scale-95 active:opacity-70 transition-all text-sm font-bold">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12 15.75 4.5" />
                     </svg>
+                    <span class="hidden sm:inline">E{prevEp.episode_number}</span>
+                  </a>
+                ) : prevSeasonLink ? (
+                  <a href={prevSeasonLink} class="flex items-center gap-1.5 px-3 py-2 bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/50 rounded-xl text-zinc-400 hover:text-zinc-100 hover:border-blue-500/50 hover:bg-zinc-800/60 active:scale-95 active:opacity-70 transition-all text-sm font-bold" title="Last episode of previous season">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12 15.75 4.5" />
+                    </svg>
+                    <span class="hidden sm:inline">Prev Season</span>
+                  </a>
+                ) : null}
+
+                <span class="px-3 py-2 bg-blue-600/20 backdrop-blur-xl border border-blue-500/30 rounded-xl text-blue-400 text-sm font-black">
+                  E{currentEpisode}
+                </span>
+
+                {nextEp ? (
+                  <a href={`/show/tvdb/${id}/season/${season_number}/${nextEp.episode_number}`} class="flex items-center gap-1.5 px-3 py-2 bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/50 rounded-xl text-zinc-400 hover:text-zinc-100 hover:border-blue-500/50 hover:bg-zinc-800/60 active:scale-95 active:opacity-70 transition-all text-sm font-bold">
+                    <span class="hidden sm:inline">E{nextEp.episode_number}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </a>
+                ) : nextSeasonLink ? (
+                  <a href={nextSeasonLink} class="flex items-center gap-1.5 px-3 py-2 bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/50 rounded-xl text-zinc-400 hover:text-zinc-100 hover:border-blue-500/50 hover:bg-zinc-800/60 active:scale-95 active:opacity-70 transition-all text-sm font-bold" title="First episode of next season">
+                    <span class="hidden sm:inline">Next Season</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </a>
+                ) : null}
+              </div>
+            );
+          })()}
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start mb-16">
+          <!-- LEFT COLUMN: Thumbnail & Actions Sidebar -->
+          <div class="lg:col-span-4 space-y-6">
+            <!-- Thumbnail -->
+            <div class="w-full shrink-0">
+              <div class="aspect-video rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative">
+                {thumbnail ? (
+                  <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge thumbnail`}>
+                    <img
+                      src={thumbnail}
+                      alt={episode.name ?? `Episode ${episode_number}`}
+                      class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
+                      loading="eager"
+                      decoding="async"
+                    />
+                    <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover/poster:opacity-100 transition-opacity duration-200 bg-black/30">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8 text-white drop-shadow-lg">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
+                      </svg>
+                    </div>
+                  </button>
+                ) : (
+                  <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
+                    <span class="text-4xl mb-2">📺</span>
+                    <span class="text-sm font-medium">No Thumbnail</span>
                   </div>
-                </button>
-              ) : (
-                <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
-                  <span class="text-4xl mb-2">📺</span>
-                  <span class="text-sm font-medium">No Thumbnail</span>
-                </div>
-              )}
+                )}
+              </div>
             </div>
+
+            <!-- ActionBar -->
+            <div class="bg-zinc-900/20 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-2xl">
+              <ActionBar
+                tmdbId={episode.tvdb_id ?? Number(id)}
+                mediaType="episode"
+                watched={episode.watched ?? false}
+                inLists={episode.in_lists ?? []}
+                inLibrary={episode.in_library ?? false}
+                collectionPct={episode.in_library ? 100 : 0}
+                showTmdbId={show?.tmdb_id_cross ?? Number(id)}
+                seasonNumber={Number(season_number)}
+                episodeNumber={Number(episode_number)}
+                mediaId={episode.id ?? null}
+                userRating={episode.user_rating ?? null}
+                hideBlock={true}
+              />
+            </div>
+
+            <!-- Action Buttons Container (Play, Session, Refresh) -->
+            {activeButtonsCount > 0 && (
+              <div class={`grid gap-2 w-full grid-cols-${activeButtonsCount}`}>
+                {episode.in_library && show?.tmdb_id_cross != null && (
+                  <VideoPlayer
+                    tmdbId={show.tmdb_id_cross}
+                    mediaId={episode.id}
+                    mediaType="episode"
+                    inLibrary={episode.in_library ?? false}
+                    title={`${show?.title} — ${episode.name ?? `Episode ${episode_number}`}`}
+                    token={token}
+                  />
+                )}
+                <ManualScrobble
+                  tmdbId={show?.tmdb_id_cross}
+                  mediaId={episode.id}
+                  mediaType="episode"
+                  runtime={episode.runtime}
+                  title={episode.name ?? `Episode ${episode_number}`}
+                  showTmdbId={show?.tmdb_id_cross}
+                  seasonNumber={Number(season_number)}
+                  episodeNumber={Number(episode_number)}
+                />
+                {episode.in_library && (
+                  <button
+                    id="refresh-metadata-btn"
+                    class="w-full h-11 flex items-center justify-center gap-2 px-5 text-sm font-bold leading-none text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
+                  >
+                    <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                      <path d="M21 3v5h-5"/>
+                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                      <path d="M8 16H3v5"/>
+                    </svg>
+                    <span id="refresh-label">Refresh Metadata</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          <!-- Info -->
-          <div class="flex-1 min-w-0 pt-2">
-            <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-2">
-              <div class="min-w-0">
-                <h1 class="text-3xl md:text-5xl font-black text-zinc-100 mb-2 tracking-tight leading-tight">
-                  {episode.name ?? `Episode ${episode_number}`}
-                </h1>
-                <div class="flex flex-wrap items-center gap-3">
-                  <p class="text-lg text-blue-400 font-bold tracking-wide uppercase">{show?.title}</p>
-                  <span class="px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
-                    S{String(season_number).padStart(2, "0")}E{String(episode_number).padStart(2, "0")}
-                  </span>
-                </div>
-              </div>
-
-              {episode.episodes && episode.episodes.length > 1 && (
-                <div class="flex items-center gap-2 shrink-0">
-                  {(() => {
-                    const currentEp = Number(episode_number);
-                    const sorted = [...episode.episodes].sort((a, b) => a.episode_number - b.episode_number);
-                    const idx = sorted.findIndex((e) => e.episode_number === currentEp);
-                    const prev = idx > 0 ? sorted[idx - 1] : null;
-                    const next = idx < sorted.length - 1 ? sorted[idx + 1] : null;
-                    return (
-                      <>
-                        {prev && (
-                          <a href={`/show/tvdb/${id}/season/${season_number}/${prev.episode_number}`} class="flex items-center gap-1.5 px-3 py-2 bg-zinc-900/60 border border-zinc-800/50 rounded-xl text-zinc-400 hover:text-zinc-100 hover:border-blue-500/50 hover:bg-zinc-800/60 active:scale-95 active:opacity-70 transition-all text-sm font-bold">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
-                              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12 15.75 4.5" />
-                            </svg>
-                            <span class="hidden sm:inline">E{prev.episode_number}</span>
-                          </a>
-                        )}
-                        <span class="px-3 py-2 bg-blue-600/20 border border-blue-500/30 rounded-xl text-blue-400 text-sm font-black">
-                          E{currentEp}
-                        </span>
-                        {next && (
-                          <a href={`/show/tvdb/${id}/season/${season_number}/${next.episode_number}`} class="flex items-center gap-1.5 px-3 py-2 bg-zinc-900/60 border border-zinc-800/50 rounded-xl text-zinc-400 hover:text-zinc-100 hover:border-blue-500/50 hover:bg-zinc-800/60 active:scale-95 active:opacity-70 transition-all text-sm font-bold">
-                            <span class="hidden sm:inline">E{next.episode_number}</span>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
-                              <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                            </svg>
-                          </a>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
+          <!-- RIGHT COLUMN: Details & Cast -->
+          <div class="lg:col-span-8 space-y-8">
+            <div class="flex flex-wrap items-center gap-3">
+              <p class="text-lg text-blue-400 font-bold tracking-wide uppercase">{show?.title}</p>
+              <span class="px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
+                S{String(season_number).padStart(2, '0')}E{String(episode_number).padStart(2, '0')}
+              </span>
             </div>
 
-            <div class="flex flex-wrap items-center gap-4 text-zinc-300 text-sm mb-8 bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm inline-flex">
+            <div class="flex flex-wrap items-center gap-2.5 md:gap-4 text-zinc-300 text-xs md:text-sm bg-zinc-900/40 p-2.5 md:p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm w-fit">
               {episode.air_date && (
                 <span class="font-bold">
-                  {new Date(episode.air_date).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
+                  {new Date(episode.air_date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
                 </span>
               )}
               {episode.runtime && (
@@ -153,147 +275,295 @@ const thumbnail = episode?.image_url || show?.poster_path || null;
                   {episode.runtime} min
                 </span>
               )}
+              {!!episode.play_count && (
+                <span id="play-count-badge" class="inline-flex items-center px-2.5 py-1 bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 text-xs font-bold rounded-lg cursor-pointer transition-all duration-200" title="Click to view/remove specific plays" data-tmdb-id={show?.tmdb_id_cross ?? ""} data-media-id={episode.id} data-media-type="episode">
+                  {episode.play_count} {episode.play_count === 1 ? 'Play' : 'Plays'}
+                </span>
+              )}
             </div>
-
-            <div class="mb-4">
-              <ActionBar
-                tmdbId={episode.tvdb_id ?? Number(id)}
-                mediaType="episode"
-                watched={episode.watched}
-                inLists={episode.in_lists}
-                inLibrary={episode.in_library}
-                collectionPct={episode.in_library ? 100 : 0}
-                showTmdbId={Number(id)}
-                seasonNumber={Number(season_number)}
-                episodeNumber={Number(episode_number)}
-                mediaId={episode.id}
-                hideRequest={true}
-                userRating={episode.user_rating}
-              />
-            </div>
-
-            <ManualScrobble
-              tmdbId={null}
-              mediaId={episode.id}
-              mediaType="episode"
-              runtime={episode.runtime}
-              title={episode.name ?? `Episode ${episode_number}`}
-              seasonNumber={Number(season_number)}
-              episodeNumber={Number(episode_number)}
-            />
 
             <!-- Library info -->
-            {episode.library && (
-              <div class="mb-4 flex flex-wrap gap-2">
-                {!!episode.play_count && (
-                  <span class="inline-flex items-center px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-bold">
-                    {episode.play_count} {episode.play_count === 1 ? 'Play' : 'Plays'}
-                  </span>
-                )}
-                {[
-                  episode.library.resolution,
-                  episode.library.video_codec,
-                  episode.library.audio_codec,
-                  episode.library.audio_channels,
-                ].filter(Boolean).map(tag => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold">
-                    {tag}
-                  </span>
-                ))}
-                {episode.library.audio_languages?.map((lang: string) => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
-                    <span class="opacity-50">🔊</span> {lang}
-                  </span>
-                ))}
-                {episode.library.subtitle_languages?.map((lang: string) => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
-                    <span class="opacity-50">💬</span> {lang}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {episode.in_library && (
-              <div class="mb-8 flex flex-wrap gap-3 items-start">
-                <button
-                  id="refresh-metadata-btn"
-                  class="flex items-center gap-2 px-4 py-2 text-sm font-bold leading-none text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors cursor-pointer"
-                >
-                  <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                    <path d="M21 3v5h-5"/>
-                    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                    <path d="M8 16H3v5"/>
-                  </svg>
-                  <span id="refresh-label">Refresh Metadata</span>
-                </button>
-                <VideoPlayer
-                  tmdbId={episode.tvdb_id ?? Number(id)}
-                  mediaId={episode.id}
-                  mediaType="episode"
-                  inLibrary={episode.in_library}
-                  title={`${show?.title} — ${episode.name ?? `Episode ${episode_number}`}`}
-                  token={token}
-                  secondary
-                />
-              </div>
-            )}
+            {(() => {
+              const hasLibraryTags = episode.library && (
+                episode.library.resolution ||
+                episode.library.video_codec ||
+                episode.library.audio_codec ||
+                episode.library.audio_channels ||
+                episode.library.audio_languages?.length ||
+                episode.library.subtitle_languages?.length
+              );
+              return hasLibraryTags && (
+                <div class="flex flex-wrap gap-2">
+                  {[
+                    episode.library.resolution,
+                    episode.library.video_codec,
+                    episode.library.audio_codec,
+                    episode.library.audio_channels,
+                  ].filter(Boolean).map(tag => (
+                    <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold">
+                      {tag}
+                    </span>
+                  ))}
+                  {episode.library?.audio_languages?.map((lang: string) => (
+                    <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
+                      <span class="opacity-50">🔊</span> {lang}
+                    </span>
+                  ))}
+                  {episode.library?.subtitle_languages?.map((lang: string) => (
+                    <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
+                      <span class="opacity-50">💬</span> {lang}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
 
             {episode.overview && (
-              <div>
-                <h2 class="text-xl font-black text-zinc-100 mb-4 flex items-center gap-2 uppercase tracking-tight">
+              <div class="space-y-3">
+                <h2 class="text-sm font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">
                   <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
                   Overview
                 </h2>
-                <p class="text-zinc-300 leading-relaxed text-lg max-w-3xl font-medium opacity-90">
+                <p class="text-zinc-350 leading-relaxed text-base md:text-lg opacity-90">
                   {episode.overview}
                 </p>
               </div>
             )}
+
+            <CommentsSection
+              mediaType="series"
+              tmdbId={Number(id)}
+              seasonNumber={Number(season_number)}
+              episodeNumber={Number(episode_number)}
+            />
+
+            <!-- Cast -->
+            {episode.cast?.length > 0 && (
+              <div class="space-y-6">
+                <h2 class="text-2xl font-black text-zinc-100 tracking-tighter uppercase flex items-center gap-3">
+                  <span class="w-1.5 h-6 bg-blue-600 rounded-full"></span>
+                  Cast
+                </h2>
+                <div class="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-5 xl:grid-cols-6 gap-3">
+                  {episode.cast.map((person) => (
+                    <div class="bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl flex flex-col h-full">
+                      <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 transition-all duration-500 shadow-lg">
+                        {person.profile_path ? (
+                          <img
+                            src={person.profile_path}
+                            alt={person.name}
+                            class="w-full h-full object-cover"
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-2xl">👤</div>
+                        )}
+                      </div>
+                      <div class="flex-1 flex flex-col items-center justify-center text-center px-0.5 py-1">
+                        <p class="text-xs font-black text-zinc-100 line-clamp-2 leading-tight">{person.name}</p>
+                        <p class="text-[10px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-2 opacity-80 mt-0.5">{person.character}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
-
-        <CommentsSection
-          mediaType="series"
-          tmdbId={Number(id)}
-          seasonNumber={Number(season_number)}
-          episodeNumber={Number(episode_number)}
-        />
-
-        <!-- Cast -->
-        {episode.cast?.length > 0 && (
-          <div class="mt-8 border-t border-zinc-900 pt-16">
-            <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase mb-10">Top Cast</h2>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-              {episode.cast.map((person) => (
-                <div class="bg-zinc-900/20 border border-zinc-800/40 p-4 rounded-3xl">
-                  <div class="aspect-square w-full rounded-2xl overflow-hidden mb-5 ring-2 ring-zinc-800/50 shadow-lg">
-                    {person.profile_path ? (
-                      <img
-                        src={person.profile_path}
-                        alt={person.name}
-                        class="w-full h-full object-cover"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-4xl">👤</div>
-                    )}
-                  </div>
-                  <div class="space-y-1.5 text-center">
-                    <p class="text-sm font-black text-zinc-100 line-clamp-1 leading-tight">{person.name}</p>
-                    <p class="text-[11px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-1 opacity-80">{person.character}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
       </div>
     </div>
   )}
 </Base>
+
+{thumbnail && (
+  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
+    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
+    <img
+      src={thumbnail}
+      alt={episode?.name ?? `Episode ${episode_number}`}
+      class="relative max-h-[90vh] max-w-[90vw] md:max-w-[70vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
+    />
+    <button
+      id="poster-modal-close"
+      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
+      aria-label="Close"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+)}
+
+<div id="play-history-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
+  <div id="play-history-backdrop" class="absolute inset-0 bg-black/75 backdrop-blur-sm cursor-pointer"></div>
+  
+  <div class="relative w-full max-w-md mx-4 bg-zinc-950/85 border border-zinc-800/85 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] z-10 backdrop-blur-xl">
+    <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
+      <h3 class="text-sm font-bold text-zinc-100 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="text-indigo-500">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+        Play History
+      </h3>
+      <button
+        id="play-history-close"
+        class="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+        aria-label="Close"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <div id="play-history-list" class="p-4 overflow-y-auto space-y-3 flex-1 scrollbar-thin">
+      <div class="text-zinc-500 text-sm text-center py-8">Loading history...</div>
+    </div>
+  </div>
+</div>
+
+<script define:vars={{ token: Astro.locals.token }}>
+  const badge = document.getElementById('play-count-badge');
+  const historyModal = document.getElementById('play-history-modal');
+  const historyBackdrop = document.getElementById('play-history-backdrop');
+  const historyClose = document.getElementById('play-history-close');
+  const historyList = document.getElementById('play-history-list');
+
+  if (badge && historyModal) {
+    const tmdbId = badge.getAttribute('data-tmdb-id');
+    const mediaId = badge.getAttribute('data-media-id');
+    const mediaType = badge.getAttribute('data-media-type');
+
+    function openModal() {
+      historyModal.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      loadHistory();
+    }
+
+    function closeModal() {
+      historyModal.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    badge.addEventListener('click', openModal);
+    historyBackdrop?.addEventListener('click', closeModal);
+    historyClose?.addEventListener('click', closeModal);
+    
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !historyModal.classList.contains('hidden')) {
+        closeModal();
+      }
+    });
+
+    async function loadHistory() {
+      if (!historyList) return;
+      historyList.innerHTML = '<div class="text-zinc-500 text-sm text-center py-8 flex justify-center items-center gap-2"><svg class="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading history...</div>';
+
+      try {
+        const queryParam = tmdbId ? `tmdb_id=${tmdbId}` : `id=${mediaId}`;
+        const res = await fetch(`/api/proxy/history/item/events?${queryParam}&media_type=${mediaType}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to fetch play history');
+        const data = await res.json();
+        
+        if (!data.events || data.events.length === 0) {
+          historyList.innerHTML = '<div class="text-zinc-500 text-sm text-center py-8">No play history found.</div>';
+          return;
+        }
+
+        const formatter = new Intl.DateTimeFormat(undefined, {
+          dateStyle: 'medium',
+          timeStyle: 'short'
+        });
+
+        historyList.innerHTML = '';
+        data.events.forEach(event => {
+          const row = document.createElement('div');
+          row.className = 'flex items-center justify-between p-3 bg-zinc-900/60 border border-zinc-800/80 rounded-xl hover:border-zinc-700/80 transition-colors';
+          row.id = `play-event-${event.id}`;
+          
+          const info = document.createElement('div');
+          info.className = 'flex flex-col gap-0.5';
+          
+          const dateSpan = document.createElement('span');
+          dateSpan.className = 'text-sm font-semibold text-zinc-200';
+          dateSpan.textContent = formatter.format(new Date(event.watched_at));
+          
+          const detailsSpan = document.createElement('span');
+          detailsSpan.className = 'text-xs text-zinc-500';
+          detailsSpan.textContent = event.completed ? 'Completed' : `In progress (${Math.round((event.progress_percent || 0) * 100)}%)`;
+          
+          info.appendChild(dateSpan);
+          info.appendChild(detailsSpan);
+          
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'delete-play-btn p-2 rounded-lg bg-red-950/20 hover:bg-red-900/30 text-red-400 border border-red-950/50 hover:border-red-800/60 transition-all duration-200 cursor-pointer flex items-center justify-center';
+          deleteBtn.setAttribute('title', 'Remove this play from history');
+          deleteBtn.setAttribute('data-event-id', event.id);
+          deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>';
+          
+          deleteBtn.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to remove this play from your history?')) return;
+            
+            deleteBtn.setAttribute('disabled', 'true');
+            deleteBtn.innerHTML = '<svg class="animate-spin h-4 w-4 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            
+            try {
+              const delRes = await fetch(`/api/proxy/history/event/${event.id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              if (!delRes.ok) throw new Error('Failed to delete play event');
+              
+              const delData = await delRes.json();
+              
+              row.remove();
+              
+              const count = delData.remaining_count;
+              if (count > 0) {
+                badge.childNodes[0].textContent = `${count} ${count === 1 ? 'Play' : 'Plays'}`;
+              } else {
+                badge.remove();
+                closeModal();
+                window.location.reload();
+              }
+            } catch (err) {
+              alert('Failed to delete play: ' + err.message);
+              deleteBtn.removeAttribute('disabled');
+              deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>';
+            }
+          });
+          
+          row.appendChild(info);
+          row.appendChild(deleteBtn);
+          historyList.appendChild(row);
+        });
+
+      } catch (err) {
+        historyList.innerHTML = `<div class="text-red-400 text-sm text-center py-8">Failed to load play history: ${err.message}</div>`;
+      }
+    }
+  }
+</script>
+
+<script>
+  const zoomBtn = document.getElementById('poster-zoom-btn');
+  const modal = document.getElementById('poster-modal');
+  const backdrop = document.getElementById('poster-modal-backdrop');
+  const closeBtn = document.getElementById('poster-modal-close');
+  if (zoomBtn && modal) {
+    function openModal() { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
+    function closeModal() { modal.classList.add('hidden'); document.body.style.overflow = ''; }
+    zoomBtn.addEventListener('click', openModal);
+    backdrop?.addEventListener('click', closeModal);
+    closeBtn?.addEventListener('click', closeModal);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+  }
+</script>
 
 <script define:vars={{ tvdbId: id, token: Astro.locals.token }}>
   const btn = document.getElementById('refresh-metadata-btn');
@@ -328,40 +598,5 @@ const thumbnail = episode?.image_url || show?.poster_path || null;
         setTimeout(() => { label.textContent = 'Refresh Metadata'; }, 3000);
       }
     });
-  }
-</script>
-
-{thumbnail && (
-  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
-    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
-    <img
-      src={thumbnail}
-      alt={episode?.name ?? ""}
-      class="relative max-h-[90vh] max-w-[90vw] md:max-w-[70vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
-    />
-    <button
-      id="poster-modal-close"
-      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
-      aria-label="Close"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-      </svg>
-    </button>
-  </div>
-)}
-
-<script>
-  const zoomBtn = document.getElementById("poster-zoom-btn");
-  const modal = document.getElementById("poster-modal");
-  const backdrop = document.getElementById("poster-modal-backdrop");
-  const closeBtn = document.getElementById("poster-modal-close");
-  if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove("hidden"); document.body.style.overflow = "hidden"; }
-    function closeModal() { modal.classList.add("hidden"); document.body.style.overflow = ""; }
-    zoomBtn.addEventListener("click", openModal);
-    backdrop?.addEventListener("click", closeModal);
-    closeBtn?.addEventListener("click", closeModal);
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
   }
 </script>

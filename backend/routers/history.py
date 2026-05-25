@@ -648,16 +648,23 @@ async def unwatch_item(
 
 @router.get("/item/events")
 async def get_item_watch_events(
-    tmdb_id: int = Query(...),
+    tmdb_id: Optional[int] = Query(None),
+    id: Optional[int] = Query(None, alias="id"),
     media_type: MediaType = Query(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get all watch events for a specific item, sorted by watched_at desc."""
-    media_q = await db.execute(
-        select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
-    )
-    media_ids = media_q.scalars().all()
+    if id is not None:
+        media_ids = [id]
+    elif tmdb_id is not None:
+        media_q = await db.execute(
+            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+        )
+        media_ids = media_q.scalars().all()
+    else:
+        raise HTTPException(status_code=400, detail="Either tmdb_id or id is required")
+
     if not media_ids:
         return {"events": []}
 
@@ -681,6 +688,7 @@ async def get_item_watch_events(
             for e in events
         ]
     }
+
 
 
 @router.delete("/event/{event_id}")

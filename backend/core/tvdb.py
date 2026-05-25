@@ -62,6 +62,56 @@ async def _get(path: str, api_key: str, params: dict | None = None) -> dict:
         return r.json()
 
 
+def to_three_letter_lang(lang_code: str | None) -> str:
+    """Map a 2-letter language code (ISO 639-1) to 3-letter code (ISO 639-2/T).
+    Defaults to 'eng' if not found or empty."""
+    if not lang_code:
+        return "eng"
+    lang_code = lang_code.lower().strip()
+    if len(lang_code) == 3:
+        return lang_code
+    mapping = {
+        "aa": "aar", "ab": "abk", "ae": "ave", "af": "afr", "ak": "aka",
+        "am": "amh", "an": "arg", "ar": "ara", "as": "asm", "av": "ava",
+        "ay": "aym", "az": "aze", "ba": "bak", "be": "bel", "bg": "bul",
+        "bh": "bih", "bi": "bis", "bm": "bam", "bn": "ben", "bo": "bod",
+        "br": "bre", "bs": "bos", "ca": "cat", "ce": "che", "ch": "cha",
+        "co": "cos", "cr": "cre", "cs": "ces", "cu": "chu", "cv": "chv",
+        "cy": "cym", "da": "dan", "de": "deu", "dv": "div", "dz": "dzo",
+        "ee": "ewe", "el": "ell", "en": "eng", "eo": "epo", "es": "spa",
+        "et": "est", "eu": "eus", "fa": "fas", "ff": "ful", "fi": "fin",
+        "fj": "fij", "fo": "fao", "fr": "fra", "fy": "fry", "ga": "gle",
+        "gd": "gla", "gl": "glg", "gn": "grn", "gu": "guj", "gv": "glv",
+        "ha": "hau", "he": "heb", "hi": "hin", "ho": "hmo", "hr": "hrv",
+        "ht": "hat", "hu": "hun", "hy": "hye", "hz": "her", "ia": "ina",
+        "id": "ind", "ie": "ile", "ig": "ibo", "ii": "iii", "ik": "ipk",
+        "io": "ido", "is": "isl", "it": "ita", "iu": "iku", "ja": "jpn",
+        "jv": "jav", "ka": "kat", "kg": "kon", "ki": "kik", "kj": "kua",
+        "kk": "kaz", "kl": "kal", "km": "khm", "kn": "kan", "ko": "kor",
+        "kr": "kau", "ks": "kas", "kv": "kom", "kw": "cor", "ky": "kir",
+        "la": "lat", "lb": "ltz", "lg": "lug", "li": "lim", "ln": "lin",
+        "lo": "lao", "lt": "lit", "lu": "lub", "lv": "lav", "mg": "mlg",
+        "mh": "mah", "mi": "mri", "mk": "mkd", "ml": "mal", "mn": "mon",
+        "mr": "mar", "ms": "msa", "mt": "mlt", "my": "mya", "na": "nau",
+        "nb": "nob", "nd": "nde", "ne": "nep", "ng": "ndo", "nl": "nld",
+        "nn": "nno", "no": "nor", "nr": "nbl", "nv": "nav", "ny": "nya",
+        "oc": "oci", "oj": "oji", "om": "orm", "or": "ori", "os": "oss",
+        "pa": "pan", "pi": "pli", "pl": "pol", "ps": "pus", "pt": "por",
+        "qu": "que", "rm": "roh", "rn": "run", "ro": "ron", "ru": "rus",
+        "rw": "kin", "sa": "san", "sc": "srd", "sd": "snd", "se": "sme",
+        "sg": "sag", "sh": "hbs", "si": "sin", "sk": "slk", "sl": "slv",
+        "sm": "smo", "sn": "sna", "so": "som", "sq": "sqi", "sr": "srp",
+        "ss": "ssw", "st": "sot", "su": "sun", "sv": "swe", "sw": "swa",
+        "ta": "tam", "te": "tel", "tg": "tgk", "th": "tha", "ti": "tir",
+        "tk": "tuk", "tl": "tgl", "tn": "tsn", "to": "ton", "tr": "tur",
+        "ts": "tso", "tt": "tat", "tw": "twi", "ty": "tah", "ug": "uig",
+        "uk": "ukr", "ur": "urd", "uz": "uzb", "ve": "ven", "vi": "vie",
+        "vo": "vol", "wa": "wln", "wo": "wol", "xh": "xho", "yi": "yid",
+        "yo": "yor", "za": "zha", "zh": "zho", "zu": "zul"
+    }
+    return mapping.get(lang_code, "eng")
+
+
 async def validate_api_key(api_key: str) -> bool:
     if not api_key:
         return False
@@ -100,38 +150,74 @@ async def get_series(tvdb_id: int, api_key: str) -> dict:
     return data.get("data") or {}
 
 
-async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str) -> list[dict]:
-    """Fetch episodes for a specific season (season_type=official)."""
+async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, lang: str = "eng") -> list[dict]:
+    """Fetch episodes for a specific season (season_type=official) in the specified language."""
     episodes = []
     page = 0
-    while True:
-        data = await _get(
-            f"/series/{tvdb_id}/episodes/official",
-            api_key,
-            params={"page": page, "season": season_number},
-        )
-        batch = (data.get("data") or {}).get("episodes") or []
-        if not batch:
-            break
-        episodes.extend(batch)
-        # TVDB paginates at 500; if we got fewer, we're done
-        if len(batch) < 500:
-            break
-        page += 1
+    try:
+        while True:
+            data = await _get(
+                f"/series/{tvdb_id}/episodes/official/{lang}",
+                api_key,
+                params={"page": page, "season": season_number},
+            )
+            batch = (data.get("data") or {}).get("episodes") or []
+            if not batch:
+                break
+            episodes.extend(batch)
+            # TVDB paginates at 500; if we got fewer, we're done
+            if len(batch) < 500:
+                break
+            page += 1
+    except Exception:
+        # Fall back to english if custom language lookup fails
+        if lang != "eng":
+            return await get_series_episodes(tvdb_id, season_number, api_key, lang="eng")
+        else:
+            raise
     return episodes
 
 
-def format_series(raw: dict) -> dict:
-    """Normalise TVDB extended series data into a frontend-friendly dict."""
+def format_series(raw: dict, lang: str = "eng") -> dict:
+    """Normalise TVDB extended series data into a frontend-friendly dict, translating name and overview if possible."""
     image = raw.get("image") or ""
     poster = _image_url(image) if image else None
 
     translations = raw.get("translations") or {}
-    eng_overview = None
+    
+    # Try preferred overview translation
+    overview = None
     for t in translations.get("overviewTranslations") or []:
-        if isinstance(t, dict) and t.get("language") == "eng":
-            eng_overview = t.get("overview")
+        if isinstance(t, dict) and t.get("language") == lang:
+            overview = t.get("overview")
             break
+            
+    # Fallback to English overview if preferred translation not found
+    if not overview and lang != "eng":
+        for t in translations.get("overviewTranslations") or []:
+            if isinstance(t, dict) and t.get("language") == "eng":
+                overview = t.get("overview")
+                break
+                
+    if not overview:
+        overview = raw.get("overview")
+
+    # Try preferred title translation
+    title = None
+    for t in translations.get("nameTranslations") or []:
+        if isinstance(t, dict) and t.get("language") == lang:
+            title = t.get("name")
+            break
+            
+    # Fallback to English title if preferred translation not found
+    if not title and lang != "eng":
+        for t in translations.get("nameTranslations") or []:
+            if isinstance(t, dict) and t.get("language") == "eng":
+                title = t.get("name")
+                break
+                
+    if not title:
+        title = raw.get("name")
 
     genres = [g.get("name") for g in (raw.get("genres") or []) if g.get("name")]
 
@@ -191,9 +277,9 @@ def format_series(raw: dict) -> dict:
 
     return {
         "tvdb_id": raw.get("id"),
-        "title": raw.get("name"),
+        "title": title,
         "original_title": raw.get("originalName"),
-        "overview": eng_overview or raw.get("overview"),
+        "overview": overview,
         "poster_path": poster,
         "backdrop_path": _image_url(raw.get("artworks", [{}])[0].get("image") if raw.get("artworks") else None),
         "first_air_date": raw.get("firstAired"),

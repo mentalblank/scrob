@@ -1630,12 +1630,15 @@ async def get_tvdb_show(
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
 
+    user_lang = await get_user_content_language(db, current_user.id)
+    tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
     try:
         raw = await tvdb_client.get_series(tvdb_id, api_key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
-    show_data = tvdb_client.format_series(raw)
+    show_data = tvdb_client.format_series(raw, lang=tvdb_lang)
     cast = tvdb_client.format_cast(raw)
 
     # Look up local Show row by tvdb_id
@@ -1770,15 +1773,18 @@ async def get_tvdb_season(
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
 
+    user_lang = await get_user_content_language(db, current_user.id)
+    tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
     try:
         raw_series, raw_episodes = await asyncio.gather(
             tvdb_client.get_series(tvdb_id, api_key),
-            tvdb_client.get_series_episodes(tvdb_id, season_number, api_key),
+            tvdb_client.get_series_episodes(tvdb_id, season_number, api_key, lang=tvdb_lang),
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
-    show_data = tvdb_client.format_series(raw_series)
+    show_data = tvdb_client.format_series(raw_series, lang=tvdb_lang)
     eps = [tvdb_client.format_episode(e) for e in raw_episodes]
 
     # Look up local Show row and episode states
@@ -1879,6 +1885,7 @@ async def get_tvdb_season(
         "show": {
             "id": show.id if show else None,
             "tvdb_id": tvdb_id,
+            "tmdb_id_cross": show_data.get("tmdb_id_cross"),
             "title": show_data["title"],
             "poster_path": show_data["poster_path"],
             "backdrop_path": show_data["backdrop_path"],
@@ -1899,15 +1906,18 @@ async def get_tvdb_episode(
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
 
+    user_lang = await get_user_content_language(db, current_user.id)
+    tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
     try:
         raw_series, raw_episodes = await asyncio.gather(
             tvdb_client.get_series(tvdb_id, api_key),
-            tvdb_client.get_series_episodes(tvdb_id, season_number, api_key),
+            tvdb_client.get_series_episodes(tvdb_id, season_number, api_key, lang=tvdb_lang),
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
-    show_data = tvdb_client.format_series(raw_series)
+    show_data = tvdb_client.format_series(raw_series, lang=tvdb_lang)
     eps = [tvdb_client.format_episode(e) for e in raw_episodes]
     ep_data = next((e for e in eps if e.get("episode_number") == episode_number), None)
     if not ep_data:
@@ -1997,6 +2007,7 @@ async def get_tvdb_episode(
         "show": {
             "id": show.id if show else None,
             "tvdb_id": tvdb_id,
+            "tmdb_id_cross": show_data.get("tmdb_id_cross"),
             "title": show_data["title"],
             "poster_path": show_data["poster_path"],
             "backdrop_path": show_data["backdrop_path"],
@@ -2024,12 +2035,15 @@ async def refresh_tvdb_show_metadata(
     if not show:
         raise HTTPException(status_code=404, detail="Show not found in local library")
 
+    user_lang = await get_user_content_language(db, current_user.id)
+    tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
     try:
         raw = await tvdb_client.get_series(tvdb_id, api_key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
-    show_fmt = tvdb_client.format_series(raw)
+    show_fmt = tvdb_client.format_series(raw, lang=tvdb_lang)
     show.title = show_fmt["title"] or show.title
     show.original_title = show_fmt.get("original_title")
     show.overview = show_fmt.get("overview")

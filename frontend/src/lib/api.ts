@@ -701,7 +701,7 @@ export interface TvdbEpisodeDetail {
   } | null;
   cast: { tmdb_id: null; person_id: number | null; name: string; character: string; profile_path: string | null }[];
   episodes: { episode_number: number; name: string | null }[];
-  show: { id: number | null; tvdb_id: number; title: string; poster_path: string | null; backdrop_path: string | null };
+  show: { id: number | null; tvdb_id: number; tmdb_id_cross: number | null; title: string; poster_path: string | null; backdrop_path: string | null };
   season: { name: string; season_number: number; poster_path: string | null };
 }
 
@@ -722,6 +722,7 @@ export interface TvdbSeason {
   show: {
     id: number | null;
     tvdb_id: number;
+    tmdb_id_cross: number | null;
     title: string;
     poster_path: string | null;
     backdrop_path: string | null;
@@ -772,7 +773,7 @@ export interface TvdbShow {
   request_status: string | null;
   user_rating: number | null;
   season_states: Record<number, SeasonState>;
-  where_to_watch: { type: string; name: string; logo: string | null }[];
+  where_to_watch: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string; connection_id?: number | null }[];
 }
 
 export interface Show {
