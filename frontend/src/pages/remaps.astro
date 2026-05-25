@@ -111,7 +111,7 @@ try {
 
     <!-- Toolbar -->
     <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
-      <h2 class="text-xl font-semibold text-zinc-200 flex items-center gap-2">
+      <h2 class="section-headline mb-1 flex items-center gap-2">
         Active Season Remaps
         <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{seasonOverrides.length}</span>
       </h2>
@@ -210,7 +210,7 @@ try {
     <!-- Episode Remaps Section -->
     <div class="mt-16 mb-8">
       <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
-        <h2 class="text-xl font-semibold text-zinc-200 flex items-center gap-2">
+        <h2 class="section-headline mb-1 flex items-center gap-2">
           Active Episode Remaps
           <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{episodeOverrides.length}</span>
         </h2>
@@ -223,10 +223,12 @@ try {
               class="px-4 py-2 bg-zinc-950/40 border border-zinc-800 focus:border-indigo-500 rounded-xl text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-64 placeholder-zinc-600 transition-all"
             />
           )}
-          <button id="auto-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/80 text-zinc-200 hover:text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">
-            <svg class="w-4 h-4 text-indigo-400 animate-pulse" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
-            TVDB ⇆ TMDB Auto-Remapper
-          </button>
+          {hasTvdbKey && (
+            <button id="auto-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/80 text-zinc-200 hover:text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">
+              <svg class="w-4 h-4 text-indigo-400 animate-pulse" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
+              TVDB ⇆ TMDB Auto-Remapper
+            </button>
+          )}
           <button id="add-ep-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg active:scale-95 cursor-pointer shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
             Add Episode Remap
@@ -419,7 +421,7 @@ try {
     <!-- Custom Renames Section -->
     <div class="mt-16">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <h2 class="text-xl font-semibold text-zinc-200 flex items-center gap-2">
+        <h2 class="section-headline mb-1 flex items-center gap-2">
           Global Custom Renames
           <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{customTitles.length}</span>
         </h2>
@@ -797,10 +799,7 @@ try {
           <!-- Right: TVDB Show Search + API Key -->
           <div class="space-y-3">
             <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">2. TVDB Show</h4>
-            <div>
-              <label class="block text-[10px] font-bold text-zinc-500 mb-1">TVDB API Key (v4)</label>
-              <input type="text" id="auto-tvdb-key" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder={hasTvdbKey ? "Using saved key from settings (optional)" : "Paste TVDB v4 key"} />
-            </div>
+
             <div class="flex gap-2">
               <input type="text" id="auto-tvdb-search" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Search by name or TVDB ID..." />
               <button id="auto-tvdb-search-btn" type="button" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer shrink-0">Search</button>
@@ -1033,31 +1032,15 @@ try {
       <!-- Modal Body (Scrollable) -->
       <div class="p-6 overflow-y-auto space-y-6 flex-1">
         
-        <!-- Rename Type Selection -->
-        <div class="space-y-3">
-          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Select Type</label>
-          <div class="flex gap-2">
-            <button id="rename-type-show" class="flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center">
-              Show
-            </button>
-            <button id="rename-type-season" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center">
-              Season
-            </button>
-            <button id="rename-type-episode" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center">
-              Episode
-            </button>
-          </div>
-        </div>
-
         <!-- Select Show -->
         <div class="space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
-          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">2. Select Show</label>
+          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Select Show</label>
           <div class="flex gap-2">
             <input type="text" id="rename-show-search" placeholder="Search local library..." class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
             <button id="rename-show-search-btn" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold rounded-xl text-xs transition cursor-pointer">Search</button>
           </div>
           <!-- Show Search Results -->
-          <div id="rename-show-results" class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto mt-2 no-scrollbar"></div>
+          <div id="rename-show-results" class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto mt-2 no-scrollbar hidden"></div>
           <!-- Selected Show Card -->
           <div id="rename-selected-show-card" class="hidden p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl flex items-center justify-between">
             <div class="flex items-center gap-3 min-w-0">
@@ -1068,6 +1051,22 @@ try {
               </div>
             </div>
             <button id="rename-change-show-btn" class="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded-lg text-[10px] font-bold transition cursor-pointer shrink-0">Change</button>
+          </div>
+        </div>
+
+        <!-- Rename Type Selection -->
+        <div id="rename-type-section" class="hidden space-y-3">
+          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">2. Select Type</label>
+          <div class="flex gap-2">
+            <button id="rename-type-show" class="flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center">
+              Show
+            </button>
+            <button id="rename-type-season" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center">
+              Season
+            </button>
+            <button id="rename-type-episode" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center">
+              Episode
+            </button>
           </div>
         </div>
 
@@ -1214,8 +1213,6 @@ try {
     // Fetch shows in user's collection
     async function fetchLocalShows() {
       if (localShowsList && localShowsList.length > 0) {
-        sourceSearchResultsContainer.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-6">Search local library to select a show.</div>';
-        sourceSearchResultsContainer.classList.remove("hidden");
         return;
       }
       try {
@@ -1225,15 +1222,9 @@ try {
         if (res.ok) {
           const data = await res.json();
           localShowsList = Array.isArray(data) ? data : data.results || [];
-          sourceSearchResultsContainer.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-6">Search local library to select a show.</div>';
-          sourceSearchResultsContainer.classList.remove("hidden");
-        } else {
-          sourceSearchResultsContainer.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-6">Failed to load local shows.</div>';
-          sourceSearchResultsContainer.classList.remove("hidden");
         }
       } catch (err) {
-        sourceSearchResultsContainer.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-6">Error loading local shows.</div>';
-        sourceSearchResultsContainer.classList.remove("hidden");
+        console.error("Error loading local shows", err);
       }
     }
 
@@ -1776,6 +1767,7 @@ try {
     const renameTypeShow = document.getElementById("rename-type-show")!;
     const renameTypeSeason = document.getElementById("rename-type-season")!;
     const renameTypeEpisode = document.getElementById("rename-type-episode")!;
+    const renameTypeSection = document.getElementById("rename-type-section")!;
 
     const renameShowSearch = document.getElementById("rename-show-search") as HTMLInputElement;
     const renameShowSearchBtn = document.getElementById("rename-show-search-btn")!;
@@ -1857,12 +1849,9 @@ try {
 
     function fetchRenameLocalShows() {
       if (localShowsList && localShowsList.length > 0) {
-        renameShowResults.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-4">Search local library to select a show.</div>';
         return;
       }
-      fetchLocalShows().then(() => {
-        renameShowResults.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-4">Search local library to select a show.</div>';
-      });
+      fetchLocalShows();
     }
 
     const performRenameShowSearch = () => {
@@ -1891,6 +1880,7 @@ try {
       renameShowResults.innerHTML = "";
       if (results.length === 0) {
         renameShowResults.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-4">No matching local shows found.</div>';
+        renameShowResults.classList.remove("hidden");
         return;
       }
 
@@ -1916,6 +1906,7 @@ try {
         card.addEventListener("click", () => selectRenameShow(show));
         renameShowResults.appendChild(card);
       });
+      renameShowResults.classList.remove("hidden");
     }
 
     function selectRenameShow(show: any) {
@@ -1937,6 +1928,7 @@ try {
       renameShowSearchBtn.classList.add("hidden");
       renameShowResults.classList.add("hidden");
       renameSelectedShowCard.classList.remove("hidden");
+      renameTypeSection.classList.remove("hidden");
 
       if (renameType === "season" || renameType === "episode") {
         renderRenameSeasonButtons(show.seasons_meta || []);
@@ -1953,6 +1945,7 @@ try {
       renameShowSearch.classList.remove("hidden");
       renameShowSearchBtn.classList.remove("hidden");
       renameShowResults.classList.remove("hidden");
+      renameTypeSection.classList.add("hidden");
       
       renameSeasonSection.classList.add("hidden");
       renameEpisodeSection.classList.add("hidden");
@@ -2083,9 +2076,10 @@ try {
       renameShowSearch.classList.remove("hidden");
       renameShowSearchBtn.classList.remove("hidden");
       renameShowResults.innerHTML = "";
-      renameShowResults.classList.remove("hidden");
+      renameShowResults.classList.add("hidden");
       
       renameSelectedShowCard.classList.add("hidden");
+      renameTypeSection.classList.add("hidden");
       renameSeasonSection.classList.add("hidden");
       renameSeasonButtons.innerHTML = "";
       renameEpisodeSection.classList.add("hidden");
@@ -2865,7 +2859,7 @@ try {
 
     // TVDB to TMDB Auto-Remap Modal Logic
     const autoModal = document.getElementById("auto-remap-modal")!;
-    const autoRemapBtn = document.getElementById("auto-remap-btn")!;
+    const autoRemapBtn = document.getElementById("auto-remap-btn");
     const closeAutoModalBtn = document.getElementById("close-auto-modal-btn")!;
     const cancelAutoModalBtn = document.getElementById("cancel-auto-modal-btn")!;
     const generatePreviewBtn = document.getElementById("generate-preview-btn") as HTMLButtonElement;
@@ -2875,7 +2869,7 @@ try {
     
     const autoTmdbIdInput = document.getElementById("auto-tmdb-id") as HTMLInputElement;
     const autoTvdbIdInput = document.getElementById("auto-tvdb-id") as HTMLInputElement;
-    const autoTvdbKeyInput = document.getElementById("auto-tvdb-key") as HTMLInputElement;
+
 
     // TMDB search elements
     const autoTmdbSearchInput = document.getElementById("auto-tmdb-search") as HTMLInputElement;
@@ -2914,9 +2908,7 @@ try {
     let selectOptionsHtml = "";
     let currentFilter = "all";
 
-    // Restore TVDB key from localStorage
-    const storedTvdbKey = localStorage.getItem("scrob_auto_tvdb_key");
-    if (storedTvdbKey) autoTvdbKeyInput.value = storedTvdbKey;
+
 
     // --- TMDB Show Search Logic ---
     async function performTmdbSearch() {
@@ -2958,11 +2950,9 @@ try {
     // --- TVDB Show Search Logic ---
     async function performTvdbSearch() {
       const q = autoTvdbSearchInput.value.trim();
-      const tvdbKey = autoTvdbKeyInput.value.trim();
       if (!q) return;
-      if (!tvdbKey && !hasSavedTvdbKey) {
-        window.showToast?.("Enter your TVDB API Key first or configure it in settings", "error");
-        autoTvdbKeyInput.focus();
+      if (!hasSavedTvdbKey) {
+        window.showToast?.("TVDB API Key must be configured in settings to use the auto-remapper!", "error");
         return;
       }
 
@@ -2975,8 +2965,7 @@ try {
             "Authorization": `Bearer ${token}`
           },
           body: JSON.stringify({
-            query: q,
-            ...(tvdbKey ? { tvdb_api_key: tvdbKey } : {})
+            query: q
           })
         });
         if (res.ok) {
@@ -3411,7 +3400,7 @@ try {
       }
     });
 
-    autoRemapBtn.addEventListener("click", openAutoModal);
+    if (autoRemapBtn) autoRemapBtn.addEventListener("click", openAutoModal);
     closeAutoModalBtn.addEventListener("click", closeAutoModal);
     cancelAutoModalBtn.addEventListener("click", closeAutoModal);
     autoModal.addEventListener("click", (e) => {
@@ -3421,20 +3410,14 @@ try {
     generatePreviewBtn.addEventListener("click", async () => {
       const tmdbId = parseInt(autoTmdbIdInput.value);
       const tvdbId = parseInt(autoTvdbIdInput.value);
-      const tvdbKey = autoTvdbKeyInput.value.trim();
       
       if (!tmdbId || !tvdbId) {
         window.showToast?.("Please search and select both a TMDB show and a TVDB show!", "error");
         return;
       }
-      if (!tvdbKey && !hasSavedTvdbKey) {
-        window.showToast?.("TVDB API Key is required first, or configure it in settings!", "error");
+      if (!hasSavedTvdbKey) {
+        window.showToast?.("TVDB API Key must be configured in settings to use the auto-remapper!", "error");
         return;
-      }
-
-      // Save TVDB key to localStorage if provided
-      if (tvdbKey) {
-        localStorage.setItem("scrob_auto_tvdb_key", tvdbKey);
       }
 
       loader.classList.remove("hidden");
@@ -3451,8 +3434,7 @@ try {
           },
           body: JSON.stringify({
             tmdb_show_id: tmdbId,
-            tvdb_show_id: tvdbId,
-            ...(tvdbKey ? { tvdb_api_key: tvdbKey } : {})
+            tvdb_show_id: tvdbId
           })
         });
 

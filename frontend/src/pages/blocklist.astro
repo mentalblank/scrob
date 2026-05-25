@@ -290,11 +290,11 @@ const LANGUAGE_NAMES: Record<string, string> = {
         <h2 class="text-base font-bold text-zinc-100 mb-1">Language Filter Mode</h2>
         <p class="text-sm text-zinc-400 mb-5">Choose whether to block the selected languages (Blacklist) or only show them (Whitelist).</p>
         
-        <div class="flex items-center gap-3 p-1.5 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-fit mb-6">
+        <div class="flex items-center gap-2 sm:gap-3 p-1.5 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-full sm:w-fit mb-6">
           <button
             id="mode-blacklist-btn"
             data-mode="blacklist"
-            class={`px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
+            class={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center ${
               (filters.language_filter_mode || "blacklist") === "blacklist"
                 ? "bg-zinc-700 text-zinc-100 shadow-sm"
                 : "text-zinc-400 hover:text-zinc-200"
@@ -305,7 +305,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
           <button
             id="mode-whitelist-btn"
             data-mode="whitelist"
-            class={`px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
+            class={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center ${
               filters.language_filter_mode === "whitelist"
                 ? "bg-zinc-700 text-zinc-100 shadow-sm"
                 : "text-zinc-400 hover:text-zinc-200"
@@ -340,10 +340,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
         </ul>
 
         <div class="flex flex-col gap-2">
-          <div class="flex gap-2">
+          <div class="flex flex-col sm:flex-row gap-2">
             <select
               id="lang-select"
-              class="flex-1 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-205 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
+              class="w-full sm:flex-1 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-205 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
             >
               <option value="">Select a common language...</option>
               {Object.entries(LANGUAGE_NAMES)
@@ -356,10 +356,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
               id="lang-custom-input"
               type="text"
               placeholder="Or code (e.g. ja)"
-              class="w-32 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all font-mono text-center"
+              class="w-full sm:w-32 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all font-mono text-center"
               maxlength="3"
             />
-            <button id="lang-add-btn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">Add</button>
+            <button id="lang-add-btn" class="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">Add</button>
           </div>
         </div>
         <div id="lang-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
@@ -676,12 +676,12 @@ const LANGUAGE_NAMES: Record<string, string> = {
 
     async function setMode(mode: "blacklist" | "whitelist") {
       if (mode === "blacklist") {
-        blacklistBtn.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer bg-zinc-700 text-zinc-100 shadow-sm';
-        whitelistBtn.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-zinc-400 hover:text-zinc-200';
+        blacklistBtn.className = 'flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center bg-zinc-700 text-zinc-100 shadow-sm';
+        whitelistBtn.className = 'flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center text-zinc-400 hover:text-zinc-200';
         description.textContent = 'Discovery results matching these languages will be hidden.';
       } else {
-        whitelistBtn.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer bg-zinc-700 text-zinc-100 shadow-sm';
-        blacklistBtn.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-zinc-400 hover:text-zinc-200';
+        whitelistBtn.className = 'flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center bg-zinc-700 text-zinc-100 shadow-sm';
+        blacklistBtn.className = 'flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center text-zinc-400 hover:text-zinc-200';
         description.textContent = 'Only discovery results matching these languages will be shown.';
       }
       await saveLanguages(mode);
@@ -742,5 +742,72 @@ const LANGUAGE_NAMES: Record<string, string> = {
     // Enter key to add
     customInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('lang-add-btn')?.click(); });
   }
+
+  // ── Swipe Gestures for Tabs ────────────────────────────────────────────────
+  function setupSwipeTabs(tabsList: string[], activeTab: string, onTabSwitch: (tabId: string) => void) {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+
+    const mainEl = document.querySelector('main') || document.body;
+    if (!mainEl) return;
+
+    mainEl.addEventListener('touchstart', (e) => {
+      const target = e.target as HTMLElement;
+      if (
+        target.closest('input, select, textarea, button, a, label') ||
+        target.closest('[class*="overflow-x-auto"], [class*="scroll-x"]')
+      ) {
+        return;
+      }
+      
+      const touch = e.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchStartTime = Date.now();
+    }, { passive: true });
+
+    mainEl.addEventListener('touchend', (e) => {
+      if (touchStartTime === 0) return;
+
+      const touch = e.changedTouches[0];
+      const diffX = touch.clientX - touchStartX;
+      const diffY = touch.clientY - touchStartY;
+      const elapsedTime = Date.now() - touchStartTime;
+
+      touchStartTime = 0;
+
+      const minDistance = 80;
+      const maxTime = 300;
+
+      if (
+        Math.abs(diffX) >= minDistance &&
+        Math.abs(diffY) < Math.abs(diffX) * 0.5 &&
+        elapsedTime <= maxTime
+      ) {
+        const currentIndex = tabsList.indexOf(activeTab);
+        if (currentIndex === -1) return;
+
+        let nextIndex = currentIndex;
+        if (diffX < 0) {
+          nextIndex = currentIndex + 1; // Swipe left -> next tab
+        } else {
+          nextIndex = currentIndex - 1; // Swipe right -> previous tab
+        }
+
+        if (nextIndex >= 0 && nextIndex < tabsList.length) {
+          onTabSwitch(tabsList[nextIndex]);
+        }
+      }
+    }, { passive: true });
+  }
+
+  setupSwipeTabs(
+    ["items", "dropped", "genres", "languages", "keywords"],
+    new URLSearchParams(window.location.search).get('tab') || 'items',
+    (nextTab) => {
+      window.location.href = `/blocklist?tab=${nextTab}`;
+    }
+  );
 </script>
 

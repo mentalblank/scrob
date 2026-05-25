@@ -1777,8 +1777,12 @@ if (me.totp_enabled) {
   function setupTabs() {
     const buttons = document.querySelectorAll('[data-settings-tab-btn]');
     const panes = document.querySelectorAll('[data-settings-tab]');
+    const tabsList = ["general", "media-servers", "trackers", "integrations", "advanced"];
+    let currentActiveTab = 'general';
 
     function switchTab(tabId) {
+      if (!tabId) return;
+      currentActiveTab = tabId;
       panes.forEach(pane => {
         if (pane.getAttribute('data-settings-tab') === tabId) {
           pane.classList.remove('hidden');
@@ -1829,6 +1833,63 @@ if (me.totp_enabled) {
     }
 
     switchTab(initialTab);
+
+    // Swipe Gestures for Settings Tabs
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+
+    const mainEl = document.querySelector('main') || document.body;
+    if (mainEl) {
+      mainEl.addEventListener('touchstart', (e) => {
+        const target = e.target as HTMLElement;
+        if (
+          target.closest('input, select, textarea, button, a, label, .accent-swatch') ||
+          target.closest('[class*="overflow-x-auto"], [class*="scroll-x"]')
+        ) {
+          return;
+        }
+        
+        const touch = e.touches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        touchStartTime = Date.now();
+      }, { passive: true });
+
+      mainEl.addEventListener('touchend', (e) => {
+        if (touchStartTime === 0) return;
+
+        const touch = e.changedTouches[0];
+        const diffX = touch.clientX - touchStartX;
+        const diffY = touch.clientY - touchStartY;
+        const elapsedTime = Date.now() - touchStartTime;
+
+        touchStartTime = 0;
+
+        const minDistance = 80;
+        const maxTime = 300;
+
+        if (
+          Math.abs(diffX) >= minDistance &&
+          Math.abs(diffY) < Math.abs(diffX) * 0.5 &&
+          elapsedTime <= maxTime
+        ) {
+          const currentIndex = tabsList.indexOf(currentActiveTab);
+          if (currentIndex === -1) return;
+
+          let nextIndex = currentIndex;
+          if (diffX < 0) {
+            nextIndex = currentIndex + 1; // Swipe left -> next
+          } else {
+            nextIndex = currentIndex - 1; // Swipe right -> prev
+          }
+
+          if (nextIndex >= 0 && nextIndex < tabsList.length) {
+            switchTab(tabsList[nextIndex]);
+          }
+        }
+      }, { passive: true });
+    }
   }
 
   setupTabs();
