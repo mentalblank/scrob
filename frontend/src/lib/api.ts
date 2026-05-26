@@ -126,10 +126,12 @@ export interface EpisodeItem {
 
 export interface ShowSummary {
   tmdb_id: number;
+  tvdb_id?: number | null;
   title: string;
   poster_path: string | null;
   backdrop_path: string | null;
   seasons_meta: SeasonMeta[];
+  adult?: boolean;
 }
 
 export interface Season {
@@ -188,7 +190,8 @@ export interface EpisodeDetail {
 }
 
 export interface PersonCredit {
-  tmdb_id: number;
+  tmdb_id: number | null;
+  tvdb_id?: number | null;
   type: "movie" | "series";
   title: string;
   poster_path: string | null;
@@ -202,6 +205,7 @@ export interface PersonCredit {
 
 export interface PersonDetail {
   tmdb_id: number;
+  tvdb_id?: number | null;
   name: string;
   profile_path: string | null;
   known_for_department: string | null;
@@ -704,7 +708,7 @@ export interface TvdbEpisodeDetail {
   } | null;
   cast: { tmdb_id: null; person_id: number | null; name: string; character: string; profile_path: string | null }[];
   episodes: { episode_number: number; name: string | null }[];
-  show: { id: number | null; tvdb_id: number; tmdb_id_cross: number | null; title: string; poster_path: string | null; backdrop_path: string | null };
+  show: { id: number | null; tvdb_id: number; tmdb_id_cross: number | null; title: string; poster_path: string | null; backdrop_path: string | null; seasons_meta?: TvdbSeasonMeta[] };
   season: { name: string; season_number: number; poster_path: string | null };
 }
 
@@ -720,6 +724,7 @@ export interface TvdbSeason {
   season_in_library: boolean;
   season_watched: boolean;
   season_collection_pct: number;
+  season_watch_pct?: number;
   season_user_rating: number | null;
   show_in_library: boolean;
   show: {
@@ -775,8 +780,11 @@ export interface TvdbShow {
   request_enabled: boolean;
   request_status: string | null;
   user_rating: number | null;
+  is_blocked?: boolean;
+  is_dropped?: boolean;
   season_states: Record<number, SeasonState>;
   where_to_watch: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string; connection_id?: number | null }[];
+  watch_pct?: number;
 }
 
 export interface Show {
@@ -1078,6 +1086,9 @@ export const api = {
 
     getPerson: (personId: number, page: number = 1, token?: string) =>
       get<PersonDetail>(`/media/person/${personId}`, { page }, token),
+
+    getPersonTvdb: (personId: number, page: number = 1, token?: string) =>
+      get<PersonDetail>(`/media/person/tvdb/${personId}`, { page }, token),
 
     getCollection: (collectionId: number, token?: string) =>
       get<CollectionDetail>(`/media/collection/${collectionId}`, undefined, token),

@@ -6,9 +6,10 @@ interface Props {
   item: MediaItem;
   hideBlock?: boolean;
   hideRating?: boolean;
+  hideActionBar?: boolean;
 }
 
-const { item, hideBlock = false, hideRating = false } = Astro.props;
+const { item, hideBlock = false, hideRating = false, hideActionBar = false } = Astro.props;
 
 const isPerson = item.type === "person";
 const isCollection = item.type === "collection";
@@ -21,27 +22,58 @@ const sxe = isEpisode && item.season_number != null && item.episode_number != nu
   ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
   : null;
 
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+
+const isTvdbSeries = isSeries && (
+  (item.tmdb_id != null && item.tmdb_id < 0) ||
+  (primaryMetadataSource === "tvdb" && item.tvdb_id != null) ||
+  (item.tmdb_id == null && item.tvdb_id != null)
+);
+const tvdbSeriesId = item.tvdb_id ?? (item.tmdb_id != null && item.tmdb_id < 0 ? -item.tmdb_id : null);
+
+const isTvdbSeason = isSeason && (
+  (item.show_tmdb_id != null && item.show_tmdb_id < 0) ||
+  (primaryMetadataSource === "tvdb" && item.show_tvdb_id != null) ||
+  (item.show_tmdb_id == null && item.show_tvdb_id != null)
+);
+const tvdbSeasonShowId = item.show_tvdb_id ?? (item.show_tmdb_id != null && item.show_tmdb_id < 0 ? -item.show_tmdb_id : null);
+
+const isTvdbEpisode = isEpisode && (
+  (item.show_tmdb_id != null && item.show_tmdb_id < 0) ||
+  (primaryMetadataSource === "tvdb" && item.show_tvdb_id != null) ||
+  (item.show_tmdb_id == null && item.show_tvdb_id != null)
+);
+const tvdbEpisodeShowId = item.show_tvdb_id ?? (item.show_tmdb_id != null && item.show_tmdb_id < 0 ? -item.show_tmdb_id : null);
+
 const href = isPerson
-  ? `/person/${item.tmdb_id}`
+  ? (primaryMetadataSource === "tvdb" && item.tvdb_id
+    ? `/person/tvdb/${item.tvdb_id}`
+    : `/person/${item.tmdb_id}`)
   : isCollection
     ? `/collection/${item.tmdb_id}`
-    : isSeries && item.tvdb_id && !item.tmdb_id
-    ? `/show/tvdb/${item.tvdb_id}`
-    : isSeries && item.tmdb_id
-    ? `/show/${item.tmdb_id}`
-    : isSeason && item.show_tmdb_id && item.season_number != null
-      ? `/show/${item.show_tmdb_id}/season/${item.season_number}`
-    : isEpisode && item.show_tmdb_id && item.season_number != null && item.episode_number != null
-      ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
-      : isEpisode && item.show_tvdb_id && item.season_number != null && item.episode_number != null
-        ? `/show/tvdb/${item.show_tvdb_id}/season/${item.season_number}/${item.episode_number}`
-        : isEpisode && item.show_tmdb_id
-          ? `/show/${item.show_tmdb_id}`
-          : isEpisode && item.show_tvdb_id
-            ? `/show/tvdb/${item.show_tvdb_id}`
-            : item.tmdb_id
-              ? `/media/${item.type}/${item.tmdb_id}`
-              : null;
+    : isSeries
+      ? (isTvdbSeries
+        ? `/show/tvdb/${tvdbSeriesId}`
+        : item.tmdb_id
+          ? `/show/${item.tmdb_id}`
+          : null)
+      : isSeason
+        ? (isTvdbSeason && tvdbSeasonShowId && item.season_number != null
+          ? `/show/tvdb/${tvdbSeasonShowId}/season/${item.season_number}`
+          : item.show_tmdb_id && item.season_number != null
+            ? `/show/${item.show_tmdb_id}/season/${item.season_number}`
+            : null)
+        : isEpisode
+          ? (isTvdbEpisode && tvdbEpisodeShowId && item.season_number != null && item.episode_number != null
+            ? `/show/tvdb/${tvdbEpisodeShowId}/season/${item.season_number}/${item.episode_number}`
+            : item.show_tmdb_id && item.season_number != null && item.episode_number != null
+              ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
+              : item.show_tmdb_id
+                ? `/show/${item.show_tmdb_id}`
+                : null)
+          : item.tmdb_id
+            ? `/media/${item.type}/${item.tmdb_id}`
+            : null;
 
 const posterPath = isEpisode && item.show_poster_path
   ? (item.show_poster_path.startsWith('http') ? item.show_poster_path : `https://image.tmdb.org/t/p/w500${item.show_poster_path}`)
@@ -49,7 +81,7 @@ const posterPath = isEpisode && item.show_poster_path
     ? (item.poster_path.startsWith('http') ? item.poster_path : `https://image.tmdb.org/t/p/w500${item.poster_path}`)
     : null;
 
-const showActionBar = !isPerson && !isCollection;
+const showActionBar = !isPerson && !isCollection && !hideActionBar;
 const watched = item.watched ?? false;
 const inLists = item.in_lists ?? [];
 const collectionPct = item.collection_pct ?? (item.in_library ? 100 : 0);
@@ -72,9 +104,9 @@ const showProgress = progressPct > 0 && !watched;
   class="group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
   data-card
   data-id={item.id ? String(item.id) : ""}
-  data-tmdb-id={item.tmdb_id ? String(item.tmdb_id) : ""}
+  data-tmdb-id={item.tmdb_id ? String(item.tmdb_id) : (item.tvdb_id ? `-${item.tvdb_id}` : "")}
   data-media-type={item.type}
-  data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : ""}
+  data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : (item.show_tvdb_id ? `-${item.show_tvdb_id}` : "")}
   data-season={item.season_number != null ? String(item.season_number) : ""}
   data-episode-number={item.episode_number != null ? String(item.episode_number) : ""}
   data-watched={String(watched)}

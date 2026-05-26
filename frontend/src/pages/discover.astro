@@ -419,15 +419,22 @@ function skeletonWide() {
   }
 
   function itemUrl(item) {
-    if (item.type === 'series') return '/show/' + item.tmdb_id;
+    if (item.type === 'series') {
+      const primarySource = document.cookie.match(/primary_metadata_source=([^;]+)/)?.[1] || 'tmdb';
+      if (primarySource === 'tvdb' && item.tvdb_id) {
+        return '/show/tvdb/' + item.tvdb_id;
+      }
+      return '/show/' + item.tmdb_id;
+    }
     return '/media/movie/' + item.tmdb_id;
   }
 
   // 2:3 poster card — movies and shows
   function posterCard(item) {
     const isSeries = item.type === 'series';
+    const primarySource = document.cookie.match(/primary_metadata_source=([^;]+)/)?.[1] || 'tmdb';
     const href = isSeries
-      ? '/show/' + item.tmdb_id
+      ? (primarySource === 'tvdb' && item.tvdb_id ? '/show/tvdb/' + item.tvdb_id : '/show/' + item.tmdb_id)
       : '/media/movie/' + item.tmdb_id;
     const year = item.release_date ? item.release_date.slice(0, 4) : '';
     const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : '';
@@ -771,7 +778,12 @@ function skeletonWide() {
 
       const viewLink = document.getElementById('pick-view-link');
       if (data.type === 'series') {
-        viewLink.href = '/show/' + data.tmdb_id;
+        const primarySource = document.cookie.match(/primary_metadata_source=([^;]+)/)?.[1] || 'tmdb';
+        if (primarySource === 'tvdb' && data.tvdb_id) {
+          viewLink.href = '/show/tvdb/' + data.tvdb_id;
+        } else {
+          viewLink.href = '/show/' + data.tmdb_id;
+        }
       } else {
         viewLink.href = '/media/movie/' + data.tmdb_id;
       }

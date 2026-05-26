@@ -88,7 +88,8 @@ try {
     const genre = Astro.url.searchParams.get("genre");
     const year = Astro.url.searchParams.get("year");
     
-    const data = await api.movies.list({
+    const data = await api.media.list({
+      type: "movie",
       sort,
       page,
       ...(genre ? { genre } : {}),

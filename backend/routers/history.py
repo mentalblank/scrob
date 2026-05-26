@@ -153,7 +153,11 @@ def format_event(event: WatchEvent | PlaybackProgress, media: Media) -> dict:
         data["media"]["show_title"] = media.show.title
         data["media"]["show_poster_path"] = media.show.poster_path
         data["media"]["show_tmdb_id"] = media.show.tmdb_id
-        data["media"]["show_tvdb_id"] = media.show.tvdb_id
+        data["media"]["show_tvdb_id"] = media.show.tvdb_id if media.show.tvdb_id else (
+            int(media.show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+            if (media.show.tmdb_data and media.show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+            else None
+        )
     return data
 
 

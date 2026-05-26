@@ -20,9 +20,14 @@ if (nextUp.length === 0) {
 }
 
 const hero = nextUp[0];
-const heroHref = hero.show_tmdb_id && hero.season_number != null && hero.episode_number != null
-  ? `/show/${hero.show_tmdb_id}/season/${hero.season_number}/${hero.episode_number}`
-  : `/media/${hero.type}/${hero.tmdb_id}`;
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+const heroHref = primaryMetadataSource === "tvdb" && hero.show_tvdb_id && hero.season_number != null && hero.episode_number != null
+  ? `/show/tvdb/${hero.show_tvdb_id}/season/${hero.season_number}/${hero.episode_number}`
+  : hero.show_tmdb_id && hero.season_number != null && hero.episode_number != null
+    ? `/show/${hero.show_tmdb_id}/season/${hero.season_number}/${hero.episode_number}`
+    : hero.show_tvdb_id && hero.season_number != null && hero.episode_number != null
+      ? `/show/tvdb/${hero.show_tvdb_id}/season/${hero.season_number}/${hero.episode_number}`
+      : `/media/${hero.type}/${hero.tmdb_id}`;
 const episodeLabel = hero.season_number != null && hero.episode_number != null
   ? `S${hero.season_number} E${hero.episode_number}`
   : null;

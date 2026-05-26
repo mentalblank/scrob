@@ -26,6 +26,13 @@ if (!episode && !error) {
   return Astro.redirect("/404");
 }
 
+if (episode) {
+  const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+  if (primaryMetadataSource === "tvdb" && episode.show?.tvdb_id) {
+    return Astro.redirect(`/show/tvdb/${episode.show.tvdb_id}/season/${season_number}/${episode_number}`);
+  }
+}
+
 const show = episode?.show;
 const currentSeason = show?.seasons_meta?.find(s => s.season_number === Number(season_number));
 const seasonName = currentSeason?.name || `Season ${season_number}`;
@@ -239,7 +246,7 @@ const activeButtonsCount = [
                     mediaType="episode"
                     inLibrary={episode.in_library ?? false}
                     title={`${show?.title} — ${episode.title}`}
-                    token={token}
+                    token={token || ""}
                   />
                 )}
                 <ManualScrobble
@@ -317,10 +324,10 @@ const activeButtonsCount = [
               return hasLibraryTags && (
                 <div class="flex flex-wrap gap-2">
                   {[
-                    episode.library.resolution,
-                    episode.library.video_codec,
-                    episode.library.audio_codec,
-                    episode.library.audio_channels,
+                    episode.library?.resolution,
+                    episode.library?.video_codec,
+                    episode.library?.audio_codec,
+                    episode.library?.audio_channels,
                   ].filter(Boolean).map(tag => (
                     <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold">
                       {tag}
@@ -610,8 +617,8 @@ const activeButtonsCount = [
   const backdrop = document.getElementById('poster-modal-backdrop');
   const closeBtn = document.getElementById('poster-modal-close');
   if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-    function closeModal() { modal.classList.add('hidden'); document.body.style.overflow = ''; }
+    const openModal = () => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
+    const closeModal = () => { modal.classList.add('hidden'); document.body.style.overflow = ''; };
     zoomBtn.addEventListener('click', openModal);
     backdrop?.addEventListener('click', closeModal);
     closeBtn?.addEventListener('click', closeModal);

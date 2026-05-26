@@ -29,6 +29,13 @@ if (!show && !error) {
     return Astro.redirect("/404");
 }
 
+if (show) {
+  const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+  if (primaryMetadataSource === "tvdb" && show.tvdb_id) {
+    return Astro.redirect(`/show/tvdb/${show.tvdb_id}`);
+  }
+}
+
 const seasons = Object.entries(show?.seasons ?? {}).sort(
   ([a], [b]) => Number(a.replace("season_", "")) - Number(b.replace("season_", ""))
 );
@@ -687,8 +694,8 @@ const activeButtonsCount = [
   const backdrop = document.getElementById('poster-modal-backdrop');
   const closeBtn = document.getElementById('poster-modal-close');
   if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-    function closeModal() { modal.classList.add('hidden'); document.body.style.overflow = ''; }
+    const openModal = () => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
+    const closeModal = () => { modal.classList.add('hidden'); document.body.style.overflow = ''; };
     zoomBtn.addEventListener('click', openModal);
     backdrop?.addEventListener('click', closeModal);
     closeBtn?.addEventListener('click', closeModal);

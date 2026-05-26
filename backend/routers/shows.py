@@ -61,7 +61,11 @@ def format_show(show: ShowModel) -> dict:
     return {
         "id": show.id,
         "tmdb_id": show.tmdb_id,
-        "tvdb_id": show.tvdb_id,
+        "tvdb_id": show.tvdb_id if show.tvdb_id else (
+            int(show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+            if (show.tmdb_data and show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+            else None
+        ),
         "type": "series",
         "title": show.custom_title or show.title,
         "tmdb_title": show.title,
@@ -608,6 +612,11 @@ async def get_show(
 
         return {
             **format_show(show),
+            "tvdb_id": show.tvdb_id or (
+                int((tmdb_extra or show.tmdb_data or {}).get("external_ids", {}).get("tvdb_id"))
+                if (tmdb_extra or show.tmdb_data or {}).get("external_ids", {}).get("tvdb_id")
+                else None
+            ),
             "backdrop_path": picked_backdrop or show.backdrop_path,
             "logo_path": picked_logo,
             "seasons_meta": enhanced_seasons_meta,
@@ -735,6 +744,11 @@ async def get_show(
         return {
             "id": None,
             "tmdb_id": series_tmdb_id,
+            "tvdb_id": (
+                int(data.get("external_ids", {}).get("tvdb_id"))
+                if data.get("external_ids", {}).get("tvdb_id")
+                else None
+            ),
             "title": data.get("name"),
             "original_title": data.get("original_name"),
             "overview": data.get("overview"),
@@ -900,6 +914,11 @@ async def get_show_season(
                 show_info = {
                     "id": None,
                     "tmdb_id": series_tmdb_id,
+                    "tvdb_id": (
+                        int(tmdb_show_data.get("external_ids", {}).get("tvdb_id"))
+                        if tmdb_show_data.get("external_ids", {}).get("tvdb_id")
+                        else None
+                    ),
                     "title": tmdb_show_data.get("name"),
                     "poster_path": tmdb.poster_url(tmdb_show_data.get("poster_path")),
                     "backdrop_path": tmdb.poster_url(
@@ -1355,6 +1374,11 @@ async def get_episode_detail(
             show_info = {
                 "id": None,
                 "tmdb_id": series_tmdb_id,
+                "tvdb_id": (
+                    int(show_tmdb.get("external_ids", {}).get("tvdb_id"))
+                    if show_tmdb.get("external_ids", {}).get("tvdb_id")
+                    else None
+                ),
                 "title": show_tmdb.get("name"),
                 "poster_path": tmdb.poster_url(show_tmdb.get("poster_path")),
                 "backdrop_path": tmdb.poster_url(
@@ -1695,14 +1719,22 @@ async def get_tvdb_show(
 
     in_library = bool(season_states and any(v["in_library"] for v in season_states.values()))
 
-    # Derive overall watched / collection_pct from season states (skip season 0 specials)
-    lib_seasons = [v for sn, v in season_states.items() if sn != 0 and v["in_library"]]
-    watched_overall = bool(lib_seasons) and all(v["watched"] for v in lib_seasons)
-    total_pct = sum(v["collection_pct"] for sn, v in season_states.items() if sn != 0)
-    non_special_seasons = len([sn for sn in season_states if sn != 0])
-    collection_pct = int(total_pct / non_special_seasons) if non_special_seasons else 0
-    total_watch_pct = sum(v["watch_pct"] for sn, v in season_states.items() if sn != 0)
-    watch_pct = int(total_watch_pct / non_special_seasons) if non_special_seasons else 0
+    collection_pct = 0
+    watch_pct = 0
+    watched_overall = False
+    include_specials = False
+
+    if show:
+        include_specials = settings.preferences.get("include_specials", False) if (settings and settings.preferences) else False
+        lib_seasons = [v for sn, v in season_states.items() if (include_specials or sn != 0) and v["in_library"]]
+        watched_overall = bool(lib_seasons) and all(v["watched"] for v in lib_seasons)
+
+        total_eps = sum(count for sn, count in season_ep_counts.items() if (include_specials or sn != 0))
+        total_coll = sum(coll_per_season.get(sn, 0) for sn in coll_per_season if (include_specials or sn != 0))
+        total_watched = sum(watched_per_season.get(sn, 0) for sn in watched_per_season if (include_specials or sn != 0))
+
+        collection_pct = min(100, int((total_coll / total_eps) * 100)) if total_eps > 0 else 0
+        watch_pct = min(100, int((total_watched / total_eps) * 100)) if total_eps > 0 else 0
 
     # Sonarr state
     gs = await _get_global_settings(db)
@@ -1735,6 +1767,38 @@ async def get_tvdb_show(
     networks = [{"id": None, "name": n.get("name"), "logo_path": None, "origin_country": None}
                 for n in (raw.get("networks") or []) if n.get("name")]
 
+    # Blocklist and drop status
+    from models.blocklist import BlocklistItem
+    is_blocked = False
+    is_dropped = False
+    block_ids = [-tvdb_id]
+    if show_data.get("tmdb_id_cross"):
+        block_ids.append(show_data["tmdb_id_cross"])
+
+    block_q = await db.execute(
+        select(BlocklistItem.is_dropped)
+        .where(
+            BlocklistItem.user_id == current_user.id,
+            BlocklistItem.media_type == MediaType.series,
+            BlocklistItem.tmdb_id.in_(block_ids),
+        )
+    )
+    block_row = block_q.first()
+    if block_row is not None:
+        is_dropped = block_row[0]
+        is_blocked = not is_dropped
+
+    if not is_blocked:
+        cf = await _get_content_filters(db, current_user.id)
+        temp_item = {
+            "type": "series",
+            "title": show_data.get("title"),
+            "genres": show_data.get("genres", []),
+            "original_language": show_data.get("original_language"),
+            "age_rating": show_data.get("age_rating"),
+        }
+        is_blocked = _is_content_filtered(temp_item, *cf)
+
     return {
         **show_data,
         "id": show.id if show else None,
@@ -1752,6 +1816,8 @@ async def get_tvdb_show(
         "watch_pct": watch_pct,
         "is_monitored": is_monitored,
         "request_enabled": request_enabled,
+        "is_blocked": is_blocked,
+        "is_dropped": is_dropped,
         "request_status": None,
         "user_rating": None,
         "season_states": season_states,
@@ -1760,6 +1826,7 @@ async def get_tvdb_show(
         "cast": cast,
         "networks": networks,
         "where_to_watch": where_to_watch,
+        "include_specials": include_specials,
     }
 
 

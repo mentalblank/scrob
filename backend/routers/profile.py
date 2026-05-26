@@ -385,6 +385,11 @@ async def get_public_profile(
             "watched_at": we.watched_at.isoformat(),
             "show_title": show.title if show else None,
             "show_tmdb_id": show.tmdb_id if show else None,
+            "show_tvdb_id": (show.tvdb_id if show.tvdb_id else (
+                int(show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+                if (show.tmdb_data and show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+                else None
+            )) if show else None,
             "season_number": media.season_number,
             "episode_number": media.episode_number,
         }
@@ -435,6 +440,11 @@ async def get_public_profile(
             "media_type": "series",
             "title": media.title,
             "poster_path": show.poster_path if show else media.poster_path,
+            "tvdb_id": (show.tvdb_id if show.tvdb_id else (
+                int(show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+                if (show.tmdb_data and show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+                else None
+            )) if show else None,
             "user_rating": rating.rating,
         }
         for rating, media, show in tr_shows_q.all()
@@ -453,16 +463,16 @@ async def get_public_profile(
     show_tmdb_ids = list({c.tmdb_id for c in comments_list if c.media_type in ("series", "season", "episode")})
     movie_tmdb_ids = list({c.tmdb_id for c in comments_list if c.media_type == "movie"})
 
-    show_titles: dict[int, tuple[str, str | None, dict | None]] = {}
+    show_titles: dict[int, tuple[str, str | None, dict | None, int | None, dict | None]] = {}
     movie_titles: dict[int, tuple[str, str | None]] = {}
 
     if show_tmdb_ids:
         sq = await db.execute(
-            select(ShowModel.tmdb_id, ShowModel.title, ShowModel.poster_path, ShowModel.custom_season_names)
+            select(ShowModel.tmdb_id, ShowModel.title, ShowModel.poster_path, ShowModel.custom_season_names, ShowModel.tvdb_id, ShowModel.tmdb_data)
             .where(ShowModel.tmdb_id.in_(show_tmdb_ids))
         )
-        for tmdb_id, title, poster_path, custom_season_names in sq.all():
-            show_titles[tmdb_id] = (title, poster_path, custom_season_names)
+        for tmdb_id, title, poster_path, custom_season_names, tvdb_id, tmdb_data in sq.all():
+            show_titles[tmdb_id] = (title, poster_path, custom_season_names, tvdb_id, tmdb_data)
 
     if movie_tmdb_ids:
         mq = await db.execute(
@@ -476,10 +486,21 @@ async def get_public_profile(
     recent_comments = []
     for c in comments_list:
         season_name = None
+        show_tvdb_id = None
         if c.media_type in ("series", "season", "episode"):
             info = show_titles.get(c.tmdb_id)
-            if info and c.season_number is not None:
-                season_name = (info[2] or {}).get(str(c.season_number))
+            if info:
+                if c.season_number is not None:
+                    season_name = (info[2] or {}).get(str(c.season_number))
+                raw_tvdb = info[3]
+                if not raw_tvdb and info[4]:
+                    ext_tvdb = (info[4].get("external_ids") or {}).get("tvdb_id")
+                    if ext_tvdb:
+                        try:
+                            raw_tvdb = int(ext_tvdb)
+                        except (ValueError, TypeError):
+                            pass
+                show_tvdb_id = raw_tvdb
         else:
             info = movie_titles.get(c.tmdb_id)
 
@@ -493,6 +514,7 @@ async def get_public_profile(
             "episode_number": c.episode_number,
             "title": info[0] if info else None,
             "poster_path": info[1] if info else None,
+            "show_tvdb_id": show_tvdb_id,
             "created_at": c.created_at.isoformat(),
         })
 

@@ -99,6 +99,11 @@ def get_jellyfin_tmdb_id(provider_ids: dict) -> int | None:
     return int(tid) if tid else None
 
 
+def get_jellyfin_tvdb_id(provider_ids: dict) -> int | None:
+    tid = provider_ids.get("Tvdb") or provider_ids.get("tvdb")
+    return int(tid) if tid else None
+
+
 def extract_jellyfin_quality(item: dict, settings: "UserSettings | None" = None) -> dict:
     do_enrich = settings.preferences.get("media_server_enrichment", True) if settings and settings.preferences else True
     if not do_enrich:
@@ -206,14 +211,105 @@ async def sync_shows_batch(
     return show_map, show_id_to_tmdb
 
 
+async def sync_shows_batch_tvdb(
+    series_tvdb_map: dict,  # source_series_id → tvdb_id
+    db: AsyncSession,
+    api_key: str = None,
+    lang: str = "eng",
+) -> tuple[dict, dict]:
+    """
+    Fetch and insert all shows in parallel from TVDB.
+    Returns (show_map: source_id→show.id, show_id_to_tvdb: show.id→series_tvdb_id).
+    """
+    all_tvdb_ids = list({tid for tid in series_tvdb_map.values() if tid})
+
+    existing_shows: dict[int, Show] = {}
+    if all_tvdb_ids:
+        shows_loaded = await _select_in_chunks(
+            db,
+            lambda chunk: select(Show).where(Show.tvdb_id.in_(chunk)),
+            all_tvdb_ids,
+        )
+        for s in shows_loaded:
+            existing_shows[s.tvdb_id] = s
+
+    missing = [tid for tid in all_tvdb_ids if tid not in existing_shows]
+    print(f"    {len(existing_shows)} shows in DB, fetching {len(missing)} from TVDB in parallel...")
+
+    semaphore = asyncio.Semaphore(TMDB_CONCURRENCY)
+    fetched: dict[int, dict] = {}
+
+    from core import tvdb as tvdb_client
+
+    async def fetch_show(tvdb_id: int):
+        async with semaphore:
+            try:
+                raw = await tvdb_client.get_series(tvdb_id, api_key, lang=lang)
+                fetched[tvdb_id] = tvdb_client.format_series(raw, lang=lang)
+            except Exception as e:
+                print(f"  Failed to fetch show tvdb={tvdb_id}: {e}")
+
+    if missing:
+        await asyncio.gather(*[fetch_show(tid) for tid in missing])
+
+    if fetched:
+        values = []
+        for tvdb_id, d in fetched.items():
+            values.append({
+                "tvdb_id": tvdb_id,
+                "tmdb_id": d.get("tmdb_id_cross"),
+                "title": d.get("title") or "",
+                "original_title": d.get("original_title"),
+                "overview": d.get("overview"),
+                "poster_path": d.get("poster_path"),
+                "backdrop_path": d.get("backdrop_path"),
+                "tmdb_rating": None,
+                "status": d.get("status"),
+                "tagline": None,
+                "first_air_date": d.get("first_air_date"),
+                "last_air_date": d.get("last_air_date"),
+                "tmdb_data": {
+                    "genres": d.get("genres", []),
+                    "seasons": d.get("seasons", []),
+                    "source": "tvdb",
+                },
+            })
+
+        update_cols = [k for k in values[0].keys() if k != "tvdb_id"]
+        for i in range(0, len(values), BATCH_SIZE):
+            chunk = values[i : i + BATCH_SIZE]
+            stmt = insert(Show).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["tvdb_id"],
+                set_={k: getattr(stmt.excluded, k) for k in update_cols},
+            )
+            stmt = stmt.returning(Show)
+            res = await db.execute(stmt)
+            for s in res.scalars().all():
+                existing_shows[s.tvdb_id] = s
+
+    show_map: dict[str, int] = {}
+    show_id_to_tvdb: dict[int, int] = {}
+    for source_id, tvdb_id in series_tvdb_map.items():
+        show = existing_shows.get(tvdb_id)
+        if show:
+            show_map[str(source_id)] = show.id
+            show_id_to_tvdb[show.id] = show.tvdb_id
+
+    return show_map, show_id_to_tvdb
+
+
 async def batch_enrich_items(
-    items: list[tuple],  # (Media, series_tmdb_id | None)
+    items: list[tuple],  # (Media, series_id | None)
     api_key: str = None,
     show_title_map: dict[int, str] | None = None,
+    is_tvdb: bool = False,
+    tvdb_api_key: str = None,
+    tvdb_lang: str = "eng",
 ) -> list[dict]:
     """
     Parallel enrichment for newly created media.
-    Episodes: one TMDB /season/{n} call per unique season (3865 calls vs 45k).
+    Episodes: one TMDB /season/{n} or TVDB episodes call per unique season.
     Movies: parallel /movie/{id} calls.
     Returns a list of warning dicts for seasons/items that couldn't be enriched.
     """
@@ -232,7 +328,7 @@ async def batch_enrich_items(
     if movies:
         await asyncio.gather(*[enrich_movie(m) for m in movies], return_exceptions=True)
 
-    # ── Episodes: one TMDB call per unique (series, season) ──────────────────
+    # ── Episodes: one metadata call per unique (series, season) ──────────────────
     season_to_eps: dict[tuple, list[Media]] = {}
     for media, stid in episodes:
         if media.season_number is not None:
@@ -241,7 +337,7 @@ async def batch_enrich_items(
     season_data: dict[tuple, dict[int, dict]] = {}
     failed_season_keys: set[tuple] = set()
 
-    async def fetch_season(stid: int, sn: int):
+    async def fetch_season_tmdb(stid: int, sn: int):
         async with semaphore:
             try:
                 d = await tmdb.get_season(stid, sn, api_key=api_key)
@@ -252,12 +348,31 @@ async def batch_enrich_items(
                 season_data[(stid, sn)] = {}
                 failed_season_keys.add((stid, sn))
 
+    async def fetch_season_tvdb(stid: int, sn: int):
+        async with semaphore:
+            try:
+                from core import tvdb as tvdb_client
+                raw_eps = await tvdb_client.get_series_episodes(stid, sn, tvdb_api_key, lang=tvdb_lang)
+                season_data[(stid, sn)] = {ep.get("number"): ep for ep in raw_eps}
+            except Exception as e:
+                show_title = show_title_map.get(stid, f"TVDB ID {stid}")
+                print(f"  Failed to fetch '{show_title}' Season {sn} from TVDB: {e}")
+                season_data[(stid, sn)] = {}
+                failed_season_keys.add((stid, sn))
+
     if season_to_eps:
-        print(f"    Fetching {len(season_to_eps)} seasons from TMDB...")
-        await asyncio.gather(
-            *[fetch_season(stid, sn) for (stid, sn) in season_to_eps],
-            return_exceptions=True,
-        )
+        if is_tvdb:
+            print(f"    Fetching {len(season_to_eps)} seasons from TVDB...")
+            await asyncio.gather(
+                *[fetch_season_tvdb(stid, sn) for (stid, sn) in season_to_eps],
+                return_exceptions=True,
+            )
+        else:
+            print(f"    Fetching {len(season_to_eps)} seasons from TMDB...")
+            await asyncio.gather(
+                *[fetch_season_tmdb(stid, sn) for (stid, sn) in season_to_eps],
+                return_exceptions=True,
+            )
 
     for (stid, sn), ep_list in season_to_eps.items():
         ep_map = season_data.get((stid, sn), {})
@@ -265,23 +380,39 @@ async def batch_enrich_items(
             ep = ep_map.get(media.episode_number)
             if not ep:
                 continue
-            media.tmdb_id = ep.get("id") or media.tmdb_id
-            media.title = ep.get("name") or media.title
-            media.overview = ep.get("overview")
-            media.poster_path = tmdb.poster_url(ep.get("still_path"), size="w500")
-            media.release_date = ep.get("air_date")
-            media.tmdb_rating = ep.get("vote_average")
-            media.tmdb_data = {"runtime": ep.get("runtime"), "cast": []}
+            if is_tvdb:
+                from core import tvdb as tvdb_client
+                tvdb_ep_id = ep.get("id")
+                if tvdb_ep_id:
+                    media.tmdb_id = tvdb_ep_id
+                media.title = ep.get("name") or media.title
+                media.overview = ep.get("overview")
+                if ep.get("image"):
+                    media.poster_path = tvdb_client._image_url(ep["image"])
+                media.release_date = ep.get("aired")
+                media.tmdb_data = {
+                    "runtime": ep.get("runtime"),
+                    "tvdb_episode_id": tvdb_ep_id,
+                    "source": "tvdb",
+                }
+            else:
+                media.tmdb_id = ep.get("id") or media.tmdb_id
+                media.title = ep.get("name") or media.title
+                media.overview = ep.get("overview")
+                media.poster_path = tmdb.poster_url(ep.get("still_path"), size="w500")
+                media.release_date = ep.get("air_date")
+                media.tmdb_rating = ep.get("vote_average")
+                media.tmdb_data = {"runtime": ep.get("runtime"), "cast": []}
 
     # Build per-season warning entries (one entry per failed season)
     warnings: list[dict] = []
     for (stid, sn) in sorted(failed_season_keys):
         warnings.append({
-            "show": show_title_map.get(stid, f"TMDB show #{stid}"),
-            "tmdb_id": stid,
+            "show": show_title_map.get(stid, f"Show #{stid}"),
+            "id": stid,
             "season": sn,
             "affected_episodes": len(season_to_eps.get((stid, sn), [])),
-            "reason": "Season not found on TMDB — the show may be split into separate series on TMDB",
+            "reason": f"Season not found on {'TVDB' if is_tvdb else 'TMDB'}",
         })
 
     return warnings
@@ -714,6 +845,35 @@ async def sync_items(
                                         existing_media_obj.episode_number = episode_num
                                     if not any(m is existing_media_obj for m, _ in new_media_for_enrichment):
                                         new_media_for_enrichment.append((existing_media_obj, ep_series_tmdb_id))
+
+                    if (
+                        source == CollectionSource.plex
+                        and media_type == MediaType.episode
+                        and season_num is not None
+                        and episode_num is not None
+                        and existing_media_obj
+                        and (
+                            existing_media_obj.season_number != season_num
+                            or existing_media_obj.episode_number != episode_num
+                        )
+                    ):
+                        # Only correct when TVDB is the primary source
+                        _pref_src = (settings.preferences or {}).get("primary_metadata_source", "tmdb") if settings else "tmdb"
+                        if _pref_src == "tvdb":
+                            print(
+                                f"  [TVDB sync] Correcting episode numbering for source_id={source_id}: "
+                                f"DB has S{existing_media_obj.season_number}E{existing_media_obj.episode_number}, "
+                                f"Plex reports S{season_num}E{episode_num} — updating to TVDB ordering."
+                            )
+                            existing_media_obj.season_number = season_num
+                            existing_media_obj.episode_number = episode_num
+                            # Queue for re-enrichment with the corrected numbers
+                            show_id_for_enrich = show_map.get(str(parent_id)) if parent_id else None
+                            if show_id_for_enrich:
+                                ep_series_id = show_id_to_tmdb.get(show_id_for_enrich)
+                                if ep_series_id and not any(m is existing_media_obj for m, _ in new_media_for_enrichment):
+                                    new_media_for_enrichment.append((existing_media_obj, ep_series_id))
+
                 else:
                     show_id = show_map.get(str(parent_id)) if media_type == MediaType.episode else None
 
@@ -956,7 +1116,22 @@ async def sync_items(
         unique_seasons = len({(stid, m.season_number) for m, stid in new_media_for_enrichment if m.media_type == MediaType.episode and stid})
         print(f"  Enriching {len(new_media_for_enrichment)} new items ({unique_seasons} unique seasons)...")
 
-        # Build series_tmdb_id → source title map so warnings can name the show
+        # Determine primary metadata source preference
+        preferences = settings.preferences if settings else None
+        primary_source = preferences.get("primary_metadata_source") if preferences else "tmdb"
+        is_tvdb = (primary_source == "tvdb")
+        
+        tvdb_api_key = None
+        tvdb_lang = "eng"
+        if is_tvdb:
+            from routers.shows import get_user_tvdb_key
+            from routers.media import get_user_content_language
+            from core import tvdb as tvdb_client
+            tvdb_api_key = await get_user_tvdb_key(db, user_id)
+            lang_code = await get_user_content_language(db, user_id)
+            tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
+
+        # Build series ID → source title map so warnings can name the show
         series_title_map: dict[int, str] = {}
         if media_type == MediaType.episode:
             for item in items:
@@ -969,11 +1144,18 @@ async def sync_items(
                 if parent_id and title:
                     show_id = show_map.get(parent_id)
                     if show_id:
-                        series_tmdb_id = show_id_to_tmdb.get(show_id)
-                        if series_tmdb_id:
-                            series_title_map[series_tmdb_id] = title
+                        series_id = show_id_to_tmdb.get(show_id)
+                        if series_id:
+                            series_title_map[series_id] = title
 
-        warnings = await batch_enrich_items(new_media_for_enrichment, api_key=api_key, show_title_map=series_title_map)
+        warnings = await batch_enrich_items(
+            new_media_for_enrichment,
+            api_key=api_key,
+            show_title_map=series_title_map,
+            is_tvdb=is_tvdb,
+            tvdb_api_key=tvdb_api_key,
+            tvdb_lang=tvdb_lang,
+        )
         await db.commit()
 
     all_warnings = skipped_warnings + warnings
@@ -1120,25 +1302,59 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                             shows = shows[:show_limit]
                         items = None # Fetch later
 
-                    series_tmdb_map = {
-                        s.get("Id"): get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
-                        for s in shows if get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
-                    }
+                    preferences = settings.preferences if settings else None
+                    primary_source = preferences.get("primary_metadata_source") if preferences else "tmdb"
 
-                    total_discovered += len(series_tmdb_map)
-                    await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
-                    await db.commit()
+                    if primary_source == "tvdb":
+                        tvdb_api_key = await get_user_tvdb_key(db, user_id)
+                        from routers.media import get_user_content_language
+                        from core import tvdb as tvdb_client
+                        lang_code = await get_user_content_language(db, user_id)
+                        tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
 
-                    print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
-                    show_map, show_id_to_tmdb = await sync_shows_batch(series_tmdb_map, db, api_key=tmdb_api_key)
-                    unmatched_shows = [s for s in shows if str(s.get("Id")) not in show_map]
-                    for s in unmatched_shows:
-                        all_warnings.append({
-                            "title": s.get("Name"),
-                            "media_type": "series",
-                            "source_id": str(s.get("Id")),
-                            "reason": "Unmatched on source — no TMDB ID available for the series",
-                        })
+                        series_tvdb_map = {
+                            s.get("Id"): get_jellyfin_tvdb_id(s.get("ProviderIds", {}))
+                            for s in shows if get_jellyfin_tvdb_id(s.get("ProviderIds", {}))
+                        }
+
+                        total_discovered += len(series_tvdb_map)
+                        await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
+                        await db.commit()
+
+                        print(f"    Mapping {len(series_tvdb_map)} shows to TVDB...")
+                        show_map, show_id_to_tmdb = await sync_shows_batch_tvdb(
+                            series_tvdb_map, db, api_key=tvdb_api_key, lang=tvdb_lang
+                        )
+                        unmatched_shows = [s for s in shows if str(s.get("Id")) not in show_map]
+                        for s in unmatched_shows:
+                            all_warnings.append({
+                                "title": s.get("Name"),
+                                "media_type": "series",
+                                "source_id": str(s.get("Id")),
+                                "reason": "Unmatched on source — no TVDB ID available for the series",
+                            })
+                        total_series_map_len = len(series_tvdb_map)
+                    else:
+                        series_tmdb_map = {
+                            s.get("Id"): get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
+                            for s in shows if get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
+                        }
+
+                        total_discovered += len(series_tmdb_map)
+                        await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
+                        await db.commit()
+
+                        print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
+                        show_map, show_id_to_tmdb = await sync_shows_batch(series_tmdb_map, db, api_key=tmdb_api_key)
+                        unmatched_shows = [s for s in shows if str(s.get("Id")) not in show_map]
+                        for s in unmatched_shows:
+                            all_warnings.append({
+                                "title": s.get("Name"),
+                                "media_type": "series",
+                                "source_id": str(s.get("Id")),
+                                "reason": "Unmatched on source — no TMDB ID available for the series",
+                            })
+                        total_series_map_len = len(series_tmdb_map)
 
                     if items is None:
                         items = await jellyfin.get_episodes(lib_id, j_url, j_token, j_user, min_date=min_date)
@@ -1146,7 +1362,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                     unmatched_series_ids = {str(s.get("Id")) for s in shows if str(s.get("Id")) not in show_map}
                     unmatched_series_episodes = [e for e in items if str(e.get("SeriesId")) in unmatched_series_ids]
 
-                    total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes) + len(unmatched_series_episodes)
+                    total_discovered = total_discovered - total_series_map_len + len(filtered_episodes) + len(unmatched_series_episodes)
                     await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
                     await db.commit()
 
@@ -1156,6 +1372,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                         api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, connection_id=conn.id,
+                        settings=settings,
                     )
                     all_warnings.extend(w)
 
@@ -1166,6 +1383,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                             api_key=tmdb_api_key, show_id_to_tmdb={},
                             sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
                             new_watched_ids=_new_watched, new_ratings=_new_ratings, connection_id=conn.id,
+                            settings=settings,
                         )
                         all_warnings.extend(w)
 
@@ -1332,27 +1550,61 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                             shows = shows[:show_limit]
                         items = None # Fetch later
 
-                    series_tmdb_map = {
-                        s.get("Id"): get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
-                        for s in shows if get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
-                    }
+                    preferences = settings.preferences if settings else None
+                    primary_source = preferences.get("primary_metadata_source") if preferences else "tmdb"
 
-                    total_discovered += len(series_tmdb_map)
-                    await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
-                    await db.commit()
+                    if primary_source == "tvdb":
+                        tvdb_api_key = await get_user_tvdb_key(db, user_id)
+                        from routers.media import get_user_content_language
+                        from core import tvdb as tvdb_client
+                        lang_code = await get_user_content_language(db, user_id)
+                        tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
 
-                    print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
-                    show_map, show_id_to_tmdb = await sync_shows_batch(
-                        series_tmdb_map, db, api_key=tmdb_api_key
-                    )
-                    unmatched_shows = [s for s in shows if str(s.get("Id")) not in show_map]
-                    for s in unmatched_shows:
-                        all_warnings.append({
-                            "title": s.get("Name"),
-                            "media_type": "series",
-                            "source_id": str(s.get("Id")),
-                            "reason": "Unmatched on source — no TMDB ID available for the series",
-                        })
+                        series_tvdb_map = {
+                            s.get("Id"): get_jellyfin_tvdb_id(s.get("ProviderIds", {}))
+                            for s in shows if get_jellyfin_tvdb_id(s.get("ProviderIds", {}))
+                        }
+
+                        total_discovered += len(series_tvdb_map)
+                        await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
+                        await db.commit()
+
+                        print(f"    Mapping {len(series_tvdb_map)} shows to TVDB...")
+                        show_map, show_id_to_tmdb = await sync_shows_batch_tvdb(
+                            series_tvdb_map, db, api_key=tvdb_api_key, lang=tvdb_lang
+                        )
+                        unmatched_shows = [s for s in shows if str(s.get("Id")) not in show_map]
+                        for s in unmatched_shows:
+                            all_warnings.append({
+                                "title": s.get("Name"),
+                                "media_type": "series",
+                                "source_id": str(s.get("Id")),
+                                "reason": "Unmatched on source — no TVDB ID available for the series",
+                            })
+                        total_series_map_len = len(series_tvdb_map)
+                    else:
+                        series_tmdb_map = {
+                            s.get("Id"): get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
+                            for s in shows if get_jellyfin_tmdb_id(s.get("ProviderIds", {}))
+                        }
+
+                        total_discovered += len(series_tmdb_map)
+                        await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
+                        await db.commit()
+
+                        print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
+                        show_map, show_id_to_tmdb = await sync_shows_batch(
+                            series_tmdb_map, db, api_key=tmdb_api_key
+                        )
+                        unmatched_shows = [s for s in shows if str(s.get("Id")) not in show_map]
+                        for s in unmatched_shows:
+                            all_warnings.append({
+                                "title": s.get("Name"),
+                                "media_type": "series",
+                                "source_id": str(s.get("Id")),
+                                "reason": "Unmatched on source — no TMDB ID available for the series",
+                            })
+                        total_series_map_len = len(series_tmdb_map)
 
                     if items is None:
                         items = await emby.get_episodes(lib_id, e_url, e_token, e_user, min_date=min_date)
@@ -1360,7 +1612,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     unmatched_series_ids = {str(s.get("Id")) for s in shows if str(s.get("Id")) not in show_map}
                     unmatched_series_episodes = [e for e in items if str(e.get("SeriesId")) in unmatched_series_ids]
 
-                    total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes) + len(unmatched_series_episodes)
+                    total_discovered = total_discovered - total_series_map_len + len(filtered_episodes) + len(unmatched_series_episodes)
                     await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
                     await db.commit()
 
@@ -1370,6 +1622,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, connection_id=conn.id,
+                        settings=settings,
                     )
                     all_warnings.extend(w)
 
@@ -1380,6 +1633,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                             api_key=tmdb_api_key, show_id_to_tmdb={},
                             sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
                             new_watched_ids=_new_watched, new_ratings=_new_ratings, connection_id=conn.id,
+                            settings=settings,
                         )
                         all_warnings.extend(w)
 
@@ -1674,66 +1928,148 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                             shows = shows[:show_limit]
                         items = None # Fetch later
 
-                    series_tmdb_map = {
-                        s.get("ratingKey"): plex.extract_tmdb_id(plex.get_guids(s))
-                        for s in shows if plex.extract_tmdb_id(plex.get_guids(s))
-                    }
+                    preferences = settings.preferences if settings else None
+                    primary_source = preferences.get("primary_metadata_source") if preferences else "tmdb"
 
-                    shows_without_tmdb = [
-                        s for s in shows
-                        if s.get("ratingKey") not in series_tmdb_map
-                        and (plex.extract_tvdb_id(plex.get_guids(s)) or plex.extract_imdb_id(plex.get_guids(s)))
-                    ]
+                    if primary_source == "tvdb":
+                        from routers.shows import get_user_tvdb_key
+                        from routers.media import get_user_content_language
+                        from core import tvdb as tvdb_client
+                        tvdb_api_key = await get_user_tvdb_key(db, user_id)
+                        lang_code = await get_user_content_language(db, user_id)
+                        tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
 
-                    if shows_without_tmdb:
-                        print(f"    Resolving {len(shows_without_tmdb)} shows via TVDB/IMDb fallback...")
-                        semaphore = asyncio.Semaphore(TMDB_CONCURRENCY)
+                        def _get_tvdb_id(s):
+                            val = plex.extract_tvdb_id(plex.get_guids(s))
+                            return int(val) if (val and val.isdigit()) else None
 
-                        async def resolve_show_tmdb_id(s: dict) -> None:
-                            async with semaphore:
-                                guids = plex.get_guids(s)
-                                tvdb_id = plex.extract_tvdb_id(guids)
-                                imdb_id = plex.extract_imdb_id(guids)
-                                try:
-                                    if tvdb_id:
-                                        res = await tmdb.find_by_external_id(tvdb_id, "tvdb_id", api_key=tmdb_api_key)
-                                        if res.get("tv_results"):
-                                            series_tmdb_map[s["ratingKey"]] = res["tv_results"][0]["id"]
-                                            return
-                                    if imdb_id:
-                                        res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=tmdb_api_key)
-                                        if res.get("tv_results"):
-                                            series_tmdb_map[s["ratingKey"]] = res["tv_results"][0]["id"]
-                                            return
-                                    title = s.get("title") or s.get("titleSort")
-                                    if title:
-                                        res = await tmdb.search_shows(title, api_key=tmdb_api_key)
-                                        if res.get("results"):
-                                            series_tmdb_map[s["ratingKey"]] = res["results"][0]["id"]
-                                except Exception as e:
-                                    print(f"    Could not resolve show '{s.get('title')}': {e}")
+                        series_tvdb_map = {
+                            s.get("ratingKey"): _get_tvdb_id(s)
+                            for s in shows if _get_tvdb_id(s)
+                        }
 
-                        await asyncio.gather(*[resolve_show_tmdb_id(s) for s in shows_without_tmdb])
+                        shows_without_tvdb = [
+                            s for s in shows
+                            if s.get("ratingKey") not in series_tvdb_map
+                            and (plex.extract_tmdb_id(plex.get_guids(s)) or plex.extract_imdb_id(plex.get_guids(s)))
+                        ]
 
-                    total_discovered += len(series_tmdb_map)
-                    await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
-                    await db.commit()
+                        if shows_without_tvdb:
+                            print(f"    Resolving {len(shows_without_tvdb)} shows via TMDB/IMDb fallback for TVDB...")
+                            semaphore = asyncio.Semaphore(TMDB_CONCURRENCY)
 
-                    print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
-                    show_map, show_id_to_tmdb = await sync_shows_batch(
-                        series_tmdb_map, db, api_key=tmdb_api_key
-                    )
-                    print(f"    Mapped {len(show_map)}/{len(series_tmdb_map)} shows.")
+                            async def resolve_show_tvdb_id(s: dict) -> None:
+                                async with semaphore:
+                                    guids = plex.get_guids(s)
+                                    tmdb_id = plex.extract_tmdb_id(guids)
+                                    imdb_id = plex.extract_imdb_id(guids)
+                                    try:
+                                        if tmdb_id:
+                                            res = await tmdb.get_external_ids(tmdb_id, "tv", api_key=tmdb_api_key)
+                                            if res.get("tvdb_id"):
+                                                series_tvdb_map[s["ratingKey"]] = int(res["tvdb_id"])
+                                                return
+                                        if imdb_id:
+                                            res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=tmdb_api_key)
+                                            if res.get("tv_results"):
+                                                cross_tmdb_id = res["tv_results"][0]["id"]
+                                                ext = await tmdb.get_external_ids(cross_tmdb_id, "tv", api_key=tmdb_api_key)
+                                                if ext.get("tvdb_id"):
+                                                    series_tvdb_map[s["ratingKey"]] = int(ext["tvdb_id"])
+                                                    return
+                                        title = s.get("title") or s.get("titleSort")
+                                        if title:
+                                            res = await tvdb_client.search_series(title, api_key=tvdb_api_key, lang=tvdb_lang)
+                                            if res:
+                                                series_tvdb_map[s["ratingKey"]] = int(res[0]["tvdb_id"])
+                                    except Exception as e:
+                                        print(f"    Could not resolve TVDB show '{s.get('title')}': {e}")
 
-                    unmatched_shows = [s for s in shows if str(s.get("ratingKey")) not in show_map]
-                    for s in unmatched_shows:
-                        all_warnings.append({
-                            "title": s.get("title"),
-                            "media_type": "series",
-                            "source_id": str(s.get("ratingKey")),
-                            "plex_guids": [g.get("id", "") for g in plex.get_guids(s) if isinstance(g, dict)],
-                            "reason": "Unmatched on source — no TMDB ID available for the series",
-                        })
+                            await asyncio.gather(*[resolve_show_tvdb_id(s) for s in shows_without_tvdb])
+
+                        total_discovered += len(series_tvdb_map)
+                        await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
+                        await db.commit()
+
+                        print(f"    Mapping {len(series_tvdb_map)} shows to TVDB...")
+                        show_map, show_id_to_tmdb = await sync_shows_batch_tvdb(
+                            series_tvdb_map, db, api_key=tvdb_api_key, lang=tvdb_lang
+                        )
+                        print(f"    Mapped {len(show_map)}/{len(series_tvdb_map)} shows.")
+
+                        unmatched_shows = [s for s in shows if str(s.get("ratingKey")) not in show_map]
+                        for s in unmatched_shows:
+                            all_warnings.append({
+                                "title": s.get("title"),
+                                "media_type": "series",
+                                "source_id": str(s.get("ratingKey")),
+                                "plex_guids": [g.get("id", "") for g in plex.get_guids(s) if isinstance(g, dict)],
+                                "reason": "Unmatched on source — no TVDB ID available for the series",
+                            })
+                        total_series_map_len = len(series_tvdb_map)
+
+                    else:
+                        series_tmdb_map = {
+                            s.get("ratingKey"): plex.extract_tmdb_id(plex.get_guids(s))
+                            for s in shows if plex.extract_tmdb_id(plex.get_guids(s))
+                        }
+
+                        shows_without_tmdb = [
+                            s for s in shows
+                            if s.get("ratingKey") not in series_tmdb_map
+                            and (plex.extract_tvdb_id(plex.get_guids(s)) or plex.extract_imdb_id(plex.get_guids(s)))
+                        ]
+
+                        if shows_without_tmdb:
+                            print(f"    Resolving {len(shows_without_tmdb)} shows via TVDB/IMDb fallback...")
+                            semaphore = asyncio.Semaphore(TMDB_CONCURRENCY)
+
+                            async def resolve_show_tmdb_id(s: dict) -> None:
+                                async with semaphore:
+                                    guids = plex.get_guids(s)
+                                    tvdb_id = plex.extract_tvdb_id(guids)
+                                    imdb_id = plex.extract_imdb_id(guids)
+                                    try:
+                                        if tvdb_id:
+                                            res = await tmdb.find_by_external_id(tvdb_id, "tvdb_id", api_key=tmdb_api_key)
+                                            if res.get("tv_results"):
+                                                series_tmdb_map[s["ratingKey"]] = res["tv_results"][0]["id"]
+                                                return
+                                        if imdb_id:
+                                            res = await tmdb.find_by_external_id(imdb_id, "imdb_id", api_key=tmdb_api_key)
+                                            if res.get("tv_results"):
+                                                series_tmdb_map[s["ratingKey"]] = res["tv_results"][0]["id"]
+                                                return
+                                        title = s.get("title") or s.get("titleSort")
+                                        if title:
+                                            res = await tmdb.search_shows(title, api_key=tmdb_api_key)
+                                            if res.get("results"):
+                                                series_tmdb_map[s["ratingKey"]] = res["results"][0]["id"]
+                                    except Exception as e:
+                                        print(f"    Could not resolve show '{s.get('title')}': {e}")
+
+                            await asyncio.gather(*[resolve_show_tmdb_id(s) for s in shows_without_tmdb])
+
+                        total_discovered += len(series_tmdb_map)
+                        await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
+                        await db.commit()
+
+                        print(f"    Mapping {len(series_tmdb_map)} shows to TMDB...")
+                        show_map, show_id_to_tmdb = await sync_shows_batch(
+                            series_tmdb_map, db, api_key=tmdb_api_key
+                        )
+                        print(f"    Mapped {len(show_map)}/{len(series_tmdb_map)} shows.")
+
+                        unmatched_shows = [s for s in shows if str(s.get("ratingKey")) not in show_map]
+                        for s in unmatched_shows:
+                            all_warnings.append({
+                                "title": s.get("title"),
+                                "media_type": "series",
+                                "source_id": str(s.get("ratingKey")),
+                                "plex_guids": [g.get("id", "") for g in plex.get_guids(s) if isinstance(g, dict)],
+                                "reason": "Unmatched on source — no TMDB ID available for the series",
+                            })
+                        total_series_map_len = len(series_tmdb_map)
 
                     print(f"    Fetching episodes for {lib_title}...")
                     if items is None:
@@ -1742,7 +2078,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     unmatched_ratingkeys = {str(s.get("ratingKey")) for s in shows if str(s.get("ratingKey")) not in show_map}
                     unmatched_series_episodes = [i for i in items if str(i.get("grandparentRatingKey")) in unmatched_ratingkeys]
 
-                    total_discovered = total_discovered - len(series_tmdb_map) + len(filtered_episodes) + len(unmatched_series_episodes)
+                    total_discovered = total_discovered - total_series_map_len + len(filtered_episodes) + len(unmatched_series_episodes)
                     await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(total_items=total_discovered))
                     await db.commit()
 
@@ -2781,6 +3117,7 @@ async def apply_season_override(
         ]
         target_show = Show(
             tmdb_id=override.target_show_tmdb_id,
+            tvdb_id=int(show_data.get("external_ids", {}).get("tvdb_id")) if show_data.get("external_ids", {}).get("tvdb_id") else None,
             title=show_data.get("name") or show_data.get("original_name"),
             original_title=show_data.get("original_name"),
             overview=show_data.get("overview"),
@@ -3075,6 +3412,7 @@ async def apply_episode_override(
         ]
         target_show = Show(
             tmdb_id=override.target_show_tmdb_id,
+            tvdb_id=int(show_data.get("external_ids", {}).get("tvdb_id")) if show_data.get("external_ids", {}).get("tvdb_id") else None,
             title=show_data.get("name") or show_data.get("original_name"),
             original_title=show_data.get("original_name"),
             overview=show_data.get("overview"),
@@ -4029,6 +4367,7 @@ async def match_unmatched_show(
             ]
             target_show = Show(
                 tmdb_id=body.tmdb_id,
+                tvdb_id=int(show_data.get("external_ids", {}).get("tvdb_id")) if show_data.get("external_ids", {}).get("tvdb_id") else None,
                 title=show_data.get("name") or show_data.get("original_name"),
                 original_title=show_data.get("original_name"),
                 overview=show_data.get("overview"),

@@ -74,6 +74,7 @@ async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: s
         show_data = await tmdb.get_show(series_tmdb_id, api_key=api_key)
         show = Show(
             tmdb_id=series_tmdb_id,
+            tvdb_id=int(show_data.get("external_ids", {}).get("tvdb_id")) if show_data.get("external_ids", {}).get("tvdb_id") else None,
             title=show_data.get("name", ""),
             original_title=show_data.get("original_name"),
             overview=show_data.get("overview"),
@@ -96,6 +97,45 @@ async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: s
                     }
                     for s in show_data.get("seasons", [])
                 ],
+            },
+        )
+        db.add(show)
+        await db.flush()
+    return show
+
+
+async def _find_or_create_show_tvdb(db: AsyncSession, series_tvdb_id: int, tvdb_api_key: str = None, lang: str = "eng") -> Show:
+    result = await db.execute(select(Show).where(Show.tvdb_id == series_tvdb_id))
+    show = result.scalar_one_or_none()
+    if not show:
+        from core import tvdb as tvdb_client
+        raw_show = await tvdb_client.get_series(series_tvdb_id, tvdb_api_key, lang=lang)
+        show_data = tvdb_client.format_series(raw_show, lang=lang)
+        show = Show(
+            tvdb_id=series_tvdb_id,
+            tmdb_id=show_data.get("tmdb_id_cross"),
+            title=show_data.get("title", ""),
+            original_title=show_data.get("original_title"),
+            overview=show_data.get("overview"),
+            poster_path=show_data.get("poster_path"),
+            backdrop_path=show_data.get("backdrop_path"),
+            tmdb_rating=None,
+            status=show_data.get("status"),
+            tagline=None,
+            first_air_date=show_data.get("first_air_date"),
+            last_air_date=show_data.get("last_air_date"),
+            tmdb_data={
+                "genres": show_data.get("genres", []),
+                "seasons": [
+                    {
+                        "season_number": s["season_number"],
+                        "poster_path": s.get("poster_path"),
+                        "episode_count": s.get("episode_count", 0),
+                        "name": s.get("name"),
+                    }
+                    for s in show_data.get("seasons", [])
+                ],
+                "source": "tvdb",
             },
         )
         db.add(show)
@@ -240,7 +280,9 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
             "year": item.get("ProductionYear"),
             "media_type": "movie" if item.get("Type") == "Movie" else "episode",
             "tmdb_id": item.get("ProviderIds", {}).get("Tmdb"),
+            "tvdb_id": item.get("ProviderIds", {}).get("Tvdb"),
             "series_tmdb_id": item.get("SeriesProviderIds", {}).get("Tmdb"),
+            "series_tvdb_id": item.get("SeriesProviderIds", {}).get("Tvdb"),
             "season_number": item.get("ParentIndexNumber"),
             "episode_number": item.get("IndexNumber"),
             "progress_percent": round(position_ticks / runtime_ticks, 4) if runtime_ticks else 0.0,
@@ -261,6 +303,11 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
         or payload.get("Provider_Tmdb")
         or payload.get("Provider_tmdbid")
     )
+    tvdb_id = (
+        payload.get("Provider_tvdb")
+        or payload.get("Provider_Tvdb")
+        or payload.get("Provider_tvdbid")
+    )
     position_ticks = payload.get("PlaybackPositionTicks") or payload.get("PositionTicks") or 0
     runtime_ticks = payload.get("RunTimeTicks") or 0
 
@@ -275,7 +322,9 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
         "year": payload.get("Year") or payload.get("ProductionYear"),
         "media_type": "movie" if item_type == "Movie" else "episode",
         "tmdb_id": str(tmdb_id) if tmdb_id else None,
+        "tvdb_id": str(tvdb_id) if tvdb_id else None,
         "series_tmdb_id": None,  # not exposed in flat format; resolved in find_or_create
+        "series_tvdb_id": None,
         "series_name": payload.get("SeriesName"),  # used to look up show when series_tmdb_id is absent
         "season_number": season_num,
         "episode_number": episode_num,
@@ -302,69 +351,120 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
         if media:
             return media
 
+    # Resolve primary metadata source preference
+    settings = None
+    if user_id:
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+        settings = settings_result.scalar_one_or_none()
+    preferences = settings.preferences if settings else None
+    primary_source = preferences.get("primary_metadata_source") if preferences else "tmdb"
+    is_tvdb = (primary_source == "tvdb")
+
+    tvdb_api_key = None
+    tvdb_lang = "eng"
+    if is_tvdb and user_id:
+        from routers.shows import get_user_tvdb_key
+        from routers.media import get_user_content_language
+        from core import tvdb as tvdb_client
+        tvdb_api_key = await get_user_tvdb_key(db, user_id)
+        lang_code = await get_user_content_language(db, user_id)
+        tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
+
     # Resolve show for episode dedup and enrichment
     show = None
     series_tmdb_id = int(data["series_tmdb_id"]) if data.get("series_tmdb_id") else None
+    series_tvdb_id = int(data["series_tvdb_id"]) if data.get("series_tvdb_id") else None
 
-    if data["media_type"] == "episode" and not series_tmdb_id and data.get("series_name"):
-        # Flat format: no series_tmdb_id — try local Show table first, then TMDB search
-        local_result = await db.execute(
-            select(Show).where(Show.title.ilike(data["series_name"]))
-        )
-        local_show = local_result.scalars().first()
-        if local_show:
-            series_tmdb_id = local_show.tmdb_id
-        else:
+    if is_tvdb:
+        if data["media_type"] == "episode" and not series_tvdb_id and series_tmdb_id:
             try:
-                res = await tmdb.search_shows(data["series_name"], api_key=api_key)
-                if res.get("results"):
-                    series_tmdb_id = res["results"][0]["id"]
+                res = await tmdb.get_external_ids(series_tmdb_id, "tv", api_key=api_key)
+                if res.get("tvdb_id"):
+                    series_tvdb_id = int(res["tvdb_id"])
             except Exception:
                 pass
 
-    if user_id and data["media_type"] == "episode" and series_tmdb_id and data.get("season_number") is not None and data.get("episode_number") is not None:
-        from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
-        
-        ep_override_q = await db.execute(
-            select(ShowEpisodeOverride).where(
-                ShowEpisodeOverride.user_id == user_id,
-                ShowEpisodeOverride.source_show_tmdb_id == series_tmdb_id,
-                ShowEpisodeOverride.source_season_number == data["season_number"],
-                ShowEpisodeOverride.source_episode_number == data["episode_number"]
+        if data["media_type"] == "episode" and not series_tvdb_id and data.get("series_name"):
+            local_result = await db.execute(
+                select(Show).where(Show.title.ilike(data["series_name"]))
             )
-        )
-        ep_override = ep_override_q.scalar_one_or_none()
-        if ep_override:
-            series_tmdb_id = ep_override.target_show_tmdb_id
-            data["series_tmdb_id"] = ep_override.target_show_tmdb_id
-            data["season_number"] = ep_override.target_season_number
-            data["episode_number"] = ep_override.target_episode_number
-        else:
-            season_override_q = await db.execute(
-                select(ShowSeasonOverride).where(
-                    ShowSeasonOverride.user_id == user_id,
-                    ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
-                    ShowSeasonOverride.source_season_number == data["season_number"]
+            local_show = local_result.scalars().first()
+            if local_show:
+                series_tvdb_id = local_show.tvdb_id
+            else:
+                try:
+                    res = await tvdb_client.search_series(data["series_name"], api_key=tvdb_api_key, lang=tvdb_lang)
+                    if res:
+                        series_tvdb_id = int(res[0]["tvdb_id"])
+                except Exception:
+                    pass
+
+        if data["media_type"] == "episode" and series_tvdb_id:
+            try:
+                show = await _find_or_create_show_tvdb(db, series_tvdb_id, tvdb_api_key, lang=tvdb_lang)
+            except Exception:
+                pass
+    else:
+        if data["media_type"] == "episode" and not series_tmdb_id and data.get("series_name"):
+            # Flat format: no series_tmdb_id — try local Show table first, then TMDB search
+            local_result = await db.execute(
+                select(Show).where(Show.title.ilike(data["series_name"]))
+            )
+            local_show = local_result.scalars().first()
+            if local_show:
+                series_tmdb_id = local_show.tmdb_id
+            else:
+                try:
+                    res = await tmdb.search_shows(data["series_name"], api_key=api_key)
+                    if res.get("results"):
+                        series_tmdb_id = res["results"][0]["id"]
+                except Exception:
+                    pass
+
+        if user_id and data["media_type"] == "episode" and series_tmdb_id and data.get("season_number") is not None and data.get("episode_number") is not None:
+            from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
+            
+            ep_override_q = await db.execute(
+                select(ShowEpisodeOverride).where(
+                    ShowEpisodeOverride.user_id == user_id,
+                    ShowEpisodeOverride.source_show_tmdb_id == series_tmdb_id,
+                    ShowEpisodeOverride.source_season_number == data["season_number"],
+                    ShowEpisodeOverride.source_episode_number == data["episode_number"]
                 )
             )
-            season_override = season_override_q.scalar_one_or_none()
-            if season_override:
-                series_tmdb_id = season_override.target_show_tmdb_id
-                data["series_tmdb_id"] = season_override.target_show_tmdb_id
-                data["season_number"] = season_override.target_season_number
+            ep_override = ep_override_q.scalar_one_or_none()
+            if ep_override:
+                series_tmdb_id = ep_override.target_show_tmdb_id
+                data["series_tmdb_id"] = ep_override.target_show_tmdb_id
+                data["season_number"] = ep_override.target_season_number
+                data["episode_number"] = ep_override.target_episode_number
+            else:
+                season_override_q = await db.execute(
+                    select(ShowSeasonOverride).where(
+                        ShowSeasonOverride.user_id == user_id,
+                        ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
+                        ShowSeasonOverride.source_season_number == data["season_number"]
+                    )
+                )
+                season_override = season_override_q.scalar_one_or_none()
+                if season_override:
+                    series_tmdb_id = season_override.target_show_tmdb_id
+                    data["series_tmdb_id"] = season_override.target_show_tmdb_id
+                    data["season_number"] = season_override.target_season_number
 
-    if data["media_type"] == "episode" and series_tmdb_id:
-        try:
-            show = await _find_or_create_show(db, series_tmdb_id, api_key)
-        except Exception:
-            pass
+        if data["media_type"] == "episode" and series_tmdb_id:
+            try:
+                show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            except Exception:
+                pass
 
-    # 2. Match by TMDB ID (handles rapid webhook events before first sync, or items
+    # 2. Match by TMDB ID or TVDB ID (handles rapid webhook events before first sync, or items
     #    already added via another source / manually — prevents duplicate media rows)
-    if data["tmdb_id"]:
+    match_id = int(data["tvdb_id"]) if (is_tvdb and data.get("tvdb_id")) else (int(data["tmdb_id"]) if data.get("tmdb_id") else None)
+    if match_id:
         result = await db.execute(
             select(Media).where(
-                Media.tmdb_id == int(data["tmdb_id"]),
+                Media.tmdb_id == match_id,
                 Media.media_type == MediaType(data["media_type"]),
             )
         )
@@ -372,7 +472,10 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
         if media:
             if media.media_type == MediaType.episode and media.show_id is None and show:
                 media.show_id = show.id
-                await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+                if is_tvdb:
+                    await enrich_media(media, api_key=api_key, is_tvdb=True, tvdb_api_key=tvdb_api_key, tvdb_lang=tvdb_lang, series_tvdb_id=series_tvdb_id)
+                else:
+                    await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
             return media
 
     # 2b. Movie matching by title + year if TMDB ID is missing
@@ -409,7 +512,7 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
             pass
 
     # 3. Match by (show_id, season_number, episode_number) — catches sync-created rows
-    #    when the Jellyfin item's TMDB ID is missing or doesn't match
+    #    when the Jellyfin item's ID is missing or doesn't match
     if show and data["season_number"] is not None and data["episode_number"] is not None:
         result = await db.execute(
             select(Media).where(
@@ -425,12 +528,12 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
 
     # Don't create a row for an episode we can't identify at all — it can never
     # be enriched or matched back to a real episode, and would inflate collection counts.
-    if data["media_type"] == "episode" and data["season_number"] is None and data["episode_number"] is None and not data["tmdb_id"]:
-        print(f"  Skipping unidentifiable episode '{data['title']}' (no season/episode/tmdb_id)")
+    if data["media_type"] == "episode" and data["season_number"] is None and data["episode_number"] is None and not match_id:
+        print(f"  Skipping unidentifiable episode '{data['title']}' (no season/episode/id)")
         return None
 
     media = Media(
-        tmdb_id=int(data["tmdb_id"]) if data["tmdb_id"] else None,
+        tmdb_id=match_id,
         media_type=MediaType(data["media_type"]),
         title=data["title"],
         season_number=data["season_number"],
@@ -439,8 +542,11 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
     )
     db.add(media)
     await db.flush()
-    if show and series_tmdb_id:
-        await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+    if show and (series_tvdb_id if is_tvdb else series_tmdb_id):
+        if is_tvdb:
+            await enrich_media(media, api_key=api_key, is_tvdb=True, tvdb_api_key=tvdb_api_key, tvdb_lang=tvdb_lang, series_tvdb_id=series_tvdb_id)
+        else:
+            await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
     else:
         await enrich_media(media, api_key=api_key)
     return media
@@ -976,148 +1082,283 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
         )
         media = cf_result.scalars().first()
         if media:
+            if (
+                media.media_type == MediaType.episode
+                and data.get("season_number") is not None
+                and data.get("episode_number") is not None
+            ):
+                plex_season = int(data["season_number"])
+                plex_episode = int(data["episode_number"])
+                # Load user settings to check primary_metadata_source
+                _settings = None
+                if user_id:
+                    _sr = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+                    _settings = _sr.scalar_one_or_none()
+                _prefs = _settings.preferences if _settings else None
+                _primary_source = _prefs.get("primary_metadata_source") if _prefs else "tmdb"
+                if _primary_source == "tvdb" and (
+                    media.season_number != plex_season or media.episode_number != plex_episode
+                ):
+                    print(
+                        f"  [TVDB] Correcting episode numbering for ratingKey={data['plex_rating_key']}: "
+                        f"DB has S{media.season_number}E{media.episode_number}, "
+                        f"Plex reports S{plex_season}E{plex_episode} — updating to TVDB ordering."
+                    )
+                    media.season_number = plex_season
+                    media.episode_number = plex_episode
+                    # Re-enrich the episode metadata from TVDB with the corrected numbers
+                    try:
+                        from routers.shows import get_user_tvdb_key
+                        from routers.media import get_user_content_language
+                        from core import tvdb as tvdb_client
+                        _tvdb_api_key = await get_user_tvdb_key(db, user_id) if user_id else None
+                        _lang_code = await get_user_content_language(db, user_id) if user_id else "en"
+                        _tvdb_lang = tvdb_client.to_three_letter_lang(_lang_code)
+                        if media.show_id:
+                            from sqlalchemy import select as _select
+                            _show_res = await db.execute(_select(Show).where(Show.id == media.show_id))
+                            _show = _show_res.scalar_one_or_none()
+                            if _show and _show.tvdb_id:
+                                await enrich_media(
+                                    media,
+                                    api_key=api_key,
+                                    is_tvdb=True,
+                                    tvdb_api_key=_tvdb_api_key,
+                                    tvdb_lang=_tvdb_lang,
+                                    series_tvdb_id=_show.tvdb_id,
+                                )
+                    except Exception as _e:
+                        print(f"  [TVDB] Could not re-enrich corrected episode: {_e}")
             return media
 
-    series_tmdb_id: Optional[int] = int(data["grandparent_tmdb_id"]) if data.get("grandparent_tmdb_id") else None
+    # Resolve primary metadata source preference
+    settings = None
+    if user_id:
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+        settings = settings_result.scalar_one_or_none()
+    preferences = settings.preferences if settings else None
+    primary_source = preferences.get("primary_metadata_source") if preferences else "tmdb"
+    is_tvdb = (primary_source == "tvdb")
 
-    # If missing series_tmdb_id, try to resolve it via other identifiers
-    if data["media_type"] == "episode" and not series_tmdb_id:
-        # 1. Try grandparent TVDB/IMDb
-        if data.get("grandparent_tvdb_id"):
-            try:
-                res = await tmdb.find_by_external_id(data["grandparent_tvdb_id"], "tvdb_id", api_key=api_key)
-                if res.get("tv_results"):
-                    series_tmdb_id = res["tv_results"][0]["id"]
-            except Exception: pass
+    tvdb_api_key = None
+    tvdb_lang = "eng"
+    if is_tvdb and user_id:
+        from routers.shows import get_user_tvdb_key
+        from routers.media import get_user_content_language
+        from core import tvdb as tvdb_client
+        tvdb_api_key = await get_user_tvdb_key(db, user_id)
+        lang_code = await get_user_content_language(db, user_id)
+        tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
 
-        if not series_tmdb_id and data.get("grandparent_imdb_id"):
-            try:
-                res = await tmdb.find_by_external_id(data["grandparent_imdb_id"], "imdb_id", api_key=api_key)
-                if res.get("tv_results"):
-                    series_tmdb_id = res["tv_results"][0]["id"]
-            except Exception: pass
+    show = None
+    series_tmdb_id = int(data["grandparent_tmdb_id"]) if data.get("grandparent_tmdb_id") else None
+    series_tvdb_id = int(data["grandparent_tvdb_id"]) if data.get("grandparent_tvdb_id") else None
 
-        # 2. Try episode identifiers (TMDB Find returns show context)
-        if not series_tmdb_id and data.get("tvdb_id"):
-            try:
-                res = await tmdb.find_by_external_id(data["tvdb_id"], "tvdb_id", api_key=api_key)
-                if res.get("tv_episode_results"):
-                    series_tmdb_id = res["tv_episode_results"][0].get("show_id")
-            except Exception: pass
-
-        if not series_tmdb_id and data.get("imdb_id"):
-            try:
-                res = await tmdb.find_by_external_id(data["imdb_id"], "imdb_id", api_key=api_key)
-                if res.get("tv_episode_results"):
-                    series_tmdb_id = res["tv_episode_results"][0].get("show_id")
-            except Exception: pass
-
-        # 3. Fetch grandparent show from Plex to extract its TMDB GUID
-        #    (needed when grandparentGuid is a plex://show/xxx internal ID)
-        if not series_tmdb_id and data.get("grandparent_rating_key") and conn:
-            try:
-                import core.plex as plex_client
-                show_item = await plex_client.get_item(conn.url, conn.token, data["grandparent_rating_key"])
-                if show_item:
-                    show_guids = show_item.get("Guid") or []
-                    for g in show_guids:
-                        gid = g.get("id", "")
-                        if gid.startswith("tmdb://"):
-                            try:
-                                series_tmdb_id = int(gid.replace("tmdb://", ""))
-                            except ValueError:
-                                pass
-                            break
-                        elif re.search(r'themoviedb(?:\.com)?://(\d+)', gid, re.IGNORECASE):
-                            m = re.search(r'themoviedb(?:\.com)?://(\d+)', gid, re.IGNORECASE)
-                            if m:
-                                try:
-                                    series_tmdb_id = int(m.group(1))
-                                except ValueError:
-                                    pass
-                            break
-                    # Also try TVDB/IMDB on the show if TMDB still not found
-                    if not series_tmdb_id:
+    if is_tvdb:
+        # If missing series_tvdb_id, resolve it
+        if data["media_type"] == "episode" and not series_tvdb_id:
+            # 1. Try from grandparent_tmdb_id
+            if series_tmdb_id:
+                try:
+                    res = await tmdb.get_external_ids(series_tmdb_id, "tv", api_key=api_key)
+                    if res.get("tvdb_id"):
+                        series_tvdb_id = int(res["tvdb_id"])
+                except Exception:
+                    pass
+            # 2. Try from grandparent_imdb_id
+            if not series_tvdb_id and data.get("grandparent_imdb_id"):
+                try:
+                    res = await tmdb.find_by_external_id(data["grandparent_imdb_id"], "imdb_id", api_key=api_key)
+                    if res.get("tv_results"):
+                        cross_id = res["tv_results"][0]["id"]
+                        ext = await tmdb.get_external_ids(cross_id, "tv", api_key=api_key)
+                        if ext.get("tvdb_id"):
+                            series_tvdb_id = int(ext["tvdb_id"])
+                except Exception:
+                    pass
+            # 3. Try from Plex show GUIDs
+            if not series_tvdb_id and data.get("grandparent_rating_key") and conn:
+                try:
+                    import core.plex as plex_client
+                    show_item = await plex_client.get_item(conn.url, conn.token, data["grandparent_rating_key"])
+                    if show_item:
+                        show_guids = show_item.get("Guid") or []
                         for g in show_guids:
                             gid = g.get("id", "")
-                            tvdb_m = re.search(r'(?:^tvdb|thetvdb(?:\.com)?)://(\d+)', gid, re.IGNORECASE)
-                            if tvdb_m:
+                            if gid.startswith("tvdb://"):
                                 try:
-                                    res = await tmdb.find_by_external_id(tvdb_m.group(1), "tvdb_id", api_key=api_key)
-                                    if res.get("tv_results"):
-                                        series_tmdb_id = res["tv_results"][0]["id"]
-                                        break
-                                except Exception:
+                                    series_tvdb_id = int(gid.replace("tvdb://", ""))
+                                except ValueError:
                                     pass
+                                break
+                except Exception:
+                    pass
+            # 4. Search by title
+            if not series_tvdb_id and data.get("grandparent_title"):
+                try:
+                    res = await tvdb_client.search_series(data["grandparent_title"], api_key=tvdb_api_key, lang=tvdb_lang)
+                    gt_lower = data["grandparent_title"].lower()
+                    for r in res[:3]:
+                        if r.get("title", "").lower() == gt_lower:
+                            series_tvdb_id = int(r["tvdb_id"])
+                            break
+                except Exception:
+                    pass
+
+        # When we couldn't verify the parent show on TVDB, discard episode-level TVDB ID
+        if data["media_type"] == "episode" and not series_tvdb_id:
+            data["tvdb_id"] = None
+
+        if data["media_type"] == "episode" and series_tvdb_id:
+            try:
+                show = await _find_or_create_show_tvdb(db, series_tvdb_id, tvdb_api_key, lang=tvdb_lang)
             except Exception:
                 pass
 
-        # 4. Last resort: search by show title — exact name match only to avoid false positives
-        #    (a fuzzy first-result on a show that doesn't exist on TMDB at all causes wrong linkage).
-        if not series_tmdb_id and data.get("grandparent_title"):
-            try:
-                res = await tmdb.search_shows(data["grandparent_title"], api_key=api_key)
-                gt_lower = data["grandparent_title"].lower()
-                for r in (res.get("results") or [])[:3]:
-                    if r.get("name", "").lower() == gt_lower or r.get("original_name", "").lower() == gt_lower:
-                        series_tmdb_id = r["id"]
-                        break
-            except Exception: pass
+    else:
+        # If missing series_tmdb_id, try to resolve it via other identifiers
+        if data["media_type"] == "episode" and not series_tmdb_id:
+            # 1. Try grandparent TVDB/IMDb
+            if data.get("grandparent_tvdb_id"):
+                try:
+                    res = await tmdb.find_by_external_id(data["grandparent_tvdb_id"], "tvdb_id", api_key=api_key)
+                    if res.get("tv_results"):
+                        series_tmdb_id = res["tv_results"][0]["id"]
+                except Exception: pass
 
-    # When we couldn't verify the parent show on TMDB via any identifier, discard any
-    # episode-level TMDB ID that Plex provided. Plex sometimes assigns a movie's TMDB ID
-    # to episodes it can't match (the show exists only on TVDB/IMDB, not TMDB).
-    if data["media_type"] == "episode" and not series_tmdb_id:
-        data["tmdb_id"] = None
+            if not series_tmdb_id and data.get("grandparent_imdb_id"):
+                try:
+                    res = await tmdb.find_by_external_id(data["grandparent_imdb_id"], "imdb_id", api_key=api_key)
+                    if res.get("tv_results"):
+                        series_tmdb_id = res["tv_results"][0]["id"]
+                except Exception: pass
 
-    if user_id and data["media_type"] == "episode" and series_tmdb_id and data.get("season_number") is not None and data.get("episode_number") is not None:
-        from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
-        
-        ep_override_q = await db.execute(
-            select(ShowEpisodeOverride).where(
-                ShowEpisodeOverride.user_id == user_id,
-                ShowEpisodeOverride.source_show_tmdb_id == series_tmdb_id,
-                ShowEpisodeOverride.source_season_number == data["season_number"],
-                ShowEpisodeOverride.source_episode_number == data["episode_number"]
-            )
-        )
-        ep_override = ep_override_q.scalar_one_or_none()
-        if ep_override:
-            series_tmdb_id = ep_override.target_show_tmdb_id
-            data["grandparent_tmdb_id"] = ep_override.target_show_tmdb_id
-            data["season_number"] = ep_override.target_season_number
-            data["episode_number"] = ep_override.target_episode_number
-        else:
-            season_override_q = await db.execute(
-                select(ShowSeasonOverride).where(
-                    ShowSeasonOverride.user_id == user_id,
-                    ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
-                    ShowSeasonOverride.source_season_number == data["season_number"]
+            # 2. Try episode identifiers (TMDB Find returns show context)
+            if not series_tmdb_id and data.get("tvdb_id"):
+                try:
+                    res = await tmdb.find_by_external_id(data["tvdb_id"], "tvdb_id", api_key=api_key)
+                    if res.get("tv_episode_results"):
+                        series_tmdb_id = res["tv_episode_results"][0].get("show_id")
+                except Exception: pass
+
+            if not series_tmdb_id and data.get("imdb_id"):
+                try:
+                    res = await tmdb.find_by_external_id(data["imdb_id"], "imdb_id", api_key=api_key)
+                    if res.get("tv_episode_results"):
+                        series_tmdb_id = res["tv_episode_results"][0].get("show_id")
+                except Exception: pass
+
+            # 3. Fetch grandparent show from Plex to extract its TMDB GUID
+            #    (needed when grandparentGuid is a plex://show/xxx internal ID)
+            if not series_tmdb_id and data.get("grandparent_rating_key") and conn:
+                try:
+                    import core.plex as plex_client
+                    show_item = await plex_client.get_item(conn.url, conn.token, data["grandparent_rating_key"])
+                    if show_item:
+                        show_guids = show_item.get("Guid") or []
+                        for g in show_guids:
+                            gid = g.get("id", "")
+                            if gid.startswith("tmdb://"):
+                                try:
+                                    series_tmdb_id = int(gid.replace("tmdb://", ""))
+                                except ValueError:
+                                    pass
+                                break
+                            elif re.search(r'themoviedb(?:\.com)?://(\d+)', gid, re.IGNORECASE):
+                                m = re.search(r'themoviedb(?:\.com)?://(\d+)', gid, re.IGNORECASE)
+                                if m:
+                                    try:
+                                        series_tmdb_id = int(m.group(1))
+                                    except ValueError:
+                                        pass
+                                break
+                        # Also try TVDB/IMDB on the show if TMDB still not found
+                        if not series_tmdb_id:
+                            for g in show_guids:
+                                gid = g.get("id", "")
+                                tvdb_m = re.search(r'(?:^tvdb|thetvdb(?:\.com)?)://(\d+)', gid, re.IGNORECASE)
+                                if tvdb_m:
+                                    try:
+                                        res = await tmdb.find_by_external_id(tvdb_m.group(1), "tvdb_id", api_key=api_key)
+                                        if res.get("tv_results"):
+                                            series_tmdb_id = res["tv_results"][0]["id"]
+                                            break
+                                    except Exception:
+                                        pass
+                except Exception:
+                    pass
+
+            # 4. Last resort: search by show title — exact name match only to avoid false positives
+            #    (a fuzzy first-result on a show that doesn't exist on TMDB at all causes wrong linkage).
+            if not series_tmdb_id and data.get("grandparent_title"):
+                try:
+                    res = await tmdb.search_shows(data["grandparent_title"], api_key=api_key)
+                    gt_lower = data["grandparent_title"].lower()
+                    for r in (res.get("results") or [])[:3]:
+                        if r.get("name", "").lower() == gt_lower or r.get("original_name", "").lower() == gt_lower:
+                            series_tmdb_id = r["id"]
+                            break
+                except Exception: pass
+
+        # When we couldn't verify the parent show on TMDB via any identifier, discard any
+        # episode-level TMDB ID that Plex provided. Plex sometimes assigns a movie's TMDB ID
+        # to episodes it can't match (the show exists only on TVDB/IMDB, not TMDB).
+        if data["media_type"] == "episode" and not series_tmdb_id:
+            data["tmdb_id"] = None
+
+        if user_id and data["media_type"] == "episode" and series_tmdb_id and data.get("season_number") is not None and data.get("episode_number") is not None:
+            from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
+            
+            ep_override_q = await db.execute(
+                select(ShowEpisodeOverride).where(
+                    ShowEpisodeOverride.user_id == user_id,
+                    ShowEpisodeOverride.source_show_tmdb_id == series_tmdb_id,
+                    ShowEpisodeOverride.source_season_number == data["season_number"],
+                    ShowEpisodeOverride.source_episode_number == data["episode_number"]
                 )
             )
-            season_override = season_override_q.scalar_one_or_none()
-            if season_override:
-                series_tmdb_id = season_override.target_show_tmdb_id
-                data["grandparent_tmdb_id"] = season_override.target_show_tmdb_id
-                data["season_number"] = season_override.target_season_number
+            ep_override = ep_override_q.scalar_one_or_none()
+            if ep_override:
+                series_tmdb_id = ep_override.target_show_tmdb_id
+                data["grandparent_tmdb_id"] = ep_override.target_show_tmdb_id
+                data["season_number"] = ep_override.target_season_number
+                data["episode_number"] = ep_override.target_episode_number
+            else:
+                season_override_q = await db.execute(
+                    select(ShowSeasonOverride).where(
+                        ShowSeasonOverride.user_id == user_id,
+                        ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
+                        ShowSeasonOverride.source_season_number == data["season_number"]
+                    )
+                )
+                season_override = season_override_q.scalar_one_or_none()
+                if season_override:
+                    series_tmdb_id = season_override.target_show_tmdb_id
+                    data["grandparent_tmdb_id"] = season_override.target_show_tmdb_id
+                    data["season_number"] = season_override.target_season_number
 
-    if data["tmdb_id"]:
-        tmdb_id_int = int(data["tmdb_id"])
-        media_type = MediaType(data["media_type"])
+    match_id = int(data["tvdb_id"]) if (is_tvdb and data.get("tvdb_id")) else (int(data["tmdb_id"]) if data.get("tmdb_id") else None)
+    if match_id:
         result = await db.execute(
             select(Media).where(
-                Media.tmdb_id == tmdb_id_int,
-                Media.media_type == media_type,
+                Media.tmdb_id == match_id,
+                Media.media_type == MediaType(data["media_type"]),
             )
         )
         media = result.scalars().first()
         if media:
             # Backfill show context if this episode record was created without it
-            if media.media_type == MediaType.episode and media.show_id is None and series_tmdb_id:
+            if media.media_type == MediaType.episode and media.show_id is None and (series_tvdb_id if is_tvdb else series_tmdb_id):
                 try:
-                    show = await _find_or_create_show(db, series_tmdb_id, api_key)
+                    if is_tvdb:
+                        show = await _find_or_create_show_tvdb(db, series_tvdb_id, tvdb_api_key, lang=tvdb_lang)
+                    else:
+                        show = await _find_or_create_show(db, series_tmdb_id, api_key)
                     media.show_id = show.id
-                    await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+                    if is_tvdb:
+                        await enrich_media(media, api_key=api_key, is_tvdb=True, tvdb_api_key=tvdb_api_key, tvdb_lang=tvdb_lang, series_tvdb_id=series_tvdb_id)
+                    else:
+                        await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
                 except Exception as e:
                     print(f"  Could not backfill show context for episode: {e}")
             return media
@@ -1157,15 +1398,15 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
 
     # Don't create a row for an episode we can't identify at all — it can never
     # be enriched or matched back to a real episode, and would inflate collection counts.
-    if data["media_type"] == "episode" and data["season_number"] is None and data["episode_number"] is None and not data["tmdb_id"]:
-        print(f"  Skipping unidentifiable episode '{data['title']}' (no season/episode/tmdb_id)")
+    if data["media_type"] == "episode" and data["season_number"] is None and data["episode_number"] is None and not match_id:
+        print(f"  Skipping unidentifiable episode '{data['title']}' (no season/episode/id)")
         return None
 
-    # For episodes without a TMDB ID, look up by show+season+episode before creating
+    # For episodes without a match ID, look up by show+season+episode before creating
     # to avoid duplicate Media rows on repeated webhook events (e.g. episodes not yet
-    # on TMDB that Plex tracks only by season/episode number).
-    if data["media_type"] == "episode" and not data["tmdb_id"] and series_tmdb_id and data["season_number"] is not None and data["episode_number"] is not None:
-        show_result = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
+    # on metadata provider that the media server tracks only by season/episode number).
+    if data["media_type"] == "episode" and not match_id and (series_tvdb_id if is_tvdb else series_tmdb_id) and data["season_number"] is not None and data["episode_number"] is not None:
+        show_result = await db.execute(select(Show).where(Show.tvdb_id == series_tvdb_id if is_tvdb else Show.tmdb_id == series_tmdb_id))
         existing_show = show_result.scalar_one_or_none()
         if existing_show:
             ep_result = await db.execute(
@@ -1181,22 +1422,28 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
                 return existing_ep
 
     media = Media(
-        tmdb_id=int(data["tmdb_id"]) if data["tmdb_id"] else None,
+        tmdb_id=match_id,
         media_type=MediaType(data["media_type"]),
         title=data["title"],
         season_number=data["season_number"],
         episode_number=data["episode_number"],
     )
-    if media.media_type == MediaType.episode and not series_tmdb_id and data.get("grandparent_title"):
+    if media.media_type == MediaType.episode and not (series_tvdb_id if is_tvdb else series_tmdb_id) and data.get("grandparent_title"):
         media.tmdb_data = {"show_title": data["grandparent_title"]}
     db.add(media)
     await db.flush()
 
-    if media.media_type == MediaType.episode and series_tmdb_id:
+    if media.media_type == MediaType.episode and (series_tvdb_id if is_tvdb else series_tmdb_id):
         try:
-            show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            if is_tvdb:
+                show = await _find_or_create_show_tvdb(db, series_tvdb_id, tvdb_api_key, lang=tvdb_lang)
+            else:
+                show = await _find_or_create_show(db, series_tmdb_id, api_key)
             media.show_id = show.id
-            await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
+            if is_tvdb:
+                await enrich_media(media, api_key=api_key, is_tvdb=True, tvdb_api_key=tvdb_api_key, tvdb_lang=tvdb_lang, series_tvdb_id=series_tvdb_id)
+            else:
+                await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
         except Exception as e:
             print(f"  Could not enrich episode with show context: {e}")
     else:

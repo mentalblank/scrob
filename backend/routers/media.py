@@ -129,8 +129,10 @@ async def enrich_with_state(
     settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = settings_q.scalar_one_or_none()
     include_specials = False
+    primary_source = "tmdb"
     if settings and settings.preferences:
         include_specials = settings.preferences.get("include_specials", False)
+        primary_source = settings.preferences.get("primary_metadata_source", "tmdb")
     gs = await _get_global_settings(db)
 
     monitored_status = {} # tmdb_id -> bool
@@ -251,62 +253,134 @@ async def enrich_with_state(
     total_map: dict[int, int] = {}
     show_status_map: dict[int, str] = {}
     adjusted_show_season_ep_counts = {}
+    input_tmdb_to_local_show = {}
 
     if show_tmdb_ids:
-        # Load overrides
+        # 1. Look up any existing local shows in the DB by their positive TMDB ID
+        local_shows_q = await db.execute(
+            select(ShowModel).where(ShowModel.tmdb_id.in_(show_tmdb_ids))
+        )
+        local_shows_by_tmdb_id = {s.tmdb_id: s for s in local_shows_q.scalars().all()}
+
+        # 2. Track resolved TVDB IDs and check for missing ones
+        resolved_tvdb_ids = {}
+        for tid in show_tmdb_ids:
+            if tid in local_shows_by_tmdb_id and local_shows_by_tmdb_id[tid].tvdb_id:
+                resolved_tvdb_ids[tid] = local_shows_by_tmdb_id[tid].tvdb_id
+
+        # Fetch external IDs for shows we don't have local mappings for
+        missing_tvdb_ids = [tid for tid in show_tmdb_ids if tid not in resolved_tvdb_ids]
+        if missing_tvdb_ids:
+            tmdb_key = await get_user_tmdb_key(db, user_id)
+            if check_tmdb_key(tmdb_key):
+                async def fetch_ext_ids(tid: int):
+                    try:
+                        ext = await tmdb.get_external_ids(tid, "tv", api_key=tmdb_key)
+                        return tid, ext.get("tvdb_id")
+                    except Exception:
+                        return tid, None
+
+                ext_results = await asyncio.gather(*[fetch_ext_ids(tid) for tid in missing_tvdb_ids])
+                for tid, tvdb_id_val in ext_results:
+                    if tvdb_id_val:
+                        try:
+                            resolved_tvdb_ids[tid] = int(tvdb_id_val)
+                        except (ValueError, TypeError):
+                            pass
+
+        # 3. Query local shows where TVDB ID matches (handles TVDB-only shows stored with negative TMDB IDs)
+        tvdb_only_shows_by_tvdb_id = {}
+        if resolved_tvdb_ids:
+            tvdb_shows_q = await db.execute(
+                select(ShowModel).where(ShowModel.tvdb_id.in_(list(resolved_tvdb_ids.values())))
+            )
+            tvdb_only_shows_by_tvdb_id = {s.tvdb_id: s for s in tvdb_shows_q.scalars().all()}
+
+        # 4. Map the input TMDB ID to the local ShowModel row and local DB ID
+        input_tmdb_to_local_show = {}
+        local_show_id_to_input_tmdb_id = {}
+        for tid in show_tmdb_ids:
+            show_row = None
+            if tid in local_shows_by_tmdb_id:
+                show_row = local_shows_by_tmdb_id[tid]
+            elif resolved_tvdb_ids.get(tid) in tvdb_only_shows_by_tvdb_id:
+                show_row = tvdb_only_shows_by_tvdb_id[resolved_tvdb_ids[tid]]
+
+            if show_row:
+                input_tmdb_to_local_show[tid] = show_row
+                local_show_id_to_input_tmdb_id[show_row.id] = tid
+
+        # Load overrides using local db tmdb_ids (which can be negative for TVDB-only shows)
+        local_db_tmdb_ids = []
+        local_db_tmdb_to_input_tmdb = {}
+        for tid in show_tmdb_ids:
+            if tid in input_tmdb_to_local_show:
+                local_db_tmdb_id = input_tmdb_to_local_show[tid].tmdb_id
+                local_db_tmdb_ids.append(local_db_tmdb_id)
+                local_db_tmdb_to_input_tmdb[local_db_tmdb_id] = tid
+            else:
+                local_db_tmdb_ids.append(tid)
+                local_db_tmdb_to_input_tmdb[tid] = tid
+
         from models.season_override import ShowSeasonOverride
         overrides_q = await db.execute(
             select(ShowSeasonOverride).where(
                 ShowSeasonOverride.user_id == user_id,
                 or_(
-                    ShowSeasonOverride.source_show_tmdb_id.in_(show_tmdb_ids),
-                    ShowSeasonOverride.target_show_tmdb_id.in_(show_tmdb_ids),
+                    ShowSeasonOverride.source_show_tmdb_id.in_(local_db_tmdb_ids),
+                    ShowSeasonOverride.target_show_tmdb_id.in_(local_db_tmdb_ids),
                 )
             )
         )
         overrides = overrides_q.scalars().all()
 
         for override in overrides:
-            overrides_by_show.setdefault(override.source_show_tmdb_id, []).append(override)
-            overrides_by_show.setdefault(override.target_show_tmdb_id, []).append(override)
+            src_tid = local_db_tmdb_to_input_tmdb.get(override.source_show_tmdb_id, override.source_show_tmdb_id)
+            tgt_tid = local_db_tmdb_to_input_tmdb.get(override.target_show_tmdb_id, override.target_show_tmdb_id)
+            overrides_by_show.setdefault(src_tid, []).append(override)
+            overrides_by_show.setdefault(tgt_tid, []).append(override)
 
         # Build sets of watched/collected episodes per show
         show_watched_eps = {tid: set() for tid in show_tmdb_ids}
         show_collected_eps = {tid: set() for tid in show_tmdb_ids}
 
         # 1. Fetch raw watched episodes linked directly
-        watched_eps_q = await db.execute(
-            select(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
-            .join(WatchEvent, WatchEvent.media_id == Media.id)
-            .join(ShowModel, ShowModel.id == Media.show_id)
-            .where(
-                WatchEvent.user_id == user_id,
-                Media.media_type == MediaType.episode,
-                Media.season_number.isnot(None),
-                Media.episode_number.isnot(None),
-                ShowModel.tmdb_id.in_(show_tmdb_ids),
+        if local_show_id_to_input_tmdb_id:
+            watched_eps_q = await db.execute(
+                select(ShowModel.id, Media.season_number, Media.episode_number)
+                .join(WatchEvent, WatchEvent.media_id == Media.id)
+                .join(ShowModel, ShowModel.id == Media.show_id)
+                .where(
+                    WatchEvent.user_id == user_id,
+                    Media.media_type == MediaType.episode,
+                    Media.season_number.isnot(None),
+                    Media.episode_number.isnot(None),
+                    ShowModel.id.in_(list(local_show_id_to_input_tmdb_id.keys())),
+                )
             )
-        )
-        for show_tmdb_id, sn, en in watched_eps_q.all():
-            if include_specials or sn != 0:
-                show_watched_eps[show_tmdb_id].add((sn, en))
+            for show_id, sn, en in watched_eps_q.all():
+                show_tmdb_id = local_show_id_to_input_tmdb_id[show_id]
+                if include_specials or sn != 0:
+                    show_watched_eps[show_tmdb_id].add((sn, en))
 
         # 2. Fetch raw collected episodes linked directly
-        collected_eps_q = await db.execute(
-            select(ShowModel.tmdb_id, Media.season_number, Media.episode_number)
-            .join(Collection, Collection.media_id == Media.id)
-            .join(ShowModel, ShowModel.id == Media.show_id)
-            .where(
-                Collection.user_id == user_id,
-                Media.media_type == MediaType.episode,
-                Media.season_number.isnot(None),
-                Media.episode_number.isnot(None),
-                ShowModel.tmdb_id.in_(show_tmdb_ids),
+        if local_show_id_to_input_tmdb_id:
+            collected_eps_q = await db.execute(
+                select(ShowModel.id, Media.season_number, Media.episode_number)
+                .join(Collection, Collection.media_id == Media.id)
+                .join(ShowModel, ShowModel.id == Media.show_id)
+                .where(
+                    Collection.user_id == user_id,
+                    Media.media_type == MediaType.episode,
+                    Media.season_number.isnot(None),
+                    Media.episode_number.isnot(None),
+                    ShowModel.id.in_(list(local_show_id_to_input_tmdb_id.keys())),
+                )
             )
-        )
-        for show_tmdb_id, sn, en in collected_eps_q.all():
-            if include_specials or sn != 0:
-                show_collected_eps[show_tmdb_id].add((sn, en))
+            for show_id, sn, en in collected_eps_q.all():
+                show_tmdb_id = local_show_id_to_input_tmdb_id[show_id]
+                if include_specials or sn != 0:
+                    show_collected_eps[show_tmdb_id].add((sn, en))
 
         # 3. Merge overrides
         async def merge_override(this_show_tmdb_id, this_season, other_show_tmdb_id, other_season):
@@ -346,10 +420,12 @@ async def enrich_with_state(
                     show_collected_eps[this_show_tmdb_id].add((this_season, en))
 
         for override in overrides:
-            if override.source_show_tmdb_id in show_tmdb_ids:
-                await merge_override(override.source_show_tmdb_id, override.source_season_number, override.target_show_tmdb_id, override.target_season_number)
-            if override.target_show_tmdb_id in show_tmdb_ids:
-                await merge_override(override.target_show_tmdb_id, override.target_season_number, override.source_show_tmdb_id, override.source_season_number)
+            src_tid = local_db_tmdb_to_input_tmdb.get(override.source_show_tmdb_id, override.source_show_tmdb_id)
+            tgt_tid = local_db_tmdb_to_input_tmdb.get(override.target_show_tmdb_id, override.target_show_tmdb_id)
+            if src_tid in show_tmdb_ids:
+                await merge_override(src_tid, override.source_season_number, override.target_show_tmdb_id, override.target_season_number)
+            if tgt_tid in show_tmdb_ids:
+                await merge_override(tgt_tid, override.target_season_number, override.source_show_tmdb_id, override.source_season_number)
 
         show_watched_count_map = {tid: len(eps) for tid, eps in show_watched_eps.items()}
         collected_map = {tid: len(eps) for tid, eps in show_collected_eps.items()}
@@ -382,23 +458,36 @@ async def enrich_with_state(
     # --- Collection pct and watched status for shows ---
     show_pct: dict[int, int] = {}
     show_aired_count: dict[int, int] = {}
+    show_tvdb_ids: dict[int, int] = {}
     if show_tmdb_ids:
         # Total episodes from TMDB metadata.
         # Check local DB first for existing show rows.
-        shows_meta_q = await db.execute(
-            select(ShowModel.tmdb_id, ShowModel.tmdb_data, ShowModel.status)
-            .where(ShowModel.tmdb_id.in_(show_tmdb_ids))
-        )
         total_map: dict[int, int] = {}
         show_status_map: dict[int, str] = {}
         show_seasons_map: dict[int, list] = {}
         show_ep_tmdb_ids: dict[int, set[int]] = {} # show_tmdb_id -> {ep_tmdb_id, ...}
 
-        for show_tmdb_id, tmdb_data, status in shows_meta_q.all():
+        # Populate show_tvdb_ids with already resolved TVDB IDs
+        show_tvdb_ids.update(resolved_tvdb_ids)
+
+        for tid, show_row in input_tmdb_to_local_show.items():
+            tmdb_data = show_row.tmdb_data
+            status = show_row.status
+            tvdb_id = show_row.tvdb_id
+            
             seasons = (tmdb_data or {}).get("seasons", [])
-            show_status_map[show_tmdb_id] = status or ""
-            show_seasons_map[show_tmdb_id] = seasons
-            total_map[show_tmdb_id] = sum(
+            show_status_map[tid] = status or ""
+            show_seasons_map[tid] = seasons
+            if tvdb_id:
+                show_tvdb_ids[tid] = tvdb_id
+            elif tmdb_data:
+                ext_tvdb = (tmdb_data.get("external_ids") or {}).get("tvdb_id")
+                if ext_tvdb:
+                    try:
+                        show_tvdb_ids[tid] = int(ext_tvdb)
+                    except (ValueError, TypeError):
+                        pass
+            total_map[tid] = sum(
                 s.get("episode_count", 0) for s in seasons if (include_specials or s.get("season_number", 0) != 0)
             )
 
@@ -431,11 +520,12 @@ async def enrich_with_state(
                         seasons = data.get("seasons", [])
                         show_status_map[tid] = data.get("status", "")
                         show_seasons_map[tid] = seasons
+                        tv_id = data.get("external_ids", {}).get("tvdb_id")
+                        if tv_id:
+                            show_tvdb_ids[tid] = int(tv_id)
                         total_map[tid] = sum(
                             s.get("episode_count", 0) for s in seasons if (include_specials or s.get("season_number", 0) != 0)
                         )
-
-
 
         for tmdb_id in show_tmdb_ids:
             # Get native seasons
@@ -448,11 +538,13 @@ async def enrich_with_state(
             # Apply overrides
             show_overrides = overrides_by_show.get(tmdb_id, [])
             for override in show_overrides:
-                if override.source_show_tmdb_id == tmdb_id:
+                src_tid = local_db_tmdb_to_input_tmdb.get(override.source_show_tmdb_id, override.source_show_tmdb_id)
+                tgt_tid = local_db_tmdb_to_input_tmdb.get(override.target_show_tmdb_id, override.target_show_tmdb_id)
+                if src_tid == tmdb_id:
                     # Remapped away! Exclude this season's episodes
                     if override.source_season_number in show_season_ep_counts:
                         del show_season_ep_counts[override.source_season_number]
-                elif override.target_show_tmdb_id == tmdb_id:
+                elif tgt_tid == tmdb_id:
                     # Remapped to! Include the source season's episodes
                     src_show_q = await db.execute(
                         select(ShowModel).where(ShowModel.tmdb_id == override.source_show_tmdb_id)
@@ -483,18 +575,22 @@ async def enrich_with_state(
         # last_episode_to_air and calculate against actually-aired episodes only.
         # If a caller already has last_episode_to_air (e.g. detail page), it can pre-populate
         # _last_episode_to_air on the item to skip the redundant fetch.
-        prefetched: dict[int, dict] = {
-            item["tmdb_id"]: item["_last_episode_to_air"]
-            for item in items
-            if item.get("type") == "series" and item.get("_last_episode_to_air")
-        }
+        prefetched: dict[int, dict] = {}
+        if primary_source != "tvdb":
+            prefetched = {
+                item["tmdb_id"]: item["_last_episode_to_air"]
+                for item in items
+                if item.get("type") == "series" and item.get("_last_episode_to_air")
+            }
         FINAL_STATUSES = {"Ended", "Canceled"}
-        needs_live_call = [
-            tid for tid in show_tmdb_ids
-            if tid not in prefetched
-            and (0 < show_pct.get(tid, 0) < 100 or 0 < show_watched_count_map.get(tid, 0))
-            and show_status_map.get(tid, "") not in FINAL_STATUSES
-        ]
+        needs_live_call = []
+        if primary_source != "tvdb":
+            needs_live_call = [
+                tid for tid in show_tmdb_ids
+                if tid not in prefetched
+                and (0 < show_pct.get(tid, 0) < 100 or 0 < show_watched_count_map.get(tid, 0))
+                and show_status_map.get(tid, "") not in FINAL_STATUSES
+            ]
         if needs_live_call:
             tmdb_key = await get_user_tmdb_key(db, user_id)
             if check_tmdb_key(tmdb_key):
@@ -509,22 +605,23 @@ async def enrich_with_state(
                     if data and data.get("last_episode_to_air"):
                         prefetched[tid] = data["last_episode_to_air"]
 
-        for tid, last_ep in prefetched.items():
-            if not last_ep:
-                continue
-            last_season = last_ep.get("season_number", 0)
-            last_ep_num = last_ep.get("episode_number", 0)
-            
-            show_season_ep_counts = adjusted_show_season_ep_counts.get(tid, {})
-            # Sum completed seasons before the current airing season, plus episodes aired so far in it.
-            aired_total = sum(
-                show_season_ep_counts.get(s_num, 0)
-                for s_num in show_season_ep_counts
-                if (s_num < last_season if include_specials else 0 < s_num < last_season)
-            ) + last_ep_num
-            show_aired_count[tid] = aired_total
-            collected = collected_map.get(tid, 0)
-            show_pct[tid] = min(100, int((collected / aired_total) * 100)) if aired_total > 0 else 0
+        if primary_source != "tvdb":
+            for tid, last_ep in prefetched.items():
+                if not last_ep:
+                    continue
+                last_season = last_ep.get("season_number", 0)
+                last_ep_num = last_ep.get("episode_number", 0)
+                
+                show_season_ep_counts = adjusted_show_season_ep_counts.get(tid, {})
+                # Sum completed seasons before the current airing season, plus episodes aired so far in it.
+                aired_total = sum(
+                    show_season_ep_counts.get(s_num, 0)
+                    for s_num in show_season_ep_counts
+                    if (s_num < last_season if include_specials else 0 < s_num < last_season)
+                ) + last_ep_num
+                show_aired_count[tid] = aired_total
+                collected = collected_map.get(tid, 0)
+                show_pct[tid] = min(100, int((collected / aired_total) * 100)) if aired_total > 0 else 0
 
         # Now we can accurately set watched_shows
         watched_shows = {
@@ -636,8 +733,24 @@ async def enrich_with_state(
             pct = show_pct.get(tid, 0)
             item["collection_pct"] = pct
             item["in_library"] = pct > 0
-            item["watched_episodes_count"] = show_watched_count_map.get(tid, 0)
-            item["total_episodes_count"] = show_aired_count.get(tid, 0)
+            watched_count = show_watched_count_map.get(tid, 0)
+            aired_count = show_aired_count.get(tid, 0)
+            item["watched_episodes_count"] = watched_count
+            item["total_episodes_count"] = aired_count
+            item["watch_pct"] = min(100, int((watched_count / aired_count) * 100)) if aired_count > 0 else 0
+            if tid in show_tvdb_ids and show_tvdb_ids[tid]:
+                item["tvdb_id"] = show_tvdb_ids[tid]
+            
+            # If the user prefers TVDB and the show is local in the DB, overwrite with TVDB metadata
+            if primary_source == "tvdb" and tid in input_tmdb_to_local_show:
+                show_row = input_tmdb_to_local_show[tid]
+                item["title"] = show_row.title
+                if show_row.poster_path:
+                    item["poster_path"] = show_row.poster_path
+                if show_row.backdrop_path:
+                    item["backdrop_path"] = show_row.backdrop_path
+                if show_row.first_air_date:
+                    item["release_date"] = show_row.first_air_date
         elif t == "episode":
             item["watched"] = tid in watched_episodes
             in_lib = tid in collected_ep_ids
@@ -770,7 +883,13 @@ def format_media(media: Media) -> dict:
         "episode_number": media.episode_number,
         "show_title": (media.show.custom_title or media.show.title) if media.show else None,
         "show_tmdb_id": media.show.tmdb_id if media.show else None,
-        "show_tvdb_id": media.show.tvdb_id if media.show else None,
+        "show_tvdb_id": (
+            media.show.tvdb_id if (media.show and media.show.tvdb_id) else (
+                int(media.show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+                if (media.show and media.show.tmdb_data and media.show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+                else None
+            )
+        ) if media.show else None,
         "show_poster_path": media.show.poster_path if media.show else None,
         "show_backdrop_path": media.show.backdrop_path if media.show else None,
         "genres": (media.tmdb_data or {}).get("genres", []),
@@ -995,10 +1114,17 @@ async def search_media(
             item["in_library"] = True
         return {"page": 1, "total_pages": 1, "total_results": len(formatted), "results": formatted}
 
-    # 1. Search TMDB (primary source for ordering)
+    # 1. Determine primary metadata source preference
+    settings_res = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings_row = settings_res.scalar_one_or_none()
+    preferences = settings_row.preferences if settings_row else None
+    primary_source = preferences.get("primary_metadata_source") if preferences else "tmdb"
+
+    # Search TMDB/TVDB
     raw_results = []
     total_pages = 1
     total_results = 0
+    
     try:
         if type == MediaType.movie:
             data = await tmdb.search_movies(q, page=page, year=year, api_key=tmdb_key)
@@ -1008,46 +1134,155 @@ async def search_media(
             total_pages = data.get("total_pages", 1)
             total_results = data.get("total_results", 0)
         elif type == MediaType.series:
-            data = await tmdb.search_shows(q, page=page, year=year, api_key=tmdb_key)
-            raw_results = data.get("results", [])
-            for res in raw_results:
-                res["media_type"] = "tv"
-            total_pages = data.get("total_pages", 1)
-            total_results = data.get("total_results", 0)
+            tvdb_api_key = None
+            if primary_source == "tvdb":
+                from routers.shows import get_user_tvdb_key
+                tvdb_api_key = await get_user_tvdb_key(db, current_user.id)
+            
+            tvdb_results = []
+            if tvdb_api_key:
+                from core import tvdb as tvdb_client
+                lang_code = await get_user_content_language(db, current_user.id)
+                tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
+                try:
+                    tvdb_results = await tvdb_client.search_series(q, tvdb_api_key, lang=tvdb_lang)
+                except Exception as e:
+                    print(f"TVDB search error: {e}")
+            
+            if primary_source == "tvdb" and not tvdb_results and check_tmdb_key(tmdb_key):
+                tvdb_api_key = None
+            
+            if not tvdb_api_key:
+                data = await tmdb.search_shows(q, page=page, year=year, api_key=tmdb_key)
+                raw_results = data.get("results", [])
+                for res in raw_results:
+                    res["media_type"] = "tv"
+                total_pages = data.get("total_pages", 1)
+                total_results = data.get("total_results", 0)
+            else:
+                PAGE_SIZE = 20
+                total_results = len(tvdb_results)
+                total_pages = max(1, (total_results + PAGE_SIZE - 1) // PAGE_SIZE)
+                start_idx = (page - 1) * PAGE_SIZE
+                raw_results = tvdb_results[start_idx : start_idx + PAGE_SIZE]
+                mapped_results = []
+                for res in raw_results:
+                    mapped_results.append({
+                        "media_type": "tv",
+                        "id": None,
+                        "tvdb_id": res.get("tvdb_id"),
+                        "name": res.get("title"),
+                        "original_name": res.get("title"),
+                        "overview": res.get("overview"),
+                        "poster_path": res.get("image_url"),
+                        "backdrop_path": None,
+                        "first_air_date": f"{res['year']}-01-01" if res.get("year") else None,
+                    })
+                raw_results = mapped_results
         else:
-            # "All": movies + shows + people, interleaved by TMDB popularity score
-            movie_data, show_data, people_data = await asyncio.gather(
-                tmdb.search_movies(q, page=page, api_key=tmdb_key),
-                tmdb.search_shows(q, page=page, api_key=tmdb_key),
-                tmdb.search_people(q, page=page, api_key=tmdb_key),
-            )
+            # "All": movies + shows + people, interleaved by popularity score
+            tvdb_api_key = None
+            if primary_source == "tvdb":
+                from routers.shows import get_user_tvdb_key
+                tvdb_api_key = await get_user_tvdb_key(db, current_user.id)
+            
+            movie_task = tmdb.search_movies(q, page=page, api_key=tmdb_key) if check_tmdb_key(tmdb_key) else None
+            people_task = tmdb.search_people(q, page=page, api_key=tmdb_key) if check_tmdb_key(tmdb_key) else None
+            
+            tvdb_results = []
+            if tvdb_api_key:
+                from core import tvdb as tvdb_client
+                lang_code = await get_user_content_language(db, current_user.id)
+                tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
+                try:
+                    tvdb_results = await tvdb_client.search_series(q, tvdb_api_key, lang=tvdb_lang)
+                except Exception as e:
+                    print(f"TVDB search error: {e}")
+            
+            show_results = []
+            movie_data = await movie_task if movie_task else {}
+            people_data = await people_task if people_task else {}
+            
             movie_results = movie_data.get("results", [])
             for res in movie_results:
                 res["media_type"] = "movie"
-            show_results = show_data.get("results", [])
-            for res in show_results:
-                res["media_type"] = "tv"
+            
             people_results = people_data.get("results", [])
             for res in people_results:
                 res["media_type"] = "person"
-            # Interleave by popularity so relevance is preserved across all three lists
+            
+            tmdb_show_total_pages = 1
+            tmdb_show_total_results = 0
+            
+            if primary_source == "tvdb" and not tvdb_results and check_tmdb_key(tmdb_key):
+                try:
+                    tmdb_show_data = await tmdb.search_shows(q, page=page, api_key=tmdb_key)
+                    tmdb_show_results = tmdb_show_data.get("results", [])
+                    for res in tmdb_show_results:
+                        res["media_type"] = "tv"
+                    show_results = tmdb_show_results
+                    tmdb_show_total_pages = tmdb_show_data.get("total_pages", 1)
+                    tmdb_show_total_results = tmdb_show_data.get("total_results", 0)
+                except Exception as e:
+                    print(f"TMDB shows search fallback error: {e}")
+            elif tvdb_results:
+                max_tmdb_pop = max([r.get("popularity", 0.0) for r in movie_results + people_results] + [100.0])
+                for i, r in enumerate(tvdb_results):
+                    show_results.append({
+                        "media_type": "tv",
+                        "id": None,
+                        "tvdb_id": r["tvdb_id"],
+                        "name": r["title"],
+                        "original_name": r["title"],
+                        "overview": r.get("overview"),
+                        "poster_path": r.get("image_url"),
+                        "backdrop_path": None,
+                        "first_air_date": f"{r['year']}-01-01" if r.get("year") else None,
+                        "vote_average": 0.0,
+                        "popularity": max(1.0, max_tmdb_pop * (1.0 - i * 0.05)),
+                    })
+            else:
+                try:
+                    tmdb_show_data = await tmdb.search_shows(q, page=page, api_key=tmdb_key)
+                    tmdb_show_results = tmdb_show_data.get("results", [])
+                    for res in tmdb_show_results:
+                        res["media_type"] = "tv"
+                    show_results = tmdb_show_results
+                    tmdb_show_total_pages = tmdb_show_data.get("total_pages", 1)
+                    tmdb_show_total_results = tmdb_show_data.get("total_results", 0)
+                except Exception as e:
+                    print(f"TMDB shows search error: {e}")
+            
             raw_results = sorted(
                 movie_results + show_results + people_results,
                 key=lambda x: x.get("popularity", 0),
                 reverse=True,
             )
-            total_pages = max(
-                movie_data.get("total_pages", 1),
-                show_data.get("total_pages", 1),
-                people_data.get("total_pages", 1),
-            )
-            total_results = (
-                movie_data.get("total_results", 0)
-                + show_data.get("total_results", 0)
-                + people_data.get("total_results", 0)
-            )
+            
+            if tvdb_results:
+                total_pages = max(
+                    movie_data.get("total_pages", 1),
+                    (len(show_results) + 20 - 1) // 20,
+                    people_data.get("total_pages", 1),
+                )
+                total_results = (
+                    movie_data.get("total_results", 0)
+                    + len(show_results)
+                    + people_data.get("total_results", 0)
+                )
+            else:
+                total_pages = max(
+                    movie_data.get("total_pages", 1),
+                    tmdb_show_total_pages,
+                    people_data.get("total_pages", 1),
+                )
+                total_results = (
+                    movie_data.get("total_results", 0)
+                    + tmdb_show_total_results
+                    + people_data.get("total_results", 0)
+                )
     except Exception as e:
-        print(f"TMDB search error: {e}")
+        print(f"Search error: {e}")
 
     # Filter out blocked items
     blocked_movies = await _get_blocked_ids(db, current_user.id, MediaType.movie)
@@ -1056,13 +1291,14 @@ async def search_media(
     raw_results = [
         res for res in raw_results
         if not (res.get("media_type") == "movie" and res.get("id") in blocked_movies)
-        and not (res.get("media_type") == "tv" and res.get("id") in blocked_series)
+        and not (res.get("media_type") == "tv" and (
+            res.get("id") in blocked_series 
+            or (res.get("tvdb_id") and (res.get("tvdb_id") in blocked_series or -res.get("tvdb_id") in blocked_series))
+        ))
         and not _is_content_filtered(res, *cf)
     ]
 
-    # 2. Check which TMDB results are in the local library.
-    # Must filter by media_type: TMDB movie/show IDs are in separate namespaces but the
-    # integers can collide with episode tmdb_ids in the local DB, corrupting the map.
+    # 2. Check which TMDB / TVDB results are in the local library.
     tmdb_ids_on_page = [res.get("id") for res in raw_results if res.get("id")]
     local_map: dict[tuple[int, str], Media] = {}
     if tmdb_ids_on_page:
@@ -1076,25 +1312,45 @@ async def search_media(
         elif type == MediaType.series:
             local_q = local_q.where(Media.media_type == MediaType.series)
         else:
-            # "All" search: only movies and series — episodes have their own separate tab
             local_q = local_q.where(Media.media_type.in_([MediaType.movie, MediaType.series]))
         local_result = await db.execute(local_q)
         local_map = {(m.tmdb_id, m.media_type.value): m for m in local_result.scalars().all()}
 
-    # 3. Build enriched list preserving TMDB relevance order
+    # For TVDB series, query local database by tvdb_id
+    tvdb_ids_on_page = [res.get("tvdb_id") for res in raw_results if res.get("tvdb_id")]
+    local_tvdb_media_map: dict[int, Media] = {}
+    if tvdb_ids_on_page:
+        shows_q = select(ShowModel).where(ShowModel.tvdb_id.in_(tvdb_ids_on_page))
+        shows_res = await db.execute(shows_q)
+        shows_list = shows_res.scalars().all()
+        show_id_to_tvdb = {s.id: s.tvdb_id for s in shows_list}
+        show_ids = list(show_id_to_tvdb.keys())
+        if show_ids:
+            media_q = select(Media).where(
+                Media.show_id.in_(show_ids),
+                Media.media_type == MediaType.series,
+            )
+            media_res = await db.execute(media_q)
+            for m in media_res.scalars().all():
+                tid = show_id_to_tvdb.get(m.show_id)
+                if tid:
+                    local_tvdb_media_map[tid] = m
+
+    # 3. Build enriched list preserving relevance order
     enriched = []
     seen_tmdb_ids = set()
+    seen_tvdb_ids = set()
+    
     for res in raw_results:
-        tmdb_id = res.get("id")
         media_type = res.get("media_type")
         if media_type == "tv":
             media_type = "series"
         if media_type not in ("movie", "series", "person"):
             continue
 
-        seen_tmdb_ids.add(tmdb_id)
-
         if media_type == "person":
+            tmdb_id = res.get("id")
+            seen_tmdb_ids.add(tmdb_id)
             enriched.append({
                 "id": None,
                 "tmdb_id": tmdb_id,
@@ -1106,12 +1362,45 @@ async def search_media(
             })
             continue
 
+        # TVDB Series formatting path
+        if media_type == "series" and res.get("tvdb_id") is not None:
+            tvdb_id = res["tvdb_id"]
+            seen_tvdb_ids.add(tvdb_id)
+            local = local_tvdb_media_map.get(tvdb_id)
+            if local:
+                item = format_media(local)
+                item["type"] = "series"
+                item["in_library"] = True
+                item["tvdb_id"] = tvdb_id
+                item["show_tvdb_id"] = tvdb_id
+            else:
+                item = {
+                    "id": None,
+                    "tmdb_id": None,
+                    "tvdb_id": tvdb_id,
+                    "show_tvdb_id": tvdb_id,
+                    "type": "series",
+                    "title": res.get("name") or res.get("title"),
+                    "original_title": res.get("original_name") or res.get("title"),
+                    "overview": res.get("overview"),
+                    "poster_path": res.get("poster_path") or res.get("image_url"),
+                    "backdrop_path": None,
+                    "release_date": res.get("first_air_date") or (f"{res['year']}-01-01" if res.get("year") else None),
+                    "tmdb_rating": 0.0,
+                    "in_library": False,
+                    "adult": False,
+                }
+            enriched.append(item)
+            continue
+
+        # Standard TMDB Movie/Series formatting path
+        tmdb_id = res.get("id")
+        seen_tmdb_ids.add(tmdb_id)
         local = local_map.get((tmdb_id, media_type))
         if local:
             item = format_media(local)
-            item["type"] = media_type  # TMDB source of truth; local row may differ
+            item["type"] = media_type
             item["in_library"] = True
-            # Fill in missing display fields from TMDB search result
             if not item.get("poster_path"):
                 item["poster_path"] = tmdb.poster_url(res.get("poster_path"))
             if not item.get("release_date"):
@@ -1135,21 +1424,28 @@ async def search_media(
             }
         enriched.append(item)
 
-    # 4. On page 1, append local library items that TMDB didn't return
+    # 4. On page 1, append local library items that TMDB/TVDB didn't return
     if page == 1:
         fallback_q = (
             select(Media)
             .options(joinedload(Media.show))
             .where(or_(Media.title.ilike(f"%{q}%"), Media.original_title.ilike(f"%{q}%")))
-            .where(Media.tmdb_id.notin_(seen_tmdb_ids))
-            .limit(10)
+            .limit(20)
         )
         if type:
             fallback_q = fallback_q.where(Media.media_type == type)
         else:
             fallback_q = fallback_q.where(Media.media_type != MediaType.episode)
+            
         fallback_result = await db.execute(fallback_q)
         for m in fallback_result.scalars().all():
+            if m.media_type == MediaType.movie and m.tmdb_id in seen_tmdb_ids:
+                continue
+            if m.media_type == MediaType.series:
+                if m.tmdb_id and m.tmdb_id in seen_tmdb_ids:
+                    continue
+                if m.show and m.show.tvdb_id and m.show.tvdb_id in seen_tvdb_ids:
+                    continue
             item = format_media(m)
             item["in_library"] = True
             enriched.append(item)
@@ -1659,6 +1955,310 @@ async def get_person_details(
             "birthday": data.get("birthday"),
             "place_of_birth": data.get("place_of_birth"),
             "known_for_department": data.get("known_for_department"),
+            "credits": top_credits,
+            "total_credits": total_credits,
+            "page": page,
+            "page_size": _PERSON_PAGE_SIZE,
+            "in_lists": person_in_lists,
+        }
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=404, detail=f"Person not found: {e}")
+
+
+@router.get("/person/tvdb/{person_id}")
+async def get_person_details_tvdb(
+    person_id: int,
+    page: int = Query(1, ge=1),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        # Retrieve TVDB API Key
+        api_key = None
+        user_settings_q = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == current_user.id)
+        )
+        user_settings = user_settings_q.scalar_one_or_none()
+        if user_settings and user_settings.tvdb_api_key:
+            api_key = user_settings.tvdb_api_key
+        else:
+            gs_q = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+            gs = gs_q.scalar_one_or_none()
+            if gs:
+                api_key = gs.tvdb_api_key
+        
+        if not api_key:
+            raise HTTPException(status_code=404, detail="TVDB API Key not configured")
+        
+        # User language preference
+        user_lang = await get_user_content_language(db, current_user.id)
+        from core import tvdb as tvdb_client
+        tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
+        # Fetch TVDB person details (extended includes characters)
+        data = await tvdb_client.get_person(person_id, api_key=api_key)
+        if not data:
+            raise HTTPException(status_code=404, detail="Person not found on TVDB")
+        
+        # Normalize fields
+        biographies = data.get("biographies") or []
+        biography = None
+        for bio_entry in biographies:
+            if bio_entry.get("language") == tvdb_lang:
+                biography = bio_entry.get("biography")
+                break
+        if not biography and tvdb_lang != "eng":
+            for bio_entry in biographies:
+                if bio_entry.get("language") == "eng":
+                    biography = bio_entry.get("biography")
+                    break
+        if not biography and biographies:
+            biography = biographies[0].get("biography")
+
+        birthday = data.get("birth")
+        place_of_birth = data.get("birthPlace")
+        profile_path = tvdb_client._image_url(data.get("image"))
+
+        # Format characters (credits)
+        characters = data.get("characters") or []
+        formatted_credits = []
+
+        tmdb_key = await get_user_tmdb_key(db, current_user.id)
+        has_tmdb = check_tmdb_key(tmdb_key)
+
+        for c in characters:
+            series_info = c.get("series")
+            movie_info = c.get("movie")
+            
+            series_id = c.get("seriesId") or (series_info.get("id") if series_info else None)
+            movie_id = c.get("movieId") or (movie_info.get("id") if movie_info else None)
+            
+            if not series_id and not movie_id:
+                continue
+
+            char_name = c.get("name")
+
+            if series_id:
+                title = series_info.get("name") if series_info else None
+                if not title:
+                    title = f"Series {series_id}"
+                poster_path = tvdb_client._image_url(series_info.get("image")) if series_info else None
+                year = series_info.get("year") if series_info else None
+                
+                sort_order = c.get("sort") or 0
+                role_weight = max(0.05, 1.0 - sort_order * 0.05)
+                
+                formatted_credits.append(
+                    {
+                        "tvdb_id": series_id,
+                        "tmdb_id": None,
+                        "type": "series",
+                        "title": title,
+                        "poster_path": poster_path,
+                        "release_date": str(year) if year else None,
+                        "character": char_name,
+                        "popularity": 0,
+                        "adult": False,
+                        "genre_ids": [],
+                        "overview": None,
+                        "_score": role_weight,
+                    }
+                )
+            elif movie_id:
+                movie_title = movie_info.get("name") if movie_info else None
+                if not movie_title:
+                    movie_title = f"Movie {movie_id}"
+                movie_year = movie_info.get("year") if movie_info else None
+                
+                year_val = None
+                if movie_year:
+                    match = re.search(r'\b\d{4}\b', str(movie_year))
+                    if match:
+                        year_val = int(match.group(0))
+
+                tmdb_movie_id = None
+                poster_path = tvdb_client._image_url(movie_info.get("image")) if movie_info else None
+                overview = None
+                popularity = 0
+                
+                if has_tmdb and movie_title:
+                    try:
+                        search_res = await tmdb.search_movies(movie_title, year=year_val, api_key=tmdb_key)
+                        results = search_res.get("results") or []
+                        if results:
+                            best_match = results[0]
+                            tmdb_movie_id = best_match.get("id")
+                            poster_path = tmdb.poster_url(best_match.get("poster_path"))
+                            overview = best_match.get("overview")
+                            popularity = best_match.get("popularity") or 0
+                    except Exception as e:
+                        print(f"Failed to resolve TVDB movie {movie_id} to TMDB: {e}")
+
+                sort_order = c.get("sort") or 0
+                role_weight = max(0.05, 1.0 - sort_order * 0.05)
+
+                formatted_credits.append(
+                    {
+                        "tmdb_id": tmdb_movie_id,
+                        "tvdb_id": movie_id,
+                        "type": "movie",
+                        "title": movie_title,
+                        "poster_path": poster_path,
+                        "release_date": str(movie_year) if movie_year else None,
+                        "character": char_name,
+                        "popularity": popularity,
+                        "adult": False,
+                        "genre_ids": [],
+                        "overview": overview,
+                        "_score": role_weight,
+                    }
+                )
+
+        # Deduplicate credits: key by type + id, keeping highest score
+        seen: dict[str, int] = {}
+        deduped: list[dict] = []
+        for credit in formatted_credits:
+            key = f"{credit['type']}_{credit['tmdb_id'] or credit['tvdb_id']}"
+            if key in seen:
+                if credit["_score"] > deduped[seen[key]]["_score"]:
+                    deduped[seen[key]] = credit
+            else:
+                seen[key] = len(deduped)
+                deduped.append(credit)
+
+        # Get blocked / dropped state and content filters
+        blocked_series = await _get_blocked_ids(db, current_user.id, MediaType.series)
+        cf = await _get_content_filters(db, current_user.id)
+        
+        tvdb_series_ids = [c["tvdb_id"] for c in deduped if c["type"] == "series" and c["tvdb_id"]]
+        
+        local_shows_map = {}
+        blocked_db = {}
+        if tvdb_series_ids:
+            local_shows_q = await db.execute(
+                select(ShowModel).where(ShowModel.tvdb_id.in_(tvdb_series_ids))
+            )
+            for show in local_shows_q.scalars().all():
+                local_shows_map[show.tvdb_id] = show
+
+            ids_to_query = tvdb_series_ids + [-x for x in tvdb_series_ids]
+            block_q = await db.execute(
+                select(BlocklistItem.tmdb_id, BlocklistItem.is_dropped)
+                .where(
+                    BlocklistItem.user_id == current_user.id,
+                    BlocklistItem.media_type == MediaType.series,
+                    BlocklistItem.tmdb_id.in_(ids_to_query)
+                )
+            )
+            for tmdb_id, is_dropped in block_q.all():
+                blocked_db[tmdb_id] = is_dropped
+                blocked_db[abs(tmdb_id)] = is_dropped
+                blocked_db[-abs(tmdb_id)] = is_dropped
+
+        enrichable_items = []
+        for credit in deduped:
+            if credit["type"] == "movie":
+                if credit["tmdb_id"]:
+                    enrichable_items.append(credit)
+            elif credit["type"] == "series":
+                tvdb_id = credit["tvdb_id"]
+                show_obj = local_shows_map.get(tvdb_id)
+                if show_obj:
+                    credit["id"] = show_obj.id
+                    if show_obj.tmdb_id:
+                        credit["tmdb_id"] = show_obj.tmdb_id
+                        enrichable_items.append(credit)
+                    else:
+                        # TVDB-only show in database, calculate metadata manually
+                        watched_q = await db.execute(
+                            select(func.count(func.distinct(Media.episode_number)))
+                            .join(WatchEvent, WatchEvent.media_id == Media.id)
+                            .where(Media.show_id == show_obj.id, WatchEvent.user_id == current_user.id, Media.media_type == MediaType.episode)
+                        )
+                        watched_count = watched_q.scalar() or 0
+                        
+                        collected_q = await db.execute(
+                            select(func.count(func.distinct(Media.episode_number)))
+                            .join(Collection, Collection.media_id == Media.id)
+                            .where(Media.show_id == show_obj.id, Collection.user_id == current_user.id, Media.media_type == MediaType.episode)
+                        )
+                        collected_count = collected_q.scalar() or 0
+                        
+                        total_episodes = sum(s.get("episode_count", 0) for s in (show_obj.tmdb_data or {}).get("seasons", []) if s.get("season_number") != 0)
+                        
+                        is_blocked = tvdb_id in blocked_series or -tvdb_id in blocked_series or _is_content_filtered(credit, *cf)
+                        
+                        credit["watched"] = watched_count >= total_episodes if total_episodes > 0 else False
+                        credit["in_library"] = collected_count > 0
+                        credit["collection_pct"] = min(100, int((collected_count / total_episodes) * 100)) if total_episodes > 0 else 0
+                        credit["watched_episodes_count"] = watched_count
+                        credit["total_episodes_count"] = total_episodes
+                        credit["in_lists"] = []
+                        credit["is_monitored"] = False
+                        credit["request_enabled"] = False
+                        credit["request_status"] = None
+                        credit["user_rating"] = None
+                        credit["play_count"] = 0
+                        credit["is_blocked"] = is_blocked
+                        credit["is_dropped"] = blocked_db.get(tvdb_id, False)
+                else:
+                    # TVDB show not in database
+                    is_blocked = tvdb_id in blocked_series or -tvdb_id in blocked_series or _is_content_filtered(credit, *cf)
+                    credit["watched"] = False
+                    credit["in_library"] = False
+                    credit["collection_pct"] = 0
+                    credit["watched_episodes_count"] = 0
+                    credit["total_episodes_count"] = 0
+                    credit["in_lists"] = []
+                    credit["is_monitored"] = False
+                    credit["request_enabled"] = False
+                    credit["request_status"] = None
+                    credit["user_rating"] = None
+                    credit["play_count"] = 0
+                    credit["is_blocked"] = is_blocked
+                    credit["is_dropped"] = blocked_db.get(tvdb_id, False)
+
+        # Enrich the rest (movies and mapped series)
+        if enrichable_items:
+            await enrich_with_state(db, current_user.id, enrichable_items)
+
+        # Filter out blocked credits
+        non_blocked = [c for c in deduped if not c.get("is_blocked")]
+        non_blocked.sort(key=lambda x: x["_score"], reverse=True)
+        for credit in non_blocked:
+            del credit["_score"]
+
+        total_credits = len(non_blocked)
+        start = (page - 1) * _PERSON_PAGE_SIZE
+        top_credits = non_blocked[start:start + _PERSON_PAGE_SIZE]
+
+        # Check list membership for the person
+        user_list_ids_q = await db.execute(select(UserList.id).where(UserList.user_id == current_user.id))
+        user_list_ids = [r[0] for r in user_list_ids_q.all()]
+        person_in_lists: list[int] = []
+        if user_list_ids:
+            li_q = await db.execute(
+                select(ListItem.list_id)
+                .join(Media, Media.id == ListItem.media_id)
+                .where(
+                    ListItem.list_id.in_(user_list_ids),
+                    Media.tmdb_id == person_id,
+                    Media.media_type == MediaType.person,
+                )
+            )
+            person_in_lists = [r[0] for r in li_q.all()]
+
+        return {
+            "tmdb_id": data.get("id"),
+            "tvdb_id": data.get("id"),
+            "name": data.get("name"),
+            "biography": biography,
+            "profile_path": profile_path,
+            "birthday": birthday,
+            "place_of_birth": place_of_birth,
+            "known_for_department": "Acting",
             "credits": top_credits,
             "total_credits": total_credits,
             "page": page,
@@ -4127,6 +4727,23 @@ async def get_blocklist_enriched(
 
     tmdb_api_key = await get_user_tmdb_key(db, current_user.id)
     
+    tvdb_api_key = None
+    user_settings_q = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )
+    user_settings = user_settings_q.scalar_one_or_none()
+    if user_settings and user_settings.tvdb_api_key:
+        tvdb_api_key = user_settings.tvdb_api_key
+    else:
+        gs_q = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        gs = gs_q.scalar_one_or_none()
+        if gs:
+            tvdb_api_key = gs.tvdb_api_key
+
+    from core import tvdb as tvdb_client
+    user_lang = await get_user_content_language(db, current_user.id)
+    tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+    
     from models.show import Show
 
     movie_ids = [b.tmdb_id for b in blocked if b.media_type == MediaType.movie]
@@ -4140,9 +4757,23 @@ async def get_blocklist_enriched(
 
     local_shows = {}
     if show_ids:
-        sq = await db.execute(select(Show).where(Show.tmdb_id.in_(show_ids)))
-        for s in sq.scalars().all():
-            local_shows[s.tmdb_id] = s
+        from sqlalchemy import or_
+        tmdb_show_ids = [s_id for s_id in show_ids if s_id > 0]
+        tvdb_show_ids = [abs(s_id) for s_id in show_ids if s_id < 0]
+        
+        conditions = []
+        if tmdb_show_ids:
+            conditions.append(Show.tmdb_id.in_(tmdb_show_ids))
+        if tvdb_show_ids:
+            conditions.append(Show.tvdb_id.in_(tvdb_show_ids))
+            
+        if conditions:
+            sq = await db.execute(select(Show).where(or_(*conditions)))
+            for s in sq.scalars().all():
+                if s.tmdb_id and s.tmdb_id in tmdb_show_ids:
+                    local_shows[s.tmdb_id] = s
+                if s.tvdb_id and s.tvdb_id in tvdb_show_ids:
+                    local_shows[-s.tvdb_id] = s
 
     sem = asyncio.Semaphore(20)
 
@@ -4190,21 +4821,43 @@ async def get_blocklist_enriched(
                 "overview": s.overview,
                 "tmdb_rating": s.tmdb_rating,
             }
-        async with sem:
-            try:
-                data = await tmdb.get_show_light(tmdb_id, api_key=tmdb_api_key)
-                return {
-                    "tmdb_id": tmdb_id,
-                    "type": "series",
-                    "title": data.get("name"),
-                    "release_date": data.get("first_air_date"),
-                    "poster_path": tmdb.poster_url(data.get("poster_path")),
-                    "backdrop_path": tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
-                    "overview": data.get("overview"),
-                    "tmdb_rating": data.get("vote_average"),
-                }
-            except Exception:
+        if tmdb_id < 0:
+            if not tvdb_api_key:
                 return None
+            async with sem:
+                try:
+                    tvdb_id_pos = -tmdb_id
+                    raw = await tvdb_client.get_series(tvdb_id_pos, tvdb_api_key, lang=tvdb_lang)
+                    show_fmt = tvdb_client.format_series(raw, lang=tvdb_lang)
+                    return {
+                        "tmdb_id": tmdb_id,
+                        "type": "series",
+                        "title": show_fmt.get("title"),
+                        "release_date": show_fmt.get("first_air_date"),
+                        "poster_path": show_fmt.get("poster_path"),
+                        "backdrop_path": show_fmt.get("backdrop_path"),
+                        "overview": show_fmt.get("overview"),
+                        "tmdb_rating": None,
+                    }
+                except Exception as e:
+                    print(f"Failed to fetch blocked TVDB show {-tmdb_id}: {e}")
+                    return None
+        else:
+            async with sem:
+                try:
+                    data = await tmdb.get_show_light(tmdb_id, api_key=tmdb_api_key)
+                    return {
+                        "tmdb_id": tmdb_id,
+                        "type": "series",
+                        "title": data.get("name"),
+                        "release_date": data.get("first_air_date"),
+                        "poster_path": tmdb.poster_url(data.get("poster_path")),
+                        "backdrop_path": tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
+                        "overview": data.get("overview"),
+                        "tmdb_rating": data.get("vote_average"),
+                    }
+                except Exception:
+                    return None
 
     tasks = []
     for b in blocked:
@@ -4302,11 +4955,43 @@ async def get_media_details(
     try:
         # 1. Fetch from TMDB
         if type == MediaType.movie:
-            data, videos_data, images_data = await asyncio.gather(
-                tmdb.get_movie(tmdb_id, api_key=tmdb_key),
-                tmdb.get_movie_videos(tmdb_id, api_key=tmdb_key),
-                tmdb.get_movie_images(tmdb_id, api_key=tmdb_key),
-            )
+            try:
+                data = await tmdb.get_movie(tmdb_id, api_key=tmdb_key)
+            except Exception as e:
+                # TMDB fetch failed — try to fall back to local DB
+                local_media_q = await db.execute(
+                    select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.movie)
+                )
+                local_media = local_media_q.scalars().first()
+                if not local_media:
+                    raise
+                
+                data = local_media.tmdb_data or {}
+                data.setdefault("title", local_media.title)
+                data.setdefault("original_title", local_media.original_title or local_media.title)
+                data.setdefault("overview", local_media.overview)
+                data.setdefault("poster_path", local_media.poster_path)
+                data.setdefault("backdrop_path", local_media.backdrop_path)
+                data.setdefault("release_date", local_media.release_date)
+                data.setdefault("runtime", local_media.runtime)
+                data.setdefault("vote_average", local_media.tmdb_rating or 0.0)
+                data.setdefault("tagline", local_media.tagline)
+                data.setdefault("status", local_media.status)
+                data.setdefault("belongs_to_collection", None)
+                data.setdefault("production_companies", [])
+                data.setdefault("genres", [])
+                data.setdefault("credits", {"cast": []})
+                data.setdefault("adult", local_media.adult)
+
+            # Videos and images are supplemental — a 404 on them should not kill the page
+            try:
+                videos_data = await tmdb.get_movie_videos(tmdb_id, api_key=tmdb_key)
+            except Exception:
+                videos_data = {}
+            try:
+                images_data = await tmdb.get_movie_images(tmdb_id, api_key=tmdb_key)
+            except Exception:
+                images_data = {}
             trailer_youtube_id = next(
                 (
                     v["key"]
@@ -4349,12 +5034,24 @@ async def get_media_details(
             if show is None:
                 raise HTTPException(status_code=404, detail="Show not found for this episode")
 
-            ep_data, ep_show_images = await asyncio.gather(
-                tmdb.get_episode(
-                    show.tmdb_id, local_ep.season_number, local_ep.episode_number, api_key=tmdb_key
-                ),
-                tmdb.get_tv_images(show.tmdb_id, api_key=tmdb_key),
-            )
+            try:
+                ep_data, ep_show_images = await asyncio.gather(
+                    tmdb.get_episode(
+                        show.tmdb_id, local_ep.season_number, local_ep.episode_number, api_key=tmdb_key
+                    ),
+                    tmdb.get_tv_images(show.tmdb_id, api_key=tmdb_key),
+                )
+            except Exception:
+                # Fall back to local episode data
+                ep_data = local_ep.tmdb_data or {}
+                ep_data.setdefault("name", local_ep.title)
+                ep_data.setdefault("overview", local_ep.overview)
+                ep_data.setdefault("still_path", local_ep.poster_path)
+                ep_data.setdefault("air_date", local_ep.release_date)
+                ep_data.setdefault("runtime", local_ep.runtime)
+                ep_data.setdefault("vote_average", local_ep.tmdb_rating or 0.0)
+                ep_data.setdefault("credits", {"cast": []})
+                ep_show_images = {}
             ep_state: dict = {"tmdb_id": tmdb_id, "type": "episode"}
             await enrich_with_state(db, current_user.id, [ep_state])
 
@@ -4459,27 +5156,30 @@ async def get_media_details(
         if type == MediaType.movie:
             raw_coll = data.get("belongs_to_collection")
             if raw_coll:
-                coll_data = await tmdb.get_collection(raw_coll["id"], api_key=tmdb_key)
-                collection = {
-                    "id": coll_data.get("id"),
-                    "name": coll_data.get("name"),
-                    "poster_path": tmdb.poster_url(coll_data.get("poster_path")),
-                    "backdrop_path": tmdb.poster_url(
-                        coll_data.get("backdrop_path"), size="original"
-                    ),
-                    "parts": [
-                        {
-                            "tmdb_id": p.get("id"),
-                            "title": p.get("title"),
-                            "type": MediaType.movie,
-                            "poster_path": tmdb.poster_url(p.get("poster_path")),
-                            "release_date": p.get("release_date"),
-                            "overview": p.get("overview"),
-                            "adult": p.get("adult", False),
-                        }
-                        for p in coll_data.get("parts", [])
-                    ],
-                }
+                try:
+                    coll_data = await tmdb.get_collection(raw_coll["id"], api_key=tmdb_key)
+                    collection = {
+                        "id": coll_data.get("id"),
+                        "name": coll_data.get("name"),
+                        "poster_path": tmdb.poster_url(coll_data.get("poster_path")),
+                        "backdrop_path": tmdb.poster_url(
+                            coll_data.get("backdrop_path"), size="original"
+                        ),
+                        "parts": [
+                            {
+                                "tmdb_id": p.get("id"),
+                                "title": p.get("title"),
+                                "type": MediaType.movie,
+                                "poster_path": tmdb.poster_url(p.get("poster_path")),
+                                "release_date": p.get("release_date"),
+                                "overview": p.get("overview"),
+                                "adult": p.get("adult", False),
+                            }
+                            for p in coll_data.get("parts", [])
+                        ],
+                    }
+                except Exception:
+                    collection = None
 
         production_companies = [
             {
@@ -4687,7 +5387,7 @@ async def pick_for_me(
             cq = await db.execute(
                 select(ShowModel.tmdb_id, ShowModel.title, ShowModel.poster_path,
                        ShowModel.backdrop_path, ShowModel.first_air_date,
-                       ShowModel.tmdb_rating, ShowModel.overview)
+                       ShowModel.tmdb_rating, ShowModel.overview, ShowModel.tvdb_id)
                 .join(Media, Media.show_id == ShowModel.id)
                 .join(Collection, Collection.media_id == Media.id)
                 .where(Collection.user_id == current_user.id)
@@ -4701,6 +5401,7 @@ async def pick_for_me(
                     "backdrop_path": _normalize_path(r[3], "w1280"),
                     "release_date": r[4], "tmdb_rating": r[5],
                     "overview": r[6], "in_library": True,
+                    "tvdb_id": r[7],
                 }
                 for r in cq.all() if r[0] and r[0] not in watched_ids and r[0] not in blocked_ids
             ]
@@ -4850,6 +5551,18 @@ async def pick_for_me(
             media=local_media,
             show=local_show
         )
+
+    if type == "series":
+        if local_show and local_show.tvdb_id:
+            pick["tvdb_id"] = local_show.tvdb_id
+        elif check_tmdb_key(tmdb_key):
+            try:
+                details_for_id = await tmdb.get_show(pick["tmdb_id"], api_key=tmdb_key)
+                tv_id = details_for_id.get("external_ids", {}).get("tvdb_id")
+                if tv_id:
+                    pick["tvdb_id"] = int(tv_id)
+            except Exception:
+                pass
 
     return pick
 

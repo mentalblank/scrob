@@ -141,12 +141,17 @@ async def search_series(query: str, api_key: str, lang: str | None = None) -> li
             continue
         
         # Try to find a translated title/overview in search results
-        title = item.get("name")
-        overview = item.get("overview")
-        
-        # TVDB search results sometimes have a 'translations' dict for the title
-        if not title and "translations" in item:
+        title = None
+        if "translations" in item and isinstance(item["translations"], dict):
             title = item["translations"].get(lang or "eng") or item["translations"].get("eng")
+        if not title:
+            title = item.get("name")
+            
+        overview = None
+        if "overviews" in item and isinstance(item["overviews"], dict):
+            overview = item["overviews"].get(lang or "eng") or item["overviews"].get("eng")
+        if not overview:
+            overview = item.get("overview")
         
         results.append({
             "tvdb_id": tvdb_id,
@@ -382,7 +387,7 @@ def format_cast(raw: dict) -> list[dict]:
     return [
         {
             "tmdb_id": None,
-            "person_id": c.get("personId"),
+            "person_id": c.get("peopleId") or c.get("personId"),
             "name": c.get("personName") or "",
             "character": c.get("name") or "",
             "profile_path": _image_url(c.get("image")),
@@ -424,4 +429,10 @@ async def get_series_episodes_by_type(tvdb_id: int, api_key: str, season_type: s
             break
         page += 1
     return episodes
+
+
+async def get_person(person_id: int, api_key: str) -> dict:
+    """Fetch person details from TVDB."""
+    data = await _get(f"/people/{person_id}/extended", api_key)
+    return data.get("data") or {}
 

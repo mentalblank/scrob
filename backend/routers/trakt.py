@@ -162,6 +162,7 @@ async def _get_or_create_show(db: AsyncSession, tmdb_id: int, title: str, api_ke
         d = await tmdb.get_show(tmdb_id, api_key=api_key)
         show = Show(
             tmdb_id=tmdb_id,
+            tvdb_id=int(d.get("external_ids", {}).get("tvdb_id")) if d.get("external_ids", {}).get("tvdb_id") else None,
             title=d.get("name") or title,
             original_title=d.get("original_name"),
             overview=d.get("overview"),

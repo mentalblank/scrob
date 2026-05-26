@@ -26,13 +26,20 @@ if (!episode && !error) {
   return Astro.redirect("/404");
 }
 
+if (episode) {
+  const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+  if (primaryMetadataSource === "tmdb" && episode.show?.tmdb_id_cross) {
+    return Astro.redirect(`/show/${episode.show.tmdb_id_cross}/season/${season_number}/${episode_number}`);
+  }
+}
+
 const show = episode?.show;
 const season = episode?.season;
 const seasonName = season?.name || `Season ${season_number}`;
 const thumbnail = episode?.image_url || show?.poster_path || null;
 
 const validSeasons = (show?.seasons_meta || [])
-  .filter((s) => s.season_number > 0 && s.episode_count > 0);
+  .filter((s: any) => s.season_number > 0 && s.episode_count > 0);
 const isSingleSeason = validSeasons.length === 1;
 
 const hasPlayableTmdbId = show?.tmdb_id_cross != null;
@@ -102,9 +109,9 @@ const activeButtonsCount = [
             const nextEp = currentIndex < episodes.length - 1 ? episodes[currentIndex + 1] : null;
 
             const validSeasons = (show?.seasons_meta || [])
-              .filter((s) => s.season_number > 0 && s.episode_count > 0)
-              .sort((a, b) => a.season_number - b.season_number);
-            const seasonIdx = validSeasons.findIndex((s) => s.season_number === currentSeasonNum);
+              .filter((s: any) => s.season_number > 0 && s.episode_count > 0)
+              .sort((a: any, b: any) => a.season_number - b.season_number);
+            const seasonIdx = validSeasons.findIndex((s: any) => s.season_number === currentSeasonNum);
 
             let nextSeasonLink = null;
             let prevSeasonLink = null;
@@ -240,7 +247,7 @@ const activeButtonsCount = [
                     mediaType="episode"
                     inLibrary={episode.in_library ?? false}
                     title={`${show?.title} — ${episode.name ?? `Episode ${episode_number}`}`}
-                    token={token}
+                    token={token || ""}
                   />
                 )}
                 <ManualScrobble
@@ -314,10 +321,10 @@ const activeButtonsCount = [
               return hasLibraryTags && (
                 <div class="flex flex-wrap gap-2">
                   {[
-                    episode.library.resolution,
-                    episode.library.video_codec,
-                    episode.library.audio_codec,
-                    episode.library.audio_channels,
+                    episode.library?.resolution,
+                    episode.library?.video_codec,
+                    episode.library?.audio_codec,
+                    episode.library?.audio_channels,
                   ].filter(Boolean).map(tag => (
                     <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold">
                       {tag}
@@ -365,29 +372,55 @@ const activeButtonsCount = [
                 </h2>
                 <div class="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-5 xl:grid-cols-6 gap-3">
                   {episode.cast.map((person) => (
-                    <div class="bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl flex flex-col h-full">
-                      <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 transition-all duration-500 shadow-lg">
-                        {person.profile_path ? (
-                          <img
-                            src={person.profile_path}
-                            alt={person.name}
-                            class="w-full h-full object-cover"
-                            loading="lazy"
-                            decoding="async"
-                          />
-                        ) : (
-                          <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-2xl">👤</div>
-                        )}
+                    person.person_id ? (
+                      <a
+                        href={`/person/tvdb/${person.person_id}`}
+                        class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full"
+                      >
+                        <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
+                          {person.profile_path ? (
+                            <img
+                              src={person.profile_path}
+                              alt={person.name}
+                              class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          ) : (
+                            <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-2xl">👤</div>
+                          )}
+                        </div>
+                        <div class="flex-1 flex flex-col items-center justify-center text-center px-0.5 py-1">
+                          <p class="text-xs font-black text-zinc-100 group-hover/cast:text-blue-400 transition-colors line-clamp-2 leading-tight">{person.name}</p>
+                          <p class="text-[10px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-2 opacity-80 mt-0.5">{person.character}</p>
+                        </div>
+                      </a>
+                    ) : (
+                      <div class="bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl flex flex-col h-full">
+                        <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 shadow-lg">
+                          {person.profile_path ? (
+                            <img
+                              src={person.profile_path}
+                              alt={person.name}
+                              class="w-full h-full object-cover"
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          ) : (
+                            <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-2xl">👤</div>
+                          )}
+                        </div>
+                        <div class="flex-1 flex flex-col items-center justify-center text-center px-0.5 py-1">
+                          <p class="text-xs font-black text-zinc-100 line-clamp-2 leading-tight">{person.name}</p>
+                          <p class="text-[10px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-2 opacity-80 mt-0.5">{person.character}</p>
+                        </div>
                       </div>
-                      <div class="flex-1 flex flex-col items-center justify-center text-center px-0.5 py-1">
-                        <p class="text-xs font-black text-zinc-100 line-clamp-2 leading-tight">{person.name}</p>
-                        <p class="text-[10px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-2 opacity-80 mt-0.5">{person.character}</p>
-                      </div>
-                    </div>
+                    )
                   ))}
                 </div>
               </div>
             )}
+
           </div>
         </div>
       </div>
@@ -575,8 +608,8 @@ const activeButtonsCount = [
   const backdrop = document.getElementById('poster-modal-backdrop');
   const closeBtn = document.getElementById('poster-modal-close');
   if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-    function closeModal() { modal.classList.add('hidden'); document.body.style.overflow = ''; }
+    const openModal = () => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
+    const closeModal = () => { modal.classList.add('hidden'); document.body.style.overflow = ''; };
     zoomBtn.addEventListener('click', openModal);
     backdrop?.addEventListener('click', closeModal);
     closeBtn?.addEventListener('click', closeModal);
