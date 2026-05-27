@@ -1651,6 +1651,9 @@ async def get_tvdb_show(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_q.scalar_one_or_none()
+
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
@@ -1738,8 +1741,6 @@ async def get_tvdb_show(
 
     # Sonarr state
     gs = await _get_global_settings(db)
-    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_q.scalar_one_or_none()
     sonarr_cfg = _effective_sonarr(settings, gs)
     is_monitored = False
     request_enabled = sonarr_cfg is not None

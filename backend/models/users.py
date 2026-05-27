@@ -112,7 +112,6 @@ class UserSettings(Base):
     show_comments  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     show_user_ratings : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     time_format_24h : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    next_up_hidden_shows : Mapped[Optional[list[int]]] = mapped_column(JSONB, server_default="'[]'")
     
     # Sync scheduling
     trakt_full_sync_interval    : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

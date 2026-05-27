@@ -386,6 +386,9 @@ async def delete_continue_watching(
 def _format_media_item(media: Media) -> dict:
     data = format_media(media)
     data["show_id"] = media.show_id
+    if media.show:
+        data["show_tmdb_id"] = media.show.tmdb_id
+        data["show_tvdb_id"] = media.show.tvdb_id
     return data
 
 
@@ -418,7 +421,7 @@ async def get_next_up(
             or_(WatchEvent.completed == True, WatchEvent.progress_percent >= 0.5),
         )
     )
-    if dropped_tmdb_ids:
+    if dropped_tmdb_ids and not include_hidden:
         query = query.where(Show.tmdb_id.not_in(dropped_tmdb_ids))
 
     result = await db.execute(
@@ -481,13 +484,14 @@ async def get_next_up(
     )
     completed_ids = {row[0] for row in completed_result.all()}
 
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    hidden_set = set(settings.next_up_hidden_shows or []) if settings else set()
+    # Build set of dropped show tmdb_ids for marking cards as hidden
+    # (dropped_tmdb_ids already fetched above; negative values represent TVDB-only shows)
+    dropped_show_tmdb_ids: set[int] = dropped_tmdb_ids
 
     next_up = [
         m for m in next_per_show.values()
-        if m.id not in completed_ids and (include_hidden or m.show_id not in hidden_set)
+        if m.id not in completed_ids
+        and (include_hidden or (m.show and m.show.tmdb_id not in dropped_show_tmdb_ids))
     ]
     next_up.sort(
         key=lambda m: show_last_watched.get(m.show_id) or datetime.min,
@@ -495,10 +499,11 @@ async def get_next_up(
     )
     if limit is not None:
         next_up = next_up[:limit]
-    
+
     items = [_format_media_item(m) for m in next_up]
     for item in items:
-        item["next_up_hidden"] = item.get("show_id") in hidden_set
+        show_tmdb_id = item.get("show_tmdb_id")
+        item["next_up_hidden"] = show_tmdb_id is not None and show_tmdb_id in dropped_show_tmdb_ids
     if items:
         await enrich_with_state(db, current_user.id, items)
 
@@ -511,48 +516,6 @@ from core.enrichment import enrich_media
 from datetime import datetime
 from fastapi import HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm.attributes import flag_modified
-
-
-class NextUpHideRequest(BaseModel):
-    show_id: int
-
-
-@router.post("/next-up/hide")
-async def hide_next_up_show(
-    body: NextUpHideRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if not settings:
-        raise HTTPException(status_code=404, detail="Settings not found")
-    hidden = list(settings.next_up_hidden_shows or [])
-    if body.show_id not in hidden:
-        hidden.append(body.show_id)
-        settings.next_up_hidden_shows = hidden
-        flag_modified(settings, "next_up_hidden_shows")
-        await db.commit()
-    return {"status": "ok"}
-
-
-@router.delete("/next-up/hide")
-async def unhide_next_up_show(
-    show_id: int = Query(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if settings:
-        hidden = list(settings.next_up_hidden_shows or [])
-        if show_id in hidden:
-            hidden.remove(show_id)
-            settings.next_up_hidden_shows = hidden
-            flag_modified(settings, "next_up_hidden_shows")
-            await db.commit()
-    return {"status": "ok"}
 
 
 class SeasonWatchRequest(BaseModel):
