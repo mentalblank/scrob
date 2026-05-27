@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,6 +19,7 @@ class Collection(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "media_id", name="uq_collection_user_media"),
+        Index("idx_collections_media_id", "media_id"),
     )
 
     user  : Mapped["User"]                  = relationship(back_populates="collections")
@@ -50,6 +51,7 @@ class CollectionFile(Base):
 
     __table_args__ = (
         UniqueConstraint("collection_id", "source", "source_id", name="uq_collection_file_source"),
+        Index("idx_collection_files_collection_id", "collection_id"),
     )
 
     collection : Mapped["Collection"]              = relationship(back_populates="files")

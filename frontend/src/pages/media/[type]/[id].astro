@@ -29,8 +29,20 @@ if (!item && !error) {
 const year = item?.release_date?.slice(0, 4) ?? null;
 const rating = item?.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
 const isEpisode = item?.type === "episode";
+const isMovie = item?.type === "movie";
 const collection = item?.collection;
 const showRefreshBtn = item?.in_library && (item.type === "movie" || (isEpisode && !!item.show_tmdb_id));
+
+const today = new Date();
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+function isPast(iso: string | null | undefined): boolean {
+  return !!iso && new Date(iso) <= today;
+}
+const theatricalDate = item?.release_date ?? null;
+const digitalDate = item?.release_dates?.digital ?? null;
+const physicalDate = item?.release_dates?.physical ?? null;
 const langNames = new Intl.DisplayNames(["en"], { type: "language" });
 const originalLanguage = item?.original_language
   ? langNames.of(item.original_language) ?? item.original_language
@@ -512,6 +524,35 @@ const activeButtonsCount = [
                     {item.runtime} min
                   </span>
                 )}
+                {item.age_rating && (
+                  <span class="px-2 py-0.5 border border-zinc-600 rounded text-[10px] font-black text-zinc-400 tracking-widest">
+                    {item.age_rating}
+                  </span>
+                )}
+                {item.imdb_id && (
+                  <a href={`https://www.imdb.com/title/${item.imdb_id}/`} target="_blank" rel="noopener noreferrer" class="px-2 py-0.5 bg-[#f5c518] rounded text-[10px] font-black text-black tracking-widest hover:bg-[#e6b800] transition-colors">
+                    IMDb
+                  </a>
+                )}
+                {item.status && (
+                  isMovie ? (
+                    <button id="release-schedule-btn" class="capitalize px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-black text-zinc-400 tracking-widest hover:bg-zinc-700 hover:text-zinc-300 transition-colors cursor-pointer">
+                      {item.status}
+                    </button>
+                  ) : (
+                    <span class="capitalize px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-black text-zinc-400 tracking-widest">
+                      {item.status}
+                    </span>
+                  )
+                )}
+                {originalLanguage && (
+                  <span class="flex items-center gap-1.5 font-medium text-zinc-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 text-zinc-500">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802" />
+                    </svg>
+                    {originalLanguage}
+                  </span>
+                )}
                 {!!item.play_count && (
                   <span id="play-count-badge" class="inline-flex items-center px-2.5 py-1 bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 text-xs font-bold rounded-lg cursor-pointer transition-all duration-200" title="Click to view/remove specific plays" data-tmdb-id={item.tmdb_id} data-media-type={item.type}>
                     {item.play_count} {item.play_count === 1 ? 'Play' : 'Plays'}
@@ -519,6 +560,9 @@ const activeButtonsCount = [
                 )}
               </div>
             )}
+
+            {!isEpisode && (() => { const c = item.production_companies?.find(c => c.logo_path); return c ? <div class="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm flex items-center w-fit mt-3"><img src={c.logo_path!} alt={c.name} title={c.name} class="h-5 max-w-[80px] object-contain" loading="lazy" /></div> : null; })()}
+
 
             <!-- Overview -->
             {item.overview && (
@@ -601,6 +645,40 @@ const activeButtonsCount = [
 
             <div id="recommendations-container" data-type={item.type} data-id={item.tmdb_id} class="pt-8 border-t border-zinc-800/60"></div>
           </div>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {isMovie && item?.status && (
+    <div id="release-schedule-popover" class="hidden absolute z-50 w-52 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+      <div class="px-3 pt-2.5 pb-2 border-b border-zinc-800">
+        <p class="text-[10px] font-black text-zinc-500 tracking-widest uppercase">Release Schedule</p>
+      </div>
+      <div class="px-3 py-2.5 flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-zinc-500 text-xs">Theatrical</span>
+          {theatricalDate ? (
+            <span class={`text-xs font-mono font-bold ${isPast(theatricalDate) ? "text-zinc-300" : "text-blue-400"}`}>{fmtDate(theatricalDate)}</span>
+          ) : (
+            <span class="text-xs text-zinc-600">—</span>
+          )}
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-zinc-500 text-xs">Digital</span>
+          {digitalDate ? (
+            <span class={`text-xs font-mono font-bold ${isPast(digitalDate) ? "text-zinc-300" : "text-blue-400"}`}>{fmtDate(digitalDate)}</span>
+          ) : (
+            <span class="text-xs text-zinc-600">—</span>
+          )}
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-zinc-500 text-xs">Physical</span>
+          {physicalDate ? (
+            <span class={`text-xs font-mono font-bold ${isPast(physicalDate) ? "text-zinc-300" : "text-blue-400"}`}>{fmtDate(physicalDate)}</span>
+          ) : (
+            <span class="text-xs text-zinc-600">—</span>
+          )}
         </div>
       </div>
     </div>
@@ -903,4 +981,31 @@ const activeButtonsCount = [
       }));
     });
   });
+</script>
+
+<script>
+  const releaseBtn = document.getElementById('release-schedule-btn');
+  const releasePopover = document.getElementById('release-schedule-popover');
+
+  if (releaseBtn && releasePopover) {
+    releaseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const hidden = releasePopover.classList.toggle('hidden');
+      if (!hidden) {
+        const rect = releaseBtn.getBoundingClientRect();
+        const popW = releasePopover.offsetWidth;
+        const left = Math.min(rect.left + window.scrollX, window.innerWidth - popW - 8);
+        releasePopover.style.left = `${Math.max(8, left)}px`;
+        releasePopover.style.top = `${rect.bottom + window.scrollY + 6}px`;
+      }
+    });
+    document.addEventListener('click', (e) => {
+      if (!releasePopover.classList.contains('hidden') && !releasePopover.contains(e.target as Node)) {
+        releasePopover.classList.add('hidden');
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') releasePopover.classList.add('hidden');
+    });
+  }
 </script>

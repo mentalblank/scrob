@@ -11,6 +11,7 @@ class WatchEvent(Base):
     __tablename__ = "watch_events"
     __table_args__ = (
         Index("idx_watch_events_user_media", "user_id", "media_id"),
+        Index("idx_watch_events_user_completed_watched_at", "user_id", "completed", "watched_at"),
     )
 
     id               : Mapped[int]             = mapped_column(Integer, primary_key=True)

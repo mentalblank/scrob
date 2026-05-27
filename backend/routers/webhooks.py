@@ -949,7 +949,7 @@ def parse_plex_payload(payload: dict) -> dict | None:
         if plex_res in ("4k", "2160"): resolution = "4K"
         elif plex_res == "1080": resolution = "1080p"
         elif plex_res == "720": resolution = "720p"
-        elif plex_res == "480": resolution = "480p"
+        elif plex_res in ("480", "sd"): resolution = "480p"
         elif plex_res: resolution = f"{plex_res}p"
         elif w >= 3200 or h >= 2000: resolution = "4K"
         elif w >= 1700 or h >= 800: resolution = "1080p"

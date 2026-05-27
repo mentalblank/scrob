@@ -13,6 +13,8 @@ class Media(Base):
     __table_args__ = (
         Index("idx_media_tmdb_type", "tmdb_id", "media_type"),
         Index("idx_media_show_season_episode", "show_id", "season_number", "episode_number"),
+        Index("idx_media_type_release_date", "media_type", "release_date"),
+        Index("idx_media_type_tmdb_rating", "media_type", "tmdb_rating"),
     )
 
     id             : Mapped[int]             = mapped_column(Integer, primary_key=True)

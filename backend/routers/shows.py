@@ -2,7 +2,8 @@ import asyncio
 from datetime import datetime, date
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, cast as sa_cast, Text, or_, and_
+from sqlalchemy import select, func, case, cast as sa_cast, Text, or_, and_
+from sqlalchemy.orm import aliased
 
 from models.events import WatchEvent
 from models.collection import Collection, CollectionFile
@@ -390,7 +391,6 @@ async def get_show(
             .join(Collection, Collection.media_id == Media.id)
             .where(
                 Media.show_id == show.id,
-                Collection.user_id == current_user.id,
                 Media.media_type == MediaType.episode,
                 Media.season_number.isnot(None),
                 Media.episode_number.isnot(None),

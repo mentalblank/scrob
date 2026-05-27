@@ -555,11 +555,13 @@ export interface MediaItem {
   age_rating?: string | null;
   imdb_id?: string | null;
   adult?: boolean;
+  show_id?: number | null;
   show_title?: string | null;
   show_tmdb_id?: number | null;
   show_tvdb_id?: number | null;
   show_poster_path?: string | null;
   show_backdrop_path?: string | null;
+  next_up_hidden?: boolean;
   known_for_department?: string | null;
   in_library?: boolean;
   // Card action state
@@ -601,6 +603,7 @@ export interface MediaItem {
   progress_percent?: number;
   trailer_youtube_id?: string | null;
   logo_path?: string | null;
+  release_dates?: { digital?: string | null; physical?: string | null } | null;
 }
 
 export interface SubtitleTrack {
@@ -1244,8 +1247,14 @@ export const api = {
     deleteProgress: (tmdbId: number, mediaType: string, token: string) =>
       del<{ status: string }>(`/history/continue-watching?tmdb_id=${tmdbId}&media_type=${mediaType}`, token),
 
-    nextUp: (token?: string, limit?: number) =>
-      get<{ next_up: MediaItem[] }>("/history/next-up", limit ? { limit } : undefined, token),
+    nextUp: (token?: string, limit?: number, includeHidden?: boolean) =>
+      get<{ next_up: MediaItem[] }>("/history/next-up", { ...(limit ? { limit } : {}), ...(includeHidden ? { include_hidden: true } : {}) }, token),
+
+    hideNextUp: (showId: number, token: string) =>
+      post<{ status: string }>("/history/next-up/hide", { show_id: showId }, token),
+
+    unhideNextUp: (showId: number, token: string) =>
+      del<{ status: string }>(`/history/next-up/hide?show_id=${showId}`, token),
 
     nowPlaying: (token: string) =>
       get<{ now_playing: NowPlayingSession[] }>("/history/now-playing", undefined, token),

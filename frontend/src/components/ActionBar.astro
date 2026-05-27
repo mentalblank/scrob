@@ -83,6 +83,7 @@ const collectedCls = inLibrary
   ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
   : "bg-zinc-950/25 text-zinc-500 hover:bg-purple-500/10 hover:text-purple-400";
 
+const needsCheck  = !requestStatus && !isMonitored;
 const requestBlocked = isMonitored || !!requestStatus;
 const requestCls  = requestBlocked
   ? "bg-orange-500/20 text-orange-400 hover:bg-orange-500/30"
@@ -189,8 +190,9 @@ const requestTitle = isMonitored
       <button
         data-action="request"
         data-state={(requestBlocked || collectionPct === 100 || (inLibrary && !isSeries)) ? "active" : "inactive"}
+        data-request-loading={needsCheck ? "true" : undefined}
         title={requestTitle}
-        disabled={requestBlocked || collectionPct === 100 || (inLibrary && !isSeries)}
+        disabled={requestBlocked || needsCheck || collectionPct === 100 || (inLibrary && !isSeries)}
         class={`${btn} ${btnW} disabled:cursor-not-allowed border-r border-zinc-800/60 ${requestCls}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

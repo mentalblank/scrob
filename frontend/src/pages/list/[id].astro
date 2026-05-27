@@ -408,19 +408,20 @@ Astro.response.headers.set("Cache-Control", "no-store");
         ) : (
           <div id="items-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
             {list.items.map((entry) => (
-              <div class="relative group/item" data-item-id={entry.id}>
-                <MediaCard item={entry.media} />
-                {list.is_owner && (
-                  <button
-                    class="remove-item-btn absolute top-2 right-2 bg-red-600/90 hover:bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg cursor-pointer z-10 transition-colors"
-                    data-item-id={entry.id}
-                    aria-label="Remove from list"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-3.5 h-3.5">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
+              <div data-item-id={entry.id}>
+                <MediaCard item={entry.media}>
+                  {list.is_owner && (
+                    <button
+                      class="remove-item-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-rose-200 hover:border-rose-700 hover:bg-rose-900 transition-all duration-200 cursor-pointer"
+                      data-item-id={entry.id}
+                      aria-label="Remove from list"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                      </svg>
+                    </button>
+                  )}
+                </MediaCard>
               </div>
             ))}
           </div>
@@ -911,7 +912,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
           }
         } catch (err) {
           console.error('Failed to remove item', err);
-          btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-3.5 h-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>`;
+          btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
           btn.disabled = false;
         }
       });
@@ -1026,7 +1027,9 @@ Astro.response.headers.set("Cache-Control", "no-store");
     }
   }
 
-  function buildCard(media) {
+  const TRASH_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
+
+  function buildCard(media, removeItemId = null) {
     const isPerson = media.type === 'person';
     const isSeries = media.type === 'series';
     const showActionBar = !isPerson && media.type !== 'collection';
@@ -1106,6 +1109,10 @@ Astro.response.headers.set("Cache-Control", "no-store");
       : (media.progress_percent ?? 0);
     const showProgress = !isPerson && progressPct > 0;
 
+    const removeBtn = removeItemId != null
+      ? `<button class="remove-item-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-rose-200 hover:border-rose-700 hover:bg-rose-900 transition-all duration-200 cursor-pointer" data-item-id="${esc(String(removeItemId))}" aria-label="Remove from list">${TRASH_SVG}</button>`
+      : '';
+
     return `
       <div
         class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1"
@@ -1125,7 +1132,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
               : `<div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center"><span class="text-3xl mb-2 opacity-30">🎬</span><span class="text-xs font-bold uppercase tracking-widest">${esc(media.title)}</span></div>`
             }
             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            ${rating ? `<div class="absolute top-2 right-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
+            ${rating ? `<div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
             ${showProgress ? `
               <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
                 <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
@@ -1134,6 +1141,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
           </div>
         </a>
         ${actionBar}
+        ${removeBtn}
         <a href="${esc(href)}" class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
           <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">${esc(media.title)}</h3>
           <div class="flex items-center justify-between">
@@ -1209,17 +1217,8 @@ Astro.response.headers.set("Cache-Control", "no-store");
       };
 
       const wrapper = document.createElement('div');
-      wrapper.className = 'relative group/item';
       wrapper.setAttribute('data-item-id', String(entry.id));
-      wrapper.innerHTML = `
-        ${buildCard(cardMedia)}
-        <button class="remove-item-btn absolute top-2 right-2 bg-red-600/90 hover:bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg cursor-pointer z-10 transition-colors"
-          data-item-id="${esc(String(entry.id))}" aria-label="Remove from list">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-3.5 h-3.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-          </svg>
-        </button>
-      `;
+      wrapper.innerHTML = buildCard(cardMedia, entry.id);
       grid.appendChild(wrapper);
       bindRemoveButtons();
     } catch (err) {

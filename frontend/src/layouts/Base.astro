@@ -16,6 +16,7 @@ if (user?.is_admin && token) {
   } catch {}
 }
 const blurExplicit = Astro.cookies.get("blur_explicit")?.value !== "false";
+const use24h = Astro.cookies.get("time_format_24h")?.value === "true";
 
 const pathname = Astro.url.pathname;
 const activeMovies = pathname.startsWith('/movies') || pathname.startsWith('/collection/movies') || pathname.startsWith('/trending/movies') || pathname.startsWith('/media/movie');
@@ -317,6 +318,30 @@ const bottomNavItem = (active: boolean) =>
     </div>
   </div>
 
+  <!-- Watch history modal -->
+  <div id="watch-history-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+      <div class="px-5 pt-5 pb-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+        <h3 class="text-base font-bold text-zinc-100">Watch History</h3>
+        <button id="watch-history-modal-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer shrink-0" aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="watch-history-modal-events" class="max-h-52 overflow-y-auto divide-y divide-zinc-800/50"></div>
+      <div class="px-4 pt-3 pb-4 border-t border-zinc-800 space-y-2.5">
+        <p class="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Add a play</p>
+        <div class="flex gap-2">
+          <button id="watch-history-now-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white">Just now</button>
+          <button id="watch-history-custom-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Custom</button>
+        </div>
+        <input type="datetime-local" id="watch-history-date-input" class="hidden w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-zinc-200 focus:outline-none focus:border-green-500 [color-scheme:dark]" />
+        <button id="watch-history-log-btn" class="w-full px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-95">
+          Log play
+        </button>
+      </div>
+    </div>
+  </div>
+
   <WatchedAtPicker />
 
   <!-- Create list modal -->
@@ -563,9 +588,10 @@ const bottomNavItem = (active: boolean) =>
     });
   </script>
 
-  <script define:vars={{ __layoutAuthToken: token ?? '' }}>
+  <script define:vars={{ __layoutAuthToken: token ?? '', __use24h: use24h }}>
     // Expose the server-side token for the card action script (httpOnly cookie is not JS-readable)
     window.__AUTH_TOKEN__ = __layoutAuthToken;
+    window.__USE_24H__ = __use24h;
 
     // ── Now Playing poller (Global) ──────────────────────────────────────────
     function esc(str) {
@@ -1138,6 +1164,177 @@ const bottomNavItem = (active: boolean) =>
       if (e.key === 'Enter') (document.getElementById('create-list-confirm') as HTMLButtonElement).click();
     });
 
+    // ── Watched button UI updater ──────────────────────────────────────────────
+    function updateWatchedButtonUI(targetBtn: HTMLElement, watched: boolean) {
+      targetBtn.dataset.watched = String(watched);
+      targetBtn.dataset.state = watched ? 'active' : 'inactive';
+      const card = targetBtn.closest<HTMLElement>('[data-card]');
+      const isSeries = card?.dataset.mediaType === 'series';
+      const isCard = targetBtn.parentElement?.classList.contains('grid');
+      if (isSeries) {
+        const newPct = watched ? 100 : 0;
+        targetBtn.dataset.watchPct = String(newPct);
+        targetBtn.title = `${newPct}% watched`;
+        targetBtn.style.background = '';
+        const labelEl = targetBtn.querySelector('span');
+        if (labelEl) labelEl.textContent = `${newPct}%`;
+        const smLabelEl = targetBtn.querySelectorAll('span')[1];
+        if (smLabelEl) smLabelEl.textContent = `${newPct}%`;
+      } else {
+        targetBtn.title = watched ? 'Mark as unwatched' : 'Mark as watched';
+      }
+      if (watched) {
+        targetBtn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-400', 'hover:text-green-500');
+        if (isCard) {
+          targetBtn.classList.add('bg-green-500/20', 'text-green-400');
+        } else {
+          targetBtn.classList.add('bg-green-500/50', 'text-green-300', 'hover:bg-green-400/50');
+        }
+      } else {
+        targetBtn.classList.remove('bg-green-500/20', 'bg-green-500/50', 'text-green-400', 'text-green-300', 'hover:bg-green-500/40', 'hover:bg-green-400/50');
+        if (isCard) {
+          targetBtn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-500');
+        } else {
+          targetBtn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-green-500/10', 'hover:text-green-400');
+        }
+      }
+      targetBtn.querySelector('circle')?.setAttribute('fill', watched ? 'currentColor' : 'none');
+    }
+
+    // ── Watch history modal ────────────────────────────────────────────────────
+    let _watchHistoryTmdbId = '';
+    let _watchHistoryMediaType = '';
+    let _watchHistoryUseNow = true;
+
+    const toLocal = (d: Date) => {
+      const p = (n: number) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    };
+    const toUTC = (d: Date) => d.toISOString().slice(0, 16);
+
+    function closeWatchHistoryModal() {
+      document.getElementById('watch-history-modal')!.classList.add('hidden');
+    }
+
+    async function openWatchHistoryModal(_btn: HTMLElement, tmdbId: string, mediaType: string) {
+      _watchHistoryTmdbId = tmdbId;
+      _watchHistoryMediaType = mediaType;
+
+      // Reset "add play" form to "Just now"
+      _watchHistoryUseNow = true;
+      const nowBtn = document.getElementById('watch-history-now-btn')!;
+      const customBtn = document.getElementById('watch-history-custom-btn')!;
+      const dateInput = document.getElementById('watch-history-date-input') as HTMLInputElement;
+      const activeClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white';
+      const inactiveClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200';
+      nowBtn.className = activeClass;
+      customBtn.className = inactiveClass;
+      dateInput.classList.add('hidden');
+      dateInput.value = toLocal(new Date());
+      dateInput.max = toLocal(new Date());
+
+      document.getElementById('watch-history-modal')!.classList.remove('hidden');
+      await loadWatchHistoryEvents();
+    }
+
+    async function loadWatchHistoryEvents() {
+      const eventsEl = document.getElementById('watch-history-modal-events')!;
+      eventsEl.innerHTML = '<div class="px-4 py-3 text-xs text-zinc-500">Loading…</div>';
+      try {
+        const events: Array<{ id: number; watched_at: string }> = await apiFetch(
+          `/history/item-events?tmdb_id=${_watchHistoryTmdbId}&media_type=${_watchHistoryMediaType}`
+        );
+        if (events.length === 0) {
+          eventsEl.innerHTML = '<div class="px-4 py-3 text-sm text-zinc-500 italic">No plays recorded yet</div>';
+        } else {
+          eventsEl.innerHTML = events.map(ev => {
+            const d = new Date(ev.watched_at + 'Z');
+            const fmt = d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: !(window as any).__USE_24H__ });
+            return `<div class="flex items-center justify-between px-4 py-2.5 hover:bg-zinc-800/50 group">
+              <span class="text-sm text-zinc-200">${esc(fmt)}</span>
+              <button class="text-zinc-600 group-hover:text-zinc-400 hover:!text-red-400 transition-colors cursor-pointer" data-delete-event="${ev.id}" aria-label="Remove">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>`;
+          }).join('');
+        }
+        const isWatched = events.length > 0;
+        document.querySelectorAll<HTMLElement>(
+          `[data-card][data-tmdb-id="${_watchHistoryTmdbId}"][data-media-type="${_watchHistoryMediaType}"] [data-action="watched"]`
+        ).forEach(b => updateWatchedButtonUI(b, isWatched));
+      } catch {
+        eventsEl.innerHTML = '<div class="px-4 py-2 text-xs text-red-400">Failed to load</div>';
+      }
+    }
+
+    document.getElementById('watch-history-modal-close')!.addEventListener('click', closeWatchHistoryModal);
+    document.getElementById('watch-history-modal')!.addEventListener('click', (e) => {
+      if (e.target === document.getElementById('watch-history-modal')) closeWatchHistoryModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeWatchHistoryModal();
+    });
+
+    document.getElementById('watch-history-modal-events')!.addEventListener('click', async (e) => {
+      const delBtn = (e.target as Element).closest<HTMLElement>('[data-delete-event]');
+      if (!delBtn) return;
+      delBtn.style.opacity = '0.4';
+      delBtn.style.pointerEvents = 'none';
+      try {
+        await apiFetch(`/history/event/${delBtn.dataset.deleteEvent}`, 'DELETE');
+        await loadWatchHistoryEvents();
+      } catch {
+        delBtn.style.opacity = '';
+        delBtn.style.pointerEvents = '';
+      }
+    });
+
+    (() => {
+      const activeClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white';
+      const inactiveClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200';
+
+      document.getElementById('watch-history-now-btn')!.addEventListener('click', () => {
+        _watchHistoryUseNow = true;
+        (document.getElementById('watch-history-now-btn') as HTMLElement).className = activeClass;
+        (document.getElementById('watch-history-custom-btn') as HTMLElement).className = inactiveClass;
+        document.getElementById('watch-history-date-input')!.classList.add('hidden');
+      });
+
+      document.getElementById('watch-history-custom-btn')!.addEventListener('click', () => {
+        _watchHistoryUseNow = false;
+        (document.getElementById('watch-history-now-btn') as HTMLElement).className = inactiveClass;
+        (document.getElementById('watch-history-custom-btn') as HTMLElement).className = activeClass;
+        const input = document.getElementById('watch-history-date-input') as HTMLInputElement;
+        input.max = toLocal(new Date());
+        input.classList.remove('hidden');
+        input.focus();
+      });
+
+      document.getElementById('watch-history-log-btn')!.addEventListener('click', async () => {
+        const input = document.getElementById('watch-history-date-input') as HTMLInputElement;
+        const watchedAt = _watchHistoryUseNow ? toUTC(new Date()) : toUTC(new Date(input.value || toLocal(new Date())));
+        const logBtn = document.getElementById('watch-history-log-btn') as HTMLButtonElement;
+        logBtn.disabled = true;
+        logBtn.textContent = 'Logging…';
+        try {
+          await apiFetch('/history', 'POST', {
+            tmdb_id: Number(_watchHistoryTmdbId),
+            media_type: _watchHistoryMediaType,
+            completed: true,
+            watched_at: watchedAt,
+          });
+          await loadWatchHistoryEvents();
+          // Reset to "Just now" after logging
+          _watchHistoryUseNow = true;
+          (document.getElementById('watch-history-now-btn') as HTMLElement).className = activeClass;
+          (document.getElementById('watch-history-custom-btn') as HTMLElement).className = inactiveClass;
+          input.classList.add('hidden');
+        } catch { /* ignore */ }
+        logBtn.disabled = false;
+        logBtn.textContent = 'Log play';
+      });
+    })();
+
     // ── Main event delegation ──────────────────────────────────────────────────
     document.addEventListener('click', async (e) => {
       const target = e.target as Element;
@@ -1299,6 +1496,11 @@ const bottomNavItem = (active: boolean) =>
         // season is set → season-level operation
         const seriesId = showTmdbId || tmdbId;
 
+        if (mediaType === 'movie' || mediaType === 'episode') {
+          await openWatchHistoryModal(btn, tmdbId, mediaType);
+          return;
+        }
+
         let confirmed = true;
         if (mediaType === 'series' && season) {
           confirmed = await showConfirm(
@@ -1314,23 +1516,8 @@ const bottomNavItem = (active: boolean) =>
         }
         if (!confirmed) return;
 
-        // For movie/episode marking as watched: ask when
-        let watchedAt: string | null = null;
-        if ((mediaType === 'movie' || mediaType === 'episode') && !isWatched) {
-          watchedAt = await showWatchedAtPicker(btn);
-          if (watchedAt === null) return; // cancelled
-        }
-
         try {
-          if (mediaType === 'movie' || mediaType === 'episode') {
-            if (isWatched) {
-              const query = tmdbId ? `tmdb_id=${tmdbId}` : `id=${mediaId}`;
-              await apiFetch(`/history/item?${query}&media_type=${mediaType}`, 'DELETE');
-            } else {
-              if (!tmdbId) throw new Error('Cannot mark unmatched item as watched');
-              await apiFetch('/history', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, completed: true, watched_at: watchedAt });
-            }
-          } else if (mediaType === 'series' && season) {
+          if (mediaType === 'series' && season) {
             if (isWatched) {
               await apiFetch(`/history/season?series_tmdb_id=${seriesId}&season_number=${season}`, 'DELETE');
             } else {
@@ -1345,47 +1532,7 @@ const bottomNavItem = (active: boolean) =>
           }
           const nowWatched = !isWatched;
           
-          const updateButtonUI = (targetBtn, watched) => {
-            targetBtn.dataset.watched = String(watched);
-            targetBtn.dataset.state = watched ? 'active' : 'inactive';
-
-            const card = targetBtn.closest('[data-card]');
-            const isSeries = card?.dataset.mediaType === 'series';
-            const isCard = targetBtn.parentElement?.classList.contains('grid');
-
-            if (isSeries) {
-              const newPct = watched ? 100 : 0;
-              targetBtn.dataset.watchPct = String(newPct);
-              targetBtn.title = `${newPct}% watched`;
-              targetBtn.style.background = '';
-              const labelEl = targetBtn.querySelector('span');
-              if (labelEl) labelEl.textContent = `${newPct}%`;
-              const smLabelEl = targetBtn.querySelectorAll('span')[1];
-              if (smLabelEl) smLabelEl.textContent = `${newPct}%`;
-            } else {
-              targetBtn.title = watched ? 'Mark as unwatched' : 'Mark as watched';
-            }
-
-            if (watched) {
-              targetBtn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-400', 'hover:text-green-500');
-              if (isCard) {
-                targetBtn.classList.add('bg-green-500/20', 'text-green-400');
-              } else {
-                targetBtn.classList.add('bg-green-500/50', 'text-green-300', 'hover:bg-green-400/50');
-              }
-            } else {
-              targetBtn.classList.remove('bg-green-500/20', 'bg-green-500/50', 'text-green-400', 'text-green-300', 'hover:bg-green-500/40', 'hover:bg-green-400/50');
-              if (isCard) {
-                targetBtn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-500');
-              } else {
-                targetBtn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-green-500/10', 'hover:text-green-400');
-              }
-            }
-            targetBtn.querySelector('circle')?.setAttribute('fill', watched ? 'currentColor' : 'none');
-          };
-
-          // Update the clicked button
-          updateButtonUI(btn, nowWatched);
+          updateWatchedButtonUI(btn, nowWatched);
 
           // If marking a show as watched/unwatched, update all season/episode cards on the page
           if (mediaType === 'series' && !season) {
@@ -1397,13 +1544,13 @@ const bottomNavItem = (active: boolean) =>
             `);
             allSeasonCards.forEach(c => {
               const sBtn = c.querySelector('[data-action="watched"]');
-              if (sBtn) updateButtonUI(sBtn, nowWatched);
+              if (sBtn) updateWatchedButtonUI(sBtn, nowWatched);
             });
             // Also update any episode cards for this show
             const allEpCards = document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${tmdbId}"]`);
             allEpCards.forEach(c => {
               const eBtn = c.querySelector('[data-action="watched"]');
-              if (eBtn) updateButtonUI(eBtn, nowWatched);
+              if (eBtn) updateWatchedButtonUI(eBtn, nowWatched);
             });
           }
 
@@ -1412,7 +1559,7 @@ const bottomNavItem = (active: boolean) =>
             const allEpCards = document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${seriesId}"][data-season="${season}"]`);
             allEpCards.forEach(c => {
               const eBtn = c.querySelector('[data-action="watched"]');
-              if (eBtn) updateButtonUI(eBtn, nowWatched);
+              if (eBtn) updateWatchedButtonUI(eBtn, nowWatched);
             });
           }
 
@@ -1627,6 +1774,40 @@ const bottomNavItem = (active: boolean) =>
         }
       }
     });
+  </script>
+  <script>
+    // ── Radarr / Sonarr monitored check (deferred after page load) ────────────
+    (async () => {
+      const btn = document.querySelector<HTMLButtonElement>('[data-action="request"][data-request-loading="true"]');
+      if (!btn) return;
+      const card = btn.closest<HTMLElement>('[data-card]');
+      if (!card) return;
+      const tmdbId = card.dataset.tmdbId;
+      const mediaType = card.dataset.mediaType;
+      if (!tmdbId || !mediaType) return;
+
+      const API = '/api/proxy';
+      const TOKEN = () => (window as any).__AUTH_TOKEN__ ?? '';
+
+      try {
+        const res = await fetch(`${API}/media/request-status?tmdb_id=${tmdbId}&media_type=${mediaType}`, {
+          headers: { Authorization: `Bearer ${TOKEN()}` },
+        });
+        if (!res.ok) return; // service down — keep disabled
+        const { monitored } = await res.json();
+        btn.removeAttribute('data-request-loading');
+        if (monitored) {
+          btn.title = mediaType === 'series' ? 'Already in Sonarr' : 'Already in Radarr';
+          btn.dataset.state = 'active';
+          btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-300/60', 'hover:text-orange-400');
+          btn.classList.add('bg-orange-500/50', 'text-orange-300', 'hover:bg-orange-400/50');
+        } else {
+          btn.disabled = false;
+        }
+      } catch {
+        // network error — keep disabled
+      }
+    })();
   </script>
   <script>
     // ── PWA install prompt ─────────────────────────────────────────────────────

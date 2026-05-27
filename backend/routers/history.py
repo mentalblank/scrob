@@ -384,7 +384,9 @@ async def delete_continue_watching(
 
 
 def _format_media_item(media: Media) -> dict:
-    return format_media(media)
+    data = format_media(media)
+    data["show_id"] = media.show_id
+    return data
 
 
 @router.get("/next-up")
@@ -392,6 +394,7 @@ async def get_next_up(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     limit: int | None = None,
+    include_hidden: bool = Query(False),
 ):
     """Next unwatched episode for each show the user is actively watching, sorted by most recent activity."""
     # Step 0: Find dropped shows to exclude
@@ -478,8 +481,14 @@ async def get_next_up(
     )
     completed_ids = {row[0] for row in completed_result.all()}
 
-    # Sort by most recent activity date (descending) before applying limit
-    next_up = [m for m in next_per_show.values() if m.id not in completed_ids]
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
+    hidden_set = set(settings.next_up_hidden_shows or []) if settings else set()
+
+    next_up = [
+        m for m in next_per_show.values()
+        if m.id not in completed_ids and (include_hidden or m.show_id not in hidden_set)
+    ]
     next_up.sort(
         key=lambda m: show_last_watched.get(m.show_id) or datetime.min,
         reverse=True,
@@ -488,6 +497,8 @@ async def get_next_up(
         next_up = next_up[:limit]
     
     items = [_format_media_item(m) for m in next_up]
+    for item in items:
+        item["next_up_hidden"] = item.get("show_id") in hidden_set
     if items:
         await enrich_with_state(db, current_user.id, items)
 
@@ -500,6 +511,48 @@ from core.enrichment import enrich_media
 from datetime import datetime
 from fastapi import HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm.attributes import flag_modified
+
+
+class NextUpHideRequest(BaseModel):
+    show_id: int
+
+
+@router.post("/next-up/hide")
+async def hide_next_up_show(
+    body: NextUpHideRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
+    if not settings:
+        raise HTTPException(status_code=404, detail="Settings not found")
+    hidden = list(settings.next_up_hidden_shows or [])
+    if body.show_id not in hidden:
+        hidden.append(body.show_id)
+        settings.next_up_hidden_shows = hidden
+        flag_modified(settings, "next_up_hidden_shows")
+        await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/next-up/hide")
+async def unhide_next_up_show(
+    show_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_result.scalar_one_or_none()
+    if settings:
+        hidden = list(settings.next_up_hidden_shows or [])
+        if show_id in hidden:
+            hidden.remove(show_id)
+            settings.next_up_hidden_shows = hidden
+            flag_modified(settings, "next_up_hidden_shows")
+            await db.commit()
+    return {"status": "ok"}
 
 
 class SeasonWatchRequest(BaseModel):
@@ -552,12 +605,19 @@ async def mark_as_watched(
     event = WatchEvent(
         user_id=current_user.id,
         media_id=media.id,
-        watched_at=(event_in.watched_at.replace(tzinfo=None) if event_in.watched_at else datetime.now()),
+        watched_at=(event_in.watched_at.replace(tzinfo=None) if event_in.watched_at else datetime.utcnow()),
         completed=event_in.completed,
         play_count=1,
         progress_percent=1.0 if event_in.completed else 0.0,
     )
     db.add(event)
+    if event_in.completed:
+        await db.execute(
+            delete(PlaybackProgress).where(
+                PlaybackProgress.user_id == current_user.id,
+                PlaybackProgress.media_id == media.id,
+            )
+        )
     await db.commit()
 
     # 4. Push to media servers if outbound push is enabled
@@ -565,6 +625,30 @@ async def mark_as_watched(
         await _push_watch_state(db, current_user.id, [media.id], watched=True)
 
     return {"status": "ok", "message": f"Marked {media.title} as watched"}
+
+
+@router.get("/item-events")
+async def get_item_events(
+    tmdb_id: int = Query(...),
+    media_type: MediaType = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all completed watch events for a specific movie or episode."""
+    query = (
+        select(WatchEvent)
+        .join(Media, Media.id == WatchEvent.media_id)
+        .where(
+            WatchEvent.user_id == current_user.id,
+            WatchEvent.completed == True,
+            Media.tmdb_id == tmdb_id,
+            Media.media_type == media_type,
+        )
+        .order_by(desc(WatchEvent.watched_at))
+    )
+    result = await db.execute(query)
+    events = result.scalars().all()
+    return [{"id": e.id, "watched_at": e.watched_at.isoformat()} for e in events]
 
 
 @router.delete("/event/{event_id}")
@@ -841,6 +925,13 @@ async def mark_season_watched(
             ))
             newly_watched.append(ep.id)
             
+    if newly_watched:
+        await db.execute(
+            delete(PlaybackProgress).where(
+                PlaybackProgress.user_id == current_user.id,
+                PlaybackProgress.media_id.in_(newly_watched),
+            )
+        )
     await db.commit()
     await _push_watch_state(db, current_user.id, newly_watched, watched=True)
     return {"status": "ok", "count": len(newly_watched)}
@@ -1007,6 +1098,13 @@ async def mark_show_watched(
                 ))
                 all_newly_watched_ids.append(ep.id)
 
+    if all_newly_watched_ids:
+        await db.execute(
+            delete(PlaybackProgress).where(
+                PlaybackProgress.user_id == current_user.id,
+                PlaybackProgress.media_id.in_(all_newly_watched_ids),
+            )
+        )
     await db.commit()
     await _push_watch_state(db, current_user.id, all_newly_watched_ids, watched=True)
     return {"status": "ok", "count": len(all_newly_watched_ids)}

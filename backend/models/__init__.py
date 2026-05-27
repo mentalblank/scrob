@@ -21,6 +21,7 @@ from .follows import Follow
 from .global_settings import GlobalSettings
 from .blocklist import BlocklistItem
 from .season_override import ShowSeasonOverride, ShowEpisodeOverride
+from .media_request import MediaRequest
 
 __all__ = [
     "Base",
@@ -47,4 +48,5 @@ __all__ = [
     "BlocklistItem",
     "ShowSeasonOverride",
     "ShowEpisodeOverride",
+    "MediaRequest",
 ]
