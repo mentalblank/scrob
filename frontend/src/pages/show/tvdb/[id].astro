@@ -33,7 +33,7 @@ if (show) {
   }
 }
 
-const seasons = (show?.seasons_meta ?? []).filter((s) => (s.season_number ?? 0) > 0);
+const seasons = (show?.seasons_meta ?? []).filter((s) => (s.season_number ?? 0) > 0 && (s.episode_count ?? 0) > 0);
 const year = show?.first_air_date?.slice(0, 4) ?? null;
 const langNames = new Intl.DisplayNames(["en"], { type: "language" });
 const originalLanguage = show?.original_language

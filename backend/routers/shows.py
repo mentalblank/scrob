@@ -28,8 +28,24 @@ from routers.media import (
 from dependencies import get_current_user
 from core import tmdb
 from core import tvdb as tvdb_client
+import unicodedata
 
 router = APIRouter()
+
+
+def sanitize_season_name(name: str | None, season_number: int, user_lang: str) -> str:
+    default_name = "Specials" if season_number == 0 else f"Season {season_number}"
+    if not name:
+        return default_name
+    if user_lang and user_lang.lower().startswith("en"):
+        for char in name:
+            category = unicodedata.category(char)
+            if category.startswith("L"):  # letter
+                char_name = unicodedata.name(char, "")
+                if "LATIN" not in char_name:
+                    return default_name
+    return name
+
 
 
 async def get_user_tvdb_key(db: AsyncSession, user_id: int) -> str | None:
@@ -132,16 +148,24 @@ async def get_enriched_show_info(db: AsyncSession, current_user_id: int, series_
                 "air_date": air_date
             })
 
-    # Re-apply custom season names to the updated seasons_meta list
+    # Re-apply custom season names to the updated seasons_meta list and filter/sanitize
+    user_lang = await get_user_content_language(db, current_user_id)
     custom_season_names = show_info.get("custom_season_names") or {}
+    filtered_seasons = []
     for s in seasons_meta:
-        s_num_str = str(s.get("season_number"))
-        if s_num_str in custom_season_names:
+        if s.get("episode_count", 0) <= 0:
+            continue
+        s_num = s.get("season_number")
+        s_num_str = str(s_num)
+        if s_num_str in custom_season_names and custom_season_names[s_num_str]:
             s["name"] = custom_season_names[s_num_str]
             s["custom_name"] = custom_season_names[s_num_str]
+        else:
+            s["name"] = sanitize_season_name(s.get("name"), s_num, user_lang)
+        filtered_seasons.append(s)
 
-    seasons_meta.sort(key=lambda x: x.get("season_number", 0))
-    show_info["seasons_meta"] = seasons_meta
+    filtered_seasons.sort(key=lambda x: x.get("season_number", 0))
+    show_info["seasons_meta"] = filtered_seasons
     return show_info
 
 
@@ -290,7 +314,7 @@ async def get_show(
         if check_tmdb_key(api_key):
             try:
                 tmdb_extra, videos_data, tv_images = await asyncio.gather(
-                    tmdb.get_show(series_tmdb_id, api_key=api_key),
+                    tmdb.get_show(series_tmdb_id, api_key=api_key, language=user_lang),
                     tmdb.get_tv_videos(series_tmdb_id, api_key=api_key),
                     tmdb.get_tv_images(series_tmdb_id, api_key=api_key),
                 )
@@ -593,18 +617,26 @@ async def get_show(
         base_seasons_meta.sort(key=lambda x: x.get("season_number", 0))
 
         custom_names = show.custom_season_names or {}
-        enhanced_seasons_meta = [
-            {
+        enhanced_seasons_meta = []
+        for s in base_seasons_meta:
+            s_num = s["season_number"]
+            ep_count = s.get("episode_count")
+            if ep_count is None:
+                ep_count = tmdb_season_map.get(s_num, {}).get("episode_count", 0)
+            if ep_count <= 0:
+                continue
+            s_name = custom_names.get(str(s_num))
+            if not s_name:
+                s_name = sanitize_season_name(s.get("name"), s_num, user_lang)
+            enhanced_seasons_meta.append({
                 **s,
-                "name": custom_names.get(str(s["season_number"]), s.get("name")),
-                "tmdb_season_id": tmdb_season_map.get(s["season_number"], {}).get("id"),
-                "tmdb_rating": tmdb_season_map.get(s["season_number"], {}).get("vote_average"),
-                # Fill overview/air_date from live TMDB if not stored in DB
-                "overview": s.get("overview") or tmdb_season_map.get(s["season_number"], {}).get("overview"),
-                "air_date": s.get("air_date") or tmdb_season_map.get(s["season_number"], {}).get("air_date"),
-            }
-            for s in base_seasons_meta
-        ]
+                "name": s_name,
+                "episode_count": ep_count,
+                "tmdb_season_id": tmdb_season_map.get(s_num, {}).get("id"),
+                "tmdb_rating": tmdb_season_map.get(s_num, {}).get("vote_average"),
+                "overview": s.get("overview") or tmdb_season_map.get(s_num, {}).get("overview"),
+                "air_date": s.get("air_date") or tmdb_season_map.get(s_num, {}).get("air_date"),
+            })
 
         where_to_watch = await get_where_to_watch(
             db, current_user.id, series_tmdb_id, MediaType.series, show=show, tmdb_key=api_key
@@ -657,7 +689,7 @@ async def get_show(
 
     try:
         data, videos_data, tv_images = await asyncio.gather(
-            tmdb.get_show(series_tmdb_id, api_key=api_key),
+            tmdb.get_show(series_tmdb_id, api_key=api_key, language=user_lang),
             tmdb.get_tv_videos(series_tmdb_id, api_key=api_key),
             tmdb.get_tv_images(series_tmdb_id, api_key=api_key),
         )
@@ -782,12 +814,13 @@ async def get_show(
                     "season_number": s["season_number"],
                     "poster_path": tmdb.poster_url(s.get("poster_path")),
                     "episode_count": s["episode_count"],
-                    "name": s["name"],
+                    "name": sanitize_season_name(s.get("name"), s["season_number"], user_lang),
                     "air_date": s.get("air_date"),
                     "overview": s.get("overview"),
                     "tmdb_rating": s.get("vote_average"),
                 }
                 for s in data.get("seasons", [])
+                if s.get("episode_count", 0) > 0
             ],
             "seasons": seasons_data,
             "season_states": {},
@@ -891,6 +924,7 @@ async def get_show_season(
 
     # 2. Always fetch full season data from TMDB for consistent metadata
     api_key = await get_user_tmdb_key(db, current_user.id)
+    user_lang = await get_user_content_language(db, current_user.id)
 
     try:
         if check_tmdb_key(api_key):
@@ -899,12 +933,12 @@ async def get_show_season(
             # Fetch season and show info (if not local)
             if not show:
                 try:
-                    tmdb_show_data = await tmdb.get_show(series_tmdb_id, api_key=api_key)
+                    tmdb_show_data = await tmdb.get_show(series_tmdb_id, api_key=api_key, language=user_lang)
                 except Exception:
                     tmdb_show_data = {}
 
                 try:
-                    tmdb_data = await tmdb.get_season(query_show_tmdb_id, query_season_number, api_key=api_key)
+                    tmdb_data = await tmdb.get_season(query_show_tmdb_id, query_season_number, api_key=api_key, language=user_lang)
                 except Exception:
                     tmdb_data = {
                         "id": None,
@@ -934,19 +968,20 @@ async def get_show_season(
                     "seasons_meta": [
                         {
                             "season_number": s["season_number"],
-                            "name": s.get("name"),
+                            "name": sanitize_season_name(s.get("name"), s["season_number"], user_lang),
                             "overview": s.get("overview"),
                             "poster_path": tmdb.poster_url(s.get("poster_path")),
                             "episode_count": s.get("episode_count"),
                             "air_date": s.get("air_date"),
                         }
                         for s in tmdb_show_data.get("seasons", [])
+                        if s.get("episode_count", 0) > 0
                     ]
                 }
             else:
                 try:
                     tmdb_data = await tmdb.get_season(
-                        query_show_tmdb_id, query_season_number, api_key=api_key
+                        query_show_tmdb_id, query_season_number, api_key=api_key, language=user_lang
                     )
                 except Exception:
                     tmdb_data = {
@@ -1235,7 +1270,7 @@ async def get_show_season(
                 "id": tmdb_data.get("id"),
                 "tmdb_id": series_tmdb_id,
                 "season_number": season_number,
-                "name": (show.custom_season_names or {}).get(str(season_number)) or tmdb_data.get("name") if show else tmdb_data.get("name"),
+                "name": (show.custom_season_names or {}).get(str(season_number)) or sanitize_season_name(tmdb_data.get("name"), season_number, user_lang) if show else sanitize_season_name(tmdb_data.get("name"), season_number, user_lang),
                 "overview": tmdb_data.get("overview"),
                 "poster_path": tmdb.poster_url(tmdb_data.get("poster_path")),
                 "backdrop_path": tmdb.poster_url(
@@ -1283,6 +1318,7 @@ async def get_episode_detail(
     current_user: User = Depends(get_current_user),
 ):
     api_key = await get_user_tmdb_key(db, current_user.id)
+    user_lang = await get_user_content_language(db, current_user.id)
     if not check_tmdb_key(api_key):
         raise HTTPException(status_code=404, detail="TMDB API Key not configured")
 
@@ -1341,7 +1377,7 @@ async def get_episode_detail(
         if show:
             try:
                 ep_data = await tmdb.get_episode(
-                    query_show_tmdb_id, query_season_number, query_episode_number, api_key=api_key
+                    query_show_tmdb_id, query_season_number, query_episode_number, api_key=api_key, language=user_lang
                 )
             except Exception:
                 ep_data = {
@@ -1465,7 +1501,7 @@ async def get_episode_detail(
         # Get all episodes in this season for navigation (querying target season_number to match page being viewed)
         try:
             season_tmdb = await tmdb.get_season(
-                series_tmdb_id, season_number, api_key=api_key
+                series_tmdb_id, season_number, api_key=api_key, language=user_lang
             )
         except Exception:
             season_tmdb = {"episodes": []}
@@ -1782,6 +1818,8 @@ async def get_tvdb_show(
     block_ids = [-tvdb_id]
     if show_data.get("tmdb_id_cross"):
         block_ids.append(show_data["tmdb_id_cross"])
+    if show and show.tmdb_id:
+        block_ids.append(show.tmdb_id)
 
     block_q = await db.execute(
         select(BlocklistItem.is_dropped)
@@ -1807,6 +1845,15 @@ async def get_tvdb_show(
         }
         is_blocked = _is_content_filtered(temp_item, *cf)
 
+    filtered_seasons = [
+        {
+            **s,
+            "name": sanitize_season_name(s.get("name"), s.get("season_number"), user_lang),
+        }
+        for s in show_data.get("seasons", [])
+        if s.get("episode_count", 0) > 0
+    ]
+
     return {
         **show_data,
         "id": show.id if show else None,
@@ -1815,7 +1862,7 @@ async def get_tvdb_show(
         "tagline": None,
         "tmdb_rating": None,
         "imdb_id": show_data.get("imdb_id"),
-        "tmdb_id_cross": show_data.get("tmdb_id_cross"),
+        "tmdb_id_cross": show_data.get("tmdb_id_cross") or (show.tmdb_id if show and show.tmdb_id else None),
         "adult": False,
         "in_library": in_library,
         "watched": watched_overall,
@@ -1830,7 +1877,7 @@ async def get_tvdb_show(
         "user_rating": None,
         "season_states": season_states,
         "seasons": {},
-        "seasons_meta": show_data["seasons"],
+        "seasons_meta": filtered_seasons,
         "cast": cast,
         "networks": networks,
         "where_to_watch": where_to_watch,
@@ -1939,7 +1986,16 @@ async def get_tvdb_season(
             "in_lists": [],
         })
 
-    season_meta = next((s for s in show_data["seasons"] if s["season_number"] == season_number), {})
+    filtered_seasons = [
+        {
+            **s,
+            "name": sanitize_season_name(s.get("name"), s.get("season_number"), user_lang),
+        }
+        for s in show_data.get("seasons", [])
+        if s.get("episode_count", 0) > 0
+    ]
+
+    season_meta = next((s for s in filtered_seasons if s["season_number"] == season_number), {})
 
     # Compute season-level stats
     season_in_library = bool(user_collected_eps)
@@ -1967,11 +2023,11 @@ async def get_tvdb_season(
         "show": {
             "id": show.id if show else None,
             "tvdb_id": tvdb_id,
-            "tmdb_id_cross": show_data.get("tmdb_id_cross"),
+            "tmdb_id_cross": show_data.get("tmdb_id_cross") or (show.tmdb_id if show and show.tmdb_id else None),
             "title": show_data["title"],
             "poster_path": show_data["poster_path"],
             "backdrop_path": show_data["backdrop_path"],
-            "seasons_meta": show_data["seasons"],
+            "seasons_meta": filtered_seasons,
         },
     }
 
@@ -2106,7 +2162,7 @@ async def get_tvdb_episode(
         "show": {
             "id": show.id if show else None,
             "tvdb_id": tvdb_id,
-            "tmdb_id_cross": show_data.get("tmdb_id_cross"),
+            "tmdb_id_cross": show_data.get("tmdb_id_cross") or (show.tmdb_id if show and show.tmdb_id else None),
             "title": show_data["title"],
             "poster_path": show_data["poster_path"],
             "backdrop_path": show_data["backdrop_path"],
