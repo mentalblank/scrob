@@ -2816,35 +2816,34 @@ async def for_you(
     if not profile:
         return {"results": []}
 
-    movie_genres = profile.movie_genres or []
-    show_genres = profile.show_genres or []
+    liked_genres = profile.liked_genres or []
     disliked_genres: set[str] = set(profile.disliked_genres or [])
     language: str | None = getattr(profile, "content_language", None)
 
-    if not movie_genres and not show_genres:
+    if not liked_genres:
         return {"results": []}
 
-    selected_movie_genres = random.sample(movie_genres, min(2, len(movie_genres)))
-    selected_show_genres = random.sample(show_genres, min(2, len(show_genres)))
+    selected_genres = random.sample(liked_genres, min(4, len(liked_genres)))
 
     movie_coros = []
     show_coros = []
 
-    for genre_name in selected_movie_genres:
-        genre_id = MOVIE_GENRE_IDS.get(genre_name)
-        if genre_id:
+    for genre_name in selected_genres:
+        # Check if it's a movie genre
+        movie_genre_id = MOVIE_GENRE_IDS.get(genre_name)
+        if movie_genre_id:
             movie_coros.append(tmdb.discover_movies(
-                genre_id=genre_id,
+                genre_id=movie_genre_id,
                 sort_by="popularity.desc",
                 with_original_language=language,
                 api_key=tmdb_key,
             ))
-
-    for genre_name in selected_show_genres:
-        genre_id = TV_GENRE_IDS.get(genre_name)
-        if genre_id:
+        
+        # Check if it's a TV genre
+        tv_genre_id = TV_GENRE_IDS.get(genre_name)
+        if tv_genre_id:
             show_coros.append(tmdb.discover_shows(
-                genre_id=genre_id,
+                genre_id=tv_genre_id,
                 sort_by="popularity.desc",
                 with_original_language=language,
                 api_key=tmdb_key,
@@ -2868,8 +2867,8 @@ async def for_you(
         else:
             show_raw.extend(raw)
 
-    movie_liked_set = set(movie_genres)
-    show_liked_set = set(show_genres)
+    movie_liked_set = set(liked_genres)
+    show_liked_set = set(liked_genres)
 
     seen: set[int] = set()
     unique_movies: list[dict] = []
@@ -3069,8 +3068,7 @@ async def recommended(
     profile_q = await db.execute(select(UserProfileData).where(UserProfileData.user_id == current_user.id))
     _rec_profile = profile_q.scalar_one_or_none()
     _rec_disliked: set[str] = set(_rec_profile.disliked_genres or []) if _rec_profile else set()
-    _rec_movie_liked: set[str] = set(_rec_profile.movie_genres or []) if _rec_profile else set()
-    _rec_show_liked: set[str] = set(_rec_profile.show_genres or []) if _rec_profile else set()
+    _rec_liked: set[str] = set(_rec_profile.liked_genres or []) if _rec_profile else set()
 
     # Bulk-load all collected IDs for filtering later
     all_movie_ids_q = await db.execute(
@@ -3147,7 +3145,7 @@ async def recommended(
     for i, batch in enumerate(all_results):
         is_show = i >= n_movies
         name_map = TV_GENRE_NAMES if is_show else MOVIE_GENRE_NAMES
-        liked_set = _rec_show_liked if is_show else _rec_movie_liked
+        liked_set = _rec_liked
         filtered_batch = _filter_disliked(batch, _rec_disliked, liked_set, name_map)
         for item in filtered_batch:
             tmdb_id = item.get("id")
@@ -5493,7 +5491,7 @@ async def pick_for_me(
     streaming_candidates: list[dict] = []
     if streaming_ids and check_tmdb_key(tmdb_key):
         disliked: set[str] = set(profile.disliked_genres or []) if profile else set()
-        user_genres = ((profile.movie_genres if type == "movie" else profile.show_genres) or []) if profile else []
+        user_genres = (profile.liked_genres or []) if profile else []
         genre_map = MOVIE_GENRE_IDS if type == "movie" else TV_GENRE_IDS
         genre_ids = [genre_map[g] for g in user_genres if g in genre_map]
 

@@ -19,13 +19,13 @@ const allProviders = providersRes.results || [];
 const PROVIDER_NAMES = Object.fromEntries(allProviders.map(p => [String(p.provider_id), p.provider_name]));
 const hasProfileData = !!(
   profileData?.country ||
-  (profileData?.movie_genres?.length ?? 0) > 0 ||
-  (profileData?.show_genres?.length ?? 0) > 0 ||
+  (profileData?.liked_genres?.length ?? 0) > 0 ||
   (profileData?.streaming_services?.length ?? 0) > 0
 );
 
-const topMovieGenres = (profileData?.movie_genres ?? []).slice(0, 3);
-const topShowGenres  = (profileData?.show_genres  ?? []).slice(0, 3);
+const topGenres = (profileData?.liked_genres ?? []).slice(0, 6);
+const topMovieGenres = topGenres.filter(g => movieGenresRes?.genres.some((mg: any) => mg.name === g));
+const topShowGenres = topGenres.filter(g => tvGenresRes?.genres.some((tg: any) => tg.name === g));
 
 const userServices = (profileData?.streaming_services ?? []);
 const hasMediaServer = !!(settings?.plex_url || settings?.jellyfin_url || settings?.emby_url);

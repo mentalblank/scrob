@@ -490,37 +490,18 @@ Lists
             </div>
 
             <!-- Favorite Genres -->
-            {(profile.movie_genres.length > 0 || profile.show_genres.length > 0) && (
+            {profile.liked_genres.length > 0 && (
               <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
                 <h3 class="group-label mb-4">
                   Favorite Genres
                 </h3>
-
-                {profile.movie_genres.length > 0 && (
-                  <div class="mb-4">
-                    <p class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Movies</p>
-                    <div class="flex flex-wrap gap-1.5">
-                      {profile.movie_genres.map((g) => (
-                        <span class="px-2.5 py-1 bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-bold uppercase rounded-full tracking-wide">
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {profile.show_genres.length > 0 && (
-                  <div>
-                    <p class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Shows</p>
-                    <div class="flex flex-wrap gap-1.5">
-                      {profile.show_genres.map((g) => (
-                        <span class="px-2.5 py-1 bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold uppercase rounded-full tracking-wide">
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div class="flex flex-wrap gap-1.5">
+                  {profile.liked_genres.map((g) => (
+                    <span class="px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold uppercase rounded-full tracking-wide">
+                      {g}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
 

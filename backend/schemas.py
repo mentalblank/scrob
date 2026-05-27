@@ -246,8 +246,7 @@ class UserProfileUpdate(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     country: Optional[str] = None
-    movie_genres: Optional[list[str]] = None
-    show_genres: Optional[list[str]] = None
+    liked_genres: Optional[list[str]] = None
     disliked_genres: Optional[list[str]] = None
     streaming_services: Optional[list[str]] = None
     content_language: Optional[str] = None
@@ -258,8 +257,7 @@ class UserProfileResponse(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     country: Optional[str] = None
-    movie_genres: list[str] = []
-    show_genres: list[str] = []
+    liked_genres: list[str] = []
     disliked_genres: list[str] = []
     streaming_services: list[str] = []
     content_language: Optional[str] = None
@@ -267,7 +265,7 @@ class UserProfileResponse(BaseModel):
     avatar_url: Optional[str] = None
     pagination_type: str = "infinite_scroll"
 
-    @field_validator('movie_genres', 'show_genres', 'disliked_genres', 'streaming_services', mode='before')
+    @field_validator('liked_genres', 'disliked_genres', 'streaming_services', mode='before')
     @classmethod
     def _none_to_list(cls, v: object) -> list:
         return v if v is not None else []
@@ -281,8 +279,7 @@ class PublicProfileResponse(BaseModel):
     display_name: str
     bio: Optional[str] = None
     country: Optional[str] = None
-    movie_genres: list[str] = []
-    show_genres: list[str] = []
+    liked_genres: list[str] = []
     created_at: datetime
     # Stats
     total_watched: int = 0

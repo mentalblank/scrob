@@ -18,8 +18,7 @@ const prefs: UserPreferences = {
   display_name: null,
   bio: null,
   country: null,
-  movie_genres: [],
-  show_genres: [],
+  liked_genres: [],
   disliked_genres: [],
   streaming_services: [],
   content_language: null,
@@ -41,11 +40,11 @@ const CONTENT_LANGUAGES = (languagesRes || [])
 
 const MOVIE_GENRES = (movieGenresRes?.genres || []).map(g => g.name).sort();
 const SHOW_GENRES = (showGenresRes?.genres || []).map(g => g.name).sort();
+const ALL_GENRES = [...new Set([...MOVIE_GENRES, ...SHOW_GENRES])].sort();
 
 const watchRegion = prefs.country || "US";
 const providersRes = await api.media.getWatchProviders("movie", watchRegion, token).catch(() => ({ results: [] }));
 const allProviders = providersRes.results || [];
-const ALL_GENRES = [...new Set([...MOVIE_GENRES, ...SHOW_GENRES])].sort();
 
 const COUNTRIES = (countriesRes || [])
   .map(c => [c.iso_3166_1, c.english_name])
@@ -226,42 +225,19 @@ const COUNTRIES = (countriesRes || [])
         </div>
       </section>
 
-      <!-- Favourite Movie Genres -->
+      <!-- Favourite Genres -->
       <section>
         <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="section-headline">Favourite Movie Genres</h2>
+          <h2 class="section-headline">Favourite Genres</h2>
           <p class="text-xs text-zinc-500 mt-1">Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.</p>
         </div>
-        <div id="movie-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.movie_genres)}>
-          {MOVIE_GENRES.map((genre) => {
-            const active = prefs.movie_genres.includes(genre);
+        <div id="liked-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.liked_genres)}>
+          {ALL_GENRES.map((genre) => {
+            const active = (prefs.liked_genres || []).includes(genre);
             return (
               <button
                 type="button"
-                data-genre-type="movie"
-                data-value={genre}
-                class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-800/50 ${active ? "bg-blue-600/10 border-blue-500/40 text-blue-400 ring-2 ring-blue-500/20" : "bg-zinc-900 border-zinc-800 text-zinc-500"}`}
-              >
-                {genre}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <!-- Favourite Show Genres -->
-      <section>
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="section-headline">Favourite Show Genres</h2>
-          <p class="text-xs text-zinc-500 mt-1">Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.</p>
-        </div>
-        <div id="show-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.show_genres)}>
-          {SHOW_GENRES.map((genre) => {
-            const active = prefs.show_genres.includes(genre);
-            return (
-              <button
-                type="button"
-                data-genre-type="show"
+                data-genre-type="liked"
                 data-value={genre}
                 class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-800/50 ${active ? "bg-blue-600/10 border-blue-500/40 text-blue-400 ring-2 ring-blue-500/20" : "bg-zinc-900 border-zinc-800 text-zinc-500"}`}
               >
@@ -368,9 +344,6 @@ const COUNTRIES = (countriesRes || [])
               </label>
             </div>
           </div>
-        </div>
-      </section>
-
         </div>
       </section>
 
@@ -481,13 +454,11 @@ const COUNTRIES = (countriesRes || [])
 
     // Discovery Preference Toggles
     const streamingList = document.getElementById('streaming-services-list');
-    const movieGenreList = document.getElementById('movie-genre-list');
-    const showGenreList = document.getElementById('show-genre-list');
+    const likedGenreList = document.getElementById('liked-genre-list');
     const dislikedGenreList = document.getElementById('disliked-genre-list');
     
     const selectedStreaming = new Set(JSON.parse(streamingList?.dataset.selected || '[]'));
-    const selectedMovieGenres = new Set(JSON.parse(movieGenreList?.dataset.selected || '[]'));
-    const selectedShowGenres = new Set(JSON.parse(showGenreList?.dataset.selected || '[]'));
+    const selectedLikedGenres = new Set(JSON.parse(likedGenreList?.dataset.selected || '[]'));
     const selectedDislikedGenres = new Set(JSON.parse(dislikedGenreList?.dataset.selected || '[]'));
 
     function refreshButton(btn: HTMLElement, active: boolean, isDislike = false) {
@@ -518,14 +489,14 @@ const COUNTRIES = (countriesRes || [])
       refreshButton(btn, selectedStreaming.has(id));
     });
 
-    movieGenreList?.addEventListener('click', (e) => {
+    likedGenreList?.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
       if (!btn) return;
       const val = btn.dataset.value!;
-      if (selectedMovieGenres.has(val)) {
-        selectedMovieGenres.delete(val);
+      if (selectedLikedGenres.has(val)) {
+        selectedLikedGenres.delete(val);
       } else {
-        selectedMovieGenres.add(val);
+        selectedLikedGenres.add(val);
         // Mutual exclusivity: remove from disliked
         if (selectedDislikedGenres.has(val)) {
           selectedDislikedGenres.delete(val);
@@ -533,25 +504,7 @@ const COUNTRIES = (countriesRes || [])
           if (dislikedBtn) refreshButton(dislikedBtn, false, true);
         }
       }
-      refreshButton(btn, selectedMovieGenres.has(val));
-    });
-
-    showGenreList?.addEventListener('click', (e) => {
-      const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
-      if (!btn) return;
-      const val = btn.dataset.value!;
-      if (selectedShowGenres.has(val)) {
-        selectedShowGenres.delete(val);
-      } else {
-        selectedShowGenres.add(val);
-        // Mutual exclusivity: remove from disliked
-        if (selectedDislikedGenres.has(val)) {
-          selectedDislikedGenres.delete(val);
-          const dislikedBtn = dislikedGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
-          if (dislikedBtn) refreshButton(dislikedBtn, false, true);
-        }
-      }
-      refreshButton(btn, selectedShowGenres.has(val));
+      refreshButton(btn, selectedLikedGenres.has(val));
     });
 
     dislikedGenreList?.addEventListener('click', (e) => {
@@ -562,16 +515,11 @@ const COUNTRIES = (countriesRes || [])
         selectedDislikedGenres.delete(val);
       } else {
         selectedDislikedGenres.add(val);
-        // Mutual exclusivity: remove from movie and show genres
-        if (selectedMovieGenres.has(val)) {
-          selectedMovieGenres.delete(val);
-          const movieBtn = movieGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
-          if (movieBtn) refreshButton(movieBtn, false);
-        }
-        if (selectedShowGenres.has(val)) {
-          selectedShowGenres.delete(val);
-          const showBtn = showGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
-          if (showBtn) refreshButton(showBtn, false);
+        // Mutual exclusivity: remove from liked
+        if (selectedLikedGenres.has(val)) {
+          selectedLikedGenres.delete(val);
+          const likedBtn = likedGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
+          if (likedBtn) refreshButton(likedBtn, false);
         }
       }
       refreshButton(btn, selectedDislikedGenres.has(val), true);
@@ -661,12 +609,6 @@ const COUNTRIES = (countriesRes || [])
       const country = (document.getElementById('country') as HTMLSelectElement | null)?.value ?? '';
       const contentLanguage = (document.getElementById('content_language') as HTMLSelectElement | null)?.value ?? '';
 
-      const activeChips = (group: string) => {
-        const activeClass = group === 'disliked-genre' ? 'bg-red-500\\/20' : 'bg-blue-500\\/20';
-        return Array.from(document.querySelectorAll<HTMLButtonElement>(`button[data-chip="${group}"].${activeClass}`))
-          .map(b => b.dataset.value ?? '');
-      };
-
       try {
         const unifiedFilters = (document.querySelector('input[name="unified_filters"]:checked') as HTMLInputElement | null)?.value === 'true';
 
@@ -684,8 +626,7 @@ const COUNTRIES = (countriesRes || [])
             privacy_level: (document.querySelector('input[name="privacy_level"]:checked') as HTMLInputElement | null)?.value,
             pagination_type: (document.querySelector('input[name="pagination_type"]:checked') as HTMLInputElement | null)?.value,
             streaming_services: Array.from(selectedStreaming),
-            movie_genres: Array.from(selectedMovieGenres),
-            show_genres: Array.from(selectedShowGenres),
+            liked_genres: Array.from(selectedLikedGenres),
             disliked_genres: Array.from(selectedDislikedGenres),
           }),
         });
