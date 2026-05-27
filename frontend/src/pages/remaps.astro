@@ -13,7 +13,6 @@ let groupedShowsList = [];
 let customTitles = [];
 let groupedCustomTitlesList = [];
 let error = "";
-let hasTvdbKey = false;
 
 try {
   const BACKEND_PORT = (import.meta.env.BACKEND_PORT as string | undefined) ?? "7331";
@@ -24,10 +23,6 @@ try {
     fetch(`http://localhost:${BACKEND_PORT}/sync/custom-titles`, { headers: { 'Authorization': `Bearer ${token}` } }),
     api.auth.getSettings(token)
   ]);
-  
-  if (settings) {
-    hasTvdbKey = settings.has_effective_tvdb_key;
-  }
   
   if (resSeason.ok) seasonOverrides = await resSeason.json();
   else error += "Failed to load season overrides. ";
@@ -103,7 +98,7 @@ try {
 ---
 
 <Base title="Metadata Overrides">
-  <div id="app-data" data-token={token} data-has-tvdb-key={hasTvdbKey ? "true" : "false"} class="hidden" aria-hidden="true"></div>
+  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
 
   <div class="max-w-6xl mx-auto px-4 py-8">
     <!-- Header with Back Button -->
@@ -234,12 +229,6 @@ try {
               placeholder="Search episode remaps..." 
               class="px-4 py-2 bg-zinc-950/40 border border-zinc-800 focus:border-indigo-500 rounded-xl text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-64 placeholder-zinc-600 transition-all"
             />
-          )}
-          {hasTvdbKey && (
-            <button id="auto-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/80 text-zinc-200 hover:text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">
-              <svg class="w-4 h-4 text-indigo-400 animate-pulse" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
-              TVDB ⇆ TMDB Auto-Remapper
-            </button>
           )}
           <button id="add-ep-remap-btn" class="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg active:scale-95 cursor-pointer shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
@@ -598,59 +587,19 @@ try {
         
         <!-- STEP 1: SOURCE SHOW & SEASON -->
         <div class="space-y-4">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
-              <span class="w-5 h-5 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center font-bold">1</span>
-              Source Season (From Library)
-            </h3>
-            <button id="toggle-source-mode-btn" class="text-xs text-blue-400 hover:underline font-semibold cursor-pointer">
-              Toggle Manual TMDB Input
-            </button>
-          </div>          <!-- Mode A: Search & Selection -->
-          <div id="source-select-group" class="space-y-4">
-            <!-- Search Box -->
-            <div class="flex gap-2">
-              <input type="text" id="source-search-input" placeholder="Search local library for source show (e.g. Demon Slayer)..." class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
-              <button id="source-search-btn" class="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-200 font-bold rounded-xl text-sm transition-all cursor-pointer">
-                Search
-              </button>
-            </div>
+          <h3 class="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center font-bold">1</span>
+            Source Season (From Library)
+          </h3>
 
-            <!-- Search Results Container -->
-            <div id="source-search-results-container" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-56 overflow-y-auto pr-1 hidden border border-zinc-850 p-2.5 rounded-2xl bg-zinc-950/40">
-              <!-- Results populated here dynamically -->
-            </div>
-
-            <!-- Selected Card -->
-            <div id="source-selected-card" class="flex items-center gap-4 p-4 bg-blue-950/20 border border-blue-900/30 rounded-2xl hidden">
-              <div class="w-10 h-15 rounded-lg overflow-hidden bg-zinc-950 shrink-0 shadow-md border border-zinc-850">
-                <img id="source-selected-poster" src="" alt="" class="w-full h-full object-cover hidden" />
-                <div id="source-selected-no-poster" class="w-full h-full bg-zinc-900 flex items-center justify-center text-[8px] text-zinc-650 font-bold">NO ART</div>
-              </div>
-              <div class="min-w-0 flex-1">
-                <span class="text-[9px] font-extrabold uppercase text-blue-400 tracking-wider">Selected Source</span>
-                <h4 id="source-selected-title" class="text-zinc-100 font-bold truncate text-sm"></h4>
-                <p id="source-selected-meta" class="text-[10px] text-zinc-400 mt-0.5"></p>
-              </div>
-              <button id="source-change-btn" class="px-3 py-1.5 bg-zinc-850 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-lg cursor-pointer transition">
-                Change
-              </button>
-            </div>
-
-            <!-- Season Selection -->
-            <div id="source-season-group" class="space-y-2 hidden">
-              <label class="block text-xs font-semibold text-zinc-400">Select Source Season</label>
-              <div id="source-season-buttons" class="flex flex-wrap gap-2">
-                <!-- Season buttons generated dynamically -->
-              </div>
-            </div>
-          </div>
-
-          <!-- Mode B: Manual Input (Hidden) -->
-          <div id="source-manual-group" class="grid grid-cols-1 sm:grid-cols-2 gap-4 hidden">
+          <div id="source-manual-group" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Source Show TMDB ID</label>
+              <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Source Show ID</label>
               <div class="flex gap-2">
+                <select id="source-show-id-type" class="bg-zinc-950 border border-zinc-800 rounded-xl px-2 py-2 text-zinc-300 text-xs focus:border-blue-500 focus:outline-none transition cursor-pointer">
+                  <option value="tmdb">TMDB</option>
+                  <option value="tvdb">TVDB</option>
+                </select>
                 <input type="number" id="source-show-tmdb-input" placeholder="e.g. 85937" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
                 <button id="source-show-lookup-btn" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer">Lookup</button>
               </div>
@@ -673,58 +622,21 @@ try {
 
         <hr class="border-zinc-850" />
 
-        <!-- STEP 2: TARGET SHOW & SEASON (TMDB SEARCH) -->
+        <!-- STEP 2: TARGET SHOW & SEASON -->
         <div class="space-y-4">
           <h3 class="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
             <span class="w-5 h-5 rounded-full bg-zinc-800 text-zinc-400 text-xs flex items-center justify-center font-bold">2</span>
-            Target Season (On TMDB)
+            Target Season (On TMDB/TVDB)
           </h3>
 
-          <!-- Mode A: Search & Selection -->
-          <div id="target-select-group" class="space-y-4">
-            <!-- Search Box -->
-            <div class="flex gap-2">
-              <input type="text" id="target-search-input" placeholder="Search TMDB for target show (e.g. Demon Slayer)..." class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
-              <button id="target-search-btn" class="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-200 font-bold rounded-xl text-sm transition-all cursor-pointer">
-                Search
-              </button>
-            </div>
-
-            <!-- Search Results Container -->
-            <div id="search-results-container" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-56 overflow-y-auto pr-1 hidden border border-zinc-850 p-2.5 rounded-2xl bg-zinc-950/40">
-              <!-- Results populated here dynamically -->
-            </div>
-
-            <!-- Selected Card -->
-            <div id="target-selected-card" class="flex items-center gap-4 p-4 bg-blue-950/20 border border-blue-900/30 rounded-2xl hidden">
-              <div class="w-10 h-15 rounded-lg overflow-hidden bg-zinc-950 shrink-0 shadow-md border border-zinc-850">
-                <img id="target-selected-poster" src="" alt="" class="w-full h-full object-cover hidden" />
-                <div id="target-selected-no-poster" class="w-full h-full bg-zinc-900 flex items-center justify-center text-[8px] text-zinc-650 font-bold">NO ART</div>
-              </div>
-              <div class="min-w-0 flex-1">
-                <span class="text-[9px] font-extrabold uppercase text-blue-400 tracking-wider">Selected Target</span>
-                <h4 id="target-selected-title" class="text-zinc-100 font-bold truncate text-sm"></h4>
-                <p id="target-selected-meta" class="text-[10px] text-zinc-400 mt-0.5"></p>
-              </div>
-              <button id="target-change-btn" class="px-3 py-1.5 bg-zinc-850 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-lg cursor-pointer transition">
-                Change
-              </button>
-            </div>
-
-            <!-- Season Selection -->
-            <div id="target-season-group" class="space-y-2 hidden">
-              <label class="block text-xs font-semibold text-zinc-400">Select Target Season</label>
-              <div id="target-season-buttons" class="flex flex-wrap gap-2">
-                <!-- Season buttons generated dynamically -->
-              </div>
-            </div>
-          </div>
-
-          <!-- Mode B: Manual Input (Hidden) -->
-          <div id="target-manual-group" class="grid grid-cols-1 sm:grid-cols-2 gap-4 hidden">
+          <div id="target-manual-group" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Target Show TMDB ID</label>
+              <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Target Show ID</label>
               <div class="flex gap-2">
+                <select id="target-show-id-type" class="bg-zinc-950 border border-zinc-800 rounded-xl px-2 py-2 text-zinc-300 text-xs focus:border-blue-500 focus:outline-none transition cursor-pointer">
+                  <option value="tmdb">TMDB</option>
+                  <option value="tvdb">TVDB</option>
+                </select>
                 <input type="number" id="target-show-tmdb-input" placeholder="e.g. 85937" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
                 <button id="target-show-lookup-btn" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer">Lookup</button>
               </div>
@@ -759,171 +671,7 @@ try {
 
     </div>
   </div>
-</Base>
-
-  <!-- Auto-Remap Modal -->
-  <div id="auto-remap-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
-    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] backdrop-blur-xl">
-      
-      <!-- Modal Header -->
-      <div class="px-6 py-5 border-b border-zinc-850 flex items-center justify-between shrink-0">
-        <div>
-          <h3 class="text-xl font-bold text-zinc-100 tracking-tight flex items-center gap-2">
-            <svg class="w-6 h-6 text-indigo-400 animate-pulse" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
-            TVDB ⇆ TMDB Episode Auto-Remapper
-          </h3>
-          <p class="text-zinc-400 text-xs mt-1">Intelligently match and remap seasons & episodes of a show between TVDB and TMDB databases automatically.</p>
-        </div>
-        <button id="close-auto-modal-btn" class="p-2 -mr-2 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded-full transition-colors cursor-pointer">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-        </button>
-      </div>
-
-      <!-- Modal Body (Scrollable) -->
-      <div class="p-6 overflow-y-auto space-y-6 flex-1 min-h-0">
-        
-        <!-- Input Configuration Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-zinc-950/40 border border-zinc-850 p-5 rounded-2xl">
-          
-          <!-- Left: TMDB Show Search -->
-          <div class="space-y-3">
-            <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">1. TMDB Show</h4>
-            <div class="flex gap-2">
-              <input type="text" id="auto-tmdb-search" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Search by name or TMDB ID..." />
-              <button id="auto-tmdb-search-btn" type="button" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer shrink-0">Search</button>
-            </div>
-            <!-- TMDB Search Results -->
-            <div id="auto-tmdb-results" class="hidden max-h-48 overflow-y-auto border border-zinc-850 rounded-xl bg-zinc-950/60 divide-y divide-zinc-850/50"></div>
-            <!-- TMDB Selected Show Card -->
-            <div id="auto-tmdb-selected" class="hidden flex items-center gap-3 p-3 bg-emerald-950/20 border border-emerald-900/30 rounded-xl">
-              <img id="auto-tmdb-selected-poster" src="" class="w-9 h-13 rounded-lg object-cover hidden shrink-0 border border-zinc-800" />
-              <div id="auto-tmdb-selected-no-poster" class="w-9 h-13 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[7px] text-zinc-600 font-bold shrink-0 hidden">NO ART</div>
-              <div class="min-w-0 flex-1">
-                <span class="text-[8px] font-extrabold uppercase text-emerald-400 tracking-wider">TMDB Show Selected</span>
-                <h4 id="auto-tmdb-selected-title" class="text-zinc-100 font-bold truncate text-xs mt-0.5"></h4>
-                <span id="auto-tmdb-selected-meta" class="text-[9px] text-zinc-500 font-medium"></span>
-              </div>
-              <button id="auto-tmdb-change-btn" type="button" class="px-2.5 py-1 bg-zinc-850 hover:bg-zinc-800 text-zinc-400 font-bold text-[10px] rounded-lg cursor-pointer transition shrink-0">Change</button>
-            </div>
-            <!-- Hidden input for actual ID -->
-            <input type="hidden" id="auto-tmdb-id" />
-          </div>
-
-          <!-- Right: TVDB Show Search + API Key -->
-          <div class="space-y-3">
-            <h4 class="text-xs font-black uppercase tracking-widest text-zinc-400">2. TVDB Show</h4>
-
-            <div class="flex gap-2">
-              <input type="text" id="auto-tvdb-search" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 text-sm focus:border-indigo-500 focus:outline-none transition" placeholder="Search by name or TVDB ID..." />
-              <button id="auto-tvdb-search-btn" type="button" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer shrink-0">Search</button>
-            </div>
-            <!-- TVDB Search Results -->
-            <div id="auto-tvdb-results" class="hidden max-h-48 overflow-y-auto border border-zinc-850 rounded-xl bg-zinc-950/60 divide-y divide-zinc-850/50"></div>
-            <!-- TVDB Selected Show Card -->
-            <div id="auto-tvdb-selected" class="hidden flex items-center gap-3 p-3 bg-indigo-950/20 border border-indigo-900/30 rounded-xl">
-              <img id="auto-tvdb-selected-poster" src="" class="w-9 h-13 rounded-lg object-cover hidden shrink-0 border border-zinc-800" />
-              <div id="auto-tvdb-selected-no-poster" class="w-9 h-13 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[7px] text-zinc-600 font-bold shrink-0 hidden">NO ART</div>
-              <div class="min-w-0 flex-1">
-                <span class="text-[8px] font-extrabold uppercase text-indigo-400 tracking-wider">TVDB Show Selected</span>
-                <h4 id="auto-tvdb-selected-title" class="text-zinc-100 font-bold truncate text-xs mt-0.5"></h4>
-                <span id="auto-tvdb-selected-meta" class="text-[9px] text-zinc-500 font-medium"></span>
-              </div>
-              <button id="auto-tvdb-change-btn" type="button" class="px-2.5 py-1 bg-zinc-850 hover:bg-zinc-800 text-zinc-400 font-bold text-[10px] rounded-lg cursor-pointer transition shrink-0">Change</button>
-            </div>
-            <!-- Hidden input for actual ID -->
-            <input type="hidden" id="auto-tvdb-id" />
-          </div>
-
-        </div>
-
-        <!-- Generate Button Section -->
-        <div class="flex justify-center">
-          <button id="generate-preview-btn" class="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg active:scale-95 cursor-pointer">
-            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
-            Generate Match Preview
-          </button>
-        </div>
-
-        <!-- Loading Indicator -->
-        <div id="auto-remap-loader" class="hidden flex flex-col items-center justify-center py-12">
-          <div class="w-12 h-12 rounded-full border-4 border-indigo-600/30 border-t-indigo-600 animate-spin mb-4"></div>
-          <span class="text-zinc-400 text-sm font-bold animate-pulse">Fetching and matching episodes across metadata sources...</span>
-        </div>
-
-        <!-- Preview Results Area (Hidden Initially) -->
-        <div id="preview-results-area" class="hidden space-y-4">
-          
-          <!-- Summary Banner -->
-          <div class="flex items-center justify-between p-4 bg-zinc-950/80 border border-zinc-800 rounded-2xl">
-            <div>
-              <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider">Matching Integrity</span>
-              <div class="flex items-center gap-2 mt-0.5">
-                <span id="preview-match-stats" class="text-lg font-bold text-zinc-100">0 / 0 matched successfully</span>
-                <span id="preview-match-pct" class="text-xs bg-emerald-950 border border-emerald-900/60 text-emerald-400 px-2 py-0.5 rounded-full font-extrabold">100%</span>
-              </div>
-            </div>
-            <div class="text-right">
-              <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider">Unmatched Count</span>
-              <div id="preview-unmatched-badge" class="text-sm font-bold text-zinc-400 mt-0.5">0 episodes</div>
-            </div>
-          </div>
-
-          <!-- Filter Tabs -->
-          <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-zinc-850 pb-3">
-            <div class="flex flex-wrap items-center gap-3 shrink-0">
-              <div class="flex gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-850 shrink-0">
-                <button id="filter-all-btn" type="button" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-zinc-800 text-zinc-100 shadow cursor-pointer">
-                  Show All
-                </button>
-                <button id="filter-matched-btn" type="button" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-zinc-400 hover:text-zinc-200 cursor-pointer">
-                  Matched Only
-                </button>
-                <button id="filter-unmatched-btn" type="button" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5 cursor-pointer">
-                  Unmatched Only
-                  <span id="unmatched-count-badge" class="bg-indigo-950 text-indigo-400 border border-indigo-900/60 px-1.5 py-0.5 rounded-full text-[9px] font-black">0</span>
-                </button>
-              </div>
-              <input 
-                type="text" 
-                id="auto-remap-search" 
-                placeholder="Search mapping preview..." 
-                class="px-3.5 py-1.5 bg-zinc-950/40 border border-zinc-800 focus:border-indigo-500 rounded-xl text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-56 placeholder-zinc-600 transition-all"
-              />
-            </div>
-            <div class="text-xs text-zinc-500 font-bold tracking-wide uppercase">
-              Check/uncheck rows to customize what is applied.
-            </div>
-          </div>
-
-          <!-- Matching List Grid -->
-          <div class="border border-zinc-850 rounded-2xl overflow-hidden bg-zinc-950/20">
-            <div class="px-4 py-3 bg-zinc-950 border-b border-zinc-850 grid grid-cols-12 text-[10px] font-black uppercase text-zinc-500 tracking-wider shrink-0 hidden lg:grid gap-4">
-              <div class="col-span-5">TVDB Source Episode</div>
-              <div class="col-span-3 text-center">Match Integrity & Confidence</div>
-              <div class="col-span-4">TMDB Target Selector</div>
-            </div>
-            
-            <div id="preview-matches-list" class="divide-y divide-zinc-850/60 overflow-y-auto max-h-[480px] text-xs scrollbar-thin">
-              <!-- Dynamically populated rows -->
-            </div>
-          </div>
-
-        </div>
-
-      </div>
-
-      <!-- Modal Footer -->
-      <div class="px-6 py-4 bg-zinc-950/60 border-t border-zinc-850 flex justify-end gap-3 shrink-0">
-        <button id="cancel-auto-modal-btn" class="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 font-bold rounded-xl text-sm transition-all cursor-pointer">
-          Cancel
-        </button>
-        <button id="apply-auto-remaps-btn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/30 disabled:text-white/40 text-white font-bold rounded-xl text-sm transition-all disabled:cursor-not-allowed cursor-pointer shadow-lg" disabled>
-          Apply Auto-Remaps
-        </button>
-      </div>
-
-    </div>
-  </div>
+</Base>  </div>
 
   <!-- Episode Remap Modal -->
   <div id="ep-remap-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
@@ -948,14 +696,28 @@ try {
         
         <!-- STEP 1: TMDB IDs -->
         <div class="space-y-4 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
-          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Show TMDB IDs</label>
+          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Show IDs</label>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Source TMDB ID</label>
+              <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Source Show ID Type</label>
+              <div class="mb-2">
+                <select id="ep-src-type" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-2 text-zinc-300 text-xs focus:border-indigo-500 focus:outline-none transition cursor-pointer">
+                  <option value="tmdb">TMDB</option>
+                  <option value="tvdb">TVDB</option>
+                </select>
+              </div>
+              <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Source Show ID</label>
               <input type="number" id="ep-src-tmdb" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-zinc-200 text-xs font-semibold focus:border-indigo-500 focus:outline-none transition" placeholder="e.g. 30984" required />
             </div>
             <div>
-              <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Target TMDB ID</label>
+              <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Target Show ID Type</label>
+              <div class="mb-2">
+                <select id="ep-tgt-type" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-2 text-zinc-300 text-xs focus:border-indigo-500 focus:outline-none transition cursor-pointer">
+                  <option value="tmdb">TMDB</option>
+                  <option value="tvdb">TVDB</option>
+                </select>
+              </div>
+              <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Target Show ID</label>
               <input type="number" id="ep-tgt-tmdb" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-zinc-200 text-xs font-semibold focus:border-indigo-500 focus:outline-none transition" placeholder="e.g. 30984" required />
             </div>
           </div>
@@ -1125,7 +887,6 @@ try {
   document.addEventListener("DOMContentLoaded", () => {
     const appData = document.getElementById("app-data");
     const token = appData?.dataset.token;
-    const hasSavedTvdbKey = appData?.dataset.hasTvdbKey === "true";
     if (!token) return;
     // Modal Control Elements
     const remapModal = document.getElementById("remap-modal")!;
@@ -1135,21 +896,7 @@ try {
     const saveRemapBtn = document.getElementById("save-remap-btn") as HTMLButtonElement;
 
     // Wizard Step 1 Elements (Source)
-    const toggleSourceModeBtn = document.getElementById("toggle-source-mode-btn")!;
-    const sourceSelectGroup = document.getElementById("source-select-group")!;
     const sourceManualGroup = document.getElementById("source-manual-group")!;
-    const sourceSearchInput = document.getElementById("source-search-input") as HTMLInputElement;
-    const sourceSearchBtn = document.getElementById("source-search-btn")!;
-    const sourceSearchResultsContainer = document.getElementById("source-search-results-container")!;
-    const sourceSelectedCard = document.getElementById("source-selected-card")!;
-    const sourceSelectedPoster = document.getElementById("source-selected-poster") as HTMLImageElement;
-    const sourceSelectedNoPoster = document.getElementById("source-selected-no-poster")!;
-    const sourceSelectedTitle = document.getElementById("source-selected-title")!;
-    const sourceSelectedMeta = document.getElementById("source-selected-meta")!;
-    const sourceChangeBtn = document.getElementById("source-change-btn")!;
-    const sourceSeasonGroup = document.getElementById("source-season-group")!;
-    const sourceSeasonButtons = document.getElementById("source-season-buttons")!;
-
     const sourceShowTmdbInput = document.getElementById("source-show-tmdb-input") as HTMLInputElement;
     const sourceSeasonInput = document.getElementById("source-season-input") as HTMLInputElement;
     const sourceShowLookupBtn = document.getElementById("source-show-lookup-btn")!;
@@ -1160,19 +907,6 @@ try {
     const sourceManualMeta = document.getElementById("source-manual-meta")!;
 
     // Wizard Step 2 Elements (Target)
-    const targetSelectGroup = document.getElementById("target-select-group")!;
-    const targetSearchInput = document.getElementById("target-search-input") as HTMLInputElement;
-    const targetSearchBtn = document.getElementById("target-search-btn")!;
-    const searchResultsContainer = document.getElementById("search-results-container")!;
-    const targetSelectedCard = document.getElementById("target-selected-card")!;
-    const targetSelectedPoster = document.getElementById("target-selected-poster") as HTMLImageElement;
-    const targetSelectedNoPoster = document.getElementById("target-selected-no-poster")!;
-    const targetSelectedTitle = document.getElementById("target-selected-title")!;
-    const targetSelectedMeta = document.getElementById("target-selected-meta")!;
-    const targetChangeBtn = document.getElementById("target-change-btn")!;
-    const targetSeasonGroup = document.getElementById("target-season-group")!;
-    const targetSeasonButtons = document.getElementById("target-season-buttons")!;
-
     const targetManualGroup = document.getElementById("target-manual-group")!;
     const targetShowTmdbInput = document.getElementById("target-show-tmdb-input") as HTMLInputElement;
     const targetSeasonInput = document.getElementById("target-season-input") as HTMLInputElement;
@@ -1184,20 +918,13 @@ try {
     const targetManualMeta = document.getElementById("target-manual-meta")!;
 
     // State Variables
-    let sourceMode: "select" | "manual" = "select";
     let localShowsList: any[] = [];
     let localMoviesList: any[] = [];
-    let selectedLocalShowObj: any = null;
-    let selectedLocalSeasonNum: number | null = null;
-
-    let targetSelectedShowObj: any = null;
-    let targetSelectedSeasonNum: number | null = null;
 
     // Open Modal Action
     addRemapBtn.addEventListener("click", () => {
       resetModalState();
       remapModal.classList.remove("opacity-0", "pointer-events-none");
-      fetchLocalShows();
     });
 
     // Close Modal Action
@@ -1206,26 +933,6 @@ try {
     };
     closeModalBtn.addEventListener("click", closeModal);
     cancelModalBtn.addEventListener("click", closeModal);
-
-    // Toggle manual/selection inputs for source and target show simultaneously
-    toggleSourceModeBtn.addEventListener("click", () => {
-      if (sourceMode === "select") {
-        sourceMode = "manual";
-        sourceSelectGroup.classList.add("hidden");
-        sourceManualGroup.classList.remove("hidden");
-        targetSelectGroup.classList.add("hidden");
-        targetManualGroup.classList.remove("hidden");
-        toggleSourceModeBtn.textContent = "Select From Collection";
-      } else {
-        sourceMode = "select";
-        sourceManualGroup.classList.add("hidden");
-        sourceSelectGroup.classList.remove("hidden");
-        targetManualGroup.classList.add("hidden");
-        targetSelectGroup.classList.remove("hidden");
-        toggleSourceModeBtn.textContent = "Toggle Manual TMDB Input";
-      }
-      validateForm();
-    });
 
     // Fetch shows in user's collection
     async function fetchLocalShows() {
@@ -1263,133 +970,6 @@ try {
       }
     }
 
-    const performSourceSearch = () => {
-      const q = sourceSearchInput.value.trim().toLowerCase();
-      if (!q) {
-        renderSourceSearchResults(localShowsList);
-        return;
-      }
-      const filtered = localShowsList.filter(show => 
-        show.title.toLowerCase().includes(q) || 
-        (show.original_title && show.original_title.toLowerCase().includes(q)) || 
-        show.tmdb_id.toString().includes(q)
-      );
-      renderSourceSearchResults(filtered);
-    };
-
-    sourceSearchBtn.addEventListener("click", performSourceSearch);
-    sourceSearchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        performSourceSearch();
-      }
-    });
-
-    function renderSourceSearchResults(results: any[]) {
-      sourceSearchResultsContainer.innerHTML = "";
-      if (results.length === 0) {
-        sourceSearchResultsContainer.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-6">No matching local shows found.</div>';
-        sourceSearchResultsContainer.classList.remove("hidden");
-        return;
-      }
-
-      results.forEach(show => {
-        const card = document.createElement("div");
-        card.className = "flex flex-col p-2 bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-700 cursor-pointer transition text-left group";
-        
-        let imgHtml = `<div class="aspect-[2/3] w-full rounded-lg bg-zinc-950 overflow-hidden mb-2 border border-zinc-800 flex items-center justify-center text-[10px] text-zinc-650 font-bold">NO ART</div>`;
-        if (show.poster_path) {
-          imgHtml = `
-            <div class="aspect-[2/3] w-full rounded-lg bg-zinc-950 overflow-hidden mb-2 border border-zinc-800 shadow-sm relative">
-              <img src="${show.poster_path}" alt="" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" loading="lazy" />
-            </div>
-          `;
-        }
-
-        const year = show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A";
-
-        card.innerHTML = `
-          ${imgHtml}
-          <span class="text-[8px] font-bold text-blue-400 uppercase tracking-wider">Local ID: ${show.tmdb_id}</span>
-          <h4 class="text-zinc-200 font-bold truncate text-xs mt-0.5" title="${show.title}">${show.title}</h4>
-          <span class="text-[10px] text-zinc-500 font-medium">${year}</span>
-        `;
-
-        card.addEventListener("click", () => selectSourceShow(show));
-        sourceSearchResultsContainer.appendChild(card);
-      });
-      sourceSearchResultsContainer.classList.remove("hidden");
-    }
-
-    function selectSourceShow(show: any) {
-      selectedLocalShowObj = show;
-      selectedLocalSeasonNum = null;
-
-      // Show Selected Card
-      sourceSelectedTitle.textContent = show.title;
-      const year = show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A";
-      sourceSelectedMeta.textContent = `${year} • TMDB ID: ${show.tmdb_id}`;
-      
-      if (show.poster_path) {
-        sourceSelectedPoster.src = show.poster_path;
-        sourceSelectedPoster.classList.remove("hidden");
-        sourceSelectedNoPoster.classList.add("hidden");
-      } else {
-        sourceSelectedPoster.classList.add("hidden");
-        sourceSelectedNoPoster.classList.remove("hidden");
-      }
-
-      sourceSearchResultsContainer.classList.add("hidden");
-      sourceSearchInput.classList.add("hidden");
-      sourceSearchBtn.classList.add("hidden");
-      sourceSelectedCard.classList.remove("hidden");
-
-      renderSourceSeasonButtons(show.seasons_meta || []);
-    }
-
-    sourceChangeBtn.addEventListener("click", () => {
-      selectedLocalShowObj = null;
-      selectedLocalSeasonNum = null;
-      sourceSelectedCard.classList.add("hidden");
-      sourceSeasonGroup.classList.add("hidden");
-      sourceSearchInput.classList.remove("hidden");
-      sourceSearchBtn.classList.remove("hidden");
-      sourceSearchResultsContainer.classList.remove("hidden");
-      renderSourceSearchResults(localShowsList);
-      validateForm();
-    });
-
-    function renderSourceSeasonButtons(seasons: any[]) {
-      sourceSeasonButtons.innerHTML = "";
-      if (seasons.length === 0) {
-        sourceSeasonButtons.innerHTML = '<span class="text-xs text-zinc-500">No seasons found for this show.</span>';
-        sourceSeasonGroup.classList.remove("hidden");
-        return;
-      }
-
-      seasons.forEach(season => {
-        const label = season.season_number === 0 ? "Specials" : `Season ${season.season_number}`;
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "px-3.5 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95";
-        btn.textContent = `${label} (${season.episode_count || 0} eps)`;
-        
-        btn.addEventListener("click", () => {
-          // Reset previous button styles
-          sourceSeasonButtons.querySelectorAll("button").forEach(b => {
-            b.className = "px-3.5 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95";
-          });
-          // Set active style
-          btn.className = "px-3.5 py-2 border border-blue-800 bg-blue-950/40 text-blue-300 font-bold text-xs rounded-xl cursor-pointer transition shadow-md";
-          selectedLocalSeasonNum = season.season_number;
-          validateForm();
-        });
-
-        sourceSeasonButtons.appendChild(btn);
-      });
-      sourceSeasonGroup.classList.remove("hidden");
-    }
-
     sourceShowTmdbInput.addEventListener("input", validateForm);
     sourceSeasonInput.addEventListener("input", validateForm);
     targetShowTmdbInput.addEventListener("input", validateForm);
@@ -1397,8 +977,11 @@ try {
 
     // Manual Source Show Lookup
     sourceShowLookupBtn.addEventListener("click", async () => {
-      const tmdbId = sourceShowTmdbInput.value.trim();
-      if (!tmdbId) return;
+      const type = (document.getElementById("source-show-id-type") as HTMLSelectElement).value;
+      const rawVal = sourceShowTmdbInput.value.trim();
+      if (!rawVal) return;
+
+      const tmdbId = type === "tvdb" ? (-parseInt(rawVal)).toString() : rawVal;
 
       sourceShowLookupBtn.textContent = "...";
       try {
@@ -1409,7 +992,7 @@ try {
           const data = await res.json();
           sourceManualTitle.textContent = data.title;
           const year = data.first_air_date ? new Date(data.first_air_date).getFullYear() : 'N/A';
-          sourceManualMeta.textContent = `${year} • TMDB ID: ${data.tmdb_id}`;
+          sourceManualMeta.textContent = `${year} • ${data.tmdb_id < 0 ? 'TVDB ID: ' + Math.abs(data.tmdb_id) : 'TMDB ID: ' + data.tmdb_id}`;
           
           if (data.poster_path) {
             sourceManualPoster.src = data.poster_path;
@@ -1421,7 +1004,7 @@ try {
           }
           sourceManualPreview.classList.remove("hidden");
         } else {
-          window.showToast?.("Show not found on TMDB", "error");
+          window.showToast?.("Show not found on TMDB/TVDB", "error");
           sourceManualPreview.classList.add("hidden");
         }
       } catch (err) {
@@ -1434,8 +1017,11 @@ try {
 
     // Manual Target Show Lookup
     targetShowLookupBtn.addEventListener("click", async () => {
-      const tmdbId = targetShowTmdbInput.value.trim();
-      if (!tmdbId) return;
+      const type = (document.getElementById("target-show-id-type") as HTMLSelectElement).value;
+      const rawVal = targetShowTmdbInput.value.trim();
+      if (!rawVal) return;
+
+      const tmdbId = type === "tvdb" ? (-parseInt(rawVal)).toString() : rawVal;
 
       targetShowLookupBtn.textContent = "...";
       try {
@@ -1446,7 +1032,7 @@ try {
           const data = await res.json();
           targetManualTitle.textContent = data.title;
           const year = data.first_air_date ? new Date(data.first_air_date).getFullYear() : 'N/A';
-          targetManualMeta.textContent = `${year} • TMDB ID: ${data.tmdb_id}`;
+          targetManualMeta.textContent = `${year} • ${data.tmdb_id < 0 ? 'TVDB ID: ' + Math.abs(data.tmdb_id) : 'TMDB ID: ' + data.tmdb_id}`;
           
           if (data.poster_path) {
             targetManualPoster.src = data.poster_path;
@@ -1458,7 +1044,7 @@ try {
           }
           targetManualPreview.classList.remove("hidden");
         } else {
-          window.showToast?.("Show not found on TMDB", "error");
+          window.showToast?.("Show not found on TMDB/TVDB", "error");
           targetManualPreview.classList.add("hidden");
         }
       } catch (err) {
@@ -1469,276 +1055,42 @@ try {
       }
     });
 
-    // Target TMDB Search Action
-    const performSearch = async () => {
-      const q = targetSearchInput.value.trim();
-      if (!q) return;
-
-      targetSearchBtn.textContent = "Searching...";
-      try {
-        if (/^\d+$/.test(q)) {
-          // Direct TMDB ID lookup
-          const res = await fetch(`/api/proxy/sync/tmdb-show-preview/${q}`, {
-            headers: { "Authorization": `Bearer ${token}` }
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const normalizedResult = {
-              tmdb_id: data.tmdb_id,
-              title: data.title,
-              poster_path: data.poster_path,
-              release_date: data.first_air_date
-            };
-            renderSearchResults([normalizedResult]);
-            return;
-          }
-        }
-
-        // Standard text search fallback
-        const res = await fetch(`/api/proxy/media/search?type=series&q=${encodeURIComponent(q)}`, {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          renderSearchResults(data.results || []);
-        } else {
-          window.showToast?.("Failed to fetch search results", "error");
-        }
-      } catch (err) {
-        window.showToast?.("Error searching target shows", "error");
-      } finally {
-        targetSearchBtn.textContent = "Search";
-      }
-    };
-
-    targetSearchBtn.addEventListener("click", performSearch);
-    targetSearchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        performSearch();
-      }
-    });
-
-    function renderSearchResults(results: any[]) {
-      searchResultsContainer.innerHTML = "";
-      if (results.length === 0) {
-        searchResultsContainer.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-6">No matching shows found on TMDB.</div>';
-        searchResultsContainer.classList.remove("hidden");
-        return;
-      }
-
-      results.forEach(show => {
-        const card = document.createElement("div");
-        card.className = "flex flex-col p-2 bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-700 cursor-pointer transition text-left group";
-        
-        let imgHtml = `<div class="aspect-[2/3] w-full rounded-lg bg-zinc-950 overflow-hidden mb-2 border border-zinc-800 flex items-center justify-center text-[10px] text-zinc-650 font-bold">NO ART</div>`;
-        if (show.poster_path) {
-          imgHtml = `
-            <div class="aspect-[2/3] w-full rounded-lg bg-zinc-950 overflow-hidden mb-2 border border-zinc-800 shadow-sm relative">
-              <img src="${show.poster_path}" alt="" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" loading="lazy" />
-            </div>
-          `;
-        }
-
-        const year = show.release_date ? new Date(show.release_date).getFullYear() : "N/A";
-
-        card.innerHTML = `
-          ${imgHtml}
-          <span class="text-[8px] font-bold text-blue-400 uppercase tracking-wider">TMDB: ${show.tmdb_id}</span>
-          <h4 class="text-zinc-200 font-bold truncate text-xs mt-0.5" title="${show.title}">${show.title}</h4>
-          <span class="text-[10px] text-zinc-500 font-medium">${year}</span>
-        `;
-
-        card.addEventListener("click", () => selectTargetShow(show));
-        searchResultsContainer.appendChild(card);
-      });
-      searchResultsContainer.classList.remove("hidden");
-    }
-
-    async function selectTargetShow(show: any) {
-      targetSelectedShowObj = show;
-      targetSelectedSeasonNum = null;
-
-      // Show Selected Card
-      targetSelectedTitle.textContent = show.title;
-      const year = show.release_date ? new Date(show.release_date).getFullYear() : "N/A";
-      targetSelectedMeta.textContent = `${year} • TMDB ID: ${show.tmdb_id}`;
-      
-      if (show.poster_path) {
-        targetSelectedPoster.src = show.poster_path;
-        targetSelectedPoster.classList.remove("hidden");
-        targetSelectedNoPoster.classList.add("hidden");
-      } else {
-        targetSelectedPoster.classList.add("hidden");
-        targetSelectedNoPoster.classList.remove("hidden");
-      }
-
-      searchResultsContainer.classList.add("hidden");
-      targetSearchInput.classList.add("hidden");
-      targetSearchBtn.classList.add("hidden");
-      targetSelectedCard.classList.remove("hidden");
-
-      // Fetch Target Show Seasons List
-      try {
-        const res = await fetch(`/api/proxy/shows/${show.tmdb_id}`, {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const detail = await res.json();
-          renderTargetSeasonButtons(detail.seasons_meta || []);
-        } else {
-          window.showToast?.("Failed to fetch target show seasons details", "error");
-        }
-      } catch (err) {
-        window.showToast?.("Error fetching target seasons list", "error");
-      }
-    }
-
-    targetChangeBtn.addEventListener("click", () => {
-      targetSelectedShowObj = null;
-      targetSelectedSeasonNum = null;
-      targetSelectedCard.classList.add("hidden");
-      targetSeasonGroup.classList.add("hidden");
-      targetSearchInput.classList.remove("hidden");
-      targetSearchBtn.classList.remove("hidden");
-      searchResultsContainer.classList.remove("hidden");
-      validateForm();
-    });
-
-    function renderTargetSeasonButtons(seasons: any[]) {
-      targetSeasonButtons.innerHTML = "";
-      if (seasons.length === 0) {
-        targetSeasonButtons.innerHTML = '<span class="text-xs text-zinc-500">No seasons found for this show.</span>';
-        targetSeasonGroup.classList.remove("hidden");
-        return;
-      }
-
-      seasons.forEach(season => {
-        const label = season.season_number === 0 ? "Specials" : `Season ${season.season_number}`;
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "px-3.5 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95";
-        btn.textContent = `${label} (${season.episode_count || 0} eps)`;
-        
-        btn.addEventListener("click", () => {
-          targetSeasonButtons.querySelectorAll("button").forEach(b => {
-            b.className = "px-3.5 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95";
-          });
-          btn.className = "px-3.5 py-2 border border-blue-800 bg-blue-950/40 text-blue-300 font-bold text-xs rounded-xl cursor-pointer transition shadow-md";
-          targetSelectedSeasonNum = season.season_number;
-          validateForm();
-        });
-
-        targetSeasonButtons.appendChild(btn);
-      });
-
-      // Add a manual input fallback for anthologies or unlisted seasons
-      const manualDiv = document.createElement("div");
-      manualDiv.className = "flex items-center gap-2 mt-3 p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl";
-      manualDiv.innerHTML = `
-        <span class="text-xs font-bold text-zinc-500 whitespace-nowrap">Not listed?</span>
-        <input type="number" id="manual-target-season" placeholder="Season #" class="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-zinc-200 text-xs focus:border-blue-500 focus:outline-none transition" />
-        <button type="button" id="manual-target-season-btn" class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-lg text-xs transition cursor-pointer">Use</button>
-      `;
-      targetSeasonButtons.appendChild(manualDiv);
-
-      const manualInput = manualDiv.querySelector("#manual-target-season") as HTMLInputElement;
-      const manualBtn = manualDiv.querySelector("#manual-target-season-btn")!;
-      manualBtn.addEventListener("click", () => {
-        const val = parseInt(manualInput.value);
-        if (!isNaN(val) && val >= 0) {
-          targetSeasonButtons.querySelectorAll("button").forEach(b => {
-            if (b.id !== "manual-target-season-btn") {
-              b.className = "px-3.5 py-2 border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95";
-            }
-          });
-          manualBtn.className = "px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-blue-200 font-bold rounded-lg text-xs transition cursor-pointer shadow-md border border-blue-700";
-          targetSelectedSeasonNum = val;
-          validateForm();
-        }
-      });
-
-      targetSeasonGroup.classList.remove("hidden");
-    }
-
     function validateForm() {
-      let isSourceValid = false;
-      if (sourceMode === "select") {
-        isSourceValid = !!selectedLocalShowObj && selectedLocalSeasonNum !== null;
-      } else {
-        isSourceValid = !!sourceShowTmdbInput.value && !!sourceSeasonInput.value;
-      }
-
-      let isTargetValid = false;
-      if (sourceMode === "select") {
-        isTargetValid = !!targetSelectedShowObj && targetSelectedSeasonNum !== null;
-      } else {
-        isTargetValid = !!targetShowTmdbInput.value && !!targetSeasonInput.value;
-      }
-
+      const isSourceValid = !!sourceShowTmdbInput.value && !!sourceSeasonInput.value;
+      const isTargetValid = !!targetShowTmdbInput.value && !!targetSeasonInput.value;
       saveRemapBtn.disabled = !(isSourceValid && isTargetValid);
     }
 
     function resetModalState() {
-      sourceMode = "select";
-      sourceSelectGroup.classList.remove("hidden");
-      sourceManualGroup.classList.add("hidden");
-      toggleSourceModeBtn.textContent = "Toggle Manual TMDB Input";
-
-      sourceSearchInput.value = "";
-      sourceSearchInput.classList.remove("hidden");
-      sourceSearchBtn.classList.remove("hidden");
-      sourceSearchResultsContainer.innerHTML = "";
-      sourceSearchResultsContainer.classList.add("hidden");
-      sourceSelectedCard.classList.add("hidden");
-      sourceSeasonGroup.classList.add("hidden");
-      sourceSeasonButtons.innerHTML = "";
-      
+      const srcTypeSelect = document.getElementById("source-show-id-type") as HTMLSelectElement;
+      const tgtTypeSelect = document.getElementById("target-show-id-type") as HTMLSelectElement;
+      if (srcTypeSelect) srcTypeSelect.value = "tmdb";
+      if (tgtTypeSelect) tgtTypeSelect.value = "tmdb";
       sourceShowTmdbInput.value = "";
       sourceSeasonInput.value = "";
       sourceManualPreview.classList.add("hidden");
 
-      targetSelectGroup.classList.remove("hidden");
-      targetManualGroup.classList.add("hidden");
-      targetSearchInput.value = "";
-      targetSearchInput.classList.remove("hidden");
-      targetSearchBtn.classList.remove("hidden");
-      searchResultsContainer.innerHTML = "";
-      searchResultsContainer.classList.add("hidden");
-      targetSelectedCard.classList.add("hidden");
-      targetSeasonGroup.classList.add("hidden");
-      targetSeasonButtons.innerHTML = "";
-
       targetShowTmdbInput.value = "";
       targetSeasonInput.value = "";
       targetManualPreview.classList.add("hidden");
-
-      selectedLocalShowObj = null;
-      selectedLocalSeasonNum = null;
-      targetSelectedShowObj = null;
-      targetSelectedSeasonNum = null;
 
       saveRemapBtn.disabled = true;
     }
 
     // Save and Apply Remap
     saveRemapBtn.addEventListener("click", async () => {
-      let sourceTmdbId: number;
-      let sourceSeasonNum: number;
-      let targetTmdbId: number;
-      let targetSeasonNum: number;
+      const srcType = (document.getElementById("source-show-id-type") as HTMLSelectElement).value;
+      const tgtType = (document.getElementById("target-show-id-type") as HTMLSelectElement).value;
 
-      if (sourceMode === "select") {
-        sourceTmdbId = selectedLocalShowObj.tmdb_id;
-        sourceSeasonNum = selectedLocalSeasonNum!;
-        targetTmdbId = targetSelectedShowObj.tmdb_id;
-        targetSeasonNum = targetSelectedSeasonNum!;
-      } else {
-        sourceTmdbId = parseInt(sourceShowTmdbInput.value);
-        sourceSeasonNum = parseInt(sourceSeasonInput.value);
-        targetTmdbId = parseInt(targetShowTmdbInput.value);
-        targetSeasonNum = parseInt(targetSeasonInput.value);
-      }
+      let sourceTmdbId = parseInt(sourceShowTmdbInput.value);
+      if (srcType === "tvdb" && sourceTmdbId > 0) sourceTmdbId = -sourceTmdbId;
+
+      const sourceSeasonNum = parseInt(sourceSeasonInput.value);
+
+      let targetTmdbId = parseInt(targetShowTmdbInput.value);
+      if (tgtType === "tvdb" && targetTmdbId > 0) targetTmdbId = -targetTmdbId;
+
+      const targetSeasonNum = parseInt(targetSeasonInput.value);
 
       saveRemapBtn.disabled = true;
       saveRemapBtn.textContent = "Saving...";
@@ -1937,12 +1289,13 @@ try {
         const year = (media.first_air_date || media.release_date) ? new Date(media.first_air_date || media.release_date).getFullYear() : "N/A";
         const typeLabel = isMovie ? "MOVIE" : "SHOW";
 
+        const idLabel = media.tmdb_id < 0 ? `TVDB: ${Math.abs(media.tmdb_id)}` : `TMDB: ${media.tmdb_id}`;
         card.innerHTML = `
           ${posterHtml}
           <div class="min-w-0">
             <span class="text-[7px] font-black px-1.5 py-0.5 rounded ${isMovie ? 'bg-blue-900/30 text-blue-400' : 'bg-indigo-900/30 text-indigo-400'}">${typeLabel}</span>
             <h4 class="text-zinc-200 font-bold truncate text-xs mt-0.5" title="${media.title}">${media.title}</h4>
-            <span class="text-[9px] text-zinc-500">${year} • ID: ${media.tmdb_id}</span>
+            <span class="text-[9px] text-zinc-500">${year} • ${idLabel}</span>
           </div>
         `;
 
@@ -1961,7 +1314,8 @@ try {
 
       renameSelectedShowTitle.textContent = media.title;
       const year = (media.first_air_date || media.release_date) ? new Date(media.first_air_date || media.release_date).getFullYear() : "N/A";
-      renameSelectedShowYear.textContent = `${year} • TMDB ID: ${media.tmdb_id}`;
+      const idLabel = media.tmdb_id < 0 ? `TVDB ID: ${Math.abs(media.tmdb_id)}` : `TMDB ID: ${media.tmdb_id}`;
+      renameSelectedShowYear.textContent = `${year} • ${idLabel}`;
       if (media.poster_path) {
         renameSelectedShowPoster.src = media.poster_path;
         renameSelectedShowPoster.classList.remove("hidden");
@@ -2796,6 +2150,11 @@ try {
       epModal.classList.add("opacity-0", "pointer-events-none");
       epModal.classList.remove("opacity-100");
       
+      const epSrcTypeSelect = document.getElementById("ep-src-type") as HTMLSelectElement;
+      const epTgtTypeSelect = document.getElementById("ep-tgt-type") as HTMLSelectElement;
+      if (epSrcTypeSelect) epSrcTypeSelect.value = "tmdb";
+      if (epTgtTypeSelect) epTgtTypeSelect.value = "tmdb";
+
       // Reset inputs
       epSrcTmdbInput.value = "";
       epTgtTmdbInput.value = "";
@@ -2824,8 +2183,15 @@ try {
 
     // Save Action supporting ranges
     saveEpRemapBtn.addEventListener("click", async () => {
-      const srcTmdb = parseInt(epSrcTmdbInput.value);
-      const tgtTmdb = parseInt(epTgtTmdbInput.value);
+      const srcType = (document.getElementById("ep-src-type") as HTMLSelectElement).value;
+      const tgtType = (document.getElementById("ep-tgt-type") as HTMLSelectElement).value;
+
+      let srcTmdb = parseInt(epSrcTmdbInput.value);
+      if (srcType === "tvdb" && srcTmdb > 0) srcTmdb = -srcTmdb;
+
+      let tgtTmdb = parseInt(epTgtTmdbInput.value);
+      if (tgtType === "tvdb" && tgtTmdb > 0) tgtTmdb = -tgtTmdb;
+
       const srcSeason = parseInt(epSrcSeasonInput.value);
       const srcEpStart = parseInt(epSrcEpisodeStartInput.value);
       const srcEpEndVal = epSrcEpisodeEndInput.value ? parseInt(epSrcEpisodeEndInput.value) : NaN;
@@ -2833,7 +2199,7 @@ try {
       const tgtEpStart = parseInt(epTgtEpisodeStartInput.value);
 
       if (isNaN(srcTmdb) || isNaN(tgtTmdb) || isNaN(srcSeason) || isNaN(srcEpStart) || isNaN(tgtSeason) || isNaN(tgtEpStart)) {
-        window.showToast?.("Please enter valid TMDB IDs, Season, and Episode Start values.", "error");
+        window.showToast?.("Please enter valid IDs, Season, and Episode Start values.", "error");
         return;
       }
 
@@ -2911,710 +2277,33 @@ try {
 
         openEpModal();
 
-        epSrcTmdbInput.value = srcTmdb || "";
-        epTgtTmdbInput.value = tgtTmdb || "";
+        const srcTypeSelect = document.getElementById("ep-src-type") as HTMLSelectElement;
+        const tgtTypeSelect = document.getElementById("ep-tgt-type") as HTMLSelectElement;
+
+        const srcTmdbVal = parseInt(srcTmdb || "0");
+        if (srcTmdbVal < 0) {
+          if (srcTypeSelect) srcTypeSelect.value = "tvdb";
+          epSrcTmdbInput.value = Math.abs(srcTmdbVal).toString();
+        } else {
+          if (srcTypeSelect) srcTypeSelect.value = "tmdb";
+          epSrcTmdbInput.value = srcTmdb || "";
+        }
+
+        const tgtTmdbVal = parseInt(tgtTmdb || "0");
+        if (tgtTmdbVal < 0) {
+          if (tgtTypeSelect) tgtTypeSelect.value = "tvdb";
+          epTgtTmdbInput.value = Math.abs(tgtTmdbVal).toString();
+        } else {
+          if (tgtTypeSelect) tgtTypeSelect.value = "tmdb";
+          epTgtTmdbInput.value = tgtTmdb || "";
+        }
+
         epSrcSeasonInput.value = srcSeason || "";
         epSrcEpisodeStartInput.value = srcEp || "";
         epSrcEpisodeEndInput.value = ""; // Default empty end for range on edit
         epTgtSeasonInput.value = tgtSeason || "";
         epTgtEpisodeStartInput.value = tgtEp || "";
       });
-    });
-
-    // TVDB to TMDB Auto-Remap Modal Logic
-    const autoModal = document.getElementById("auto-remap-modal")!;
-    const autoRemapBtn = document.getElementById("auto-remap-btn");
-    const closeAutoModalBtn = document.getElementById("close-auto-modal-btn")!;
-    const cancelAutoModalBtn = document.getElementById("cancel-auto-modal-btn")!;
-    const generatePreviewBtn = document.getElementById("generate-preview-btn") as HTMLButtonElement;
-    const applyAutoRemapsBtn = document.getElementById("apply-auto-remaps-btn") as HTMLButtonElement;
-    const loader = document.getElementById("auto-remap-loader")!;
-    const previewArea = document.getElementById("preview-results-area")!;
-    
-    const autoTmdbIdInput = document.getElementById("auto-tmdb-id") as HTMLInputElement;
-    const autoTvdbIdInput = document.getElementById("auto-tvdb-id") as HTMLInputElement;
-
-
-    // TMDB search elements
-    const autoTmdbSearchInput = document.getElementById("auto-tmdb-search") as HTMLInputElement;
-    const autoTmdbSearchBtn = document.getElementById("auto-tmdb-search-btn")!;
-    const autoTmdbResults = document.getElementById("auto-tmdb-results")!;
-    const autoTmdbSelected = document.getElementById("auto-tmdb-selected")!;
-    const autoTmdbSelectedPoster = document.getElementById("auto-tmdb-selected-poster") as HTMLImageElement;
-    const autoTmdbSelectedNoPoster = document.getElementById("auto-tmdb-selected-no-poster")!;
-    const autoTmdbSelectedTitle = document.getElementById("auto-tmdb-selected-title")!;
-    const autoTmdbSelectedMeta = document.getElementById("auto-tmdb-selected-meta")!;
-    const autoTmdbChangeBtn = document.getElementById("auto-tmdb-change-btn")!;
-
-    // TVDB search elements
-    const autoTvdbSearchInput = document.getElementById("auto-tvdb-search") as HTMLInputElement;
-    const autoTvdbSearchBtn = document.getElementById("auto-tvdb-search-btn")!;
-    const autoTvdbResults = document.getElementById("auto-tvdb-results")!;
-    const autoTvdbSelected = document.getElementById("auto-tvdb-selected")!;
-    const autoTvdbSelectedPoster = document.getElementById("auto-tvdb-selected-poster") as HTMLImageElement;
-    const autoTvdbSelectedNoPoster = document.getElementById("auto-tvdb-selected-no-poster")!;
-    const autoTvdbSelectedTitle = document.getElementById("auto-tvdb-selected-title")!;
-    const autoTvdbSelectedMeta = document.getElementById("auto-tvdb-selected-meta")!;
-    const autoTvdbChangeBtn = document.getElementById("auto-tvdb-change-btn")!;
-    
-    const previewMatchStats = document.getElementById("preview-match-stats")!;
-    const previewMatchPct = document.getElementById("preview-match-pct")!;
-    const previewUnmatchedBadge = document.getElementById("preview-unmatched-badge")!;
-    const previewMatchesList = document.getElementById("preview-matches-list")!;
-    
-    const filterAllBtn = document.getElementById("filter-all-btn")!;
-    const filterMatchedBtn = document.getElementById("filter-matched-btn")!;
-    const filterUnmatchedBtn = document.getElementById("filter-unmatched-btn")!;
-    const unmatchedCountBadge = document.getElementById("unmatched-count-badge")!;
-    
-    let activeMappings: any[] = [];
-    let tmdbEpisodesList: any[] = [];
-    let selectOptionsHtml = "";
-    let currentFilter = "all";
-
-
-
-    // --- TMDB Show Search Logic ---
-    async function performTmdbSearch() {
-      const q = autoTmdbSearchInput.value.trim();
-      if (!q) return;
-
-      autoTmdbSearchBtn.textContent = "...";
-      try {
-        const res = await fetch(`/api/proxy/sync/tmdb-show-search?q=${encodeURIComponent(q)}`, {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          renderAutoSearchResults(data.results || [], "tmdb");
-        } else {
-          window.showToast?.("TMDB search failed", "error");
-        }
-      } catch (err) {
-        window.showToast?.("Error searching TMDB", "error");
-      } finally {
-        autoTmdbSearchBtn.textContent = "Search";
-      }
-    }
-
-    autoTmdbSearchBtn.addEventListener("click", performTmdbSearch);
-    autoTmdbSearchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); performTmdbSearch(); }
-    });
-
-    autoTmdbChangeBtn.addEventListener("click", () => {
-      autoTmdbIdInput.value = "";
-      autoTmdbSelected.classList.add("hidden");
-      autoTmdbSearchInput.value = "";
-      autoTmdbSearchInput.classList.remove("hidden");
-      autoTmdbSearchBtn.classList.remove("hidden");
-      autoTmdbResults.classList.add("hidden");
-    });
-
-    // --- TVDB Show Search Logic ---
-    async function performTvdbSearch() {
-      const q = autoTvdbSearchInput.value.trim();
-      if (!q) return;
-      if (!hasSavedTvdbKey) {
-        window.showToast?.("TVDB API Key must be configured in settings to use the auto-remapper!", "error");
-        return;
-      }
-
-      autoTvdbSearchBtn.textContent = "...";
-      try {
-        const res = await fetch("/api/proxy/sync/tvdb-search", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            query: q
-          })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          renderAutoSearchResults(data.results || [], "tvdb");
-        } else {
-          const err = await res.json().catch(() => ({}));
-          window.showToast?.(err.detail || "TVDB search failed", "error");
-        }
-      } catch (err) {
-        window.showToast?.("Error searching TVDB", "error");
-      } finally {
-        autoTvdbSearchBtn.textContent = "Search";
-      }
-    }
-
-    autoTvdbSearchBtn.addEventListener("click", performTvdbSearch);
-    autoTvdbSearchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); performTvdbSearch(); }
-    });
-
-    autoTvdbChangeBtn.addEventListener("click", () => {
-      autoTvdbIdInput.value = "";
-      autoTvdbSelected.classList.add("hidden");
-      autoTvdbSearchInput.value = "";
-      autoTvdbSearchInput.classList.remove("hidden");
-      autoTvdbSearchBtn.classList.remove("hidden");
-      autoTvdbResults.classList.add("hidden");
-    });
-
-    // --- Shared render for search results ---
-    function renderAutoSearchResults(results: any[], source: "tmdb" | "tvdb") {
-      const container = source === "tmdb" ? autoTmdbResults : autoTvdbResults;
-      container.innerHTML = "";
-
-      if (results.length === 0) {
-        container.innerHTML = '<div class="p-4 text-center text-xs text-zinc-500">No shows found. Try a different search.</div>';
-        container.classList.remove("hidden");
-        return;
-      }
-
-      results.forEach(item => {
-        const row = document.createElement("div");
-        row.className = "flex items-center gap-3 p-2.5 hover:bg-zinc-800/40 cursor-pointer transition-colors";
-
-        const id = source === "tmdb" ? item.tmdb_id : item.tvdb_id;
-        const poster = source === "tmdb" ? item.poster_path : item.image;
-        const name = item.name || "Unknown";
-        const year = item.year || "N/A";
-
-        let imgHtml = `<div class="w-7 h-10 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[6px] text-zinc-600 font-bold shrink-0">N/A</div>`;
-        if (poster) {
-          imgHtml = `<img src="${poster}" alt="" class="w-7 h-10 rounded object-cover border border-zinc-800 shrink-0" loading="lazy" />`;
-        }
-
-        const idLabel = source === "tmdb" ? "TMDB" : "TVDB";
-
-        row.innerHTML = `
-          ${imgHtml}
-          <div class="min-w-0 flex-1">
-            <div class="text-xs font-bold text-zinc-200 truncate">${name}</div>
-            <div class="text-[9px] text-zinc-500 font-medium">${year} • ${idLabel}: ${id || 'N/A'}</div>
-          </div>
-        `;
-
-        row.addEventListener("click", () => {
-          selectAutoShow(source, {
-            id,
-            name,
-            year,
-            poster
-          });
-        });
-
-        container.appendChild(row);
-      });
-
-      container.classList.remove("hidden");
-    }
-
-    function selectAutoShow(source: "tmdb" | "tvdb", show: { id: number | null; name: string; year: string; poster: string | null }) {
-      if (source === "tmdb") {
-        autoTmdbIdInput.value = show.id?.toString() || "";
-        autoTmdbSelectedTitle.textContent = show.name;
-        autoTmdbSelectedMeta.textContent = `${show.year} • TMDB ID: ${show.id}`;
-
-        if (show.poster) {
-          autoTmdbSelectedPoster.src = show.poster;
-          autoTmdbSelectedPoster.classList.remove("hidden");
-          autoTmdbSelectedNoPoster.classList.add("hidden");
-        } else {
-          autoTmdbSelectedPoster.classList.add("hidden");
-          autoTmdbSelectedNoPoster.classList.remove("hidden");
-        }
-
-        autoTmdbSelected.classList.remove("hidden");
-        autoTmdbResults.classList.add("hidden");
-        autoTmdbSearchInput.classList.add("hidden");
-        autoTmdbSearchBtn.classList.add("hidden");
-
-        // Save to localStorage
-        localStorage.setItem("scrob_auto_tmdb_id", show.id?.toString() || "");
-      } else {
-        autoTvdbIdInput.value = show.id?.toString() || "";
-        autoTvdbSelectedTitle.textContent = show.name;
-        autoTvdbSelectedMeta.textContent = `${show.year} • TVDB ID: ${show.id}`;
-
-        if (show.poster) {
-          autoTvdbSelectedPoster.src = show.poster;
-          autoTvdbSelectedPoster.classList.remove("hidden");
-          autoTvdbSelectedNoPoster.classList.add("hidden");
-        } else {
-          autoTvdbSelectedPoster.classList.add("hidden");
-          autoTvdbSelectedNoPoster.classList.remove("hidden");
-        }
-
-        autoTvdbSelected.classList.remove("hidden");
-        autoTvdbResults.classList.add("hidden");
-        autoTvdbSearchInput.classList.add("hidden");
-        autoTvdbSearchBtn.classList.add("hidden");
-
-        // Save to localStorage
-        localStorage.setItem("scrob_auto_tvdb_id", show.id?.toString() || "");
-      }
-    }
-
-    function openAutoModal() {
-      autoModal.classList.remove("opacity-0", "pointer-events-none");
-    }
-
-    function closeAutoModal() {
-      autoModal.classList.add("opacity-0", "pointer-events-none");
-      // Reset state
-      previewArea.classList.add("hidden");
-      loader.classList.add("hidden");
-      generatePreviewBtn.disabled = false;
-      applyAutoRemapsBtn.disabled = true;
-      setFilter("all");
-    }
-
-    function setFilter(mode: string) {
-      currentFilter = mode;
-      
-      [filterAllBtn, filterMatchedBtn, filterUnmatchedBtn].forEach(btn => {
-        btn.classList.remove("bg-zinc-800", "text-zinc-100", "shadow");
-        btn.classList.add("text-zinc-400", "hover:text-zinc-200");
-      });
-
-      if (mode === "all") {
-        filterAllBtn.classList.add("bg-zinc-800", "text-zinc-100", "shadow");
-        filterAllBtn.classList.remove("text-zinc-400", "hover:text-zinc-200");
-      } else if (mode === "matched") {
-        filterMatchedBtn.classList.add("bg-zinc-800", "text-zinc-100", "shadow");
-        filterMatchedBtn.classList.remove("text-zinc-400", "hover:text-zinc-200");
-      } else if (mode === "unmatched") {
-        filterUnmatchedBtn.classList.add("bg-zinc-800", "text-zinc-100", "shadow");
-        filterUnmatchedBtn.classList.remove("text-zinc-400", "hover:text-zinc-200");
-      }
-
-      renderList();
-    }
-
-    filterAllBtn.addEventListener("click", () => setFilter("all"));
-    filterMatchedBtn.addEventListener("click", () => setFilter("matched"));
-    filterUnmatchedBtn.addEventListener("click", () => setFilter("unmatched"));
-
-    const autoRemapSearchInput = document.getElementById("auto-remap-search") as HTMLInputElement;
-    if (autoRemapSearchInput) {
-      autoRemapSearchInput.addEventListener("input", () => {
-        renderList();
-      });
-    }
-
-    function renderList() {
-      previewMatchesList.innerHTML = "";
-      
-      const searchQuery = autoRemapSearchInput ? autoRemapSearchInput.value.toLowerCase().trim() : "";
-      
-      let filtered = activeMappings;
-      if (currentFilter === "matched") {
-        filtered = activeMappings.filter(m => m.matched);
-      } else if (currentFilter === "unmatched") {
-        filtered = activeMappings.filter(m => !m.matched);
-      }
-
-      if (searchQuery !== "") {
-        filtered = filtered.filter(m => {
-          const srcTitle = (m.source_title || "").toLowerCase();
-          const srcSeasonEp = `s${m.source_season.toString().padStart(2, '0')}e${m.source_episode.toString().padStart(2, '0')}`;
-          const tgtSeasonEp = (m.target_season !== null && m.target_episode !== null) ? `s${m.target_season.toString().padStart(2, '0')}e${m.target_episode.toString().padStart(2, '0')}` : "";
-          const tgtTitle = (m.target_title || "").toLowerCase();
-          
-          return srcTitle.includes(searchQuery) || srcSeasonEp.includes(searchQuery) || tgtSeasonEp.includes(searchQuery) || tgtTitle.includes(searchQuery);
-        });
-      }
-
-      if (filtered.length === 0) {
-        previewMatchesList.innerHTML = `<div class="p-6 text-center text-zinc-500">No episodes found matching active query/filters.</div>`;
-        return;
-      }
-
-      filtered.forEach((m: any) => {
-        // Find index in original activeMappings to ensure correct referencing
-        const origIndex = activeMappings.indexOf(m);
-        const row = document.createElement("div");
-        row.className = "p-4 grid grid-cols-1 lg:grid-cols-12 items-center gap-4 border-b border-zinc-850 hover:bg-zinc-800/10 transition-all duration-200";
-        
-        row.innerHTML = `
-          <!-- Column 1: Source Title and Details (TVDB) -->
-          <div class="col-span-12 lg:col-span-5 flex items-start gap-3 min-w-0">
-            <input type="checkbox" class="auto-include-checkbox mt-1.5 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4.5 h-4.5 shrink-0" data-index="${origIndex}" ${m.matched ? 'checked' : ''} />
-            
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-[9px] bg-indigo-950/80 text-indigo-400 border border-indigo-900/40 px-1.5 py-0.5 rounded font-black tracking-wider uppercase">TVDB</span>
-                <span class="text-xs font-black text-zinc-350">S${m.source_season.toString().padStart(2, '0')}E${m.source_episode.toString().padStart(2, '0')}</span>
-                <span class="text-[10px] text-zinc-550 font-bold">• ${m.source_air_date || 'No Date'}</span>
-              </div>
-              <div class="text-zinc-200 font-bold text-sm mt-1 leading-relaxed truncate" title="${m.source_title || 'Untitled Episode'}">${m.source_title || 'Untitled Episode'}</div>
-            </div>
-          </div>
-
-          <!-- Column 2: Connector & Match Confidence Status -->
-          <div class="col-span-12 lg:col-span-3 flex flex-row lg:flex-col items-center justify-between lg:justify-center gap-2 lg:gap-1 text-center bg-zinc-950/20 lg:bg-transparent p-2.5 lg:p-0 rounded-xl border border-zinc-850/50 lg:border-0 shrink-0 min-w-0">
-            <div class="flex items-center gap-1.5 justify-center">
-              ${m.matched ? (() => {
-                const conf = m.confidence || 0;
-                let badgeClass = "bg-rose-950/40 text-rose-400 border border-rose-900/30";
-                if (conf >= 85) {
-                  badgeClass = "bg-emerald-950/40 text-emerald-400 border border-emerald-900/30";
-                } else if (conf >= 50) {
-                  badgeClass = "bg-amber-950/40 text-amber-400 border border-amber-900/30";
-                }
-                return `
-                  <span class="text-[9px] ${badgeClass} px-2 py-0.5 rounded-full font-black tracking-wider shadow-sm shrink-0" title="${m.match_reason}">
-                    ${m.confidence}% MATCH
-                  </span>
-                `;
-              })() : `
-                <span class="text-[9px] bg-zinc-850/80 text-zinc-400 border border-zinc-700/60 px-2 py-0.5 rounded-full font-black tracking-wider shrink-0">
-                  UNMATCHED
-                </span>
-              `}
-            </div>
-            
-            <div class="hidden lg:flex items-center justify-center text-zinc-650 mt-0.5">
-              <svg class="w-4 h-4 text-zinc-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-            </div>
-            
-            <div class="text-[10px] text-zinc-500 font-extrabold truncate w-full tracking-wide max-w-[150px] lg:max-w-none text-right lg:text-center" title="${m.match_reason || ''}">
-              ${m.matched ? m.match_reason : 'Manual override required'}
-            </div>
-          </div>
-
-          <!-- Column 3: Target Selector Dropdown (TMDB) -->
-          <div class="col-span-12 lg:col-span-4 flex items-center gap-2 min-w-0">
-            <span class="text-[9px] bg-emerald-950/80 text-emerald-400 border border-emerald-900/40 px-1.5 py-0.5 rounded font-black tracking-wider uppercase shrink-0 lg:hidden">TMDB</span>
-            
-            <div class="w-full">
-              <div class="relative w-full custom-search-select-container" data-index="${origIndex}">
-                <!-- Search/Display Input -->
-                <div class="flex items-center w-full bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 focus-within:border-indigo-500 rounded-xl transition-all duration-200 shadow-inner">
-                  <input 
-                    type="text" 
-                    class="custom-search-select-input w-full bg-transparent px-3 py-2 text-xs text-zinc-200 font-semibold focus:outline-none cursor-pointer" 
-                    placeholder="Search & select target episode..."
-                    readonly
-                  />
-                  <!-- Dropdown Arrow -->
-                  <div class="pr-2.5 text-zinc-500 pointer-events-none">
-                    <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                  </div>
-                </div>
-                <!-- Options Dropdown Box -->
-                <div class="custom-search-select-dropdown hidden absolute top-full left-0 right-0 z-50 mt-1 max-h-60 overflow-y-auto bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-2 flex flex-col gap-2 backdrop-blur-md">
-                  <!-- Inline search input inside dropdown -->
-                  <div class="relative w-full shrink-0">
-                    <input 
-                      type="text" 
-                      class="custom-search-select-filter w-full bg-zinc-900 border border-zinc-800 focus:border-indigo-500/80 rounded-lg px-2.5 py-1.5 text-[11px] text-zinc-300 focus:outline-none transition-all placeholder-zinc-650" 
-                      placeholder="Type to search episodes..."
-                    />
-                  </div>
-                  <!-- Options container -->
-                  <div class="custom-search-select-options overflow-y-auto space-y-0.5 max-h-44 text-[11px] font-semibold text-zinc-400 scrollbar-thin">
-                    <!-- Loaded on click -->
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        `;
-
-        previewMatchesList.appendChild(row);
-      });
-
-      // Populate select values
-      previewMatchesList.querySelectorAll(".custom-search-select-container").forEach(el => {
-        const idx = parseInt(el.getAttribute("data-index")!);
-        const m = activeMappings[idx];
-        const inputEl = el.querySelector(".custom-search-select-input") as HTMLInputElement;
-        
-        if (m.target_season !== null && m.target_episode !== null) {
-          const foundEp = tmdbEpisodesList.find(ep => ep.season === m.target_season && ep.episode === m.target_episode);
-          const titleText = foundEp ? foundEp.title : 'Untitled Episode';
-          inputEl.value = `S${m.target_season.toString().padStart(2, '0')}E${m.target_episode.toString().padStart(2, '0')} - ${titleText}`;
-          el.setAttribute("data-selected-value", `${m.target_season}:${m.target_episode}`);
-        } else {
-          inputEl.value = "-- Unmapped / Ignore --";
-          el.setAttribute("data-selected-value", "");
-        }
-      });
-
-      // Hook up custom search-select event listeners
-      previewMatchesList.querySelectorAll(".custom-search-select-container").forEach(container => {
-        const idx = parseInt(container.getAttribute("data-index")!);
-        const inputEl = container.querySelector(".custom-search-select-input") as HTMLInputElement;
-        const dropdownEl = container.querySelector(".custom-search-select-dropdown") as HTMLDivElement;
-        const filterInput = container.querySelector(".custom-search-select-filter") as HTMLInputElement;
-        const optionsContainer = container.querySelector(".custom-search-select-options") as HTMLDivElement;
-
-        // Toggle open dropdown
-        inputEl.addEventListener("click", (e) => {
-          e.stopPropagation();
-          
-          // Close all other open dropdowns first!
-          document.querySelectorAll(".custom-search-select-dropdown").forEach(d => {
-            if (d !== dropdownEl) d.classList.add("hidden");
-          });
-
-          const isHidden = dropdownEl.classList.contains("hidden");
-          if (isHidden) {
-            dropdownEl.classList.remove("hidden");
-            filterInput.value = "";
-            filterInput.focus();
-            
-            // Build options dynamically!
-            optionsContainer.innerHTML = "";
-            
-            // 1. Unmapped / Ignore option
-            const unmappedDiv = document.createElement("div");
-            unmappedDiv.className = "custom-option px-2.5 py-1.5 hover:bg-zinc-900 rounded-lg cursor-pointer transition-colors text-zinc-400 font-bold border border-transparent";
-            unmappedDiv.setAttribute("data-value", "");
-            unmappedDiv.textContent = "-- Unmapped / Ignore --";
-            unmappedDiv.addEventListener("click", () => {
-              selectOption("", "-- Unmapped / Ignore --");
-            });
-            optionsContainer.appendChild(unmappedDiv);
-
-            // 2. All episodes from tmdbEpisodesList
-            tmdbEpisodesList.forEach((ep: any) => {
-              const optDiv = document.createElement("div");
-              optDiv.className = "custom-option px-2.5 py-1.5 hover:bg-zinc-900 hover:text-zinc-100 rounded-lg cursor-pointer transition-colors border border-transparent";
-              const val = `${ep.season}:${ep.episode}`;
-              const label = `S${ep.season.toString().padStart(2, '0')}E${ep.episode.toString().padStart(2, '0')} - ${ep.title || 'Untitled Episode'}`;
-              
-              optDiv.setAttribute("data-value", val);
-              optDiv.textContent = label;
-              optDiv.addEventListener("click", () => {
-                selectOption(val, label);
-              });
-              optionsContainer.appendChild(optDiv);
-            });
-          } else {
-            dropdownEl.classList.add("hidden");
-          }
-        });
-
-        // Live filter/search input inside the dropdown
-        filterInput.addEventListener("input", (e) => {
-          const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
-          optionsContainer.querySelectorAll(".custom-option").forEach(opt => {
-            const label = opt.textContent?.toLowerCase() || "";
-            const val = opt.getAttribute("data-value") || "";
-            
-            if (label.includes(query) || val.includes(query)) {
-              (opt as HTMLElement).classList.remove("hidden");
-            } else {
-              (opt as HTMLElement).classList.add("hidden");
-            }
-          });
-        });
-
-        // Function to select an option
-        function selectOption(val: string, label: string) {
-          inputEl.value = label;
-          container.setAttribute("data-selected-value", val);
-          dropdownEl.classList.add("hidden");
-
-          if (val === "") {
-            activeMappings[idx].target_season = null;
-            activeMappings[idx].target_episode = null;
-            activeMappings[idx].target_title = null;
-            activeMappings[idx].matched = false;
-            
-            // Uncheck checkbox
-            const checkbox = previewMatchesList.querySelector(`.auto-include-checkbox[data-index="${idx}"]`) as HTMLInputElement;
-            if (checkbox) checkbox.checked = false;
-          } else {
-            const [s, eNum] = val.split(":");
-            activeMappings[idx].target_season = parseInt(s);
-            activeMappings[idx].target_episode = parseInt(eNum);
-            
-            const foundEp = tmdbEpisodesList.find(ep => ep.season === activeMappings[idx].target_season && ep.episode === activeMappings[idx].target_episode);
-            if (foundEp) {
-              activeMappings[idx].target_title = foundEp.title;
-            }
-            activeMappings[idx].matched = true;
-            
-            // Check checkbox
-            const checkbox = previewMatchesList.querySelector(`.auto-include-checkbox[data-index="${idx}"]`) as HTMLInputElement;
-            if (checkbox) checkbox.checked = true;
-          }
-        }
-      });
-
-      // Hook up include checkbox listeners
-      previewMatchesList.querySelectorAll(".auto-include-checkbox").forEach(el => {
-        el.addEventListener("change", (e) => {
-          const idx = parseInt((e.target as HTMLElement).getAttribute("data-index")!);
-          activeMappings[idx].matched = (e.target as HTMLInputElement).checked;
-        });
-      });
-    }
-
-    // Global click listener to close open select dropdowns
-    document.addEventListener("click", (e) => {
-      if (!(e.target as HTMLElement).closest(".custom-search-select-container")) {
-        document.querySelectorAll(".custom-search-select-dropdown").forEach(d => {
-          d.classList.add("hidden");
-        });
-      }
-    });
-
-    if (autoRemapBtn) autoRemapBtn.addEventListener("click", openAutoModal);
-    closeAutoModalBtn.addEventListener("click", closeAutoModal);
-    cancelAutoModalBtn.addEventListener("click", closeAutoModal);
-    autoModal.addEventListener("click", (e) => {
-      if (e.target === autoModal) closeAutoModal();
-    });
-
-    generatePreviewBtn.addEventListener("click", async () => {
-      const tmdbId = parseInt(autoTmdbIdInput.value);
-      const tvdbId = parseInt(autoTvdbIdInput.value);
-      
-      if (!tmdbId || !tvdbId) {
-        window.showToast?.("Please search and select both a TMDB show and a TVDB show!", "error");
-        return;
-      }
-      if (!hasSavedTvdbKey) {
-        window.showToast?.("TVDB API Key must be configured in settings to use the auto-remapper!", "error");
-        return;
-      }
-
-      loader.classList.remove("hidden");
-      previewArea.classList.add("hidden");
-      generatePreviewBtn.disabled = true;
-      applyAutoRemapsBtn.disabled = true;
-
-      try {
-        const res = await fetch("/api/proxy/sync/auto-map-tvdb-tmdb/preview", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            tmdb_show_id: tmdbId,
-            tvdb_show_id: tvdbId
-          })
-        });
-
-        if (!res.ok) {
-          const err = await res.json();
-          window.showToast?.(err.detail || "Failed to generate preview", "error");
-          loader.classList.add("hidden");
-          generatePreviewBtn.disabled = false;
-          return;
-        }
-
-        const data = await res.json();
-        activeMappings = data.matches || [];
-        tmdbEpisodesList = data.tmdb_episodes || [];
-        
-        // Compile dropdown options once in memory
-        selectOptionsHtml = `<option value="">-- Unmapped / Ignore --</option>`;
-        let currentSeason = -1;
-        tmdbEpisodesList.forEach((ep: any) => {
-          if (ep.season !== currentSeason) {
-            if (currentSeason !== -1) selectOptionsHtml += `</optgroup>`;
-            currentSeason = ep.season;
-            selectOptionsHtml += `<optgroup label="Season ${currentSeason}">`;
-          }
-          selectOptionsHtml += `<option value="${ep.season}:${ep.episode}">S${ep.season.toString().padStart(2, '0')}E${ep.episode.toString().padStart(2, '0')} - ${ep.title || 'Untitled Episode'}</option>`;
-        });
-        if (currentSeason !== -1) selectOptionsHtml += `</optgroup>`;
-
-        // Populate stats
-        const totalTvdb = data.total_tvdb_episodes || 0;
-        const matchedCount = data.matched_count || 0;
-        const unmatchedCount = activeMappings.filter(m => !m.matched).length;
-        
-        const pct = totalTvdb > 0 ? Math.round((matchedCount / totalTvdb) * 100) : 0;
-        previewMatchStats.textContent = `${matchedCount} / ${totalTvdb} matched successfully`;
-        previewMatchPct.textContent = `${pct}% Match Rate`;
-        
-        if (pct >= 85) {
-          previewMatchPct.className = "text-xs bg-emerald-950/80 border border-emerald-900/60 text-emerald-400 px-2 py-0.5 rounded-full font-extrabold";
-        } else if (pct >= 50) {
-          previewMatchPct.className = "text-xs bg-amber-950/80 border border-amber-900/60 text-amber-400 px-2 py-0.5 rounded-full font-extrabold";
-        } else {
-          previewMatchPct.className = "text-xs bg-rose-950/80 border border-rose-900/60 text-rose-400 px-2 py-0.5 rounded-full font-extrabold";
-        }
-
-        previewUnmatchedBadge.textContent = `${unmatchedCount} unmatched`;
-        unmatchedCountBadge.textContent = unmatchedCount.toString();
-
-        // Render matched pairs
-        renderList();
-
-        loader.classList.add("hidden");
-        previewArea.classList.remove("hidden");
-        generatePreviewBtn.disabled = false;
-        
-        if (activeMappings.length > 0) {
-          applyAutoRemapsBtn.disabled = false;
-        }
-      } catch (err: any) {
-        window.showToast?.("Error communicating with server", "error");
-        loader.classList.add("hidden");
-        generatePreviewBtn.disabled = false;
-      }
-    });
-
-    applyAutoRemapsBtn.addEventListener("click", async () => {
-      const tmdbId = parseInt(autoTmdbIdInput.value);
-      const tvdbId = parseInt(autoTvdbIdInput.value);
-      
-      const mappingsToApply = activeMappings.filter(m => m.matched && m.target_season !== null && m.target_episode !== null);
-      if (mappingsToApply.length === 0) {
-        window.showToast?.("No active mappings with filled target coordinates are checked!", "error");
-        return;
-      }
-
-      applyAutoRemapsBtn.disabled = true;
-      applyAutoRemapsBtn.textContent = "Applying Overrides...";
-
-      try {
-        const payload = {
-          tmdb_show_id: tmdbId,
-          target_show_tmdb_id: tmdbId,
-          tvdb_show_id: tvdbId,
-          mappings: mappingsToApply.map(m => ({
-            source_season: m.source_season,
-            source_episode: m.source_episode,
-            target_season: m.target_season,
-            target_episode: m.target_episode
-          }))
-        };
-
-        const res = await fetch("/api/proxy/sync/auto-map-tvdb-tmdb/apply", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify(payload)
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          window.showToast?.(`Successfully applied ${data.overrides_created} overrides and remapped ${data.media_remapped} library items!`, "success");
-          closeAutoModal();
-          setTimeout(() => window.location.reload(), 1000);
-        } else {
-          const err = await res.json();
-          window.showToast?.(err.detail || "Failed to apply auto-remaps", "error");
-          applyAutoRemapsBtn.disabled = false;
-          applyAutoRemapsBtn.textContent = "Apply Auto-Remaps";
-        }
-      } catch (e) {
-        window.showToast?.("Error communicating with server", "error");
-        applyAutoRemapsBtn.disabled = false;
-        applyAutoRemapsBtn.textContent = "Apply Auto-Remaps";
-      }
     });
 
     // Auto-fill and Open Modals based on URL Query Parameters
@@ -3630,38 +2319,34 @@ try {
         resetModalState();
         remapModal.classList.remove("opacity-0", "pointer-events-none");
         
-        // 2. Fetch local shows and select matching card
-        fetchLocalShows().then(() => {
-          const matchedShow = localShowsList.find(s => s.tmdb_id.toString() === tmdb);
-          if (matchedShow) {
-            selectSourceShow(matchedShow);
-            
-            if (season) {
-              // Wait for buttons to render, then select the season
-              setTimeout(() => {
-                const seasonButtonsList = sourceSeasonButtons.querySelectorAll("button");
-                seasonButtonsList.forEach(sBtn => {
-                  const txt = sBtn.textContent || "";
-                  if (txt.includes(`Season ${season}`) || (season === "0" && txt.includes("Specials"))) {
-                    (sBtn as HTMLButtonElement).click();
-                  }
-                });
-              }, 100);
-            }
-          } else {
-            // Toggle to manual mode and load show metadata
-            if (sourceMode === "select") {
-              toggleSourceModeBtn.click();
-            }
-            sourceShowTmdbInput.value = tmdb;
-            if (season) sourceSeasonInput.value = season;
-            sourceShowLookupBtn.click();
-          }
-        });
+        const tmdbVal = parseInt(tmdb);
+        const typeSelectSrc = document.getElementById("source-show-id-type") as HTMLSelectElement;
+        const typeSelectTgt = document.getElementById("target-show-id-type") as HTMLSelectElement;
 
-        // 3. Pre-fill target show search with the same TMDB ID to make remapping easy
-        targetSearchInput.value = tmdb;
-        targetSearchBtn.click();
+        if (tmdbVal < 0) {
+          if (typeSelectSrc) typeSelectSrc.value = "tvdb";
+          if (typeSelectTgt) typeSelectTgt.value = "tvdb";
+          sourceShowTmdbInput.value = Math.abs(tmdbVal).toString();
+          targetShowTmdbInput.value = Math.abs(tmdbVal).toString();
+        } else {
+          if (typeSelectSrc) typeSelectSrc.value = "tmdb";
+          if (typeSelectTgt) typeSelectTgt.value = "tmdb";
+          sourceShowTmdbInput.value = tmdb;
+          targetShowTmdbInput.value = tmdb;
+        }
+
+        // 2. Pre-fill season coordinates
+        if (season) {
+          sourceSeasonInput.value = season;
+          targetSeasonInput.value = season;
+        }
+
+        // 3. Trigger lookups
+        sourceShowLookupBtn.click();
+        targetShowLookupBtn.click();
+
+        // 4. Validate form
+        validateForm();
       }
       // Remove params from URL so refresh doesn't pop it open again
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -3674,9 +2359,23 @@ try {
         // 1. Open the Episode Remap Modal
         openEpModal();
         
-        // 2. Fill the manual coordinate inputs directly
-        epSrcTmdbInput.value = tmdb;
-        epTgtTmdbInput.value = tmdb;
+        const tmdbVal = parseInt(tmdb);
+        const epSrcTypeSelect = document.getElementById("ep-src-type") as HTMLSelectElement;
+        const epTgtTypeSelect = document.getElementById("ep-tgt-type") as HTMLSelectElement;
+
+        if (tmdbVal < 0) {
+          if (epSrcTypeSelect) epSrcTypeSelect.value = "tvdb";
+          if (epTgtTypeSelect) epTgtTypeSelect.value = "tvdb";
+          epSrcTmdbInput.value = Math.abs(tmdbVal).toString();
+          epTgtTmdbInput.value = Math.abs(tmdbVal).toString();
+        } else {
+          if (epSrcTypeSelect) epSrcTypeSelect.value = "tmdb";
+          if (epTgtTypeSelect) epTgtTypeSelect.value = "tmdb";
+          epSrcTmdbInput.value = tmdb;
+          epTgtTmdbInput.value = tmdb;
+        }
+
+        // 2. Fill coordinates
         if (season) epSrcSeasonInput.value = season;
         if (ep) epSrcEpisodeStartInput.value = ep;
         

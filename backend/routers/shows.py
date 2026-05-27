@@ -849,6 +849,13 @@ async def get_show_season(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if series_tmdb_id < 0:
+        res = await get_tvdb_season(-series_tmdb_id, season_number, db, current_user)
+        res["tmdb_id"] = series_tmdb_id
+        if "show" in res:
+            res["show"]["tmdb_id"] = series_tmdb_id
+        return res
+
     # Check for active season override
     override_result = await db.execute(
         select(ShowSeasonOverride).where(
