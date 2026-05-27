@@ -220,7 +220,8 @@ class PasswordUpdate(BaseModel):
     new_password: str
 
 class WatchEventCreate(BaseModel):
-    tmdb_id: int
+    tmdb_id: Optional[int] = None
+    media_id: Optional[int] = None
     media_type: MediaType
     watched_at: Optional[datetime] = None
     completed: bool = True

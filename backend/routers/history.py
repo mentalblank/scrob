@@ -534,14 +534,21 @@ async def mark_as_watched(
     current_user: User = Depends(get_current_user),
 ):
     # 1. Check if Media exists locally
-    query = select(Media).where(
-        Media.tmdb_id == event_in.tmdb_id, Media.media_type == event_in.media_type
-    )
-    result = await db.execute(query)
-    media = result.scalars().first()
+    media = None
+    if event_in.media_id:
+        media = await db.get(Media, event_in.media_id)
+    
+    if not media and event_in.tmdb_id:
+        query = select(Media).where(
+            Media.tmdb_id == event_in.tmdb_id, Media.media_type == event_in.media_type
+        )
+        result = await db.execute(query)
+        media = result.scalars().first()
 
     # 2. If not, create Media record from TMDB
     if not media:
+        if not event_in.tmdb_id:
+             raise HTTPException(status_code=400, detail="tmdb_id is required for new media")
         # Get user's TMDB key if available
         from routers.media import get_user_tmdb_key
 

@@ -319,23 +319,32 @@ const bottomNavItem = (active: boolean) =>
   </div>
 
   <!-- Watch history modal -->
-  <div id="watch-history-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-      <div class="px-5 pt-5 pb-4 border-b border-zinc-800 flex items-center justify-between gap-3">
-        <h3 class="text-base font-bold text-zinc-100">Watch History</h3>
-        <button id="watch-history-modal-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer shrink-0" aria-label="Close">
+  <div id="watch-history-modal" class="hidden fixed inset-0 z-[999] flex items-center justify-center" role="dialog" aria-modal="true">
+    <div id="watch-history-modal-backdrop" class="absolute inset-0 bg-black/75 backdrop-blur-sm cursor-pointer"></div>
+    <div class="relative bg-zinc-950/85 border border-zinc-800/85 rounded-3xl shadow-2xl w-full max-w-md mx-4 overflow-hidden flex flex-col max-h-[85vh] z-10 backdrop-blur-xl">
+      <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
+        <h3 class="text-sm font-bold text-zinc-100 flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="text-indigo-500">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          Play History
+        </h3>
+        <button id="watch-history-modal-close" class="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition cursor-pointer shrink-0" aria-label="Close">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <div id="watch-history-modal-events" class="max-h-52 overflow-y-auto divide-y divide-zinc-800/50"></div>
-      <div class="px-4 pt-3 pb-4 border-t border-zinc-800 space-y-2.5">
-        <p class="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Add a play</p>
+      
+      <div id="watch-history-modal-events" class="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin"></div>
+      
+      <div class="p-4 border-t border-zinc-800 bg-zinc-950/40 space-y-3">
+        <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Log a new play</p>
         <div class="flex gap-2">
           <button id="watch-history-now-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white">Just now</button>
-          <button id="watch-history-custom-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Custom</button>
+          <button id="watch-history-custom-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Custom Date</button>
         </div>
-        <input type="datetime-local" id="watch-history-date-input" class="hidden w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-zinc-200 focus:outline-none focus:border-green-500 [color-scheme:dark]" />
-        <button id="watch-history-log-btn" class="w-full px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-95">
+        <input type="datetime-local" id="watch-history-date-input" class="hidden w-full px-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-sm text-zinc-200 focus:outline-none focus:border-blue-500 [color-scheme:dark]" />
+        <button id="watch-history-log-btn" class="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-[0.98] shadow-lg shadow-indigo-900/20">
           Log play
         </button>
       </div>
@@ -1212,13 +1221,12 @@ const bottomNavItem = (active: boolean) =>
     };
     const toUTC = (d: Date) => d.toISOString().slice(0, 16);
 
-    function closeWatchHistoryModal() {
-      document.getElementById('watch-history-modal')!.classList.add('hidden');
-    }
+    let _watchHistoryMediaId: string | null = null;
 
-    async function openWatchHistoryModal(_btn: HTMLElement, tmdbId: string, mediaType: string) {
+    async function openWatchHistoryModal(_btn: HTMLElement | null, tmdbId: string | null, mediaType: string, mediaId: string | null = null) {
       _watchHistoryTmdbId = tmdbId;
       _watchHistoryMediaType = mediaType;
+      _watchHistoryMediaId = mediaId;
 
       // Reset "add play" form to "Just now"
       _watchHistoryUseNow = true;
@@ -1234,40 +1242,68 @@ const bottomNavItem = (active: boolean) =>
       dateInput.max = toLocal(new Date());
 
       document.getElementById('watch-history-modal')!.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
       await loadWatchHistoryEvents();
     }
 
     async function loadWatchHistoryEvents() {
       const eventsEl = document.getElementById('watch-history-modal-events')!;
-      eventsEl.innerHTML = '<div class="px-4 py-3 text-xs text-zinc-500">Loading…</div>';
+      eventsEl.innerHTML = '<div class="text-zinc-500 text-sm text-center py-8 flex justify-center items-center gap-2"><svg class="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading plays...</div>';
       try {
-        const events: Array<{ id: number; watched_at: string }> = await apiFetch(
-          `/history/item-events?tmdb_id=${_watchHistoryTmdbId}&media_type=${_watchHistoryMediaType}`
-        );
+        const query = _watchHistoryTmdbId ? `tmdb_id=${_watchHistoryTmdbId}` : `id=${_watchHistoryMediaId}`;
+        const res = await fetch(`/api/proxy/history/item/events?${query}&media_type=${_watchHistoryMediaType}`, {
+          headers: { 'Authorization': `Bearer ${TOKEN()}` }
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const events = data.events || [];
+
         if (events.length === 0) {
-          eventsEl.innerHTML = '<div class="px-4 py-3 text-sm text-zinc-500 italic">No plays recorded yet</div>';
+          eventsEl.innerHTML = '<div class="text-zinc-500 text-sm text-center py-12 px-4 italic opacity-50 bg-zinc-900/30 border border-dashed border-zinc-800 rounded-2xl">No plays recorded for this item.</div>';
         } else {
-          eventsEl.innerHTML = events.map(ev => {
-            const d = new Date(ev.watched_at + 'Z');
-            const fmt = d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: !(window as any).__USE_24H__ });
-            return `<div class="flex items-center justify-between px-4 py-2.5 hover:bg-zinc-800/50 group">
-              <span class="text-sm text-zinc-200">${esc(fmt)}</span>
-              <button class="text-zinc-600 group-hover:text-zinc-400 hover:!text-red-400 transition-colors cursor-pointer" data-delete-event="${ev.id}" aria-label="Remove">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          const formatter = new Intl.DateTimeFormat(undefined, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+            hour12: !(window as any).__USE_24H__
+          });
+
+          eventsEl.innerHTML = events.map((ev: any) => {
+            const dateStr = ev.watched_at.includes('Z') || ev.watched_at.includes('+') ? ev.watched_at : ev.watched_at + 'Z';
+            const date = new Date(dateStr);
+            const statusLabel = ev.completed ? 'Completed' : `In progress (${Math.round((ev.progress_percent || 0) * 100)}%)`;
+
+            return `<div class="flex items-center justify-between p-3.5 bg-zinc-900/60 border border-zinc-800/80 rounded-2xl hover:border-zinc-700 transition-colors group">
+              <div class="flex flex-col gap-0.5">
+                <span class="text-sm font-bold text-zinc-200">${esc(formatter.format(date))}</span>
+                <span class="text-[10px] font-bold uppercase tracking-wider ${ev.completed ? 'text-green-500' : 'text-amber-500'}">${esc(statusLabel)}</span>
+              </div>
+              <button class="p-2.5 rounded-xl bg-red-500/5 hover:bg-red-500/20 text-red-500 border border-red-500/10 hover:border-red-500/30 transition-all duration-200 cursor-pointer active:scale-90" 
+                      data-delete-event="${ev.id}" 
+                      title="Remove play">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
             </div>`;
           }).join('');
         }
-        const isWatched = events.length > 0;
+        
+        const isWatched = events.some((e: any) => e.completed);
         document.querySelectorAll<HTMLElement>(
           `[data-card][data-tmdb-id="${_watchHistoryTmdbId}"][data-media-type="${_watchHistoryMediaType}"] [data-action="watched"]`
         ).forEach(b => updateWatchedButtonUI(b, isWatched));
       } catch {
-        eventsEl.innerHTML = '<div class="px-4 py-2 text-xs text-red-400">Failed to load</div>';
+        eventsEl.innerHTML = '<div class="px-4 py-2 text-xs text-red-400">Failed to load history</div>';
       }
     }
 
+    function closeWatchHistoryModal() {
+      document.getElementById('watch-history-modal')!.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
     document.getElementById('watch-history-modal-close')!.addEventListener('click', closeWatchHistoryModal);
+    document.getElementById('watch-history-modal-backdrop')!.addEventListener('click', closeWatchHistoryModal);
+
+    (window as any).openWatchHistoryModal = openWatchHistoryModal;
     document.getElementById('watch-history-modal')!.addEventListener('click', (e) => {
       if (e.target === document.getElementById('watch-history-modal')) closeWatchHistoryModal();
     });
@@ -1318,7 +1354,8 @@ const bottomNavItem = (active: boolean) =>
         logBtn.textContent = 'Logging…';
         try {
           await apiFetch('/history', 'POST', {
-            tmdb_id: Number(_watchHistoryTmdbId),
+            tmdb_id: _watchHistoryTmdbId ? Number(_watchHistoryTmdbId) : null,
+            media_id: _watchHistoryMediaId ? Number(_watchHistoryMediaId) : null,
             media_type: _watchHistoryMediaType,
             completed: true,
             watched_at: watchedAt,
@@ -1497,7 +1534,7 @@ const bottomNavItem = (active: boolean) =>
         const seriesId = showTmdbId || tmdbId;
 
         if (mediaType === 'movie' || mediaType === 'episode') {
-          await openWatchHistoryModal(btn, tmdbId, mediaType);
+          await openWatchHistoryModal(btn, tmdbId, mediaType, card.dataset.mediaId || null);
           return;
         }
 
