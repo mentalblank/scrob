@@ -406,7 +406,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
                   const icon = (isDropped || (showDrop && !isBlocked)) ? ICON_DROP : ICON_BLOCK;
                   return `<button data-action="unified-block" data-is-blocked="${isBlocked}" data-is-dropped="${isDropped}" title="${esc(titleStr)}" class="${esc(cls)}">${icon}</button>`;
                 })()}
-                ${rating ? `<div class="absolute top-2 right-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
+                ${rating ? `<div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
                 ${showProgress ? `
                   <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
                     <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
