@@ -62,21 +62,33 @@ try {
     customTitles = (await resTitles.json()).results || [];
     
     // Group custom titles by show ID
-    const groupedCustomTitles: Record<number, any> = {};
+    const groupedCustomTitles: Record<string, any> = {};
     customTitles.forEach((item: any) => {
-      const showId = item.show_tmdb_id || 0;
-      if (!groupedCustomTitles[showId]) {
-        groupedCustomTitles[showId] = {
-          show_title: item.show_title || "Global / Unlinked",
-          show_tmdb_id: showId,
-          show_poster_path: item.show_poster_path || null,
-          items: []
+      let groupId = String(item.show_tmdb_id || 0);
+      let groupTitle = item.show_title || "Global / Unlinked";
+      let groupPoster = item.show_poster_path || null;
+
+      if (item.type === 'movie') {
+        groupId = "movies";
+        groupTitle = "Movies";
+        groupPoster = null;
+      }
+
+      if (!groupedCustomTitles[groupId]) {
+        groupedCustomTitles[groupId] = {
+          show_title: groupTitle,
+          show_tmdb_id: item.show_tmdb_id || 0,
+          show_poster_path: groupPoster,
+          items: [],
+          isMovies: item.type === 'movie'
         };
       }
-      groupedCustomTitles[showId].items.push(item);
+      groupedCustomTitles[groupId].items.push(item);
     });
-    // Sort show groups: shows with posters / names first, unlinked last
+    // Sort groups: movies first, then shows alphabetically, unlinked last
     groupedCustomTitlesList = Object.values(groupedCustomTitles).sort((a: any, b: any) => {
+      if (a.isMovies) return -1;
+      if (b.isMovies) return 1;
       if (a.show_tmdb_id === 0) return 1;
       if (b.show_tmdb_id === 0) return -1;
       return a.show_title.localeCompare(b.show_title);
@@ -531,6 +543,7 @@ try {
                             {item.type === 'show' && <span class="px-2 py-1 bg-purple-900/30 text-purple-400 rounded font-bold text-xs">Show</span>}
                             {item.type === 'season' && <span class="px-2 py-1 bg-teal-900/30 text-teal-400 rounded font-bold text-xs">Season</span>}
                             {item.type === 'episode' && <span class="px-2 py-1 bg-orange-900/30 text-orange-400 rounded font-bold text-xs">Episode</span>}
+                            {item.type === 'movie' && <span class="px-2 py-1 bg-blue-900/30 text-blue-400 rounded font-bold text-xs">Movie</span>}
                           </td>
                           <td class="px-5 py-4 text-zinc-400">{item.context}</td>
                           <td class="px-5 py-4 text-zinc-500 line-through decoration-zinc-600">{item.original_title}</td>
@@ -1032,16 +1045,16 @@ try {
       <!-- Modal Body (Scrollable) -->
       <div class="p-6 overflow-y-auto space-y-6 flex-1">
         
-        <!-- Select Show -->
+        <!-- Select Media -->
         <div class="space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
-          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Select Show</label>
+          <label id="rename-media-label" class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Select Show or Movie</label>
           <div class="flex gap-2">
             <input type="text" id="rename-show-search" placeholder="Search local library..." class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
             <button id="rename-show-search-btn" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold rounded-xl text-xs transition cursor-pointer">Search</button>
           </div>
-          <!-- Show Search Results -->
+          <!-- Media Search Results -->
           <div id="rename-show-results" class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto mt-2 no-scrollbar hidden"></div>
-          <!-- Selected Show Card -->
+          <!-- Selected Media Card -->
           <div id="rename-selected-show-card" class="hidden p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl flex items-center justify-between">
             <div class="flex items-center gap-3 min-w-0">
               <img id="rename-selected-show-poster" class="w-10 h-14 rounded-lg object-cover bg-zinc-950 border border-zinc-850 shrink-0" src="" />
@@ -1058,6 +1071,9 @@ try {
         <div id="rename-type-section" class="hidden space-y-3">
           <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">2. Select Type</label>
           <div class="flex gap-2">
+            <button id="rename-type-movie" class="hidden flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center">
+              Movie
+            </button>
             <button id="rename-type-show" class="flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center">
               Show
             </button>
@@ -1170,6 +1186,7 @@ try {
     // State Variables
     let sourceMode: "select" | "manual" = "select";
     let localShowsList: any[] = [];
+    let localMoviesList: any[] = [];
     let selectedLocalShowObj: any = null;
     let selectedLocalSeasonNum: number | null = null;
 
@@ -1225,6 +1242,24 @@ try {
         }
       } catch (err) {
         console.error("Error loading local shows", err);
+      }
+    }
+
+    // Fetch movies in user's collection
+    async function fetchLocalMovies() {
+      if (localMoviesList && localMoviesList.length > 0) {
+        return;
+      }
+      try {
+        const res = await fetch("/api/proxy/sync/source-movies", {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          localMoviesList = Array.isArray(data) ? data : data.results || [];
+        }
+      } catch (err) {
+        console.error("Error loading local movies", err);
       }
     }
 
@@ -1764,6 +1799,7 @@ try {
     const cancelRenameModalBtn = document.getElementById("cancel-rename-modal-btn")!;
     const saveRenameBtn = document.getElementById("save-rename-btn") as HTMLButtonElement;
 
+    const renameTypeMovie = document.getElementById("rename-type-movie")!;
     const renameTypeShow = document.getElementById("rename-type-show")!;
     const renameTypeSeason = document.getElementById("rename-type-season")!;
     const renameTypeEpisode = document.getElementById("rename-type-episode")!;
@@ -1788,7 +1824,7 @@ try {
     const renameCustomTitleInput = document.getElementById("rename-custom-title-input") as HTMLInputElement;
 
     // Custom Rename State
-    let renameType: "show" | "season" | "episode" = "show";
+    let renameType: "show" | "season" | "episode" | "movie" = "show";
     let renameSelectedShow: any = null;
     let renameSelectedSeason: number | null = null;
     let renameSelectedEpisode: any = null;
@@ -1797,7 +1833,7 @@ try {
     addRenameBtn.addEventListener("click", () => {
       resetRenameModal();
       renameModal.classList.remove("opacity-0", "pointer-events-none");
-      fetchRenameLocalShows();
+      fetchRenameLocalMedia();
     });
 
     // Close Custom Rename Modal
@@ -1811,19 +1847,19 @@ try {
     });
 
     // Toggle Rename Type Tab Selection
-    function selectRenameType(type: "show" | "season" | "episode") {
+    function selectRenameType(type: "show" | "season" | "episode" | "movie") {
       renameType = type;
       
       // Update Tab Styles
-      [renameTypeShow, renameTypeSeason, renameTypeEpisode].forEach(btn => {
+      [renameTypeMovie, renameTypeShow, renameTypeSeason, renameTypeEpisode].forEach(btn => {
         btn.className = "flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center";
       });
 
-      const activeBtn = type === "show" ? renameTypeShow : type === "season" ? renameTypeSeason : renameTypeEpisode;
+      const activeBtn = type === "movie" ? renameTypeMovie : type === "show" ? renameTypeShow : type === "season" ? renameTypeSeason : renameTypeEpisode;
       activeBtn.className = "flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center";
 
       // Show/Hide Sections
-      if (type === "show") {
+      if (type === "show" || type === "movie") {
         renameSeasonSection.classList.add("hidden");
         renameEpisodeSection.classList.add("hidden");
       } else if (type === "season") {
@@ -1843,29 +1879,33 @@ try {
       validateRenameForm();
     }
 
+    renameTypeMovie.addEventListener("click", () => selectRenameType("movie"));
     renameTypeShow.addEventListener("click", () => selectRenameType("show"));
     renameTypeSeason.addEventListener("click", () => selectRenameType("season"));
     renameTypeEpisode.addEventListener("click", () => selectRenameType("episode"));
 
-    function fetchRenameLocalShows() {
-      if (localShowsList && localShowsList.length > 0) {
-        return;
-      }
+    function fetchRenameLocalMedia() {
       fetchLocalShows();
+      fetchLocalMovies();
     }
 
     const performRenameShowSearch = () => {
       const q = renameShowSearch.value.trim().toLowerCase();
       if (!q) {
-        renderRenameShowResults(localShowsList);
+        renderRenameShowResults([...localShowsList, ...localMoviesList]);
         return;
       }
-      const filtered = localShowsList.filter(show => 
+      const filteredShows = localShowsList.filter(show => 
         show.title.toLowerCase().includes(q) || 
         (show.original_title && show.original_title.toLowerCase().includes(q)) || 
         show.tmdb_id.toString().includes(q)
       );
-      renderRenameShowResults(filtered);
+      const filteredMovies = localMoviesList.filter(movie => 
+        movie.title.toLowerCase().includes(q) || 
+        (movie.tmdb_title && movie.tmdb_title.toLowerCase().includes(q)) || 
+        movie.tmdb_id.toString().includes(q)
+      );
+      renderRenameShowResults([...filteredShows, ...filteredMovies]);
     };
 
     renameShowSearchBtn.addEventListener("click", performRenameShowSearch);
@@ -1879,46 +1919,51 @@ try {
     function renderRenameShowResults(results: any[]) {
       renameShowResults.innerHTML = "";
       if (results.length === 0) {
-        renameShowResults.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-4">No matching local shows found.</div>';
+        renameShowResults.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-4">No matching local media found.</div>';
         renameShowResults.classList.remove("hidden");
         return;
       }
 
-      results.forEach(show => {
+      results.forEach(media => {
+        const isMovie = !media.first_air_date && (media.release_date || media.tmdb_title);
         const card = document.createElement("div");
         card.className = "flex items-center gap-3 p-2 bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-700 cursor-pointer transition text-left group";
         
         let posterHtml = `<div class="w-8 h-12 rounded bg-zinc-950 flex items-center justify-center text-[7px] text-zinc-750 font-bold shrink-0">NO ART</div>`;
-        if (show.poster_path) {
-          posterHtml = `<img src="${show.poster_path}" class="w-8 h-12 rounded object-cover shrink-0" />`;
+        if (media.poster_path) {
+          posterHtml = `<img src="${media.poster_path}" class="w-8 h-12 rounded object-cover shrink-0" />`;
         }
 
-        const year = show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A";
+        const year = (media.first_air_date || media.release_date) ? new Date(media.first_air_date || media.release_date).getFullYear() : "N/A";
+        const typeLabel = isMovie ? "MOVIE" : "SHOW";
 
         card.innerHTML = `
           ${posterHtml}
           <div class="min-w-0">
-            <h4 class="text-zinc-200 font-bold truncate text-xs" title="${show.title}">${show.title}</h4>
-            <span class="text-[9px] text-zinc-500">${year} • ID: ${show.tmdb_id}</span>
+            <span class="text-[7px] font-black px-1.5 py-0.5 rounded ${isMovie ? 'bg-blue-900/30 text-blue-400' : 'bg-indigo-900/30 text-indigo-400'}">${typeLabel}</span>
+            <h4 class="text-zinc-200 font-bold truncate text-xs mt-0.5" title="${media.title}">${media.title}</h4>
+            <span class="text-[9px] text-zinc-500">${year} • ID: ${media.tmdb_id}</span>
           </div>
         `;
 
-        card.addEventListener("click", () => selectRenameShow(show));
+        card.addEventListener("click", () => selectRenameShow(media));
         renameShowResults.appendChild(card);
       });
       renameShowResults.classList.remove("hidden");
     }
 
-    function selectRenameShow(show: any) {
-      renameSelectedShow = show;
+    function selectRenameShow(media: any) {
+      renameSelectedShow = media;
       renameSelectedSeason = null;
       renameSelectedEpisode = null;
+      
+      const isMovie = !media.first_air_date && (media.release_date || media.tmdb_title);
 
-      renameSelectedShowTitle.textContent = show.title;
-      const year = show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A";
-      renameSelectedShowYear.textContent = `${year} • TMDB ID: ${show.tmdb_id}`;
-      if (show.poster_path) {
-        renameSelectedShowPoster.src = show.poster_path;
+      renameSelectedShowTitle.textContent = media.title;
+      const year = (media.first_air_date || media.release_date) ? new Date(media.first_air_date || media.release_date).getFullYear() : "N/A";
+      renameSelectedShowYear.textContent = `${year} • TMDB ID: ${media.tmdb_id}`;
+      if (media.poster_path) {
+        renameSelectedShowPoster.src = media.poster_path;
         renameSelectedShowPoster.classList.remove("hidden");
       } else {
         renameSelectedShowPoster.classList.add("hidden");
@@ -1930,9 +1975,20 @@ try {
       renameSelectedShowCard.classList.remove("hidden");
       renameTypeSection.classList.remove("hidden");
 
-      if (renameType === "season" || renameType === "episode") {
-        renderRenameSeasonButtons(show.seasons_meta || []);
+      if (isMovie) {
+        renameTypeMovie.classList.remove("hidden");
+        renameTypeShow.classList.add("hidden");
+        renameTypeSeason.classList.add("hidden");
+        renameTypeEpisode.classList.add("hidden");
+        selectRenameType("movie");
+      } else {
+        renameTypeMovie.classList.add("hidden");
+        renameTypeShow.classList.remove("hidden");
+        renameTypeSeason.classList.remove("hidden");
+        renameTypeEpisode.classList.remove("hidden");
+        selectRenameType("show");
       }
+
       validateRenameForm();
     }
 
@@ -1950,7 +2006,7 @@ try {
       renameSeasonSection.classList.add("hidden");
       renameEpisodeSection.classList.add("hidden");
 
-      renderRenameShowResults(localShowsList);
+      renderRenameShowResults([...localShowsList, ...localMoviesList]);
       validateRenameForm();
     });
 
@@ -2050,7 +2106,7 @@ try {
       let isValid = false;
       const hasTitle = renameCustomTitleInput.value.trim().length > 0;
       
-      if (renameType === "show") {
+      if (renameType === "show" || renameType === "movie") {
         isValid = !!renameSelectedShow && hasTitle;
       } else if (renameType === "season") {
         isValid = !!renameSelectedShow && renameSelectedSeason !== null && hasTitle;
@@ -2068,6 +2124,11 @@ try {
       renameSelectedEpisode = null;
 
       // Reset tabs
+      renameTypeMovie.classList.add("hidden");
+      renameTypeShow.classList.remove("hidden");
+      renameTypeSeason.classList.remove("hidden");
+      renameTypeEpisode.classList.remove("hidden");
+
       renameTypeShow.className = "flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center";
       renameTypeSeason.className = "flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center";
       renameTypeEpisode.className = "flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center";
@@ -2095,6 +2156,9 @@ try {
 
       if (renameType === "show") {
         body.show_tmdb_id = renameSelectedShow.tmdb_id;
+        body.custom_title = customTitle;
+      } else if (renameType === "movie") {
+        body.media_id = renameSelectedShow.id;
         body.custom_title = customTitle;
       } else if (renameType === "season") {
         body.show_tmdb_id = renameSelectedShow.tmdb_id;

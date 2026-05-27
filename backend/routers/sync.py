@@ -3459,6 +3459,35 @@ async def apply_episode_override(
 
 # ── Source shows (lightweight list for remap wizard dropdown) ─────────────────
 
+@router.get("/source-movies")
+async def list_source_movies(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all movies in the user's collection."""
+    result = await db.execute(
+        select(Media)
+        .join(Collection, Collection.media_id == Media.id)
+        .where(
+            Collection.user_id == current_user.id,
+            Media.media_type == MediaType.movie
+        )
+        .order_by(Media.title.asc())
+    )
+    movies = result.scalars().all()
+    return [
+        {
+            "id": m.id,
+            "tmdb_id": m.tmdb_id,
+            "title": m.custom_title or m.title,
+            "tmdb_title": m.title,
+            "poster_path": m.poster_path,
+            "release_date": m.release_date,
+        }
+        for m in movies
+    ]
+
+
 @router.get("/source-shows")
 async def list_source_shows(
     db: AsyncSession = Depends(get_db),
@@ -3622,8 +3651,27 @@ async def get_all_custom_titles(
             "context": context
         })
 
-    # Sort results to be nice: Shows first, then Seasons, then Episodes
-    type_order = {"show": 1, "season": 2, "episode": 3}
+    # 3. Movies
+    movies_q = await db.execute(
+        select(Media)
+        .where(Media.media_type == MediaType.movie)
+        .where(Media.custom_title.isnot(None))
+    )
+    for m in movies_q.scalars().all():
+        results.append({
+            "type": "movie",
+            "show_tmdb_id": None,
+            "show_title": None,
+            "show_poster_path": m.poster_path,
+            "media_id": m.id,
+            "season_number": None,
+            "original_title": m.title,
+            "custom_title": m.custom_title,
+            "context": "Movie"
+        })
+
+    # Sort results to be nice: Shows first, then Seasons, then Episodes, then Movies
+    type_order = {"show": 1, "season": 2, "episode": 3, "movie": 4}
     results.sort(key=lambda x: (type_order[x["type"]], x["context"]))
 
     return {"results": results}
