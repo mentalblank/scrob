@@ -27,13 +27,11 @@ try {
 const credits = person.credits || [];
 ---
 
-<div data-total-credits={person.total_credits} data-page-size={person.page_size}>
-  {credits.map((item) => (
-    <div class="flex flex-col gap-1">
-      <MediaCard item={item as unknown as MediaItem} />
-      {item.character && (
-        <p class="text-xs text-zinc-500 truncate px-1">as {item.character}</p>
-      )}
-    </div>
-  ))}
-</div>
+{credits.map((item) => (
+  <div class="flex flex-col gap-1">
+    <MediaCard item={item as unknown as MediaItem} />
+    {item.character && (
+      <p class="text-xs text-zinc-500 truncate px-1">as {item.character}</p>
+    )}
+  </div>
+))}

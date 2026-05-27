@@ -1925,13 +1925,14 @@ async def get_person_details(
                 seen[tid] = len(deduped)
                 deduped.append(credit)
 
-        # Enrich the full list to support correct blocklist filtering
-        await enrich_with_state(db, current_user.id, deduped)
+        # Enrichment happens above
         non_blocked = [c for c in deduped if not c.get("is_blocked")]
 
-        non_blocked.sort(key=lambda x: x["_score"], reverse=True)
+        # Sort by release date (most recent first), items without date at the end
+        non_blocked.sort(key=lambda x: x.get("release_date") or "", reverse=True)
         for credit in non_blocked:
-            del credit["_score"]
+            if "_score" in credit:
+                del credit["_score"]
 
         total_credits = len(non_blocked)
         start = (page - 1) * _PERSON_PAGE_SIZE
@@ -2232,9 +2233,13 @@ async def get_person_details_tvdb(
 
         # Filter out blocked credits
         non_blocked = [c for c in deduped if not c.get("is_blocked")]
-        non_blocked.sort(key=lambda x: x["_score"], reverse=True)
+
+        # Sort by release date (most recent first), items without date at the end
+        non_blocked.sort(key=lambda x: x.get("release_date") or "", reverse=True)
+
         for credit in non_blocked:
-            del credit["_score"]
+            if "_score" in credit:
+                del credit["_score"]
 
         total_credits = len(non_blocked)
         start = (page - 1) * _PERSON_PAGE_SIZE

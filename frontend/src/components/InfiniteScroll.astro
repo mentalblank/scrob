@@ -6,6 +6,7 @@ interface Props {
   params?: Record<string, any>;
   targetSelector?: string;
   isHistory?: boolean;
+  endpoint?: string;
 }
 
 const { 
@@ -14,7 +15,8 @@ const {
   totalPages, 
   params = {}, 
   targetSelector = "#media-grid",
-  isHistory = false
+  isHistory = false,
+  endpoint = "/partials/media-grid"
 } = Astro.props;
 ---
 
@@ -27,6 +29,7 @@ const {
   data-params={JSON.stringify(params)}
   data-target={targetSelector}
   data-is-history={isHistory ? "true" : "false"}
+  data-endpoint={endpoint}
 >
   {currentPage < totalPages && (
     <div class="loading-spinner flex items-center gap-3 text-zinc-500 font-medium">
@@ -72,6 +75,7 @@ const {
       const params = JSON.parse(this.sentinel.dataset.params || '{}');
       const targetSelector = this.sentinel.dataset.target || '#media-grid';
       const isHistory = this.sentinel.dataset.isHistory === "true";
+      const endpoint = this.sentinel.dataset.endpoint || '/partials/media-grid';
 
       const queryParams = new URLSearchParams({
         type: type!,
@@ -80,7 +84,7 @@ const {
       });
 
       try {
-        const res = await fetch(`/partials/media-grid?${queryParams.toString()}`);
+        const res = await fetch(`${endpoint}?${queryParams.toString()}`);
         if (!res.ok) throw new Error();
         const html = await res.text();
         
