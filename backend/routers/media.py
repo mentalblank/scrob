@@ -191,6 +191,7 @@ async def enrich_with_state(
     show_status_map: dict[int, str] = {}
     adjusted_show_season_ep_counts = {}
     input_tmdb_to_local_show = {}
+    resolved_tvdb_ids = {}
 
     if show_tmdb_ids:
         # 1. Look up any existing local shows in the DB by their positive TMDB ID
@@ -200,7 +201,6 @@ async def enrich_with_state(
         local_shows_by_tmdb_id = {s.tmdb_id: s for s in local_shows_q.scalars().all()}
 
         # 2. Track resolved TVDB IDs and check for missing ones
-        resolved_tvdb_ids = {}
         for tid in show_tmdb_ids:
             if tid in local_shows_by_tmdb_id and local_shows_by_tmdb_id[tid].tvdb_id:
                 resolved_tvdb_ids[tid] = local_shows_by_tmdb_id[tid].tvdb_id
@@ -610,15 +610,36 @@ async def enrich_with_state(
     blocked_ids: dict[str, set[int]] = {"movie": set(), "series": set(), "episode": set()}
     dropped_ids: dict[str, set[int]] = {"movie": set(), "series": set(), "episode": set()}
     if all_tmdb_ids:
+        # Build block query list including both all_tmdb_ids and any alternative resolved IDs
+        block_query_ids = list(all_tmdb_ids)
+        alt_to_input_ids = {}
+        for tid in show_tmdb_ids:
+            local_show = input_tmdb_to_local_show.get(tid)
+            if local_show and local_show.tmdb_id:
+                db_tid = local_show.tmdb_id
+                if db_tid != tid:
+                    block_query_ids.append(db_tid)
+                    alt_to_input_ids[db_tid] = tid
+            tvdb_id = resolved_tvdb_ids.get(tid)
+            if tvdb_id:
+                neg_tvdb_id = -tvdb_id
+                if neg_tvdb_id != tid:
+                    block_query_ids.append(neg_tvdb_id)
+                    alt_to_input_ids[neg_tvdb_id] = tid
+
         block_q = await db.execute(
             select(BlocklistItem.tmdb_id, BlocklistItem.media_type, BlocklistItem.is_dropped)
-            .where(BlocklistItem.user_id == user_id, BlocklistItem.tmdb_id.in_(all_tmdb_ids))
+            .where(BlocklistItem.user_id == user_id, BlocklistItem.tmdb_id.in_(block_query_ids))
         )
-        for tid, mtype, is_dropped in block_q.all():
-            if is_dropped:
-                dropped_ids[mtype.value].add(tid)
-            else:
-                blocked_ids[mtype.value].add(tid)
+        for block_id, mtype, is_dropped in block_q.all():
+            target_ids = {block_id}
+            if block_id in alt_to_input_ids:
+                target_ids.add(alt_to_input_ids[block_id])
+            for t_id in target_ids:
+                if is_dropped:
+                    dropped_ids[mtype.value].add(t_id)
+                else:
+                    blocked_ids[mtype.value].add(t_id)
 
     # --- Playback progress ---
     progress_map: dict[tuple[int, str], float] = {}

@@ -115,23 +115,44 @@ const showProgress = progressPct > 0 && !watched;
   data-dvr={String(isDvr)}
   data-partial-watched={String(isPartialWatched)}
   data-partial-collected={String(isPartialCollected)}
+  data-in-library={String(inLibrary)}
+  data-is-blocked={String(item.is_blocked ?? false)}
+  data-is-dropped={String(item.is_dropped ?? false)}
 >
   <!-- Clickable poster -->
   {href ? (
     <a href={href} class="block">
       <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300" data-adult={item.adult ? "true" : undefined}>
-        <!-- Block button -->
-        {showActionBar && !hideBlock && (
-          <button
-            data-action="block"
-            title="Don't show this again"
-            class="absolute top-2 left-2 z-10 bg-black/60 backdrop-blur-md text-zinc-400 hover:text-red-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 border border-zinc-800 hover:border-red-500/50 cursor-pointer"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>
-            </svg>
-          </button>
-        )}
+        {/* Unified block/drop button — top-right corner, smart icon/colour */}
+        {showActionBar && !hideBlock && !isPerson && !isCollection && !isSeason && !isEpisode && (() => {
+          const isBlocked = item.is_blocked ?? false;
+          const isDropped = item.is_dropped ?? false;
+          const alreadyActive = isBlocked || isDropped;
+          // Drop (amber) for series that are in collection or have any watch progress
+          const showDrop = isSeries && (inLibrary || isPartialWatched || watched);
+          const btnBase = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer';
+          const btnInactiveDrop = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+          const btnInactiveBlock = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+          const btnActiveDrop  = `${btnBase} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+          const btnActiveBlock = `${btnBase} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+          const cls = isDropped ? btnActiveDrop : isBlocked ? btnActiveBlock : showDrop ? btnInactiveDrop : btnInactiveBlock;
+          const titleStr = isDropped ? 'Resume tracking' : isBlocked ? 'Unblock' : showDrop ? 'Drop show' : 'Block';
+          return (
+            <button
+              data-action="unified-block"
+              data-is-blocked={String(isBlocked)}
+              data-is-dropped={String(isDropped)}
+              title={titleStr}
+              class={cls}
+            >
+              {(isDropped || (showDrop && !isBlocked)) ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+              )}
+            </button>
+          );
+        })()}
 
         {posterPath ? (
           <img

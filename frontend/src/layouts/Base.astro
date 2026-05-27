@@ -1383,7 +1383,7 @@ const bottomNavItem = (active: boolean) =>
       if (!card) return;
 
       const action = btn.dataset.action;
-      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'block', 'block-item', 'drop', 'remove-progress'];
+      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'block', 'block-item', 'drop', 'remove-progress', 'unified-block'];
       if (!action || !mediaActions.includes(action)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -1392,6 +1392,97 @@ const bottomNavItem = (active: boolean) =>
       const tmdbId = tmdbIdRaw && tmdbIdRaw !== 'null' ? tmdbIdRaw : '';
       const mediaId = card.dataset.id || '';
       const mediaType = card.dataset.mediaType!;
+
+      if (action === 'unified-block') {
+        const isDropped  = btn.dataset.isDropped  === 'true';
+        const isBlocked  = btn.dataset.isBlocked  === 'true';
+        const inLibrary  = card.dataset.inLibrary  === 'true';
+        const partialWatched = card.dataset.partialWatched === 'true';
+        const isWatched  = card.dataset.watched   === 'true';
+        const isSeries   = mediaType === 'series';
+
+        // Determine intent: undo if already active, else decide drop vs block
+        const alreadyActive = isDropped || isBlocked;
+        const shouldDrop    = isSeries && (inLibrary || isWatched || partialWatched);
+
+        // SVG icons
+        const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
+        const ICON_DROP  = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
+        const ICON_SPIN  = `<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>`;
+
+        btn.innerHTML = ICON_SPIN;
+        (btn as HTMLButtonElement).disabled = true;
+
+        try {
+          if (alreadyActive) {
+            // Undo: remove from blocklist entirely
+            await apiFetch(`/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
+            btn.dataset.isDropped = 'false';
+            btn.dataset.isBlocked = 'false';
+            card.dataset.isDropped = 'false';
+            card.dataset.isBlocked = 'false';
+            const nowDrop = shouldDrop; // button mode reverts to what it would show
+            // Style: back to inactive state
+            btn.className = btn.className
+              .replace(/bg-amber-900\/60|bg-red-900\/60|border-amber-600|border-red-600|text-amber-300|text-red-300/g, '')
+              .trim();
+            if (nowDrop) {
+              btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950';
+              btn.title = 'Drop show';
+              btn.innerHTML = ICON_DROP;
+            } else {
+              btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950';
+              btn.title = 'Block';
+              btn.innerHTML = ICON_BLOCK;
+            }
+            (window as any).showToast(isDropped ? 'Tracking resumed' : 'Unblocked', 'success');
+            window.dispatchEvent(new CustomEvent('unified-block-changed', {
+              detail: { tmdbId, mediaType, isBlocked: false, isDropped: false }
+            }));
+          } else {
+            // Apply: drop or block
+            if (shouldDrop) {
+              await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, is_dropped: true });
+              btn.dataset.isDropped = 'true';
+              card.dataset.isDropped = 'true';
+              btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white';
+              btn.title = 'Resume tracking';
+              btn.innerHTML = ICON_DROP;
+              (window as any).showToast('Show dropped', 'success');
+              window.dispatchEvent(new CustomEvent('unified-block-changed', {
+                detail: { tmdbId, mediaType, isBlocked: false, isDropped: true }
+              }));
+            } else {
+              await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, is_dropped: false });
+              btn.dataset.isBlocked = 'true';
+              card.dataset.isBlocked = 'true';
+              // For discovery cards: fade the card out (like old 'block' behaviour)
+              const isDiscoveryCard = !isSeries || !inLibrary;
+              if (!alreadyActive && isDiscoveryCard) {
+                card.style.transition = 'all 0.3s ease';
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.9)';
+                card.style.pointerEvents = 'none';
+                setTimeout(() => card.remove(), 300);
+              } else {
+                btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white';
+                btn.title = 'Unblock';
+                btn.innerHTML = ICON_BLOCK;
+              }
+              (window as any).showToast('Blocked', 'success');
+              window.dispatchEvent(new CustomEvent('unified-block-changed', {
+                detail: { tmdbId, mediaType, isBlocked: true, isDropped: false }
+              }));
+            }
+          }
+        } catch {
+          // Restore icon on error
+          btn.innerHTML = (shouldDrop && !alreadyActive) ? ICON_DROP : ICON_BLOCK;
+        } finally {
+          (btn as HTMLButtonElement).disabled = false;
+        }
+        return;
+      }
 
       if (action === 'block') {
         const title = card.querySelector('h3')?.textContent || 'this item';
@@ -1410,6 +1501,7 @@ const bottomNavItem = (active: boolean) =>
         } catch { /* ignore */ }
         return;
       }
+
 
       if (action === 'block-item') {
         const isBlocked = btn.dataset.blocked === 'true';
@@ -1441,11 +1533,11 @@ const bottomNavItem = (active: boolean) =>
           if (labelEl) labelEl.textContent = nowBlocked ? 'Blocked' : 'Block';
           
           if (nowBlocked) {
-            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-red-400/50', 'hover:text-red-400');
-            btn.classList.add('bg-red-500/50', 'text-red-300', 'hover:bg-red-400/50');
+            btn.classList.remove('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-red-500/10', 'hover:text-red-400');
+            btn.classList.add('bg-red-500/20', 'text-red-400', 'hover:bg-red-500/30');
           } else {
-            btn.classList.remove('bg-red-500/50', 'text-red-300', 'hover:bg-red-400/50');
-            btn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-red-400/50', 'hover:text-red-400');
+            btn.classList.remove('bg-red-500/20', 'text-red-400', 'hover:bg-red-500/30');
+            btn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-red-500/10', 'hover:text-red-400');
           }
         } catch { /* ignore */ }
         return;
@@ -1469,11 +1561,11 @@ const bottomNavItem = (active: boolean) =>
           if (labelEl) labelEl.textContent = nowDropped ? 'Dropped' : 'Drop';
           
           if (nowDropped) {
-            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-amber-400/50', 'hover:text-amber-400');
-            btn.classList.add('bg-amber-500/50', 'text-amber-300', 'hover:bg-amber-400/50');
+            btn.classList.remove('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-amber-500/10', 'hover:text-amber-400');
+            btn.classList.add('bg-amber-500/20', 'text-amber-400', 'hover:bg-amber-500/30');
           } else {
-            btn.classList.remove('bg-amber-500/50', 'text-amber-300', 'hover:bg-amber-400/50');
-            btn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-amber-400/50', 'hover:text-amber-400');
+            btn.classList.remove('bg-amber-500/20', 'text-amber-400', 'hover:bg-amber-500/30');
+            btn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-amber-500/10', 'hover:text-amber-400');
           }
           
           (window as any).showToast(nowDropped ? 'Show dropped' : 'Tracking resumed', 'success');

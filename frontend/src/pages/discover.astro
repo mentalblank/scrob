@@ -462,6 +462,10 @@ function skeletonWide() {
       data-watched="${watched}"
       data-collected="${inLibrary}"
       data-listed="${inLists.length > 0}"
+      data-in-library="${inLibrary}"
+      data-partial-watched="${item.progress_percent > 0 || (item.watched_episodes_count > 0)}"
+      data-is-blocked="${item.is_blocked ?? false}"
+      data-is-dropped="${item.is_dropped ?? false}"
     >
       <a href="${esc(href)}" class="block">
         <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
@@ -470,15 +474,25 @@ function skeletonWide() {
             : `<div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center"><span class="text-3xl mb-2 opacity-30">🎬</span><span class="text-xs font-bold uppercase tracking-widest">${esc(item.title)}</span></div>`
           }
           <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-          <button
-            data-action="block"
-            title="Don't show this again"
-            class="absolute top-2 left-2 z-10 bg-black/60 backdrop-blur-md text-zinc-400 hover:text-red-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 border border-zinc-800 hover:border-red-500/50 cursor-pointer"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>
-            </svg>
-          </button>
+          ${(() => {
+            const isBlocked = item.is_blocked ?? false;
+            const isDropped = item.is_dropped ?? false;
+            const isSeries = item.type === 'series';
+            const showDrop = isSeries && (inLibrary || watched || (item.progress_percent > 0) || (item.watched_episodes_count > 0));
+            const base = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer';
+            const cls = isDropped
+              ? `${base} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`
+              : isBlocked
+              ? `${base} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`
+              : showDrop
+              ? `${base} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`
+              : `${base} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+            const titleStr = isDropped ? 'Resume tracking' : isBlocked ? 'Unblock' : showDrop ? 'Drop show' : 'Block';
+            const ICON_DROP = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
+            const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
+            const icon = (isDropped || (showDrop && !isBlocked)) ? ICON_DROP : ICON_BLOCK;
+            return `<button data-action="unified-block" data-is-blocked="${isBlocked}" data-is-dropped="${isDropped}" title="${esc(titleStr)}" class="${esc(cls)}">${icon}</button>`;
+          })()}
           ${rating ? `<div class="absolute top-2 right-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
           ${showProgress ? `
             <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
