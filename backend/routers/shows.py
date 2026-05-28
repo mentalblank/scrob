@@ -1892,39 +1892,10 @@ async def get_tvdb_show(
     networks = [{"id": None, "name": n.get("name"), "logo_path": None, "origin_country": None}
                 for n in (raw.get("networks") or []) if n.get("name")]
 
-    # Blocklist and drop status
-    from models.blocklist import BlocklistItem
-    is_blocked = False
-    is_dropped = False
-    block_ids = [-tvdb_id]
-    if show_data.get("tmdb_id_cross"):
-        block_ids.append(show_data["tmdb_id_cross"])
-    if show and show.tmdb_id:
-        block_ids.append(show.tmdb_id)
-
-    block_q = await db.execute(
-        select(BlocklistItem.is_dropped)
-        .where(
-            BlocklistItem.user_id == current_user.id,
-            BlocklistItem.media_type == MediaType.series,
-            BlocklistItem.tmdb_id.in_(block_ids),
-        )
+    # Blocklist, drop status, and request status
+    is_blocked, is_dropped, request_status = await _get_tvdb_show_state(
+        db, current_user.id, tvdb_id, show_data, show
     )
-    block_row = block_q.first()
-    if block_row is not None:
-        is_dropped = block_row[0]
-        is_blocked = not is_dropped
-
-    if not is_blocked:
-        cf = await _get_content_filters(db, current_user.id)
-        temp_item = {
-            "type": "series",
-            "title": show_data.get("title"),
-            "genres": show_data.get("genres", []),
-            "original_language": show_data.get("original_language"),
-            "age_rating": show_data.get("age_rating"),
-        }
-        is_blocked = _is_content_filtered(temp_item, *cf)
 
     filtered_seasons = [
         {
@@ -1954,7 +1925,7 @@ async def get_tvdb_show(
         "request_enabled": request_enabled,
         "is_blocked": is_blocked,
         "is_dropped": is_dropped,
-        "request_status": None,
+        "request_status": request_status,
         "user_rating": None,
         "season_states": season_states,
         "seasons": {},

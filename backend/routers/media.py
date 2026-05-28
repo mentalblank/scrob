@@ -1558,12 +1558,15 @@ def _is_content_filtered(
     if filter_languages:
         itype = item.get("type")
         if itype is None or itype in ("movie", "series"):
-            item_lang = (item.get("original_language") or "").lower()
+            raw_lang = (item.get("original_language") or "").lower()
+            from core.tvdb import to_two_letter_lang
+            item_lang = to_two_letter_lang(raw_lang) or raw_lang
+            
             if language_filter_mode == "blacklist":
-                if item_lang in filter_languages:
+                if item_lang in filter_languages or raw_lang in filter_languages:
                     return True
             elif language_filter_mode == "whitelist":
-                if item_lang and item_lang not in filter_languages:
+                if item_lang and item_lang not in filter_languages and raw_lang not in filter_languages:
                     return True
 
     title = (item.get("title") or item.get("name") or "").lower()
