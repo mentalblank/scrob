@@ -63,6 +63,7 @@ if (me.totp_enabled) {
                       name="tmdb_api_key"
                       id="tmdb_api_key"
                       value={settings.tmdb_api_key || ""}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                       class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
                     <button
@@ -138,11 +139,11 @@ if (me.totp_enabled) {
                   </button>
                 </div>
                 {settings.has_global_tvdb_key && !settings.tvdb_api_key ? (
-                  <p class="text-xs text-blue-400">A server-wide TVDB key is configured by your admin.</p>
+                  <p class="text-xs text-blue-400">A server-wide TVDB key is configured by your admin. You can leave this blank to use it, or enter your own key to override it.</p>
                 ) : settings.has_global_tvdb_key && settings.tvdb_api_key ? (
-                  <p class="text-xs text-blue-400">A server-wide TVDB key is configured, but you are using your own key.</p>
+                  <p class="text-xs text-blue-400">A server-wide TVDB key is configured, but you are using your own key. Clear this field to fall back to the server key.</p>
                 ) : (
-                  <p class="text-xs text-zinc-500">Required for TVDB-sourced shows (shows not on TMDB). Get your key at thetvdb.com.</p>
+                  <p class="text-xs text-zinc-500">Required for TVDB-sourced shows. Get your key at thetvdb.com.</p>
                 )}
               </div>
 
