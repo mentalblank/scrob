@@ -421,17 +421,23 @@ export interface UserSettings {
   has_effective_tmdb_key: boolean;
   has_global_tmdb_key: boolean;
 
+  tvdb_api_key: string | null;
+  has_global_tvdb_key: boolean;
+  has_effective_tvdb_key: boolean;
+
   radarr_url: string | null;
   radarr_token: string | null;
   radarr_root_folder: string | null;
   radarr_quality_profile: number | null;
   radarr_tags: number[] | null;
+  has_global_radarr_config: boolean;
 
   sonarr_url: string | null;
   sonarr_token: string | null;
   sonarr_root_folder: string | null;
   sonarr_quality_profile: number | null;
   sonarr_tags: number[] | null;
+  has_global_sonarr_config: boolean;
 
   // Trakt
   trakt_connected: boolean;

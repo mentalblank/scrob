@@ -333,6 +333,10 @@ async def _settings_response(settings: UserSettings, db: AsyncSession) -> schema
     data.has_effective_tmdb_key = bool(settings.tmdb_api_key) or data.has_global_tmdb_key
     data.has_global_tvdb_key = bool(gs and gs.tvdb_api_key)
     data.has_effective_tvdb_key = bool(settings.tvdb_api_key) or data.has_global_tvdb_key
+
+    data.has_global_radarr_config = bool(gs and all([gs.radarr_url, gs.radarr_token, gs.radarr_root_folder, gs.radarr_quality_profile]))
+    data.has_global_sonarr_config = bool(gs and all([gs.sonarr_url, gs.sonarr_token, gs.sonarr_root_folder, gs.sonarr_quality_profile]))
+
     return data
 
 
@@ -371,7 +375,12 @@ async def update_user_settings(
         db.add(settings)
 
     # Computed read-only fields; never write them back
-    READ_ONLY_FIELDS = {"trakt_connected", "simkl_connected", "has_global_tmdb_key", "has_effective_tmdb_key", "has_global_tvdb_key", "has_effective_tvdb_key"}
+    READ_ONLY_FIELDS = {
+        "trakt_connected", "simkl_connected",
+        "has_global_tmdb_key", "has_effective_tmdb_key",
+        "has_global_tvdb_key", "has_effective_tvdb_key",
+        "has_global_radarr_config", "has_global_sonarr_config"
+    }
     update_data = {k: v for k, v in settings_in.model_dump(exclude_unset=True).items() if k not in READ_ONLY_FIELDS}
 
     if "tmdb_api_key" in update_data and update_data["tmdb_api_key"]:
@@ -617,10 +626,18 @@ async def regenerate_api_key(
 
 @router.post("/test-tmdb")
 async def test_tmdb(
-    key: str = Query(...),
+    key: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     from core import tmdb
+    from routers.media import get_user_tmdb_key
+
+    if not key:
+        key = await get_user_tmdb_key(db, current_user.id)
+        if not key:
+            raise HTTPException(status_code=400, detail="TMDB API Key not configured")
+
     success = await tmdb.validate_api_key(key)
     if not success:
         raise HTTPException(status_code=400, detail="Invalid TMDB API Key")
@@ -628,10 +645,18 @@ async def test_tmdb(
 
 @router.post("/test-tvdb")
 async def test_tvdb(
-    key: str = Query(...),
+    key: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     from core import tvdb
+    from routers.shows import get_user_tvdb_key
+
+    if not key:
+        key = await get_user_tvdb_key(db, current_user.id)
+        if not key:
+            raise HTTPException(status_code=400, detail="TVDB API Key not configured")
+
     success = await tvdb.validate_api_key(key)
     if not success:
         raise HTTPException(status_code=400, detail="Invalid TVDB API Key")
@@ -680,11 +705,25 @@ async def test_plex(
 
 @router.post("/test-radarr")
 async def test_radarr(
-    url: str = Query(...),
-    token: str = Query(...),
+    url: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     from core import radarr
+    from routers.media import _effective_radarr
+
+    if not url or not token:
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+        user_settings = settings_result.scalar_one_or_none()
+        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        global_settings = gs_result.scalar_one_or_none()
+        cfg = _effective_radarr(user_settings, global_settings)
+        if not cfg:
+            raise HTTPException(status_code=400, detail="Radarr not configured")
+        url = cfg.radarr_url
+        token = cfg.radarr_token
+
     url = await validate_service_url(url, "Radarr URL")
     success = await radarr.validate_connection(url, token)
     if not success:
@@ -693,11 +732,25 @@ async def test_radarr(
 
 @router.get("/radarr/profiles")
 async def get_radarr_profiles(
-    url: str = Query(...),
-    token: str = Query(...),
+    url: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     from core import radarr
+    from routers.media import _effective_radarr
+
+    if not url or not token:
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+        user_settings = settings_result.scalar_one_or_none()
+        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        global_settings = gs_result.scalar_one_or_none()
+        cfg = _effective_radarr(user_settings, global_settings)
+        if not cfg:
+            raise HTTPException(status_code=400, detail="Radarr not configured")
+        url = cfg.radarr_url
+        token = cfg.radarr_token
+
     url = await validate_service_url(url, "Radarr URL")
     quality_profiles = await radarr.get_quality_profiles(url, token)
     root_folders = await radarr.get_root_folders(url, token)
@@ -710,11 +763,25 @@ async def get_radarr_profiles(
 
 @router.post("/test-sonarr")
 async def test_sonarr(
-    url: str = Query(...),
-    token: str = Query(...),
+    url: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     from core import sonarr
+    from routers.media import _effective_sonarr
+
+    if not url or not token:
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+        user_settings = settings_result.scalar_one_or_none()
+        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        global_settings = gs_result.scalar_one_or_none()
+        cfg = _effective_sonarr(user_settings, global_settings)
+        if not cfg:
+            raise HTTPException(status_code=400, detail="Sonarr not configured")
+        url = cfg.sonarr_url
+        token = cfg.sonarr_token
+
     url = await validate_service_url(url, "Sonarr URL")
     success = await sonarr.validate_connection(url, token)
     if not success:
@@ -727,10 +794,14 @@ async def get_connection_status(
     current_user: User = Depends(get_current_user)
 ):
     import asyncio
+    from routers.media import _effective_radarr, _effective_sonarr
     from core import radarr as rdr, sonarr as snr
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     user_settings = settings_result.scalar_one_or_none()
+
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    global_settings = gs_result.scalar_one_or_none()
 
     conns_result = await db.execute(
         select(MediaServerConnection).where(MediaServerConnection.user_id == current_user.id)
@@ -738,30 +809,32 @@ async def get_connection_status(
     media_server_conns = conns_result.scalars().all()
 
     async def check_radarr():
-        if not user_settings or not (user_settings.radarr_url and user_settings.radarr_token):
+        cfg = _effective_radarr(user_settings, global_settings)
+        if not cfg:
             return {"configured": False, "connected": False}
-        connected = await rdr.validate_connection(user_settings.radarr_url, user_settings.radarr_token)
+        connected = await rdr.validate_connection(cfg.radarr_url, cfg.radarr_token)
         if not connected:
             return {"configured": True, "connected": False}
         quality_profiles, root_folders, tags = await asyncio.gather(
-            rdr.get_quality_profiles(user_settings.radarr_url, user_settings.radarr_token),
-            rdr.get_root_folders(user_settings.radarr_url, user_settings.radarr_token),
-            rdr.get_tags(user_settings.radarr_url, user_settings.radarr_token),
+            rdr.get_quality_profiles(cfg.radarr_url, cfg.radarr_token),
+            rdr.get_root_folders(cfg.radarr_url, cfg.radarr_token),
+            rdr.get_tags(cfg.radarr_url, cfg.radarr_token),
         )
-        return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags}
+        return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags, "is_global": cfg is global_settings}
 
     async def check_sonarr():
-        if not user_settings or not (user_settings.sonarr_url and user_settings.sonarr_token):
+        cfg = _effective_sonarr(user_settings, global_settings)
+        if not cfg:
             return {"configured": False, "connected": False}
-        connected = await snr.validate_connection(user_settings.sonarr_url, user_settings.sonarr_token)
+        connected = await snr.validate_connection(cfg.sonarr_url, cfg.sonarr_token)
         if not connected:
             return {"configured": True, "connected": False}
         quality_profiles, root_folders, tags = await asyncio.gather(
-            snr.get_quality_profiles(user_settings.sonarr_url, user_settings.sonarr_token),
-            snr.get_root_folders(user_settings.sonarr_url, user_settings.sonarr_token),
-            snr.get_tags(user_settings.sonarr_url, user_settings.sonarr_token),
+            snr.get_quality_profiles(cfg.sonarr_url, cfg.sonarr_token),
+            snr.get_root_folders(cfg.sonarr_url, cfg.sonarr_token),
+            snr.get_tags(cfg.sonarr_url, cfg.sonarr_token),
         )
-        return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags}
+        return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags, "is_global": cfg is global_settings}
 
     async def check_trakt():
         from core import trakt as trakt_client
@@ -813,11 +886,25 @@ async def get_connection_status(
 
 @router.get("/sonarr/profiles")
 async def get_sonarr_profiles(
-    url: str = Query(...),
-    token: str = Query(...),
+    url: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     from core import sonarr
+    from routers.media import _effective_sonarr
+
+    if not url or not token:
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+        user_settings = settings_result.scalar_one_or_none()
+        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        global_settings = gs_result.scalar_one_or_none()
+        cfg = _effective_sonarr(user_settings, global_settings)
+        if not cfg:
+            raise HTTPException(status_code=400, detail="Sonarr not configured")
+        url = cfg.sonarr_url
+        token = cfg.sonarr_token
+
     url = await validate_service_url(url, "Sonarr URL")
     quality_profiles = await sonarr.get_quality_profiles(url, token)
     root_folders = await sonarr.get_root_folders(url, token)

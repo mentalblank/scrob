@@ -85,6 +85,7 @@ class UserSettings(BaseModel):
     radarr_root_folder: Optional[str] = None
     radarr_quality_profile: Optional[int] = None
     radarr_tags: Optional[list[int]] = None
+    has_global_radarr_config: bool = False
 
     # Sonarr integration
     sonarr_url: Optional[str] = None
@@ -93,6 +94,7 @@ class UserSettings(BaseModel):
     sonarr_quality_profile: Optional[int] = None
     sonarr_tags: Optional[list[int]] = None
     sonarr_season_folder: Optional[bool] = None
+    has_global_sonarr_config: bool = False
 
     # Trakt — app credentials + sync flags; OAuth tokens managed via /trakt/* endpoints
     trakt_client_id: Optional[str] = None

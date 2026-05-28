@@ -552,7 +552,7 @@ if (me.totp_enabled) {
                       {conn.type === "plex" && (
                         <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                           <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Watchlist → Radarr / Sonarr</p>
-                          <p class="text-xs text-zinc-500">Automatically request items added to your Plex watchlist. Requires Radarr / Sonarr to be configured in settings.</p>
+                          <p class="text-xs text-zinc-500">Automatically request items added to your Plex watchlist. Requires Radarr / Sonarr to be configured in your settings {settings.has_global_radarr_config || settings.has_global_sonarr_config ? '(or using server-wide connections)' : ''}.</p>
                           {[
                             { key: "watchlist_to_radarr", label: "Movies → Radarr" },
                             { key: "watchlist_to_sonarr", label: "Shows → Sonarr" },
@@ -1151,6 +1151,21 @@ if (me.totp_enabled) {
                 </div>
               </div>
               <div id="radarr-body" class="border-t border-zinc-800 hidden">
+                <div class="px-6 pt-6 -mb-2">
+                  {settings.has_global_radarr_config && !settings.radarr_url ? (
+                    <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 flex items-center gap-3">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-blue-400 shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                      <p class="text-xs text-blue-300">A server-wide Radarr connection is configured by your admin. You can leave these fields blank to use it, or enter your own to override.</p>
+                    </div>
+                  ) : settings.has_global_radarr_config && settings.radarr_url ? (
+                    <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 flex items-center gap-3">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-blue-400 shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                      <p class="text-xs text-blue-300">A server-wide Radarr connection is configured, but you are using your own. Clear these fields to fall back to the server connection.</p>
+                    </div>
+                  ) : (
+                    <p class="text-xs text-zinc-500 italic px-1">Connect Radarr to automatically add movies to your library.</p>
+                  )}
+                </div>
                 <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
                   <div class="space-y-4">
                     <div class="space-y-2">
@@ -1217,6 +1232,21 @@ if (me.totp_enabled) {
                 </div>
               </div>
               <div id="sonarr-body" class="border-t border-zinc-800 hidden">
+                <div class="px-6 pt-6 -mb-2">
+                  {settings.has_global_sonarr_config && !settings.sonarr_url ? (
+                    <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 flex items-center gap-3">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-blue-400 shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                      <p class="text-xs text-blue-300">A server-wide Sonarr connection is configured by your admin. You can leave these fields blank to use it, or enter your own to override.</p>
+                    </div>
+                  ) : settings.has_global_sonarr_config && settings.sonarr_url ? (
+                    <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 flex items-center gap-3">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 text-blue-400 shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                      <p class="text-xs text-blue-300">A server-wide Sonarr connection is configured, but you are using your own. Clear these fields to fall back to the server connection.</p>
+                    </div>
+                  ) : (
+                    <p class="text-xs text-zinc-500 italic px-1">Connect Sonarr to automatically add shows to your library.</p>
+                  )}
+                </div>
                 <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
                   <div class="space-y-4">
                     <div class="space-y-2">

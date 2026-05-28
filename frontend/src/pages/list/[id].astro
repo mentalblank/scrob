@@ -658,10 +658,28 @@ Astro.response.headers.set("Cache-Control", "no-store");
       }
 
       const status = connectionsStatus[type];
+      const isGlobal = status.is_global;
+      
       if (!status || !status.configured) {
         const optionsEl = document.getElementById(`auto-${type}-options`);
         optionsEl.innerHTML = `<p class="text-[10px] text-red-400 p-2">${type.charAt(0).toUpperCase() + type.slice(1)} is not configured in your settings.</p>`;
         return;
+      }
+
+      // Add a small info box if it's a global config
+      if (isGlobal) {
+        const existingGlobalInfo = document.getElementById(`auto-${type}-global-info`);
+        if (!existingGlobalInfo) {
+          const infoBox = document.createElement('div');
+          infoBox.id = `auto-${type}-global-info`;
+          infoBox.className = 'mx-5 mt-2 bg-blue-500/5 border border-blue-500/10 rounded-xl px-3 py-2 flex items-center gap-2';
+          infoBox.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-3.5 h-3.5 text-blue-400 shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+            <p class="text-[9px] font-bold text-blue-300 uppercase tracking-tight">Using server-wide ${type.charAt(0).toUpperCase() + type.slice(1)} connection</p>
+          `;
+          const container = document.getElementById(`auto-${type}-options`).parentElement;
+          container.insertBefore(infoBox, document.getElementById(`auto-${type}-options`));
+        }
       }
 
       const rootSelect = document.getElementById(`auto-${type}-root`);
@@ -673,11 +691,44 @@ Astro.response.headers.set("Cache-Control", "no-store");
 
       if (rootSelect) {
         rootSelect.innerHTML = status.root_folders.map(f => `<option value="${f.path}" ${f.path === currentRoot ? 'selected' : ''}>${f.path} (${(f.freeSpace / 1024 / 1024 / 1024).toFixed(1)} GB free)</option>`).join('');
+        if (isGlobal) {
+          rootSelect.disabled = true;
+          rootSelect.classList.add('opacity-60', 'cursor-not-allowed');
+        }
       }
       if (profileSelect) {
         profileSelect.innerHTML = status.quality_profiles.map(p => `<option value="${p.id}" ${p.id == currentProfile ? 'selected' : ''}>${p.name}</option>`).join('');
+        if (isGlobal) {
+          profileSelect.disabled = true;
+          profileSelect.classList.add('opacity-60', 'cursor-not-allowed');
+        }
       }
       
+      if (isGlobal) {
+        const monitorSelect = document.getElementById(`auto-${type}-monitor`);
+        if (monitorSelect) {
+          monitorSelect.disabled = true;
+          monitorSelect.classList.add('opacity-60', 'cursor-not-allowed');
+        }
+        const searchInput = document.getElementById(`auto-${type}-tags-search`);
+        if (searchInput) {
+          searchInput.disabled = true;
+          searchInput.classList.add('opacity-60', 'cursor-not-allowed');
+        }
+        if (type === 'sonarr') {
+          const typeSelect = document.getElementById('auto-sonarr-type');
+          if (typeSelect) {
+            typeSelect.disabled = true;
+            typeSelect.classList.add('opacity-60', 'cursor-not-allowed');
+          }
+          const seasonFolderCb = document.getElementById('auto-sonarr-season-folder');
+          if (seasonFolderCb) {
+            seasonFolderCb.disabled = true;
+            seasonFolderCb.classList.add('opacity-60', 'cursor-not-allowed');
+          }
+        }
+      }
+
       updateTagUI(type);
     } catch (err) {
       console.error(`Failed to fetch ${type} profiles`, err);
