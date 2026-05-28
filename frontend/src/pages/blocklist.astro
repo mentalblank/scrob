@@ -128,7 +128,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
     ) : (
       <div id="blocklist-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
         {blockedItems.map(item => (
-          <div class="relative group/blocked" data-tmdb-id={item.tmdb_id} data-media-type={item.type}>
+          <div class="relative group/blocked" data-tmdb-id={item.tmdb_id} data-uri-id={item.uri_id} data-media-type={item.type}>
             <MediaCard item={item} hideBlock={true} hideRating={true} hideActionBar={true} />
             <div class="absolute inset-x-0 top-0 p-2 flex justify-end opacity-0 group-hover/blocked:opacity-100 transition-opacity z-20 pointer-events-none">
               <button
@@ -156,7 +156,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
     ) : (
       <div id="dropped-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
         {droppedItems.map(item => (
-          <div class="relative group/dropped" data-tmdb-id={item.tmdb_id} data-media-type={item.type}>
+          <div class="relative group/dropped" data-tmdb-id={item.tmdb_id} data-uri-id={item.uri_id} data-media-type={item.type}>
             <MediaCard item={item} hideBlock={true} hideRating={true} hideActionBar={true} />
             <div class="absolute inset-x-0 top-0 p-2 flex justify-end opacity-0 group-hover/dropped:opacity-100 transition-opacity z-20 pointer-events-none">
               <button
@@ -373,15 +373,15 @@ const LANGUAGE_NAMES: Record<string, string> = {
   document.addEventListener('click', async (e) => {
     const btn = (e.target as HTMLElement).closest('[data-action="unblock-direct"]') as HTMLButtonElement;
     if (!btn) return;
-    const container = btn.closest('[data-tmdb-id]') as HTMLElement;
-    const tmdbId = container?.dataset.tmdbId;
+    const container = btn.closest('[data-uri-id]') as HTMLElement;
+    const uriId = container?.dataset.uriId;
     const mediaType = container?.dataset.mediaType;
-    if (!tmdbId || !mediaType) return;
+    if (!uriId || !mediaType) return;
     btn.disabled = true;
     btn.innerHTML = '<span class="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full"></span>';
     const token = (document.getElementById('app-data') as HTMLElement)?.dataset.token;
     try {
-      const res = await fetch(`/api/proxy/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, {
+      const res = await fetch(`/api/proxy/media/blocklist?uri_id=${encodeURIComponent(uriId)}&media_type=${mediaType}`, {
         method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {

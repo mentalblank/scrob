@@ -1,26 +1,26 @@
 ---
 interface Props {
-  tmdbId: number | null | undefined;
+  uriId?: string | null;
   mediaType: string;
   runtime?: number | null;
   title?: string | null;
-  showTmdbId?: number | null;
+  showUriId?: string | null;
   seasonNumber?: number | null;
   episodeNumber?: number | null;
   mediaId?: number | null;
 }
-const { tmdbId, mediaType, runtime, title, showTmdbId, seasonNumber, episodeNumber, mediaId } = Astro.props;
+const { uriId, mediaType, runtime, title, showUriId, seasonNumber, episodeNumber, mediaId } = Astro.props;
 ---
 
-{(tmdbId || mediaId) && (
+{(uriId || mediaId) && (
   <div
     id="manual-scrobble"
-    data-tmdb-id={tmdbId ?? 0}
+    data-uri-id={uriId ?? ''}
     data-media-id={mediaId ?? 0}
     data-media-type={mediaType}
     data-runtime={runtime ?? 0}
     data-title={title ?? ''}
-    data-show-tmdb-id={showTmdbId ?? 0}
+    data-show-uri-id={showUriId ?? ''}
     data-season={seasonNumber ?? 0}
     data-episode={episodeNumber ?? 0}
     class="w-full"
@@ -40,19 +40,19 @@ const { tmdbId, mediaType, runtime, title, showTmdbId, seasonNumber, episodeNumb
   const container = document.getElementById('manual-scrobble');
   if (!container) return;
 
-  const TOKEN = () => (window as any).__AUTH_TOKEN__ ?? '';
+  const TOKEN = () => window["__AUTH_TOKEN__"] ?? '';
   const API = '/api/proxy';
 
-  const tmdbId    = parseInt(container.dataset.tmdbId ?? '0', 10) || null;
+  const uriId     = container.dataset.uriId || null;
   const mediaId   = parseInt(container.dataset.mediaId ?? '0', 10) || null;
   const mediaType = container.dataset.mediaType ?? '';
-  const runtime   = parseInt(container.dataset.runtime ?? '0', 10);   // minutes
+  const runtime   = parseInt(container.dataset.runtime ?? '0', 10);
   const title     = container.dataset.title ?? '';
-  const showTmdbId   = parseInt(container.dataset.showTmdbId ?? '0', 10) || null;
+  const showUriId    = container.dataset.showUriId || null;
   const seasonNumber = parseInt(container.dataset.season ?? '0', 10) || null;
   const episodeNumber = parseInt(container.dataset.episode ?? '0', 10) || null;
 
-  if (!tmdbId && !mediaId) return;
+  if (!uriId && !mediaId) return;
 
   // ── State ─────────────────────────────────────────────────────────────────
   let sessionKey: string | null = null;
@@ -182,12 +182,12 @@ const { tmdbId, mediaType, runtime, title, showTmdbId, seasonNumber, episodeNumb
         method: 'POST',
         headers: { 'Authorization': `Bearer ${TOKEN()}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tmdb_id: tmdbId,
+          uri_id: uriId,
           media_id: mediaId,
           media_type: mediaType,
           title,
           runtime: runtime || null,
-          show_tmdb_id: showTmdbId,
+          show_uri_id: showUriId || undefined,
           season_number: seasonNumber,
           episode_number: episodeNumber,
         }),
@@ -274,7 +274,7 @@ const { tmdbId, mediaType, runtime, title, showTmdbId, seasonNumber, episodeNumb
       const existing = (data.now_playing ?? []).find((s: any) => {
         if (s.source !== 'manual') return false;
         if (mediaId && s.media?.id === mediaId) return true;
-        return tmdbId && s.media?.tmdb_id === tmdbId && s.media?.type === mediaType;
+        return uriId && s.media?.uri_id === uriId && s.media?.type === mediaType;
       });
       if (existing) {
         sessionKey = existing.session_key;

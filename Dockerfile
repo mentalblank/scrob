@@ -17,12 +17,13 @@ ENV APP_VERSION=${APP_VERSION}
 ENV APP_BRANCH=${APP_BRANCH}
 ENV TZ=UTC
 
-# Install Node.js 22, supervisord, gosu and tzdata
+# Install Node.js 22, supervisord, gosu, tzdata, and PostgreSQL client (pg_dump/pg_restore)
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     supervisor \
     tzdata \
+    postgresql-client \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get purge -y curl \

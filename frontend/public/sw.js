@@ -1,9 +1,4 @@
-// Scrob — Service Worker
-// Strategy:
-//   - Static assets (JS/CSS/fonts/icons): NetworkFirst, cached for offline fallback
-//   - TMDB images: CacheFirst, max 500 entries / 30 days
-//   - /api/proxy/*: NetworkOnly — library data must always be fresh
-//   - Navigation (HTML pages): NetworkFirst, offline fallback if all fail
+// Scrob Service Worker: Cache static/images (CacheFirst), API/HTML (NetworkFirst/Only).
 
 const SHELL_CACHE  = 'scrob-shell-v2';
 const IMAGE_CACHE  = 'scrob-images-v1';

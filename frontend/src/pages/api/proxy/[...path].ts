@@ -11,8 +11,9 @@ async function handle({ params, request }: Parameters<APIRoute>[0]): Promise<Res
   const forwardHeaders = new Headers();
 
   const auth = request.headers.get("Authorization");
-  if (auth) {
-    forwardHeaders.set("Authorization", auth);
+  const bearerToken = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : null;
+  if (bearerToken) {
+    forwardHeaders.set("Authorization", `Bearer ${bearerToken}`);
   } else {
     // Video elements can't set custom headers — extract JWT from the session cookie instead
     const cookieStr = request.headers.get("Cookie") ?? "";

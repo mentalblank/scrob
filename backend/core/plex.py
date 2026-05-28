@@ -15,12 +15,7 @@ async def _get(url: str, token: str, params: Optional[Dict] = None) -> Dict:
         return res.json()
 
 def get_guids(item: Dict) -> List[Dict]:
-    """Return a normalised Guid list for a Plex item.
-
-    Modern Plex returns a 'Guid' array: [{"id": "tmdb://123"}, ...].
-    Legacy items may have an empty/missing 'Guid' but a single lowercase 'guid'
-    string like 'com.plexapp.agents.thetvdb://73762/1/1'.
-    """
+    """Return a normalised Guid list for a Plex item."""
     guids = item.get("Guid") or []
     if not guids:
         legacy = item.get("guid", "")
@@ -44,15 +39,21 @@ def extract_tmdb_id(guids: List[Dict]) -> Optional[int]:
 
 
 def extract_tvdb_id(guids: List[Dict]) -> Optional[str]:
-    if not guids:
-        return None
+    ids = extract_all_tvdb_ids(guids)
+    return ids[0] if ids else None
+
+
+def extract_all_tvdb_ids(guids: List[Dict]) -> List[str]:
+    """Return ALL TVDB IDs from Plex GUIDs."""
+    ids: List[str] = []
     for guid in guids:
         id_str = guid.get("id", "")
         for prefix in ("tvdb://", "com.plexapp.agents.thetvdb://"):
             if id_str.startswith(prefix):
                 val = id_str[len(prefix):].split("/")[0].strip()
-                return val if val else None
-    return None
+                if val and val.isdigit() and val not in ids:
+                    ids.append(val)
+    return ids
 
 
 def extract_imdb_id(guids: List[Dict]) -> Optional[str]:
@@ -222,13 +223,21 @@ async def get_history(url: str, token: str, mindate: int) -> List[Dict]:
     )
     return data.get("MediaContainer", {}).get("Metadata", [])
 
-async def get_movies(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
+async def _get_all_plex_items(
+    url: str,
+    token: str,
+    section_id: str,
+    plex_type: int,
+    sort: Optional[str] = None,
+    offset: int = 0,
+    limit: Optional[int] = None
+) -> List[Dict]:
     all_items = []
     current_offset = offset
     page_size = 500 if limit is None else min(limit, 500)
 
     while True:
-        params = {"type": 1, "includeGuids": 1}
+        params = {"type": plex_type, "includeGuids": 1}
         if sort:
             params["sort"] = sort
         params["X-Plex-Container-Start"] = current_offset
@@ -249,64 +258,18 @@ async def get_movies(url: str, token: str, section_id: str, sort: Optional[str] 
             break
 
     return all_items
+
+
+async def get_movies(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
+    return await _get_all_plex_items(url, token, section_id, 1, sort, offset, limit)
 
 
 async def get_shows(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
-    all_items = []
-    current_offset = offset
-    page_size = 500 if limit is None else min(limit, 500)
-
-    while True:
-        params = {"type": 2, "includeGuids": 1}
-        if sort:
-            params["sort"] = sort
-        params["X-Plex-Container-Start"] = current_offset
-        params["X-Plex-Container-Size"] = page_size
-
-        data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
-        mc = data.get("MediaContainer", {})
-        items = mc.get("Metadata", [])
-        all_items.extend(items)
-
-        total = mc.get("totalSize", 0)
-        current_offset += len(items)
-
-        if limit is not None and len(all_items) >= limit:
-            all_items = all_items[:limit]
-            break
-        if not items or current_offset >= total:
-            break
-
-    return all_items
+    return await _get_all_plex_items(url, token, section_id, 2, sort, offset, limit)
 
 
 async def get_episodes(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
-    all_items = []
-    current_offset = offset
-    page_size = 500 if limit is None else min(limit, 500)
-
-    while True:
-        params = {"type": 4, "includeGuids": 1}
-        if sort:
-            params["sort"] = sort
-        params["X-Plex-Container-Start"] = current_offset
-        params["X-Plex-Container-Size"] = page_size
-
-        data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
-        mc = data.get("MediaContainer", {})
-        items = mc.get("Metadata", [])
-        all_items.extend(items)
-
-        total = mc.get("totalSize", 0)
-        current_offset += len(items)
-
-        if limit is not None and len(all_items) >= limit:
-            all_items = all_items[:limit]
-            break
-        if not items or current_offset >= total:
-            break
-
-    return all_items
+    return await _get_all_plex_items(url, token, section_id, 4, sort, offset, limit)
 
 async def get_items_by_ids(url: str, token: str, section_id: str, rating_keys: List[str], chunk_size: int = 200) -> List[Dict]:
     if not rating_keys:

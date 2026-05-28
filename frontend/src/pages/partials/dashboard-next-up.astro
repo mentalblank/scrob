@@ -2,6 +2,7 @@
 import MediaCard from "../../components/MediaCard.astro";
 import ActionBar from "../../components/ActionBar.astro";
 import { api } from "../../lib/api";
+import { mediaUrl } from "../../lib/urls";
 
 export const prerender = false;
 
@@ -21,13 +22,7 @@ if (nextUp.length === 0) {
 
 const hero = nextUp[0];
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
-const heroHref = primaryMetadataSource === "tvdb" && hero.show_tvdb_id && hero.season_number != null && hero.episode_number != null
-  ? `/show/tvdb/${hero.show_tvdb_id}/season/${hero.season_number}/${hero.episode_number}`
-  : hero.show_tmdb_id && hero.season_number != null && hero.episode_number != null
-    ? `/show/${hero.show_tmdb_id}/season/${hero.season_number}/${hero.episode_number}`
-    : hero.show_tvdb_id && hero.season_number != null && hero.episode_number != null
-      ? `/show/tvdb/${hero.show_tvdb_id}/season/${hero.season_number}/${hero.episode_number}`
-      : `/media/${hero.type}/${hero.tmdb_id}`;
+const heroHref = mediaUrl(hero, primaryMetadataSource === "tvdb");
 const episodeLabel = hero.season_number != null && hero.episode_number != null
   ? `S${hero.season_number} E${hero.episode_number}`
   : null;
@@ -89,6 +84,7 @@ const heroBackdrop = rawBackdrop
             inLists={hero.in_lists ?? []}
             inLibrary={hero.in_library ?? false}
             collectionPct={hero.collection_pct ?? (hero.in_library ? 100 : 0)}
+            showUriId={hero.show_uri_id ?? (hero.show_tmdb_id ? `tmdb:s:${hero.show_tmdb_id}` : undefined)}
             showTmdbId={hero.show_tmdb_id ?? undefined}
             seasonNumber={hero.season_number ?? undefined}
             episodeNumber={hero.episode_number ?? undefined}

@@ -24,10 +24,40 @@ async def enrich_media(
     tvdb_api_key: str = None,
     tvdb_lang: str = "eng",
     series_tvdb_id: int = None,
+    series_uri_id: str | None = None,
+    db=None,
 ) -> None:
-    """Fetch TMDB/TVDB metadata and update the media record in place."""
+    """Fetch TMDB/TVDB metadata and update the media record in place.
+
+    series_uri_id (e.g. 'tvdb:s:81189', 'tmdb:s:1396') resolves series context without
+    requiring the caller to extract integer IDs first. Provide db for cross-provider alias lookup.
+    """
+    # Resolve series_uri_id → integer params when caller uses URI instead of raw ints
+    if series_uri_id and not (series_tmdb_id or series_tvdb_id):
+        try:
+            from utils.media_uri import MediaURI
+            _suri = MediaURI.parse(series_uri_id)
+            if _suri.provider == "tvdb":
+                series_tvdb_id = int(_suri.id)
+                is_tvdb = True
+            elif _suri.provider == "tmdb":
+                series_tmdb_id = int(_suri.id)
+            if db and not series_tvdb_id and series_tmdb_id:
+                from utils.alias_lookup import get_provider_id_for_uri
+                _tvdb = await get_provider_id_for_uri(db, series_uri_id, "tvdb")
+                if _tvdb:
+                    series_tvdb_id = int(_tvdb)
+        except (ValueError, Exception):
+            pass
+
     if media.media_type == MediaType.movie and not media.tmdb_id:
-        return
+        if media.uri_id and media.uri_id.startswith("tmdb:m:"):
+            try:
+                media.tmdb_id = int(media.uri_id.split(":")[2])
+            except (IndexError, ValueError):
+                pass
+        if not media.tmdb_id:
+            return
     if media.media_type == MediaType.episode and not series_tmdb_id and not series_tvdb_id:
         return
 
@@ -91,7 +121,9 @@ async def enrich_media(
                     if ep:
                         tvdb_ep_id = ep.get("id")
                         if tvdb_ep_id:
-                            media.tmdb_id = tvdb_ep_id
+                            if not media.uri_id:
+                                media.uri_id = f"tvdb:e:{tvdb_ep_id}"
+                            # Do NOT set media.tmdb_id to a TVDB ID — different namespace
                         media.title = ep.get("name") or media.title
                         media.overview = ep.get("overview")
                         if ep.get("image"):
@@ -108,7 +140,10 @@ async def enrich_media(
 
             if not enriched and series_tmdb_id:
                 data = await tmdb.get_episode(series_tmdb_id, media.season_number, media.episode_number, api_key=api_key)
-                media.tmdb_id = data.get("id") or media.tmdb_id
+                ep_id = data.get("id") or media.tmdb_id
+                media.tmdb_id = ep_id
+                if ep_id and not media.uri_id:
+                    media.uri_id = f"tmdb:e:{ep_id}"
                 media.title = data.get("name") or media.title
                 media.overview = data.get("overview")
                 media.poster_path = tmdb.poster_url(data.get("still_path"), size="w500")

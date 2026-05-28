@@ -1,10 +1,4 @@
-"""Trakt.tv API client.
-
-Uses the Device Authentication flow — no redirect URI needed.
-Trakt uses TMDB IDs natively, so no external ID mapping is required.
-
-Rate limits: 1000 requests per 5 minutes per user.
-"""
+"""Trakt.tv API client."""
 
 import asyncio
 import logging
@@ -291,6 +285,18 @@ async def remove_movie_from_history(client_id: str, access_token: str, tmdb_id: 
         resp.raise_for_status()
 
 
+def _episode_history_payload(show_tmdb_id: int, season_number: int, episode_number: int) -> dict:
+    return {
+        "shows": [{
+            "ids": {"tmdb": show_tmdb_id},
+            "seasons": [{
+                "number": season_number,
+                "episodes": [{"number": episode_number}],
+            }],
+        }]
+    }
+
+
 async def add_episode_to_history(
     client_id: str,
     access_token: str,
@@ -302,15 +308,7 @@ async def add_episode_to_history(
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
             f"{TRAKT_BASE}/sync/history",
-            json={
-                "shows": [{
-                    "ids": {"tmdb": show_tmdb_id},
-                    "seasons": [{
-                        "number": season_number,
-                        "episodes": [{"number": episode_number}],
-                    }],
-                }]
-            },
+            json=_episode_history_payload(show_tmdb_id, season_number, episode_number),
             headers=_headers(client_id, access_token),
         )
         resp.raise_for_status()
@@ -327,15 +325,7 @@ async def remove_episode_from_history(
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
             f"{TRAKT_BASE}/sync/history/remove",
-            json={
-                "shows": [{
-                    "ids": {"tmdb": show_tmdb_id},
-                    "seasons": [{
-                        "number": season_number,
-                        "episodes": [{"number": episode_number}],
-                    }],
-                }]
-            },
+            json=_episode_history_payload(show_tmdb_id, season_number, episode_number),
             headers=_headers(client_id, access_token),
         )
         resp.raise_for_status()

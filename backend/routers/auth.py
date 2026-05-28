@@ -24,7 +24,7 @@ from core.config import settings as app_settings
 from core.email import send_activation_email, send_password_reset_email
 from core.url_validator import validate_service_url
 from core.limiter import limiter
-from core.backup import restore_backup
+from core.backup import pg_restore
 import schemas
 from dependencies import get_current_user
 from sqlalchemy.orm import selectinload
@@ -281,8 +281,9 @@ async def bootstrap_restore(
     if count_result.scalar_one() > 0:
         raise HTTPException(status_code=403, detail="Bootstrap restore is only available when no users exist.")
 
-    if not (file.filename or "").endswith(".bak"):
-        raise HTTPException(status_code=400, detail="Only .bak backup files are accepted.")
+    fname = file.filename or ""
+    if not (fname.endswith(".pgdump") or fname.endswith(".bak")):
+        raise HTTPException(status_code=400, detail="Only .pgdump backup files are accepted.")
 
     content = await file.read()
     if not content:
@@ -291,8 +292,8 @@ async def bootstrap_restore(
     await db.rollback()
 
     try:
-        await restore_backup(content)
-    except ValueError as e:
+        await pg_restore(content)
+    except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return {"status": "restored"}
@@ -714,15 +715,7 @@ async def test_radarr(
     from routers.media import _effective_radarr
 
     if not url or not token:
-        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-        user_settings = settings_result.scalar_one_or_none()
-        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
-        global_settings = gs_result.scalar_one_or_none()
-        cfg = _effective_radarr(user_settings, global_settings)
-        if not cfg:
-            raise HTTPException(status_code=400, detail="Radarr not configured")
-        url = cfg.radarr_url
-        token = cfg.radarr_token
+        url, token = await _resolve_radarr_creds(db, current_user.id)
 
     url = await validate_service_url(url, "Radarr URL")
     success = await radarr.validate_connection(url, token)
@@ -741,15 +734,7 @@ async def get_radarr_profiles(
     from routers.media import _effective_radarr
 
     if not url or not token:
-        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-        user_settings = settings_result.scalar_one_or_none()
-        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
-        global_settings = gs_result.scalar_one_or_none()
-        cfg = _effective_radarr(user_settings, global_settings)
-        if not cfg:
-            raise HTTPException(status_code=400, detail="Radarr not configured")
-        url = cfg.radarr_url
-        token = cfg.radarr_token
+        url, token = await _resolve_radarr_creds(db, current_user.id)
 
     url = await validate_service_url(url, "Radarr URL")
     quality_profiles = await radarr.get_quality_profiles(url, token)
@@ -772,15 +757,7 @@ async def test_sonarr(
     from routers.media import _effective_sonarr
 
     if not url or not token:
-        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-        user_settings = settings_result.scalar_one_or_none()
-        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
-        global_settings = gs_result.scalar_one_or_none()
-        cfg = _effective_sonarr(user_settings, global_settings)
-        if not cfg:
-            raise HTTPException(status_code=400, detail="Sonarr not configured")
-        url = cfg.sonarr_url
-        token = cfg.sonarr_token
+        url, token = await _resolve_sonarr_creds(db, current_user.id)
 
     url = await validate_service_url(url, "Sonarr URL")
     success = await sonarr.validate_connection(url, token)
@@ -895,15 +872,7 @@ async def get_sonarr_profiles(
     from routers.media import _effective_sonarr
 
     if not url or not token:
-        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-        user_settings = settings_result.scalar_one_or_none()
-        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
-        global_settings = gs_result.scalar_one_or_none()
-        cfg = _effective_sonarr(user_settings, global_settings)
-        if not cfg:
-            raise HTTPException(status_code=400, detail="Sonarr not configured")
-        url = cfg.sonarr_url
-        token = cfg.sonarr_token
+        url, token = await _resolve_sonarr_creds(db, current_user.id)
 
     url = await validate_service_url(url, "Sonarr URL")
     quality_profiles = await sonarr.get_quality_profiles(url, token)
@@ -1052,3 +1021,28 @@ async def verify_2fa_login(
         return {"access_token": create_access_token(subject=user.id), "token_type": "bearer"}
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid verification code")
+
+
+async def _resolve_radarr_creds(db: AsyncSession, user_id: int) -> tuple[str, str]:
+    from routers.media import _effective_radarr
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    user_settings = settings_result.scalar_one_or_none()
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    global_settings = gs_result.scalar_one_or_none()
+    cfg = _effective_radarr(user_settings, global_settings)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Radarr not configured")
+    return cfg.radarr_url, cfg.radarr_token
+
+
+async def _resolve_sonarr_creds(db: AsyncSession, user_id: int) -> tuple[str, str]:
+    from routers.media import _effective_sonarr
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    user_settings = settings_result.scalar_one_or_none()
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    global_settings = gs_result.scalar_one_or_none()
+    cfg = _effective_sonarr(user_settings, global_settings)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Sonarr not configured")
+    return cfg.sonarr_url, cfg.sonarr_token
+

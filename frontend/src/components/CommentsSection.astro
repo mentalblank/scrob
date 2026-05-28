@@ -3,12 +3,12 @@ import { api, type Comment } from "../lib/api";
 
 interface Props {
   mediaType: string;
-  tmdbId: number;
+  uriId: string;
   seasonNumber?: number;
   episodeNumber?: number;
 }
 
-const { mediaType, tmdbId, seasonNumber, episodeNumber } = Astro.props;
+const { mediaType, uriId, seasonNumber, episodeNumber } = Astro.props;
 const token = Astro.cookies.get("token")?.value;
 const user = Astro.locals.user;
 
@@ -16,7 +16,7 @@ let comments: Comment[] = [];
 try {
   comments = await api.comments.list({
     media_type: mediaType,
-    tmdb_id: tmdbId,
+    uri_id: uriId,
     season_number: seasonNumber,
     episode_number: episodeNumber
   }, token);
@@ -46,7 +46,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
       <div class="mb-12 bg-zinc-950/40 border border-zinc-800/80 p-6 rounded-3xl backdrop-blur-md">
         <form id="comment-form" class="space-y-4">
           <input type="hidden" name="mediaType" value={mediaType} />
-          <input type="hidden" name="tmdbId" value={tmdbId} />
+          <input type="hidden" name="uriId" value={uriId} />
           {seasonNumber !== undefined && <input type="hidden" name="seasonNumber" value={seasonNumber} />}
           {episodeNumber !== undefined && <input type="hidden" name="episodeNumber" value={episodeNumber} />}
           <div class="relative">
@@ -190,10 +190,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
 </div>
 
 <script define:vars={{ token, currentUserId: user?.id, isAdmin: user?.role === 'admin' }}>
-  function esc(s) {
-    if (s == null) return '';
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  const esc = window.esc;
 
   const SPOILER_OVERLAY_HTML = `<span class="text-amber-400 font-bold text-sm">Click to reveal</span>`;
 
@@ -271,7 +268,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
       const formData = new FormData(form);
       const content = formData.get('content');
       const mediaType = formData.get('mediaType');
-      const tmdbId = parseInt(formData.get('tmdbId'));
+      const uriIdVal = formData.get('uriId');
       const seasonNumber = formData.get('seasonNumber') ? parseInt(formData.get('seasonNumber')) : undefined;
       const episodeNumber = formData.get('episodeNumber') ? parseInt(formData.get('episodeNumber')) : undefined;
       const isSpoiler = document.getElementById('is-spoiler-checkbox')?.checked ?? false;
@@ -290,7 +287,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
           },
           body: JSON.stringify({
             media_type: mediaType,
-            tmdb_id: tmdbId,
+            uri_id: uriIdVal,
             season_number: seasonNumber,
             episode_number: episodeNumber,
             content: content,

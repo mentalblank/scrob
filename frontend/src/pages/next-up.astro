@@ -47,22 +47,14 @@ Astro.response.headers.set("Cache-Control", "no-store");
 </Base>
 
 <script define:vars={{ token }}>
-  function esc(str) {
-    if (str == null) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  const esc = window.esc;
 
   let showingHidden = false;
 
   function buildCard(item) {
     const isHidden = item.next_up_hidden === true;
-    const href = item.show_tmdb_id && item.season_number != null && item.episode_number != null
-      ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
-      : item.show_tvdb_id && item.season_number != null && item.episode_number != null
-        ? `/show/tvdb/${item.show_tvdb_id}/season/${item.season_number}/${item.episode_number}`
-        : item.show_tmdb_id ? `/show/${item.show_tmdb_id}`
-        : item.show_tvdb_id ? `/show/tvdb/${item.show_tvdb_id}`
-        : item.tmdb_id ? `/media/${item.type}/${item.tmdb_id}` : '#';
+    const primarySource = document.cookie.split('; ').find(row => row.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
+    const href = window.buildItemUrl?.(item, primarySource === 'tvdb') || '#';
 
     const posterSrc = item.show_poster_path
       ? (item.show_poster_path.startsWith('http') ? item.show_poster_path : `https://image.tmdb.org/t/p/w500${item.show_poster_path}`)
@@ -75,9 +67,8 @@ Astro.response.headers.set("Cache-Control", "no-store");
       ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
       : null;
 
-    const showTmdbId = item.show_tmdb_id != null
-      ? item.show_tmdb_id
-      : (item.show_tvdb_id != null ? -item.show_tvdb_id : null);
+    const showTmdbId = item.show_tmdb_id ?? null;
+    const showUriId = item.show_uri_id ?? (item.show_tvdb_id ? `tvdb:s:${item.show_tvdb_id}` : item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : null);
 
     const isSeries = true;
     const inLibrary = item.in_library ?? false;
@@ -91,7 +82,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
     const titleStr = isHidden ? 'Resume tracking' : 'Drop show';
     const ICON_DROP = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
 
-    const hideBtn = showTmdbId != null ? `
+    const hideBtn = showUriId ? `
       <button
         data-action="unified-block"
         data-is-blocked="false"
@@ -107,7 +98,9 @@ Astro.response.headers.set("Cache-Control", "no-store");
       <div 
         class="flex-shrink-0 w-40 group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 ${wrapperClass}"
         data-card
-        data-tmdb-id="${esc(String(showTmdbId))}"
+        data-tmdb-id="${esc(String(showTmdbId ?? ''))}"
+        data-uri-id="${esc(showUriId ?? '')}"
+        data-show-uri-id="${esc(showUriId ?? '')}"
         data-media-type="series"
         data-in-library="${inLibrary}"
         data-partial-watched="true"
@@ -178,10 +171,12 @@ Astro.response.headers.set("Cache-Control", "no-store");
 
   // Handle unified block/drop status change events globally
   window.addEventListener('unified-block-changed', (e) => {
-    const { tmdbId, mediaType, isDropped } = e.detail;
+    const { uriId, tmdbId, mediaType, isDropped } = e.detail;
     if (mediaType !== 'series') return;
 
-    const card = document.querySelector(`[data-card][data-tmdb-id="${tmdbId}"][data-media-type="series"]`);
+    const card = uriId
+      ? document.querySelector(`[data-card][data-uri-id="${CSS.escape(uriId)}"][data-media-type="series"]`)
+      : document.querySelector(`[data-card][data-tmdb-id="${tmdbId}"][data-media-type="series"]`);
     if (!card) return;
 
     const isNowHidden = isDropped;

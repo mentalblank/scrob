@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
 
 from db import get_db
+from dependencies import get_user_by_api_key
 from models.media import Media
 from models.show import Show
 from models.collection import Collection, CollectionFile
@@ -27,6 +28,26 @@ from core import tmdb
 from core.jellyfin import extract_quality
 
 router = APIRouter()
+
+
+# Parse provider IDs from path brackets (e.g. {tmdb-550}, [tvdbid-79126]).
+_PATH_TMDB_RE = re.compile(r'[\{\[](?:tmdb|tmdbid)-(\d+)[\}\]]', re.IGNORECASE)
+_PATH_TVDB_RE = re.compile(r'[\{\[](?:tvdb|tvdbid)-(\d+)[\}\]]', re.IGNORECASE)
+_PATH_IMDB_RE = re.compile(r'[\{\[](?:imdb|imdbid)-(tt\d+)[\}\]]', re.IGNORECASE)
+
+
+def _extract_ids_from_path(path: str | None) -> dict:
+    """Parse provider IDs from a media path."""
+    if not path:
+        return {"tmdb_id": None, "tvdb_id": None, "imdb_id": None}
+    tmdb_m = _PATH_TMDB_RE.search(path)
+    tvdb_m = _PATH_TVDB_RE.search(path)
+    imdb_m = _PATH_IMDB_RE.search(path)
+    return {
+        "tmdb_id": tmdb_m.group(1) if tmdb_m else None,
+        "tvdb_id": tvdb_m.group(1) if tvdb_m else None,
+        "imdb_id": imdb_m.group(1) if imdb_m else None,
+    }
 
 
 async def _get_tmdb_key(db: AsyncSession, settings: UserSettings | None) -> str | None:
@@ -67,13 +88,38 @@ async def _get_scrobble_connection_by_id(db: AsyncSession, user_id: int, connect
     return result.scalar_one_or_none()
 
 
+async def _find_show_by_alias(db: AsyncSession, provider: str, external_id: str, media_type: str = "series") -> Show | None:
+    """Look up a Show via media_aliases (falls back gracefully if table doesn't exist yet)."""
+    try:
+        from models.media_alias import MediaAlias
+        from models.base import MediaType as MT
+        alias_q = await db.execute(
+            select(MediaAlias.internal_id).where(
+                MediaAlias.provider == provider,
+                MediaAlias.external_id == str(external_id),
+                MediaAlias.media_type == MT(media_type),
+            )
+        )
+        internal_id = alias_q.scalar_one_or_none()
+        if internal_id is not None:
+            show_q = await db.execute(select(Show).where(Show.id == internal_id))
+            return show_q.scalar_one_or_none()
+    except Exception:
+        pass
+    return None
+
+
 async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: str = None) -> Show:
+    show = await _find_show_by_alias(db, "tmdb", str(series_tmdb_id))
+    if show:
+        return show
     result = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
     show = result.scalar_one_or_none()
     if not show:
         show_data = await tmdb.get_show(series_tmdb_id, api_key=api_key)
         show = Show(
             tmdb_id=series_tmdb_id,
+            uri_id=f"tmdb:s:{series_tmdb_id}",
             tvdb_id=int(show_data.get("external_ids", {}).get("tvdb_id")) if show_data.get("external_ids", {}).get("tvdb_id") else None,
             title=show_data.get("name", ""),
             original_title=show_data.get("original_name"),
@@ -105,15 +151,20 @@ async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: s
 
 
 async def _find_or_create_show_tvdb(db: AsyncSession, series_tvdb_id: int, tvdb_api_key: str = None, lang: str = "eng") -> Show:
-    result = await db.execute(select(Show).where(Show.tvdb_id == series_tvdb_id))
-    show = result.scalar_one_or_none()
+    # Try alias lookup first (avoids API calls for already-known shows)
+    show = await _find_show_by_alias(db, "tvdb", str(series_tvdb_id))
+    if not show:
+        result = await db.execute(select(Show).where(Show.tvdb_id == series_tvdb_id))
+        show = result.scalar_one_or_none()
     if not show:
         from core import tvdb as tvdb_client
         raw_show = await tvdb_client.get_series(series_tvdb_id, tvdb_api_key, lang=lang)
         show_data = tvdb_client.format_series(raw_show, lang=lang)
+        _tmdb_cross = show_data.get("tmdb_id_cross")
         show = Show(
             tvdb_id=series_tvdb_id,
-            tmdb_id=show_data.get("tmdb_id_cross"),
+            tmdb_id=_tmdb_cross,
+            uri_id=f"tmdb:s:{_tmdb_cross}" if _tmdb_cross else f"tvdb:s:{series_tvdb_id}",
             title=show_data.get("title", ""),
             original_title=show_data.get("original_title"),
             overview=show_data.get("overview"),
@@ -273,16 +324,21 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
         else:
             quality = {}
 
+        _is_movie = item.get("Type") == "Movie"
+        _path_ids = _extract_ids_from_path(quality.get("file_path"))
         return {
             "notification_type": notification_type,
             "jellyfin_id": item.get("Id"),
             "title": item.get("Name"),
             "year": item.get("ProductionYear"),
-            "media_type": "movie" if item.get("Type") == "Movie" else "episode",
-            "tmdb_id": item.get("ProviderIds", {}).get("Tmdb"),
-            "tvdb_id": item.get("ProviderIds", {}).get("Tvdb"),
-            "series_tmdb_id": item.get("SeriesProviderIds", {}).get("Tmdb"),
-            "series_tvdb_id": item.get("SeriesProviderIds", {}).get("Tvdb"),
+            "media_type": "movie" if _is_movie else "episode",
+            # Movie IDs come from the item; the filename is a seed fallback.
+            "tmdb_id": item.get("ProviderIds", {}).get("Tmdb") or (_path_ids["tmdb_id"] if _is_movie else None),
+            "tvdb_id": item.get("ProviderIds", {}).get("Tvdb") or (_path_ids["tvdb_id"] if _is_movie else None),
+            "imdb_id": item.get("ProviderIds", {}).get("Imdb") or (_path_ids["imdb_id"] if _is_movie else None),
+            # Episode → series IDs may live in the show folder name.
+            "series_tmdb_id": item.get("SeriesProviderIds", {}).get("Tmdb") or (None if _is_movie else _path_ids["tmdb_id"]),
+            "series_tvdb_id": item.get("SeriesProviderIds", {}).get("Tvdb") or (None if _is_movie else _path_ids["tvdb_id"]),
             "season_number": item.get("ParentIndexNumber"),
             "episode_number": item.get("IndexNumber"),
             "progress_percent": round(position_ticks / runtime_ticks, 4) if runtime_ticks else 0.0,
@@ -323,6 +379,7 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
         "media_type": "movie" if item_type == "Movie" else "episode",
         "tmdb_id": str(tmdb_id) if tmdb_id else None,
         "tvdb_id": str(tvdb_id) if tvdb_id else None,
+        "imdb_id": payload.get("Provider_imdb") or payload.get("Provider_Imdb"),
         "series_tmdb_id": None,  # not exposed in flat format; resolved in find_or_create
         "series_tvdb_id": None,
         "series_name": payload.get("SeriesName"),  # used to look up show when series_tmdb_id is absent
@@ -423,34 +480,43 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
 
         if user_id and data["media_type"] == "episode" and series_tmdb_id and data.get("season_number") is not None and data.get("episode_number") is not None:
             from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
-            
-            ep_override_q = await db.execute(
-                select(ShowEpisodeOverride).where(
-                    ShowEpisodeOverride.user_id == user_id,
-                    ShowEpisodeOverride.source_show_tmdb_id == series_tmdb_id,
-                    ShowEpisodeOverride.source_season_number == data["season_number"],
-                    ShowEpisodeOverride.source_episode_number == data["episode_number"]
-                )
-            )
-            ep_override = ep_override_q.scalar_one_or_none()
-            if ep_override:
-                series_tmdb_id = ep_override.target_show_tmdb_id
-                data["series_tmdb_id"] = ep_override.target_show_tmdb_id
-                data["season_number"] = ep_override.target_season_number
-                data["episode_number"] = ep_override.target_episode_number
-            else:
-                season_override_q = await db.execute(
-                    select(ShowSeasonOverride).where(
-                        ShowSeasonOverride.user_id == user_id,
-                        ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
-                        ShowSeasonOverride.source_season_number == data["season_number"]
+            # Resolve series_tmdb_id to local show to look up overrides by FK
+            _src_show_q = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
+            _src_show = _src_show_q.scalar_one_or_none()
+            if _src_show:
+                ep_override_q = await db.execute(
+                    select(ShowEpisodeOverride).where(
+                        ShowEpisodeOverride.user_id == user_id,
+                        ShowEpisodeOverride.source_show_id == _src_show.id,
+                        ShowEpisodeOverride.source_season_number == data["season_number"],
+                        ShowEpisodeOverride.source_episode_number == data["episode_number"],
                     )
                 )
-                season_override = season_override_q.scalar_one_or_none()
-                if season_override:
-                    series_tmdb_id = season_override.target_show_tmdb_id
-                    data["series_tmdb_id"] = season_override.target_show_tmdb_id
-                    data["season_number"] = season_override.target_season_number
+                ep_override = ep_override_q.scalar_one_or_none()
+                if ep_override and ep_override.target_show_id:
+                    _tgt_q = await db.execute(select(Show).where(Show.id == ep_override.target_show_id))
+                    _tgt = _tgt_q.scalar_one_or_none()
+                    if _tgt and _tgt.tmdb_id:
+                        series_tmdb_id = _tgt.tmdb_id
+                        data["series_tmdb_id"] = _tgt.tmdb_id
+                    data["season_number"] = ep_override.target_season_number
+                    data["episode_number"] = ep_override.target_episode_number
+                else:
+                    season_override_q = await db.execute(
+                        select(ShowSeasonOverride).where(
+                            ShowSeasonOverride.user_id == user_id,
+                            ShowSeasonOverride.source_show_id == _src_show.id,
+                            ShowSeasonOverride.source_season_number == data["season_number"],
+                        )
+                    )
+                    season_override = season_override_q.scalar_one_or_none()
+                    if season_override and season_override.target_show_id:
+                        _tgt_q = await db.execute(select(Show).where(Show.id == season_override.target_show_id))
+                        _tgt = _tgt_q.scalar_one_or_none()
+                        if _tgt and _tgt.tmdb_id:
+                            series_tmdb_id = _tgt.tmdb_id
+                            data["series_tmdb_id"] = _tgt.tmdb_id
+                        data["season_number"] = season_override.target_season_number
 
         if data["media_type"] == "episode" and series_tmdb_id:
             try:
@@ -460,15 +526,31 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
 
     # 2. Match by TMDB ID or TVDB ID (handles rapid webhook events before first sync, or items
     #    already added via another source / manually — prevents duplicate media rows)
-    match_id = int(data["tvdb_id"]) if (is_tvdb and data.get("tvdb_id")) else (int(data["tmdb_id"]) if data.get("tmdb_id") else None)
+    _jf_mt = MediaType(data["media_type"])
+    _jf_uri_prefix = "e" if _jf_mt == MediaType.episode else ("m" if _jf_mt == MediaType.movie else "s")
+    # Movies are always TMDB-identified — TVDB mode applies to series/episodes only.
+    _jf_use_tvdb = is_tvdb and _jf_mt != MediaType.movie
+    match_id = int(data["tvdb_id"]) if (_jf_use_tvdb and data.get("tvdb_id")) else (int(data["tmdb_id"]) if data.get("tmdb_id") else None)
     if match_id:
-        result = await db.execute(
-            select(Media).where(
-                Media.tmdb_id == match_id,
-                Media.media_type == MediaType(data["media_type"]),
+        if _jf_use_tvdb:
+            # Look up by uri_id (e.g. tvdb:e:12345) — avoids polluting tmdb_id column with TVDB integers
+            _tvdb_uri = f"tvdb:{_jf_uri_prefix}:{match_id}"
+            result = await db.execute(
+                select(Media).where(Media.uri_id == _tvdb_uri, Media.media_type == _jf_mt)
             )
-        )
-        media = result.scalars().first()
+            media = result.scalars().first()
+            if not media:
+                # Alias table fallback for items that predate uri_id population
+                from utils.alias_lookup import get_internal_id_for_uri
+                _internal = await get_internal_id_for_uri(db, _tvdb_uri)
+                if _internal:
+                    result = await db.execute(select(Media).where(Media.id == _internal))
+                    media = result.scalars().first()
+        else:
+            result = await db.execute(
+                select(Media).where(Media.tmdb_id == match_id, Media.media_type == _jf_mt)
+            )
+            media = result.scalars().first()
         if media:
             if media.media_type == MediaType.episode and media.show_id is None and show:
                 media.show_id = show.id
@@ -478,38 +560,60 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
                     await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
             return media
 
-    # 2b. Movie matching by title + year if TMDB ID is missing
+    # 2b. Movie matching when TMDB ID is missing — resolve via IMDB (from filename
+    #     seed/GUID), then title+year search.
     if data["media_type"] == "movie" and not data["tmdb_id"]:
-        # Try local match first to avoid redundant TMDB search
+        # IMDB → TMDB is an exact match — try it before fuzzy title search.
+        if data.get("imdb_id"):
+            try:
+                ext = await tmdb.find_by_external_id(data["imdb_id"], "imdb_id", api_key=api_key)
+                if ext.get("movie_results"):
+                    data["tmdb_id"] = str(ext["movie_results"][0]["id"])
+            except Exception:
+                pass
+
+        if data["tmdb_id"]:
+            result = await db.execute(
+                select(Media).where(
+                    Media.tmdb_id == int(data["tmdb_id"]),
+                    Media.media_type == MediaType.movie,
+                )
+            )
+            media = result.scalars().first()
+            if media:
+                return media
+
+        # Try local match before a TMDB title search to avoid a redundant API call.
         local_q = select(Media).where(
             Media.media_type == MediaType.movie,
             Media.title.ilike(data["title"]),
         )
         if data.get("year"):
             local_q = local_q.where(Media.release_date.like(f"{data['year']}%"))
-        
+
         media = (await db.execute(local_q)).scalars().first()
         if media:
             return media
-            
-        # Try TMDB search to find the real ID
-        try:
-            search_res = await tmdb.search_movies(data["title"], year=data.get("year"), api_key=api_key)
-            if search_res.get("results"):
-                tmdb_movie = search_res["results"][0]
-                data["tmdb_id"] = str(tmdb_movie["id"])
-                # Check again with the new TMDB ID
-                result = await db.execute(
-                    select(Media).where(
-                        Media.tmdb_id == tmdb_movie["id"],
-                        Media.media_type == MediaType.movie,
+
+        # Try TMDB title search to find the real ID (only if IMDB didn't resolve it).
+        if not data["tmdb_id"]:
+            try:
+                search_res = await tmdb.search_movies(data["title"], year=data.get("year"), api_key=api_key)
+                if search_res.get("results"):
+                    tmdb_movie = search_res["results"][0]
+                    data["tmdb_id"] = str(tmdb_movie["id"])
+                    # Check again with the new TMDB ID
+                    result = await db.execute(
+                        select(Media).where(
+                            Media.tmdb_id == tmdb_movie["id"],
+                            Media.media_type == MediaType.movie,
+                        )
                     )
-                )
-                media = result.scalars().first()
-                if media:
-                    return media
-        except Exception:
-            pass
+                    media = result.scalars().first()
+                    if media:
+                        return media
+            except Exception:
+                pass
 
     # 3. Match by (show_id, season_number, episode_number) — catches sync-created rows
     #    when the Jellyfin item's ID is missing or doesn't match
@@ -532,9 +636,16 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
         print(f"  Skipping unidentifiable episode '{data['title']}' (no season/episode/id)")
         return None
 
+    # Block 2b (movie title/year TMDB search) may have populated data["tmdb_id"] — pick it up.
+    if not match_id and not _jf_use_tvdb and data.get("tmdb_id"):
+        match_id = int(data["tmdb_id"])
+    _mt = _jf_mt
+    _uri_prefix = _jf_uri_prefix
+    _uri = f"{'tvdb' if _jf_use_tvdb else 'tmdb'}:{_uri_prefix}:{match_id}" if match_id else None
     media = Media(
-        tmdb_id=match_id,
-        media_type=MediaType(data["media_type"]),
+        tmdb_id=match_id if not _jf_use_tvdb else None,
+        uri_id=_uri,
+        media_type=_mt,
         title=data["title"],
         season_number=data["season_number"],
         episode_number=data["episode_number"],
@@ -552,20 +663,24 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
     return media
 
 
-async def _handle_jellyfin_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int | None = None):
-    user_result = await db.execute(select(User).where(User.api_key == api_key))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
+async def _parse_request_payload(request: Request) -> tuple[dict | None, dict | None]:
+    """Parse payload from request. Returns (payload, error_dict)."""
     body = await request.body()
     if not body:
-        return {"status": "ignored", "reason": "empty body"}
-
+        return None, {"status": "ignored", "reason": "empty body"}
     try:
         payload = await request.json()
+        return payload, None
     except Exception:
-        return {"status": "ignored", "reason": "invalid JSON"}
+        return None, {"status": "ignored", "reason": "invalid JSON"}
+
+
+async def _handle_jellyfin_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int | None = None):
+    user = await get_user_by_api_key(api_key, db)
+
+    payload, err = await _parse_request_payload(request)
+    if err:
+        return err
 
     data = parse_jellyfin_payload(payload)
     if not data:
@@ -682,19 +797,11 @@ async def jellyfin_webhook_connection(
 # ── Emby ───────────────────────────────────────────────────────────────────────
 
 async def _handle_emby_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int | None = None):
-    user_result = await db.execute(select(User).where(User.api_key == api_key))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    user = await get_user_by_api_key(api_key, db)
 
-    body = await request.body()
-    if not body:
-        return {"status": "ignored", "reason": "empty body"}
-
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"status": "ignored", "reason": "invalid JSON"}
+    payload, err = await _parse_request_payload(request)
+    if err:
+        return err
 
     data = parse_jellyfin_payload(payload)
     if not data:
@@ -782,19 +889,11 @@ async def _handle_emby_webhook(request: Request, db: AsyncSession, api_key: str,
 async def _handle_jellyfin_scrobble_webhook(
     request: Request, db: AsyncSession, api_key: str, connection_id: int, source: str
 ):
-    user_result = await db.execute(select(User).where(User.api_key == api_key))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    user = await get_user_by_api_key(api_key, db)
 
-    body = await request.body()
-    if not body:
-        return {"status": "ignored", "reason": "empty body"}
-
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"status": "ignored", "reason": "invalid JSON"}
+    payload, err = await _parse_request_payload(request)
+    if err:
+        return err
 
     data = parse_jellyfin_payload(payload)
     if not data:
@@ -942,47 +1041,21 @@ def parse_plex_payload(payload: dict) -> dict | None:
     media_list = metadata.get("Media", [])
     quality = {}
     if media_list:
-        m = media_list[0]
-        h = m.get("height", 0)
-        w = m.get("width", 0)
-        plex_res = str(m.get("videoResolution", "")).lower()
-        if plex_res in ("4k", "2160"): resolution = "4K"
-        elif plex_res == "1080": resolution = "1080p"
-        elif plex_res == "720": resolution = "720p"
-        elif plex_res in ("480", "sd"): resolution = "480p"
-        elif plex_res: resolution = f"{plex_res}p"
-        elif w >= 3200 or h >= 2000: resolution = "4K"
-        elif w >= 1700 or h >= 800: resolution = "1080p"
-        elif w >= 1100 or h >= 540: resolution = "720p"
-        else: resolution = f"{h}p"
+        import core.plex as plex_client
+        quality = plex_client.extract_quality(media_list)
 
-        quality = {
-            "resolution": resolution,
-            "video_codec": m.get("videoCodec"),
-            "audio_codec": m.get("audioCodec"),
-            "audio_channels": f"{m.get('audioChannels', 0)}.0" if m.get("audioChannels") else None,
-            "audio_languages": [],
-            "subtitle_languages": [],
-        }
-        parts = m.get("Part", [])
-        if parts:
-            p = parts[0]
-            quality["file_path"] = p.get("file")
-            for s in p.get("Stream", []):
-                st = s.get("streamType")
-                l = s.get("languageTag") or s.get("languageCode") or s.get("language")
-                if not l: continue
-                if st == 2 and l not in quality["audio_languages"]: quality["audio_languages"].append(l)
-                elif st == 3 and l not in quality["subtitle_languages"]: quality["subtitle_languages"].append(l)
-
+    # Filename/folder is a seed fallback when GUIDs are absent. For a movie the path
+    # carries the movie IDs; for an episode it carries the show folder's series IDs.
+    _is_movie = media_type == "movie"
+    _path_ids = _extract_ids_from_path(quality.get("file_path"))
     return {
         "event": event,
         "title": metadata.get("title") or metadata.get("grandparentTitle", ""),
         "year": metadata.get("year"),
         "media_type": "movie" if media_type == "movie" else "episode",
-        "tmdb_id": tmdb_id,
-        "tvdb_id": tvdb_id,
-        "imdb_id": imdb_id,
+        "tmdb_id": tmdb_id or (_path_ids["tmdb_id"] if _is_movie else None),
+        "tvdb_id": tvdb_id or (_path_ids["tvdb_id"] if _is_movie else None),
+        "imdb_id": imdb_id or (_path_ids["imdb_id"] if _is_movie else None),
         "season_number": metadata.get("parentIndex"),
         "episode_number": metadata.get("index"),
         "rating": metadata.get("userRating"),
@@ -994,9 +1067,9 @@ def parse_plex_payload(payload: dict) -> dict | None:
         "library_section_id": str(metadata["librarySectionID"]) if metadata.get("librarySectionID") else None,
         "library_section_type": metadata.get("librarySectionType"),
         "account_title": (payload.get("Account") or {}).get("title", ""),
-        "grandparent_tmdb_id": grandparent_tmdb_id,
-        "grandparent_tvdb_id": grandparent_tvdb_id,
-        "grandparent_imdb_id": grandparent_imdb_id,
+        "grandparent_tmdb_id": grandparent_tmdb_id or (None if _is_movie else _path_ids["tmdb_id"]),
+        "grandparent_tvdb_id": grandparent_tvdb_id or (None if _is_movie else _path_ids["tvdb_id"]),
+        "grandparent_imdb_id": grandparent_imdb_id or (None if _is_movie else _path_ids["imdb_id"]),
         "grandparent_title": metadata.get("grandparentTitle"),
         "grandparent_rating_key": str(metadata["grandparentRatingKey"]) if metadata.get("grandparentRatingKey") else None,
         "quality": quality,
@@ -1308,44 +1381,66 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
 
         if user_id and data["media_type"] == "episode" and series_tmdb_id and data.get("season_number") is not None and data.get("episode_number") is not None:
             from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
-            
-            ep_override_q = await db.execute(
-                select(ShowEpisodeOverride).where(
-                    ShowEpisodeOverride.user_id == user_id,
-                    ShowEpisodeOverride.source_show_tmdb_id == series_tmdb_id,
-                    ShowEpisodeOverride.source_season_number == data["season_number"],
-                    ShowEpisodeOverride.source_episode_number == data["episode_number"]
-                )
-            )
-            ep_override = ep_override_q.scalar_one_or_none()
-            if ep_override:
-                series_tmdb_id = ep_override.target_show_tmdb_id
-                data["grandparent_tmdb_id"] = ep_override.target_show_tmdb_id
-                data["season_number"] = ep_override.target_season_number
-                data["episode_number"] = ep_override.target_episode_number
-            else:
-                season_override_q = await db.execute(
-                    select(ShowSeasonOverride).where(
-                        ShowSeasonOverride.user_id == user_id,
-                        ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
-                        ShowSeasonOverride.source_season_number == data["season_number"]
+            _plex_src_q = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
+            _plex_src = _plex_src_q.scalar_one_or_none()
+            if _plex_src:
+                ep_override_q = await db.execute(
+                    select(ShowEpisodeOverride).where(
+                        ShowEpisodeOverride.user_id == user_id,
+                        ShowEpisodeOverride.source_show_id == _plex_src.id,
+                        ShowEpisodeOverride.source_season_number == data["season_number"],
+                        ShowEpisodeOverride.source_episode_number == data["episode_number"],
                     )
                 )
-                season_override = season_override_q.scalar_one_or_none()
-                if season_override:
-                    series_tmdb_id = season_override.target_show_tmdb_id
-                    data["grandparent_tmdb_id"] = season_override.target_show_tmdb_id
-                    data["season_number"] = season_override.target_season_number
+                ep_override = ep_override_q.scalar_one_or_none()
+                if ep_override and ep_override.target_show_id:
+                    _tgt_q = await db.execute(select(Show).where(Show.id == ep_override.target_show_id))
+                    _tgt = _tgt_q.scalar_one_or_none()
+                    if _tgt and _tgt.tmdb_id:
+                        series_tmdb_id = _tgt.tmdb_id
+                        data["grandparent_tmdb_id"] = _tgt.tmdb_id
+                    data["season_number"] = ep_override.target_season_number
+                    data["episode_number"] = ep_override.target_episode_number
+                else:
+                    season_override_q = await db.execute(
+                        select(ShowSeasonOverride).where(
+                            ShowSeasonOverride.user_id == user_id,
+                            ShowSeasonOverride.source_show_id == _plex_src.id,
+                            ShowSeasonOverride.source_season_number == data["season_number"],
+                        )
+                    )
+                    season_override = season_override_q.scalar_one_or_none()
+                    if season_override and season_override.target_show_id:
+                        _tgt_q = await db.execute(select(Show).where(Show.id == season_override.target_show_id))
+                        _tgt = _tgt_q.scalar_one_or_none()
+                        if _tgt and _tgt.tmdb_id:
+                            series_tmdb_id = _tgt.tmdb_id
+                            data["grandparent_tmdb_id"] = _tgt.tmdb_id
+                        data["season_number"] = season_override.target_season_number
 
-    match_id = int(data["tvdb_id"]) if (is_tvdb and data.get("tvdb_id")) else (int(data["tmdb_id"]) if data.get("tmdb_id") else None)
+    _pl_mt = MediaType(data["media_type"])
+    _pl_uri_prefix = "e" if _pl_mt == MediaType.episode else ("m" if _pl_mt == MediaType.movie else "s")
+    # Movies are always TMDB-identified — TVDB mode applies to series/episodes only.
+    _pl_use_tvdb = is_tvdb and _pl_mt != MediaType.movie
+    match_id = int(data["tvdb_id"]) if (_pl_use_tvdb and data.get("tvdb_id")) else (int(data["tmdb_id"]) if data.get("tmdb_id") else None)
     if match_id:
-        result = await db.execute(
-            select(Media).where(
-                Media.tmdb_id == match_id,
-                Media.media_type == MediaType(data["media_type"]),
+        if _pl_use_tvdb:
+            _tvdb_uri = f"tvdb:{_pl_uri_prefix}:{match_id}"
+            result = await db.execute(
+                select(Media).where(Media.uri_id == _tvdb_uri, Media.media_type == _pl_mt)
             )
-        )
-        media = result.scalars().first()
+            media = result.scalars().first()
+            if not media:
+                from utils.alias_lookup import get_internal_id_for_uri
+                _internal = await get_internal_id_for_uri(db, _tvdb_uri)
+                if _internal:
+                    result = await db.execute(select(Media).where(Media.id == _internal))
+                    media = result.scalars().first()
+        else:
+            result = await db.execute(
+                select(Media).where(Media.tmdb_id == match_id, Media.media_type == _pl_mt)
+            )
+            media = result.scalars().first()
         if media:
             # Backfill show context if this episode record was created without it
             if media.media_type == MediaType.episode and media.show_id is None and (series_tvdb_id if is_tvdb else series_tmdb_id):
@@ -1363,38 +1458,60 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
                     print(f"  Could not backfill show context for episode: {e}")
             return media
 
-    # 2b. Movie matching by title + year if TMDB ID is missing
+    # 2b. Movie matching when TMDB ID is missing — resolve via IMDB (from filename
+    #     seed/GUID), then title+year search.
     if data["media_type"] == "movie" and not data["tmdb_id"]:
-        # Try local match first to avoid redundant TMDB search
+        # IMDB → TMDB is an exact match — try it before fuzzy title search.
+        if data.get("imdb_id"):
+            try:
+                ext = await tmdb.find_by_external_id(data["imdb_id"], "imdb_id", api_key=api_key)
+                if ext.get("movie_results"):
+                    data["tmdb_id"] = str(ext["movie_results"][0]["id"])
+            except Exception:
+                pass
+
+        if data["tmdb_id"]:
+            result = await db.execute(
+                select(Media).where(
+                    Media.tmdb_id == int(data["tmdb_id"]),
+                    Media.media_type == MediaType.movie,
+                )
+            )
+            media = result.scalars().first()
+            if media:
+                return media
+
+        # Try local match before a TMDB title search to avoid a redundant API call.
         local_q = select(Media).where(
             Media.media_type == MediaType.movie,
             Media.title.ilike(data["title"]),
         )
         if data.get("year"):
             local_q = local_q.where(Media.release_date.like(f"{data['year']}%"))
-        
+
         media = (await db.execute(local_q)).scalars().first()
         if media:
             return media
-            
-        # Try TMDB search to find the real ID
-        try:
-            search_res = await tmdb.search_movies(data["title"], year=data.get("year"), api_key=api_key)
-            if search_res.get("results"):
-                tmdb_movie = search_res["results"][0]
-                data["tmdb_id"] = str(tmdb_movie["id"])
-                # Check again with the new TMDB ID
-                result = await db.execute(
-                    select(Media).where(
-                        Media.tmdb_id == tmdb_movie["id"],
-                        Media.media_type == MediaType.movie,
+
+        # Try TMDB title search to find the real ID (only if IMDB didn't resolve it).
+        if not data["tmdb_id"]:
+            try:
+                search_res = await tmdb.search_movies(data["title"], year=data.get("year"), api_key=api_key)
+                if search_res.get("results"):
+                    tmdb_movie = search_res["results"][0]
+                    data["tmdb_id"] = str(tmdb_movie["id"])
+                    # Check again with the new TMDB ID
+                    result = await db.execute(
+                        select(Media).where(
+                            Media.tmdb_id == tmdb_movie["id"],
+                            Media.media_type == MediaType.movie,
+                        )
                     )
-                )
-                media = result.scalars().first()
-                if media:
-                    return media
-        except Exception:
-            pass
+                    media = result.scalars().first()
+                    if media:
+                        return media
+            except Exception:
+                pass
 
     # Don't create a row for an episode we can't identify at all — it can never
     # be enriched or matched back to a real episode, and would inflate collection counts.
@@ -1421,9 +1538,16 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
             if existing_ep:
                 return existing_ep
 
+    # Block 2b (movie title/year TMDB search) may have populated data["tmdb_id"] — pick it up.
+    if not match_id and not _pl_use_tvdb and data.get("tmdb_id"):
+        match_id = int(data["tmdb_id"])
+    _mt2 = _pl_mt
+    _uri_prefix2 = _pl_uri_prefix
+    _uri2 = f"{'tvdb' if _pl_use_tvdb else 'tmdb'}:{_uri_prefix2}:{match_id}" if match_id else None
     media = Media(
-        tmdb_id=match_id,
-        media_type=MediaType(data["media_type"]),
+        tmdb_id=match_id if not _pl_use_tvdb else None,
+        uri_id=_uri2,
+        media_type=_mt2,
         title=data["title"],
         season_number=data["season_number"],
         episode_number=data["episode_number"],
@@ -1452,10 +1576,7 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
 
 
 async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int | None = None):
-    user_result = await db.execute(select(User).where(User.api_key == api_key))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    user = await get_user_by_api_key(api_key, db)
 
     try:
         form = await request.form()
@@ -1740,10 +1861,7 @@ async def _handle_plex_webhook(request: Request, db: AsyncSession, api_key: str,
 
 
 async def _handle_plex_scrobble_webhook(request: Request, db: AsyncSession, api_key: str, connection_id: int):
-    user_result = await db.execute(select(User).where(User.api_key == api_key))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    user = await get_user_by_api_key(api_key, db)
 
     try:
         form = await request.form()
@@ -2041,9 +2159,14 @@ async def find_or_create_media_kodi(data: dict, db: AsyncSession, api_key: str =
     if data["media_type"] == "episode" and not data.get("tmdb_id") and data.get("season_number") is None:
         return None
 
+    _tid3 = int(data["tmdb_id"]) if data.get("tmdb_id") else None
+    _mt3 = MediaType(data["media_type"])
+    _uri_prefix3 = "e" if _mt3 == MediaType.episode else ("m" if _mt3 == MediaType.movie else "s")
+    _uri3 = f"tmdb:{_uri_prefix3}:{_tid3}" if _tid3 else None
     media = Media(
-        tmdb_id=int(data["tmdb_id"]) if data.get("tmdb_id") else None,
-        media_type=MediaType(data["media_type"]),
+        tmdb_id=_tid3,
+        uri_id=_uri3,
+        media_type=_mt3,
         title=data["title"],
         season_number=data.get("season_number"),
         episode_number=data.get("episode_number"),
@@ -2059,19 +2182,11 @@ async def find_or_create_media_kodi(data: dict, db: AsyncSession, api_key: str =
 
 
 async def _handle_kodi_webhook(request: Request, db: AsyncSession, api_key: str):
-    user_result = await db.execute(select(User).where(User.api_key == api_key))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    user = await get_user_by_api_key(api_key, db)
 
-    body = await request.body()
-    if not body:
-        return {"status": "ignored", "reason": "empty body"}
-
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"status": "ignored", "reason": "invalid JSON"}
+    payload, err = await _parse_request_payload(request)
+    if err:
+        return err
 
     data = parse_kodi_payload(payload)
     if not data:
@@ -2147,10 +2262,7 @@ async def kodi_library_history(
     db: AsyncSession = Depends(get_db),
     api_key: str = Query(..., description="Scrob user API key"),
 ):
-    user_result = await db.execute(select(User).where(User.api_key == api_key))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    user = await get_user_by_api_key(api_key, db)
 
     movie_rows = (await db.execute(
         select(Media.tmdb_id, func.sum(WatchEvent.play_count).label("play_count"))
@@ -2201,10 +2313,7 @@ async def kodi_rating(
     db: AsyncSession = Depends(get_db),
     api_key: str = Query(..., description="Scrob user API key"),
 ):
-    user_result = await db.execute(select(User).where(User.api_key == api_key))
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    user = await get_user_by_api_key(api_key, db)
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
     settings = settings_result.scalar_one_or_none()

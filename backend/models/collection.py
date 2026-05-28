@@ -28,11 +28,7 @@ class Collection(Base):
 
 
 class CollectionFile(Base):
-    """One row per (collection, source, source_id) — a physical file or source entry.
-
-    A Collection (one per user+media) can have multiple CollectionFiles when the same item
-    exists in several sources (e.g., both Plex and Jellyfin).
-    """
+    """One row per (collection, source, source_id)."""
     __tablename__ = "collection_files"
 
     id                 : Mapped[int]               = mapped_column(Integer, primary_key=True)

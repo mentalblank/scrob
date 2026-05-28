@@ -1,6 +1,7 @@
 ---
 import type { MediaItem } from "../lib/api";
 import CardActionBar from "./CardActionBar.astro";
+import { mediaUrl } from "../lib/urls";
 
 interface Props {
   item: MediaItem;
@@ -23,57 +24,8 @@ const sxe = isEpisode && item.season_number != null && item.episode_number != nu
   : null;
 
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
-
-const isTvdbSeries = isSeries && (
-  (item.tmdb_id != null && item.tmdb_id < 0) ||
-  (primaryMetadataSource === "tvdb" && item.tvdb_id != null) ||
-  (item.tmdb_id == null && item.tvdb_id != null)
-);
-const tvdbSeriesId = item.tvdb_id ?? (item.tmdb_id != null && item.tmdb_id < 0 ? -item.tmdb_id : null);
-
-const isTvdbSeason = isSeason && (
-  (item.show_tmdb_id != null && item.show_tmdb_id < 0) ||
-  (primaryMetadataSource === "tvdb" && item.show_tvdb_id != null) ||
-  (item.show_tmdb_id == null && item.show_tvdb_id != null)
-);
-const tvdbSeasonShowId = item.show_tvdb_id ?? (item.show_tmdb_id != null && item.show_tmdb_id < 0 ? -item.show_tmdb_id : null);
-
-const isTvdbEpisode = isEpisode && (
-  (item.show_tmdb_id != null && item.show_tmdb_id < 0) ||
-  (primaryMetadataSource === "tvdb" && item.show_tvdb_id != null) ||
-  (item.show_tmdb_id == null && item.show_tvdb_id != null)
-);
-const tvdbEpisodeShowId = item.show_tvdb_id ?? (item.show_tmdb_id != null && item.show_tmdb_id < 0 ? -item.show_tmdb_id : null);
-
-const href = isPerson
-  ? (primaryMetadataSource === "tvdb" && item.tvdb_id
-    ? `/person/tvdb/${item.tvdb_id}`
-    : `/person/${item.tmdb_id}`)
-  : isCollection
-    ? `/collection/${item.tmdb_id}`
-    : isSeries
-      ? (isTvdbSeries
-        ? `/show/tvdb/${tvdbSeriesId}`
-        : item.tmdb_id
-          ? `/show/${item.tmdb_id}`
-          : null)
-      : isSeason
-        ? (isTvdbSeason && tvdbSeasonShowId && item.season_number != null
-          ? `/show/tvdb/${tvdbSeasonShowId}/season/${item.season_number}`
-          : item.show_tmdb_id && item.season_number != null
-            ? `/show/${item.show_tmdb_id}/season/${item.season_number}`
-            : null)
-        : isEpisode
-          ? (isTvdbEpisode && tvdbEpisodeShowId && item.season_number != null && item.episode_number != null
-            ? `/show/tvdb/${tvdbEpisodeShowId}/season/${item.season_number}/${item.episode_number}`
-            : item.show_tmdb_id && item.season_number != null && item.episode_number != null
-              ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
-              : item.show_tmdb_id
-                ? `/show/${item.show_tmdb_id}`
-                : null)
-          : item.tmdb_id
-            ? `/media/${item.type}/${item.tmdb_id}`
-            : null;
+const preferTvdb = primaryMetadataSource === "tvdb";
+const href = mediaUrl(item, preferTvdb) || null;
 
 const posterPath = isEpisode && item.show_poster_path
   ? (item.show_poster_path.startsWith('http') ? item.show_poster_path : `https://image.tmdb.org/t/p/w500${item.show_poster_path}`)
@@ -104,9 +56,11 @@ const showProgress = progressPct > 0 && !watched;
   class="group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
   data-card
   data-id={item.id ? String(item.id) : ""}
-  data-tmdb-id={item.tmdb_id ? String(item.tmdb_id) : (item.tvdb_id ? `-${item.tvdb_id}` : "")}
+  data-tmdb-id={item.tmdb_id ? String(item.tmdb_id) : ""}
+  data-uri-id={item.uri_id || (item.tmdb_id ? `tmdb:${item.type === 'series' || item.type === 'season' || item.type === 'episode' ? 's' : 'm'}:${item.tmdb_id}` : (item.tvdb_id ? `tvdb:s:${item.tvdb_id}` : ""))}
   data-media-type={item.type}
-  data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : (item.show_tvdb_id ? `-${item.show_tvdb_id}` : "")}
+  data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : ""}
+  data-show-uri-id={item.show_uri_id ?? (item.show_tvdb_id && !item.show_tmdb_id ? `tvdb:s:${item.show_tvdb_id}` : item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : "")}
   data-season={item.season_number != null ? String(item.season_number) : ""}
   data-episode-number={item.episode_number != null ? String(item.episode_number) : ""}
   data-watched={String(watched)}

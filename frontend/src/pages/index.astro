@@ -6,6 +6,7 @@ import EpisodeCard from "../components/EpisodeCard.astro";
 
 import ActionBar from "../components/ActionBar.astro";
 import { api, type ContinueWatchingItem, type MediaItem } from "../lib/api";
+import { mediaUrl } from "../lib/urls";
 
 const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
@@ -86,13 +87,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
   {nextUp.length > 0 && (() => {
     const hero = nextUp[0];
     const rest = nextUp.slice(1);
-    const heroHref = primaryMetadataSource === "tvdb" && hero.show_tvdb_id && hero.season_number != null && hero.episode_number != null
-      ? `/show/tvdb/${hero.show_tvdb_id}/season/${hero.season_number}/${hero.episode_number}`
-      : hero.show_tmdb_id && hero.season_number != null && hero.episode_number != null
-        ? `/show/${hero.show_tmdb_id}/season/${hero.season_number}/${hero.episode_number}`
-        : hero.show_tvdb_id && hero.season_number != null && hero.episode_number != null
-          ? `/show/tvdb/${hero.show_tvdb_id}/season/${hero.season_number}/${hero.episode_number}`
-          : `/media/${hero.type}/${hero.tmdb_id}`;
+    const heroHref = mediaUrl(hero, primaryMetadataSource === "tvdb");
     const episodeLabel = hero.season_number != null && hero.episode_number != null
       ? `S${hero.season_number} E${hero.episode_number}`
       : null;
@@ -150,6 +145,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
                   inLists={hero.in_lists ?? []}
                   inLibrary={hero.in_library ?? false}
                   collectionPct={hero.collection_pct ?? (hero.in_library ? 100 : 0)}
+                  showUriId={hero.show_uri_id ?? (hero.show_tmdb_id ? `tmdb:s:${hero.show_tmdb_id}` : undefined)}
                   showTmdbId={hero.show_tmdb_id ?? undefined}
                   seasonNumber={hero.season_number ?? undefined}
                   episodeNumber={hero.episode_number ?? undefined}
@@ -303,8 +299,9 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
         </div>
         <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0" id="grid-airing-today">
           {Array.from({ length: 10 }).map(() => (
-            <div class="flex-shrink-0 w-40 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
-              <div class="aspect-[2/3] bg-zinc-800"></div>
+            <div class="flex-shrink-0 w-56 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 glass-card">
+              <div class="aspect-[3/2] bg-zinc-800"></div>
+              <div class="card-action-bar bg-zinc-800/50"></div>
               <div class="p-3 space-y-2">
                 <div class="h-3 bg-zinc-800 rounded w-3/4"></div>
                 <div class="h-2 bg-zinc-800 rounded w-1/4"></div>
@@ -320,29 +317,14 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
 
 <script define:vars={{ token }}>
 
-  function esc(str) {
-          if (str == null) return '';
-          return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-        }
+  const esc = window.esc;
 
   // ─────────────────────────────────────────────────────────────────────────
 
         function mediaCardHtml(item) {
           const isSeries = item.type === 'series';
           const primarySource = document.cookie.split('; ').find(row => row.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
-          const href = isSeries
-            ? (primarySource === 'tvdb' && item.tvdb_id
-              ? `/show/tvdb/${item.tvdb_id}`
-              : item.tmdb_id
-                ? `/show/${item.tmdb_id}`
-                : item.tvdb_id
-                  ? `/show/tvdb/${item.tvdb_id}`
-                  : null)
-            : `/media/${item.type}/${item.tmdb_id}`;
+          const href = window.buildItemUrl(item, primarySource === 'tvdb') || '/';
           const year = item.release_date ? item.release_date.slice(0, 4) : null;
           const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : null;
           const raw = item.poster_path;
@@ -370,9 +352,11 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           return `<div
             class="flex-shrink-0 w-40 group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
             data-card
-            data-tmdb-id="${esc(String(item.tmdb_id))}"
+            data-tmdb-id="${esc(String(item.tmdb_id ?? ''))}"
+            data-uri-id="${esc(String(item.uri_id || (item.tmdb_id ? `tmdb:${item.type === 'series' || item.type === 'season' || item.type === 'episode' ? 's' : 'm'}:${item.tmdb_id}` : (item.tvdb_id ? `tvdb:s:${item.tvdb_id}` : ""))))}"
             data-media-type="${esc(item.type)}"
             data-show-tmdb-id=""
+            data-show-uri-id=""
             data-season=""
             data-in-library="${inLibrary}"
             data-partial-watched="${progressPct > 0}"
@@ -462,39 +446,117 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
         function episodeCardHtml(item) {
           const isSeries = item.type === 'series';
           const primarySource = document.cookie.split('; ').find(row => row.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
-          const href = primarySource === 'tvdb' && item.show_tvdb_id && item.season_number != null && item.episode_number != null
-            ? `/show/tvdb/${item.show_tvdb_id}/season/${item.season_number}/${item.episode_number}`
-            : item.show_tmdb_id && item.season_number != null && item.episode_number != null
-              ? `/show/${item.show_tmdb_id}/season/${item.season_number}/${item.episode_number}`
-              : item.show_tvdb_id && item.season_number != null && item.episode_number != null
-                ? `/show/tvdb/${item.show_tvdb_id}/season/${item.season_number}/${item.episode_number}`
-                : isSeries
-                  ? (primarySource === 'tvdb' && item.tvdb_id
-                    ? `/show/tvdb/${item.tvdb_id}`
-                    : `/show/${item.tmdb_id}`)
-                  : `/media/${item.type}/${item.tmdb_id}`;
-          const raw = isSeries ? (item.backdrop_path ?? item.poster_path) : item.poster_path;
-          const imageUrl = raw
-            ? (raw.startsWith('http') ? raw : `https://image.tmdb.org/t/p/w780${raw}`)
+          const href = window.buildItemUrl(item, primarySource === 'tvdb') || '/';
+          const rawImage = isSeries
+            ? (item.backdrop_path ?? item.poster_path)
+            : item.type === "movie"
+              ? (item.backdrop_path ?? item.poster_path)
+              : (item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
+          const imageUrl = rawImage
+            ? (rawImage.startsWith('http') ? rawImage : `https://image.tmdb.org/t/p/w780${rawImage}`)
             : null;
           const sxe = item.season_number != null && item.episode_number != null
             ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
             : null;
+          
+          const watched = item.watched ?? false;
+          const inLists = item.in_lists ?? [];
+          const inLibrary = item.in_library ?? false;
+          const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
+          const watchPct = watched ? 100 : 0;
+          const watchActive = isSeries ? watchPct > 0 : watched;
+          
+          const progressPct = item.progress_percent ?? 0;
+          const showProgress = progressPct > 0;
+          
+          const watchStyle = isSeries && watchPct > 0
+            ? `background: linear-gradient(to right, rgba(34,197,94,0.2) ${watchPct}%, transparent ${watchPct}%)`
+            : '';
+          const collectStyle = isSeries && collectionPct > 0
+            ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
+            : '';
 
-          return `<a href="${esc(href)}" class="flex-shrink-0 w-56 group relative block rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70">
-            <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
-              ${imageUrl
-                ? `<img src="${esc(imageUrl)}" alt="${esc(item.show_title ?? item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />`
-                : `<div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-[#18181b]"><span class="text-3xl mb-2 opacity-30">📺</span><span class="text-xs font-bold uppercase tracking-widest text-[#52525b]">${esc(item.show_title ?? item.title)}</span></div>`
-              }
-              <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-              ${sxe ? `<div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">${esc(sxe)}</div>` : ''}
-              <div class="absolute bottom-0 left-0 right-0 p-3">
-                ${item.show_title ? `<p class="text-[11px] font-bold text-white/70 truncate leading-tight">${esc(item.show_title)}</p>` : ''}
-                <h3 class="text-sm font-bold text-white truncate group-hover:text-blue-300 transition-colors leading-tight">${esc(item.title)}</h3>
+          return `<div
+            class="flex-shrink-0 w-56 group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
+            data-card
+            data-tmdb-id="${item.tmdb_id != null ? esc(String(item.tmdb_id)) : ""}"
+            data-uri-id="${esc(item.uri_id ?? "")}"
+            data-media-type="${esc(item.type)}"
+            data-show-tmdb-id="${item.show_tmdb_id ? esc(String(item.show_tmdb_id)) : ""}"
+            data-show-uri-id="${esc(item.show_uri_id ?? (item.show_tvdb_id && !item.show_tmdb_id ? `tvdb:s:${item.show_tvdb_id}` : item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : ""))}"
+            data-season="${item.season_number != null ? esc(String(item.season_number)) : ""}"
+            data-watched="${watched}"
+            data-collected="${inLibrary}"
+            data-listed="${inLists.length > 0}"
+          >
+            <a href="${esc(href)}" class="block">
+              <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
+                ${imageUrl
+                  ? `<img src="${esc(imageUrl)}" alt="${esc(item.show_title ?? item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />`
+                  : `<div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-zinc-900/40"><span class="text-3xl mb-2 opacity-30">📺</span><span class="text-xs font-bold uppercase tracking-widest text-zinc-500">${esc(item.show_title ?? item.title)}</span></div>`
+                }
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+                ${item.library?.resolution ? `<div class="absolute top-1.5 right-1.5 bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-zinc-800/80 shadow-lg tracking-tighter">${esc(item.library.resolution)}</div>` : ''}
+                ${showProgress ? `
+                  <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+                    <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
+                  </div>
+                ` : ''}
               </div>
+            </a>
+            
+            <div class="card-action-bar">
+              <button data-action="watched" data-watched="${watched}" data-watch-pct="${watchPct}" data-state="${watchActive ? 'active' : 'inactive'}"
+                title="${isSeries ? `${watchPct}% watched` : (watched ? 'Mark as unwatched' : 'Mark as watched')}"
+                style="${esc(watchStyle)}"
+                class="card-action-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3" fill="${watchActive ? 'currentColor' : 'none'}"/>
+                </svg>
+                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${watchPct}%` : 'Watched'}</span>
+              </button>
+              <button data-action="list" data-in-lists="${esc(JSON.stringify(inLists))}" data-state="${inLists.length > 0 ? 'active' : 'inactive'}" title="Add to list"
+                class="card-action-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                  <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+                </svg>
+                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Lists</span>
+              </button>
+              <button data-action="collected" data-in-library="${inLibrary}" data-collection-pct="${collectionPct}" data-state="${(inLibrary || collectionPct > 0) ? 'active' : 'inactive'}"
+                title="${isSeries ? `${collectionPct}% in library` : (inLibrary ? 'In collection' : 'Add to collection')}"
+                style="${esc(collectStyle)}"
+                class="card-action-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                  <path d="M15 22v-4a3 3 0 0 0-6 0v4"/>
+                  <path d="M2 7h20"/>
+                </svg>
+                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${collectionPct}%` : 'Collected'}</span>
+              </button>
             </div>
-          </a>`;
+            
+            <a href="${esc(href)}" class="block p-3 bg-transparent flex-1">
+              ${item.show_title ? `<p class="text-xs font-medium text-zinc-400 truncate mb-0.5">${esc(item.show_title)}</p>` : ''}
+              <div class="flex items-start justify-between gap-2">
+                <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors leading-tight">
+                  ${esc(item.title)}
+                </h3>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  ${sxe ? `<span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">${esc(sxe)}</span>` : ''}
+                </div>
+                <div class="flex items-center gap-2">
+                  ${showProgress ? `<span class="text-[10px] font-bold text-zinc-500 tabular-nums">${Math.round(progressPct)}%</span>` : ''}
+                  <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
+                    ${item.type === "movie" ? "MOVIE" : "EPISODE"}
+                  </span>
+                </div>
+              </div>
+            </a>
+          </div>`;
         }
 
         async function loadSection(url, gridId, renderFn, limit) {
@@ -525,4 +587,32 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
         const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         loadSection(`/api/proxy/media/airing-today/collected?timezone=${encodeURIComponent(userTimezone)}`, 'grid-airing-today', episodeCardHtml, 12);
 
+        window.addEventListener('unified-block-changed', (e) => {
+          const { uriId, tmdbId, mediaType, isDropped } = e.detail;
+          if (mediaType !== 'series' || !isDropped) return;
+
+          const section = document.getElementById('dashboard-next-up');
+          if (!section) return;
+
+          // Hide hero if dropped
+          const heroBtn = section.querySelector('[data-next-up-hero] [data-action="unified-block"]');
+          if (heroBtn) {
+            const hUriId = heroBtn.dataset.showUriId || heroBtn.closest('[data-show-uri-id]')?.dataset.showUriId;
+            const hTmdbId = heroBtn.dataset.showTmdbId || heroBtn.closest('[data-show-tmdb-id]')?.dataset.showTmdbId;
+            if ((uriId && hUriId === uriId) || (tmdbId && hTmdbId === String(tmdbId)) || 
+                (uriId && heroBtn.dataset.uriId === uriId) || (tmdbId && heroBtn.dataset.tmdbId === String(tmdbId))) {
+              section.classList.add('hidden');
+            }
+          }
+
+          // Hide list items
+          const listCards = section.querySelectorAll('[data-next-up-list] [data-card][data-media-type="episode"]');
+          listCards.forEach(card => {
+            const cUriId = card.dataset.showUriId;
+            const cTmdbId = card.dataset.showTmdbId;
+            if ((uriId && cUriId === uriId) || (tmdbId && cTmdbId === String(tmdbId))) {
+              card.closest('.flex-shrink-0')?.classList.add('hidden');
+            }
+          });
+        });
 </script>

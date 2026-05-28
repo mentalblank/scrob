@@ -1,5 +1,8 @@
 ---
 import Base from "../../../layouts/Base.astro";
+import ErrorState from "../../../components/ErrorState.astro";
+import PosterModal from "../../../components/PosterModal.astro";
+import RefreshMetadataButton from "../../../components/RefreshMetadataButton.astro";
 import MediaRow from "../../../components/MediaRow.astro";
 import ActionBar from "../../../components/ActionBar.astro";
 import CommentsSection from "../../../components/CommentsSection.astro";
@@ -7,7 +10,10 @@ import VideoPlayer from "../../../components/VideoPlayer.astro";
 import ManualScrobble from "../../../components/ManualScrobble.astro";
 import ProgressStrip from "../../../components/ProgressStrip.astro";
 import { api, type MediaItem } from "../../../lib/api";
+import { personUrl } from "../../../lib/urls";
 export const prerender = false;
+
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
 
 const { type, id } = Astro.params;
 const { token } = Astro.locals;
@@ -17,7 +23,7 @@ let item: MediaItem | null = null;
 let error = "";
 
 try {
-  item = await api.media.get(type!, Number(id), token);
+  item = await api.media.get(type!, id!.includes(":") ? id! : Number(id), token);
 } catch (e: any) {
   error = e.message;
 }
@@ -31,7 +37,7 @@ const rating = item?.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
 const isEpisode = item?.type === "episode";
 const isMovie = item?.type === "movie";
 const collection = item?.collection;
-const showRefreshBtn = item?.in_library && (item.type === "movie" || (isEpisode && !!item.show_tmdb_id));
+const showRefreshBtn = item?.in_library && (item.type === "movie" || (isEpisode && !!(item.show_uri_id || item.show_tmdb_id)));
 
 const today = new Date();
 function fmtDate(iso: string): string {
@@ -48,8 +54,8 @@ const originalLanguage = item?.original_language
   ? langNames.of(item.original_language) ?? item.original_language
   : null;
 const refreshUrl = isEpisode
-  ? `/api/proxy/shows/${item?.show_tmdb_id}/refresh`
-  : `/api/proxy/media/movie/${item?.tmdb_id}/refresh`;
+  ? `/api/proxy/shows/${item?.show_uri_id ?? item?.show_tmdb_id}/refresh`
+  : `/api/proxy/media/movie/${item?.uri_id ?? `tmdb:m:${item?.tmdb_id}`}/refresh`;
 const trailerYoutubeId = item?.trailer_youtube_id ?? null;
 const tmdbUrl = isEpisode
   ? (item?.show_tmdb_id ? `https://www.themoviedb.org/tv/${item.show_tmdb_id}` : null)
@@ -70,15 +76,7 @@ const activeButtonsCount = [
 ---
 
 <Base title={item?.title || "Media Details"}>
-  {error && !item && (
-    <div class="max-w-md mx-auto mt-20 text-center">
-        <div class="bg-red-500/10 border border-red-500/20 text-red-500 p-6 rounded-2xl mb-6">
-            <p class="font-bold text-lg mb-2">Oops!</p>
-            <p class="text-sm opacity-80">{error}</p>
-        </div>
-        <a href="/" class="text-blue-500 hover:underline">Return to Dashboard</a>
-    </div>
-  )}
+  {error && !item && <ErrorState error={error} />}
 
   {item && (
     <div class="relative">
@@ -181,6 +179,7 @@ const activeButtonsCount = [
               inLists={item.in_lists ?? []}
               inLibrary={item.in_library ?? false}
               collectionPct={item.collection_pct ?? 0}
+              showUriId={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : undefined)}
               showTmdbId={item.show_tmdb_id ?? undefined}
               seasonNumber={item.season_number}
               episodeNumber={item.episode_number}
@@ -210,38 +209,27 @@ const activeButtonsCount = [
               <div class={`grid gap-2.5 w-full grid-cols-${activeButtonsCount}`}>
                 {((item.type === 'movie' || item.type === 'episode')) && item.in_library && (
                   <VideoPlayer
+                    uriId={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : item.type === 'episode' ? `tmdb:e:${item.tmdb_id}` : undefined)}
                     tmdbId={item.tmdb_id}
                     mediaType={item.type}
                     inLibrary={item.in_library ?? false}
                     title={item.title}
                     token={token}
+                    mediaId={item.id}
                   />
                 )}
                 {((item.type === 'movie' || item.type === 'episode')) && (
                   <ManualScrobble
-                    tmdbId={item.tmdb_id}
+                    uriId={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : `tmdb:e:${item.tmdb_id}`)}
                     mediaType={item.type}
                     runtime={item.runtime}
                     title={item.title}
-                    showTmdbId={item.show_tmdb_id}
+                    showUriId={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : null)}
                     seasonNumber={item.season_number}
                     episodeNumber={item.episode_number}
                   />
                 )}
-                {showRefreshBtn && (
-                  <button
-                    id="refresh-metadata-btn"
-                    class="w-full h-11 flex items-center justify-center gap-2 px-5 text-sm font-bold leading-none text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
-                  >
-                    <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                      <path d="M21 3v5h-5"/>
-                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                      <path d="M8 16H3v5"/>
-                    </svg>
-                    <span id="refresh-label">Refresh Metadata</span>
-                  </button>
-                )}
+                <RefreshMetadataButton refreshUrl={refreshUrl} showRefreshBtn={showRefreshBtn} />
                 {trailerYoutubeId && (
                   <button
                     id="trailer-btn"
@@ -487,6 +475,11 @@ const activeButtonsCount = [
                       TMDB
                     </a>
                   )}
+                  {item.tvdb_id && (
+                    <a href={item.type === 'episode' ? `https://thetvdb.com/episodes/${item.tvdb_id}` : `https://thetvdb.com/movies/${item.tvdb_id}`} target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-1.5 bg-[#005a2b] rounded text-[10px] font-bold text-white hover:bg-[#008c44] transition-colors">
+                      TVDB
+                    </a>
+                  )}
                 </div>
 
                 <!-- Production companies -->
@@ -555,7 +548,7 @@ const activeButtonsCount = [
                   </span>
                 )}
                 {!!item.play_count && (
-                  <span id="play-count-badge" class="inline-flex items-center px-2.5 py-1 bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 text-xs font-bold rounded-lg cursor-pointer transition-all duration-200" title="Click to view/remove specific plays" data-tmdb-id={item.tmdb_id} data-media-type={item.type}>
+                  <span id="play-count-badge" class="inline-flex items-center px-2.5 py-1 bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 text-xs font-bold rounded-lg cursor-pointer transition-all duration-200" title="Click to view/remove specific plays" data-uri-id={item.uri_id ?? (item.type === "movie" ? `tmdb:m:${item.tmdb_id}` : `tmdb:s:${item.tmdb_id}`)} data-media-type={item.type} data-media-id={item.id ?? ""} data-show-uri={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : "")} data-season={item.season_number ?? ""} data-episode={item.episode_number ?? ""}>
                     {item.play_count} {item.play_count === 1 ? 'Play' : 'Plays'}
                   </span>
                 )}
@@ -597,7 +590,7 @@ const activeButtonsCount = [
                 </div>
                 <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-3">
                   {item.cast.slice(0, 12).map((person) => (
-                    <a href={`/person/${person.tmdb_id}`} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-3 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-300 active:scale-95 active:opacity-70 flex flex-col h-full">
+                    <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id, primaryMetadataSource === 'tvdb')} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-3 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-300 active:scale-95 active:opacity-70 flex flex-col h-full">
                       <div class="aspect-square w-full rounded-xl overflow-hidden mb-3 ring-1 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-300 shadow-md">
                         {person.profile_path ? (
                           <img
@@ -637,14 +630,14 @@ const activeButtonsCount = [
               <div class="pt-8 border-t border-zinc-800/60">
                 <CommentsSection
                   mediaType={item.type}
-                  tmdbId={item.tmdb_id}
+                  uriId={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : `tmdb:s:${item.tmdb_id}`)}
                   seasonNumber={isEpisode ? item.season_number : undefined}
                   episodeNumber={isEpisode ? item.episode_number : undefined}
                 />
               </div>
             )}
 
-            <div id="recommendations-container" data-type={item.type} data-id={item.tmdb_id} class="pt-8 border-t border-zinc-800/60"></div>
+            <div id="recommendations-container" data-type={item.type} data-id={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : `tmdb:s:${item.tmdb_id}`)} class="pt-8 border-t border-zinc-800/60"></div>
           </div>
         </div>
       </div>
@@ -705,102 +698,30 @@ const activeButtonsCount = [
   }
 </script>
 
-{item?.poster_path && (
-  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
-    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
-    <img
-      src={item.poster_path}
-      alt={item.title}
-      class="relative max-h-[90vh] max-w-[85vw] md:max-w-[50vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
-    />
-    <button
-      id="poster-modal-close"
-      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
-      aria-label="Close"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-      </svg>
-    </button>
-  </div>
-)}
+<PosterModal posterPath={item?.poster_path} title={item?.title || ""} />
 
 <script define:vars={{ token: Astro.locals.token }}>
   const badge = document.getElementById('play-count-badge');
 
   if (badge) {
-    const tmdbId = badge.getAttribute('data-tmdb-id');
+    const uriId = badge.getAttribute('data-uri-id');
     const mediaType = badge.getAttribute('data-media-type');
+    const mediaId = badge.getAttribute('data-media-id');
+    const showUri = badge.getAttribute('data-show-uri');
+    const season = badge.getAttribute('data-season');
+    const episode = badge.getAttribute('data-episode');
 
     badge.addEventListener('click', () => {
-      if ((window as any).openWatchHistoryModal) {
-        (window as any).openWatchHistoryModal(null, tmdbId, mediaType);
+      if (window["openWatchHistoryModal"]) {
+        window["openWatchHistoryModal"](null, uriId, mediaType, mediaId, showUri, season, episode);
       }
     });
   }
 </script>
 
-<script>
-  const zoomBtn = document.getElementById('poster-zoom-btn');
-  const modal = document.getElementById('poster-modal');
-  const backdrop = document.getElementById('poster-modal-backdrop');
-  const closeBtn = document.getElementById('poster-modal-close');
 
-  if (zoomBtn && modal) {
-    function openModal() {
-      modal.classList.remove('hidden');
-      document.body.style.overflow = 'hidden';
-    }
-    function closeModal() {
-      modal.classList.add('hidden');
-      document.body.style.overflow = '';
-    }
 
-    zoomBtn.addEventListener('click', openModal);
-    backdrop?.addEventListener('click', closeModal);
-    closeBtn?.addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
-  }
-</script>
 
-<script define:vars={{ refreshUrl, showRefreshBtn, token: Astro.locals.token }}>
-  if (showRefreshBtn) {
-    const btn = document.getElementById('refresh-metadata-btn');
-    if (btn) {
-      btn.addEventListener('click', async () => {
-        const icon = document.getElementById('refresh-icon');
-        const label = document.getElementById('refresh-label');
-        if (!label || !icon) return;
-
-        btn.setAttribute('disabled', 'true');
-        btn.classList.add('opacity-60', 'cursor-not-allowed');
-        icon.classList.add('animate-spin');
-        label.textContent = 'Refreshing...';
-
-        try {
-          const res = await fetch(refreshUrl, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            throw new Error(data.detail || 'Refresh failed');
-          }
-          label.textContent = 'Done!';
-          icon.classList.remove('animate-spin');
-          setTimeout(() => { window.location.reload(); }, 800);
-        } catch (err) {
-          icon.classList.remove('animate-spin');
-          label.textContent = 'Refresh failed';
-          btn.removeAttribute('disabled');
-          btn.classList.remove('opacity-60', 'cursor-not-allowed');
-          setTimeout(() => { label.textContent = 'Refresh Metadata'; }, 3000);
-        }
-      });
-    }
-  }
-
-</script>
 
 <script define:vars={{ trailerYoutubeId }}>
   if (trailerYoutubeId) {

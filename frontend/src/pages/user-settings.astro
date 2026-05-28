@@ -367,27 +367,8 @@ const COUNTRIES = (countriesRes || [])
     const appData = document.getElementById('app-data');
     const token = appData?.dataset.token ?? '';
 
-    function esc(s: unknown): string {
-      if (s == null) return '';
-      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
-    function showMessage(text: string, type: 'success' | 'error' = 'success') {
-      const msg = document.getElementById('js-message');
-      if (!msg) return;
-      msg.textContent = text;
-      msg.className = `p-4 rounded-lg mb-8 ${
-        type === 'success'
-          ? 'bg-green-500/10 border border-green-500 text-green-500'
-          : 'bg-red-500/10 border border-red-500 text-red-500'
-      }`;
-      msg.classList.remove('hidden');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      if ((window as Window & { _msgTimeout?: ReturnType<typeof setTimeout> })._msgTimeout)
-        clearTimeout((window as Window & { _msgTimeout?: ReturnType<typeof setTimeout> })._msgTimeout);
-      (window as Window & { _msgTimeout?: ReturnType<typeof setTimeout> })._msgTimeout =
-        setTimeout(() => msg.classList.add('hidden'), 4000);
-    }
+    const esc = (window as any).esc;
+    const showMessage = (window as any).showMessage;
 
     // Avatar upload
     const avatarInput = document.getElementById('avatar-input') as HTMLInputElement | null;

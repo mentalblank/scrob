@@ -326,14 +326,7 @@ async def get_tv_season_images(tmdb_id: int, season_number: int, api_key: str = 
 
 
 def pick_image(items: list[dict], preferred_lang: str | None = None, size: str = "original") -> str | None:
-    """
-    Select the best image from a TMDB image array using the priority:
-      1. No Language (iso_639_1 == null) — studio-supplied, clean, no text overlay
-      2. User's preferred language (iso_639_1 == preferred_lang)
-      3. Any image (highest vote_average in the remaining set)
-
-    Within each tier, the image with the highest vote_average is chosen.
-    """
+    """Select the best image from TMDB images based on language availability and rating."""
     if not items:
         return None
 
@@ -376,3 +369,15 @@ async def get_languages(api_key: str = None) -> list[dict]:
 
 async def get_countries(api_key: str = None) -> list[dict]:
     return await _get(f"{TMDB_BASE}/configuration/countries", headers=get_headers(api_key))
+
+
+def extract_trailer(videos_data: dict) -> str | None:
+    """Extract the first official YouTube trailer, falling back to unofficial YouTube trailers."""
+    results = videos_data.get("results", []) if videos_data else []
+    for v in results:
+        if v.get("type") == "Trailer" and v.get("site") == "YouTube" and v.get("official"):
+            return v["key"]
+    for v in results:
+        if v.get("type") == "Trailer" and v.get("site") == "YouTube":
+            return v["key"]
+    return None

@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import PasswordToggle from "../components/PasswordToggle.astro";
 import { api } from "../lib/api";
 import type { TotpBackupCode } from "../lib/api";
 
@@ -66,19 +67,7 @@ if (me.totp_enabled) {
                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                       class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
-                    <button
-                      type="button"
-                      class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
-                      aria-label="Toggle password visibility"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                      </svg>
-                    </button>
+                    <PasswordToggle />
                   </div>
                   <button
                     type="button"
@@ -113,19 +102,7 @@ if (me.totp_enabled) {
                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                       class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
-                    <button
-                      type="button"
-                      class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
-                      aria-label="Toggle password visibility"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                      </svg>
-                    </button>
+                    <PasswordToggle />
                   </div>
                   <button
                     type="button"
@@ -922,8 +899,13 @@ if (me.totp_enabled) {
                       <p class="text-xs text-zinc-500">Create a Trakt application at <span class="text-zinc-400">trakt.tv/oauth/applications</span> to get these credentials.</p>
                     </div>
                     <div id="trakt-auth-panel" class="hidden space-y-3 bg-zinc-900/50 border border-zinc-700 rounded-xl p-4">
-                      <p class="text-sm text-zinc-400">Go to <strong id="trakt-verify-url" class="text-zinc-100"></strong> and enter this code:</p>
-                      <div class="font-mono text-2xl font-bold tracking-widest text-zinc-100 bg-zinc-950 border border-zinc-700 rounded-lg px-4 py-3 text-center select-all" id="trakt-user-code"></div>
+                      <p class="text-sm text-zinc-400">Go to <a href="#" target="_blank" id="trakt-verify-url" class="text-blue-400 hover:underline"></a> and enter this code:</p>
+                      <div class="flex items-center gap-2">
+                        <div class="flex-1 font-mono text-2xl font-bold tracking-widest text-zinc-100 bg-zinc-950 border border-zinc-700 rounded-lg px-4 py-3 text-center select-all" id="trakt-user-code"></div>
+                        <button type="button" id="copy-trakt-code-btn" title="Copy to clipboard" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer self-stretch flex items-center justify-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"> <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"></path> </svg>
+                        </button>
+                      </div>
                       <p class="text-xs text-zinc-500" id="trakt-auth-status">Waiting for authorization…</p>
                     </div>
                     <p class="text-sm text-zinc-400">
@@ -1381,19 +1363,7 @@ if (me.totp_enabled) {
                   value={me.api_key}
                   class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
                 />
-                <button
-                  type="button"
-                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
-                  aria-label="Toggle key visibility"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                  </svg>
-                </button>
+                <PasswordToggle />
               </div>
               <button
                 type="button"
@@ -1591,14 +1561,7 @@ if (me.totp_enabled) {
                   required
                   class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
-                <button
-                  type="button"
-                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
-                  aria-label="Toggle password visibility"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                </button>
+                <PasswordToggle />
               </div>
             </div>}
             <div class="space-y-2">
@@ -1611,14 +1574,7 @@ if (me.totp_enabled) {
                   required
                   class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
-                <button
-                  type="button"
-                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
-                  aria-label="Toggle password visibility"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                </button>
+                <PasswordToggle />
               </div>
             </div>
             <div class="space-y-2">
@@ -1631,14 +1587,7 @@ if (me.totp_enabled) {
                   required
                   class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
-                <button
-                  type="button"
-                  class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors"
-                  aria-label="Toggle password visibility"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                </button>
+                <PasswordToggle />
               </div>
             </div>
           </div>
@@ -1881,27 +1830,8 @@ if (me.totp_enabled) {
 
   setupTabs();
 
-  function esc(s) {
-    if (s == null) return '';
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function showMessage(text, type = 'success') {
-    const msg = document.getElementById('js-message');
-    if (!msg) return;
-    msg.textContent = text;
-    msg.className = `p-4 rounded-lg mb-8 ${
-      type === 'success' 
-        ? 'bg-green-500/10 border border-green-500 text-green-500' 
-        : 'bg-red-500/10 border border-red-500 text-red-500'
-    }`;
-    msg.classList.remove('hidden');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    
-    // Always hide after 4 seconds
-    if (window._messageTimeout) clearTimeout(window._messageTimeout);
-    window._messageTimeout = setTimeout(() => msg.classList.add('hidden'), 4000);
-  }
+  const esc = (window as any).esc;
+  const showMessage = (window as any).showMessage;
 
   // ── Per-connection progress tracking ─────────────────────────────────────
   const connPollers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -2863,6 +2793,21 @@ if (me.totp_enabled) {
     function setupTraktAuth() {
       const connectBtn = document.getElementById('trakt-connect-btn');
       const disconnectBtn = document.getElementById('trakt-disconnect-btn');
+      const copyBtn = document.getElementById('copy-trakt-code-btn');
+
+      if (copyBtn) {
+        copyBtn.onclick = () => {
+          const codeEl = document.getElementById('trakt-user-code');
+          if (codeEl && codeEl.textContent) {
+            navigator.clipboard.writeText(codeEl.textContent);
+            const originalHTML = copyBtn.innerHTML;
+            copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-green-400"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>';
+            setTimeout(() => {
+              copyBtn.innerHTML = originalHTML;
+            }, 2000);
+          }
+        };
+      }
 
       if (connectBtn) {
         connectBtn.onclick = async () => {
@@ -2901,7 +2846,10 @@ if (me.totp_enabled) {
             const codeEl = document.getElementById('trakt-user-code');
             const statusEl = document.getElementById('trakt-auth-status');
             if (panel) panel.classList.remove('hidden');
-            if (urlEl) urlEl.textContent = data.verification_url;
+            if (urlEl) {
+              urlEl.textContent = data.verification_url;
+              (urlEl as HTMLAnchorElement).href = data.verification_url;
+            }
             if (codeEl) codeEl.textContent = data.user_code;
             connectBtn.textContent = 'Waiting…';
 
@@ -3170,29 +3118,7 @@ if (me.totp_enabled) {
     }
   }
 
-  function setupPasswordToggles() {
-    const toggles = document.querySelectorAll('.password-toggle');
-    toggles.forEach(toggle => {
-      toggle.addEventListener('click', () => {
-        const input = toggle.parentElement?.querySelector('input');
-        if (!input) return;
 
-        const isPassword = input.type === 'password';
-        input.type = isPassword ? 'text' : 'password';
-
-        const eyeIcon = toggle.querySelector('.eye-icon');
-        const eyeSlashIcon = toggle.querySelector('.eye-slash-icon');
-
-        if (isPassword) {
-          eyeIcon?.classList.add('hidden');
-          eyeSlashIcon?.classList.remove('hidden');
-        } else {
-          eyeIcon?.classList.remove('hidden');
-          eyeSlashIcon?.classList.add('hidden');
-        }
-      });
-    });
-  }
 
   function setupAccentSwatches() {
     const saved = localStorage.getItem('accentTheme') || 'purple';
@@ -3901,7 +3827,6 @@ if (me.totp_enabled) {
 
   setupAccentSwatches();
   setupActions();
-  setupPasswordToggles();
   setupConnections();
   setupVisibilityToggles();
   setupScrobbleConnections();
@@ -4047,7 +3972,6 @@ if (me.totp_enabled) {
   document.addEventListener('astro:after-swap', () => {
     setupAccentSwatches();
     setupActions();
-    setupPasswordToggles();
     setupConnections();
     setupVisibilityToggles();
     setupSettingsForm();
@@ -4097,9 +4021,7 @@ if (me.totp_enabled) {
     }
   }
 
-  function escapeHtml(s: string): string {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
+  const escapeHtml = (window as any).esc;
 
   async function loadSyncWarnings() {
     const appData = document.getElementById('app-data') as HTMLElement | null;
@@ -4123,7 +4045,7 @@ if (me.totp_enabled) {
 
       const overrideMap = new Map<string, any>();
       for (const o of overrides) {
-        overrideMap.set(`${o.source_show_tmdb_id}:${o.source_season_number}`, o);
+        overrideMap.set(`${o.source_show_uri_id ?? o.source_show_id}:${o.source_season_number}`, o);
       }
 
       // Find all connection warning containers on the page
@@ -4144,9 +4066,11 @@ if (me.totp_enabled) {
           <div class="space-y-1">
             <p class="text-xs text-zinc-500 mb-2">These seasons weren't found on TMDB — the show may be split into separate series there. Use "Remap" to point each season to the correct TMDB show.</p>
             ${enrichmentWarnings.map((w: any) => {
-              const key = `${w.tmdb_id}:${w.season}`;
+              const srcUri = `tmdb:s:${w.tmdb_id}`;
+              const key = `${srcUri}:${w.season}`;
               const existing = overrideMap.get(key);
-              const remapAttr = `data-src-tmdb="${w.tmdb_id}" data-src-season="${w.season}" data-src-title="${escapeHtml(w.show)}"`;
+              const remapAttr = `data-src-uri="${srcUri}" data-src-season="${w.season}" data-src-title="${escapeHtml(w.show)}"`;
+              const _ = w; // unused tmdb_id below
               return `
               <div class="flex items-center gap-3 py-1.5 border-b border-zinc-800/60 last:border-0">
                 <div class="flex-1 min-w-0">
@@ -4159,7 +4083,7 @@ if (me.totp_enabled) {
                   <button type="button" class="remap-season-btn text-xs px-2.5 py-1 rounded-lg border cursor-pointer transition-colors ${existing ? 'border-green-700/50 text-green-400 hover:bg-green-900/20' : 'bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60'}" ${remapAttr}>
                     ${existing ? 'Edit remap' : 'Remap'}
                   </button>
-                  <a href="/remaps?mode=season&src_tmdb=${w.tmdb_id}&src_season=${w.season}" class="text-xs px-2.5 py-1 rounded-lg border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40" title="Advanced mapping on the overrides page">
+                  <a href="/remaps?mode=season&src_uri=tmdb:s:${w.tmdb_id}&src_season=${w.season}" class="text-xs px-2.5 py-1 rounded-lg border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40" title="Advanced mapping on the overrides page">
                     Advanced
                   </a>
                 </div>
@@ -4171,7 +4095,7 @@ if (me.totp_enabled) {
         // Group episode warnings by series_name to avoid N identical rows for the same show.
         // Series-level warnings for the same show are merged in (to carry their GUIDs) rather
         // than rendered as a separate row. Matched state is read directly from warning entries.
-        type GroupEntry = {count: number, reason: string, plex_guids: string[], matched: boolean, matched_tvdb_id?: number, matched_show_id?: number, matched_show_title?: string};
+        type GroupEntry = {count: number, reason: string, plex_guids: string[], matched: boolean, matched_tvdb_id?: number, matched_show_id?: number, matched_show_uri_id?: string, matched_show_title?: string};
         const groupedEpisodeWarnings: Map<string, GroupEntry> = new Map();
         const standaloneUnmatched: any[] = [];
         for (const w of unmatchedWarnings) {
@@ -4183,6 +4107,7 @@ if (me.totp_enabled) {
                 existing.matched = true;
                 existing.matched_tvdb_id = w.matched_tvdb_id;
                 existing.matched_show_id = w.matched_show_id;
+                existing.matched_show_uri_id = w.matched_show_uri_id;
                 existing.matched_show_title = w.matched_show_title;
               }
             } else {
@@ -4193,6 +4118,7 @@ if (me.totp_enabled) {
                 matched: !!w.matched,
                 matched_tvdb_id: w.matched_tvdb_id,
                 matched_show_id: w.matched_show_id,
+                matched_show_uri_id: w.matched_show_uri_id,
                 matched_show_title: w.matched_show_title,
               });
             }
@@ -4218,11 +4144,11 @@ if (me.totp_enabled) {
         const displayCount = enrichmentWarnings.length + groupedEpisodeWarnings.size + trueStandaloneUnmatched.length;
         const renderUnmatched = hasUnmatched ? `
           <div class="space-y-1 ${enrichmentWarnings.length > 0 ? 'mt-4 pt-4 border-t border-zinc-800/60' : ''}">
-            <p class="text-xs text-zinc-500 mb-2">Items that couldn't be matched to TMDB:</p>
-            ${[...groupedEpisodeWarnings.entries()].map(([seriesName, {count, reason, plex_guids, matched, matched_tvdb_id, matched_show_id, matched_show_title}]) => {
+            <p class="text-xs text-zinc-500 mb-2">Items that couldn't be automatically matched:</p>
+            ${[...groupedEpisodeWarnings.entries()].map(([seriesName, {count, reason, plex_guids, matched, matched_tvdb_id, matched_show_id, matched_show_uri_id, matched_show_title}]) => {
               const isMatched = matched;
               const matchedTitle = matched_show_title ?? '';
-              const matchHref = matched_tvdb_id ? `/show/tvdb/${matched_tvdb_id}` : (matched_show_id ? `/show/${matched_show_id}` : '');
+              const matchHref = matched_show_uri_id ? `/show/${matched_show_uri_id}` : (matched_tvdb_id ? `/show/tvdb:s:${matched_tvdb_id}` : '');
               return `
               <div class="flex items-center gap-3 py-1.5 border-b border-zinc-800/60 last:border-0">
                 <div class="flex-1 min-w-0">
@@ -4250,7 +4176,7 @@ if (me.totp_enabled) {
               const wMatchedTitle = w.matched_movie_title ?? w.matched_show_title ?? '';
               const wMatchHref = w.media_type === 'movie' && w.matched_tmdb_id
                 ? `/movie/${w.matched_tmdb_id}`
-                : (w.matched_tvdb_id ? `/show/tvdb/${w.matched_tvdb_id}` : (w.matched_show_id ? `/show/${w.matched_show_id}` : ''));
+                : (w.matched_tvdb_id ? `/show/tvdb:s:${w.matched_tvdb_id}` : (w.matched_show_id ? `/show/${w.matched_show_id}` : ''));
               return `
               <div class="flex items-center gap-3 py-1.5 border-b border-zinc-800/60 last:border-0">
                 <div class="flex-1 min-w-0">
@@ -4309,8 +4235,8 @@ if (me.totp_enabled) {
         container.querySelectorAll('.remap-season-btn').forEach((btn) => {
           btn.addEventListener('click', () => {
             const el = btn as HTMLElement;
-            (window as any).openRemapModal(
-              parseInt(el.dataset.srcTmdb ?? '0'),
+            window["openRemapModal"](
+              el.dataset.srcUri ?? '',
               parseInt(el.dataset.srcSeason ?? '0'),
               el.dataset.srcTitle ?? '',
             );
@@ -4322,9 +4248,9 @@ if (me.totp_enabled) {
             const el = btn as HTMLElement;
             const mediaType = el.dataset.mediaType ?? '';
             if (mediaType === 'movie') {
-              (window as any).openMatchMovieModal(el.dataset.seriesName ?? '');
+              window["openMatchMovieModal"](el.dataset.seriesName ?? '');
             } else {
-              (window as any).openMatchModal(el.dataset.seriesName ?? '');
+              window["openMatchModal"](el.dataset.seriesName ?? '');
             }
           });
         });
@@ -4366,6 +4292,7 @@ if (me.totp_enabled) {
     if (!modal) return;
 
     let srcTmdbId = 0;
+    let srcUri: string | null = null;
     let srcSeason = 0;
     let targetTmdbId = 0;
     let targetTvdbId = 0;
@@ -4462,7 +4389,8 @@ if (me.totp_enabled) {
         seasonsList.innerHTML = '';
         seasonsLoading.classList.remove('hidden');
         try {
-          const showRes = await fetch(`/api/proxy/shows/${tmdbId}`, {
+          const showUri = tvdbId ? `tvdb:s:${tvdbId}` : `tmdb:s:${tmdbId}`;
+          const showRes = await fetch(`/api/proxy/shows/${showUri}`, {
             headers: { 'Authorization': `Bearer ${token}` },
           });
           const showData = showRes.ok ? await showRes.json() : null;
@@ -4600,8 +4528,8 @@ if (me.totp_enabled) {
         saveBtn.textContent = 'Matching…';
         try {
           const body: any = { show_title: matchSeriesName };
-          if (targetTvdbId) body.tvdb_id = targetTvdbId;
-          else body.tmdb_id = targetTmdbId;
+          if (targetTvdbId) body.uri_id = `tvdb:s:${targetTvdbId}`;
+          else if (targetTmdbId) body.uri_id = `tmdb:s:${targetTmdbId}`;
           const res = await fetch('/api/proxy/sync/match-unmatched-show', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -4626,7 +4554,7 @@ if (me.totp_enabled) {
           const res = await fetch('/api/proxy/sync/match-unmatched-movie', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ movie_title: matchMovieTitle, tmdb_id: targetTmdbId }),
+            body: JSON.stringify({ movie_title: matchMovieTitle, uri_id: `tmdb:m:${targetTmdbId}` }),
           });
           if (!res.ok) throw new Error(await res.text());
           closeModal();
@@ -4648,9 +4576,9 @@ if (me.totp_enabled) {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            source_show_tmdb_id: srcTmdbId,
+            source_show_uri_id: srcUri ?? `tmdb:s:${srcTmdbId}`,
             source_season_number: srcSeason,
-            target_show_tmdb_id: targetTmdbId,
+            target_show_uri_id: `tmdb:s:${targetTmdbId}`,
             target_season_number: targetSeasonNumber,
           }),
         });
@@ -4674,9 +4602,10 @@ if (me.totp_enabled) {
       }
     });
 
-    (window as any).openRemapModal = (tmdbId: number, season: number, title: string) => {
+    window["openRemapModal"] = (uriOrTmdbId: string | number, season: number, title: string) => {
       modalMode = 'remap';
-      srcTmdbId = tmdbId;
+      srcTmdbId = typeof uriOrTmdbId === 'number' ? uriOrTmdbId : (parseInt(String(uriOrTmdbId).split(':').pop() ?? '0') || 0);
+      srcUri = typeof uriOrTmdbId === 'string' ? uriOrTmdbId : null;
       srcSeason = season;
       (document.getElementById('remap-modal-title') as HTMLElement).textContent = 'Remap Season';
       (document.getElementById('remap-source-label') as HTMLElement).textContent = `"${title}" — Season ${season}`;
@@ -4690,7 +4619,7 @@ if (me.totp_enabled) {
       searchInput.focus();
     };
 
-    (window as any).openMatchModal = (seriesName: string) => {
+    window["openMatchModal"] = (seriesName: string) => {
       modalMode = 'match';
       matchSeriesName = seriesName;
       (document.getElementById('remap-modal-title') as HTMLElement).textContent = 'Match Show on TVDB';
@@ -4708,7 +4637,7 @@ if (me.totp_enabled) {
       doTvdbSearch();
     };
 
-    (window as any).openMatchMovieModal = (movieTitle: string) => {
+    window["openMatchMovieModal"] = (movieTitle: string) => {
       modalMode = 'match-movie';
       matchMovieTitle = movieTitle;
       (document.getElementById('remap-modal-title') as HTMLElement).textContent = 'Match Movie on TMDB';

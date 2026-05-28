@@ -69,8 +69,11 @@ class ListUpdate(BaseModel):
 
 
 class ListItemAdd(BaseModel):
-    tmdb_id: int
+    uri_id: str
     media_type: MediaType
+    show_uri_id: Optional[str] = None
+    season_number: Optional[int] = None
+    episode_number: Optional[int] = None
 
 
 def _format_list(lst: ListModel) -> dict:
@@ -126,6 +129,7 @@ def _format_item(item: ListItem) -> dict:
         "notes": item.notes,
         "media": {
             "id": media.id,
+            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "type": media.media_type,
             "title": media.title,
@@ -142,6 +146,7 @@ def _format_item(item: ListItem) -> dict:
     }
     if media.media_type == MediaType.episode and media.show:
         data["media"]["show_title"] = media.show.title
+        data["media"]["show_uri_id"] = media.show.uri_id
         data["media"]["show_poster_path"] = media.show.poster_path
         data["media"]["show_tmdb_id"] = media.show.tmdb_id
     return data
@@ -246,23 +251,35 @@ async def get_list(
     formatted_items = [_format_item(i) for i in items_sorted]
 
     # Fill in missing poster/release_date for series items from the Show table
-    series_tmdb_ids = [
-        item["media"]["tmdb_id"]
-        for item in formatted_items
+    series_items_needing_data = [
+        item for item in formatted_items
         if item["media"].get("type") in (MediaType.series, "series")
         and (not item["media"].get("poster_path") or not item["media"].get("release_date"))
-        and item["media"].get("tmdb_id")
     ]
-    if series_tmdb_ids:
-        shows_result = await db.execute(
-            select(ShowModel).where(ShowModel.tmdb_id.in_(series_tmdb_ids))
-        )
-        show_map = {s.tmdb_id: s for s in shows_result.scalars().all()}
+    if series_items_needing_data:
+        series_tmdb_ids = [m["media"]["tmdb_id"] for m in series_items_needing_data if m["media"].get("tmdb_id")]
+        series_uri_ids = [
+            m["media"]["uri_id"] for m in series_items_needing_data
+            if not m["media"].get("tmdb_id") and m["media"].get("uri_id")
+        ]
+        show_map: dict = {}
+        if series_tmdb_ids:
+            shows_result = await db.execute(
+                select(ShowModel).where(ShowModel.tmdb_id.in_(series_tmdb_ids))
+            )
+            for s in shows_result.scalars().all():
+                show_map[("tmdb", s.tmdb_id)] = s
+        if series_uri_ids:
+            shows_result2 = await db.execute(
+                select(ShowModel).where(ShowModel.uri_id.in_(series_uri_ids))
+            )
+            for s in shows_result2.scalars().all():
+                show_map[("uri", s.uri_id)] = s
         for item in formatted_items:
             m = item["media"]
             if m.get("type") not in (MediaType.series, "series"):
                 continue
-            show = show_map.get(m.get("tmdb_id"))
+            show = show_map.get(("tmdb", m.get("tmdb_id"))) or show_map.get(("uri", m.get("uri_id")))
             if show:
                 if not m.get("poster_path") and show.poster_path:
                     m["poster_path"] = show.poster_path
@@ -272,7 +289,7 @@ async def get_list(
                     m["title"] = show.title
 
     media_dicts = [item["media"] for item in formatted_items]
-    await enrich_with_state(db, current_user.id, media_dicts)
+    await enrich_with_state(db, current_user.id, media_dicts, False)
 
     return {
         **_format_list(lst),
@@ -372,7 +389,15 @@ async def _push_list_item_to_trakt(
     remove: bool = False,
 ) -> None:
     trakt_type = _trakt_media_type(media.media_type)
-    if not trakt_type or not media.tmdb_id:
+    if not trakt_type:
+        return
+
+    push_tmdb_id = media.tmdb_id
+    if not push_tmdb_id and media.uri_id:
+        from utils.alias_lookup import get_provider_id_for_uri
+        alias = await get_provider_id_for_uri(db, media.uri_id, "tmdb")
+        push_tmdb_id = int(alias) if alias else None
+    if not push_tmdb_id:
         return
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
@@ -391,26 +416,73 @@ async def _push_list_item_to_trakt(
             if remove:
                 await trakt_client.remove_from_watchlist(
                     settings.trakt_client_id, settings.trakt_access_token,
-                    trakt_type, media.tmdb_id,
+                    trakt_type, push_tmdb_id,
                 )
             else:
                 await trakt_client.add_to_watchlist(
                     settings.trakt_client_id, settings.trakt_access_token,
-                    trakt_type, media.tmdb_id,
+                    trakt_type, push_tmdb_id,
                 )
         else:
             if remove:
                 await trakt_client.remove_from_list(
                     settings.trakt_client_id, settings.trakt_access_token,
-                    list_trakt_slug, trakt_type, media.tmdb_id,
+                    list_trakt_slug, trakt_type, push_tmdb_id,
                 )
             else:
                 await trakt_client.add_to_list(
                     settings.trakt_client_id, settings.trakt_access_token,
-                    list_trakt_slug, trakt_type, media.tmdb_id,
+                    list_trakt_slug, trakt_type, push_tmdb_id,
                 )
     except Exception as exc:
         logger.warning("Failed to push list item to Trakt (slug=%s, remove=%s): %s", list_trakt_slug, remove, exc)
+
+
+async def _resolve_or_create_episode(db, current_user, body) -> "Media | None":
+    from utils.media_uri import MediaURI
+    from utils.alias_lookup import get_internal_id_for_uri
+
+    if not (body.show_uri_id and body.season_number is not None and body.episode_number is not None):
+        return None
+
+    show = None
+    try:
+        _suri = MediaURI.parse(body.show_uri_id)
+        col = ShowModel.tvdb_id if _suri.provider == "tvdb" else ShowModel.tmdb_id
+        show_q = await db.execute(select(ShowModel).where(col == int(_suri.id)))
+        show = show_q.scalar_one_or_none()
+    except (ValueError, TypeError):
+        show = None
+    if show is None:
+        internal_id = await get_internal_id_for_uri(db, body.show_uri_id)
+        if internal_id is not None:
+            show_q = await db.execute(select(ShowModel).where(ShowModel.id == internal_id))
+            show = show_q.scalar_one_or_none()
+    if show is None:
+        return None
+
+    ep_q = await db.execute(
+        select(Media).where(
+            Media.show_id == show.id,
+            Media.media_type == MediaType.episode,
+            Media.season_number == body.season_number,
+            Media.episode_number == body.episode_number,
+        )
+    )
+    media = ep_q.scalars().first()
+    if media is None:
+        media = Media(
+            uri_id=body.uri_id,
+            media_type=MediaType.episode,
+            show_id=show.id,
+            season_number=body.season_number,
+            episode_number=body.episode_number,
+            title=f"Episode {body.episode_number}",
+        )
+        db.add(media)
+        await db.commit()
+        await db.refresh(media)
+    return media
 
 
 @router.post("/{list_id}/items", status_code=201)
@@ -427,10 +499,17 @@ async def add_list_item(
     if not list_obj:
         raise HTTPException(status_code=404, detail="List not found")
 
+    from utils.media_uri import MediaURI
+    try:
+        uri = MediaURI.parse(body.uri_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid uri_id: {body.uri_id!r}")
+        
+
     media_result = await db.execute(
         select(Media)
         .options(selectinload(Media.show))
-        .where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
+        .where(Media.uri_id == body.uri_id, Media.media_type == body.media_type)
     )
     media = media_result.scalar_one_or_none()
 
@@ -440,53 +519,67 @@ async def add_list_item(
     api_key = await get_user_tmdb_key(db, current_user.id)
 
     if not media:
+        from routers.shows import get_show_by_uri
+        from routers.media import get_media_details
         try:
-            if body.media_type == MediaType.movie:
-                data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
-                media = Media(
-                    tmdb_id=body.tmdb_id,
-                    media_type=MediaType.movie,
-                    title=data.get("title", "Unknown"),
-                    poster_path=tmdb.poster_url(data.get("poster_path")),
-                    backdrop_path=tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
-                    release_date=data.get("release_date"),
-                    tmdb_rating=data.get("vote_average"),
-                    overview=data.get("overview"),
-                    adult=data.get("adult", False),
+            if body.media_type == MediaType.series:
+                show_data = await get_show_by_uri(body.uri_id, db=db, current_user=current_user)
+                # Ensure a Media row exists for this series
+                media_result = await db.execute(
+                    select(Media).where(Media.uri_id == body.uri_id, Media.media_type == MediaType.series)
                 )
-            elif body.media_type == MediaType.person:
-                data = await tmdb.get_person(body.tmdb_id, api_key=api_key)
-                media = Media(
-                    tmdb_id=body.tmdb_id,
-                    media_type=MediaType.person,
-                    title=data.get("name", "Unknown"),
-                    poster_path=tmdb.poster_url(data.get("profile_path"), size="w185"),
-                    overview=data.get("biography"),
+                media = media_result.scalar_one_or_none()
+                if not media:
+                    # Create a dummy Media row for the series so lists can reference it
+                    media = Media(
+                        uri_id=body.uri_id,
+                        tmdb_id=show_data.get("tmdb_id_cross") or show_data.get("tmdb_id"),
+                        media_type=MediaType.series,
+                        title=show_data.get("title") or show_data.get("name") or "Unknown Series",
+                        poster_path=show_data.get("poster_path"),
+                        release_date=show_data.get("first_air_date"),
+                    )
+                    db.add(media)
+                    await db.commit()
+                    await db.refresh(media)
+            elif body.media_type == MediaType.movie:
+                movie_data = await get_media_details(body.media_type, body.uri_id, db=db, current_user=current_user)
+                media_result = await db.execute(
+                    select(Media).where(Media.uri_id == body.uri_id, Media.media_type == MediaType.movie)
                 )
+                media = media_result.scalar_one_or_none()
+                if not media:
+                    media = Media(
+                        uri_id=body.uri_id,
+                        tmdb_id=movie_data.get("id") or movie_data.get("tmdb_id"),
+                        media_type=MediaType.movie,
+                        title=movie_data.get("title") or "Unknown Movie",
+                        poster_path=movie_data.get("poster_path"),
+                        release_date=movie_data.get("release_date"),
+                        overview=movie_data.get("overview"),
+                    )
+                    db.add(media)
+                    await db.commit()
+                    await db.refresh(media)
+            elif body.media_type == MediaType.episode:
+                media = await _resolve_or_create_episode(db, current_user, body)
+                if media is None:
+                    raise Exception(
+                        "Episode requires show_uri_id, season_number and episode_number "
+                        "(and a known parent show) to add to a list"
+                    )
             else:
-                data = await tmdb.get_show(body.tmdb_id, api_key=api_key)
-                media = Media(
-                    tmdb_id=body.tmdb_id,
-                    media_type=MediaType.series,
-                    title=data.get("name", "Unknown"),
-                    poster_path=tmdb.poster_url(data.get("poster_path")),
-                    backdrop_path=tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
-                    release_date=data.get("first_air_date"),
-                    tmdb_rating=data.get("vote_average"),
-                    overview=data.get("overview"),
-                    adult=data.get("adult", False),
-                )
-            db.add(media)
-            await db.flush()
+                raise Exception("Cannot add unmatched items of this media type to lists")
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=404, detail=f"Media not found: {e}")
-    elif not media.adult and body.media_type in (MediaType.movie, MediaType.series):
-        # Existing record may pre-date the adult flag — refresh from TMDB
+            raise HTTPException(status_code=400, detail=f"Failed to sync media item to lists: {e}")
+    elif not media.adult and body.media_type in (MediaType.movie, MediaType.series) and media.tmdb_id:
         try:
             if body.media_type == MediaType.movie:
-                data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
+                data = await tmdb.get_movie(media.tmdb_id, api_key=api_key)
             else:
-                data = await tmdb.get_show(body.tmdb_id, api_key=api_key)
+                data = await tmdb.get_show(media.tmdb_id, api_key=api_key)
             if data.get("adult", False):
                 media.adult = True
         except Exception:
@@ -504,6 +597,12 @@ async def add_list_item(
 
     # --- Sonarr/Radarr Auto-Add ---
     approval_enqueued = False
+    # Resolve TMDB integer ID for Sonarr/Radarr APIs (alias lookup for TVDB-only items)
+    tmdb_id_int = media.tmdb_id
+    if not tmdb_id_int and media.uri_id:
+        from utils.alias_lookup import get_provider_id_for_uri as _get_provider_id
+        _alias = await _get_provider_id(db, media.uri_id, "tmdb")
+        tmdb_id_int = int(_alias) if _alias else None
     if body.media_type in (MediaType.movie, MediaType.series):
         from models.users import UserSettings
         from models.global_settings import GlobalSettings
@@ -520,11 +619,11 @@ async def add_list_item(
                 if uses_global and gs.radarr_require_approval:
                     approval_enqueued = True
                     from models.media_request import MediaRequest, RequestStatus
+                    movie_uri = body.uri_id
                     existing_q = await db.execute(
                         select(MediaRequest).where(
                             MediaRequest.user_id == current_user.id,
-                            MediaRequest.tmdb_id == body.tmdb_id,
-                            MediaRequest.media_type == "movie",
+                            MediaRequest.uri_id == movie_uri,
                         )
                     )
                     existing = existing_q.scalar_one_or_none()
@@ -535,7 +634,7 @@ async def add_list_item(
                     else:
                         db.add(MediaRequest(
                             user_id=current_user.id,
-                            tmdb_id=body.tmdb_id,
+                            uri_id=movie_uri,
                             media_type="movie",
                             title=media.title or "",
                             poster_path=media.poster_path,
@@ -548,7 +647,7 @@ async def add_list_item(
                         await radarr.add_movie(
                             url=radarr_cfg.radarr_url,
                             token=radarr_cfg.radarr_token,
-                            tmdb_id=body.tmdb_id,
+                            tmdb_id=tmdb_id_int,
                             title=media.title,
                             root_folder=list_obj.radarr_root_folder or radarr_cfg.radarr_root_folder,
                             quality_profile_id=list_obj.radarr_quality_profile or radarr_cfg.radarr_quality_profile,
@@ -566,11 +665,11 @@ async def add_list_item(
                 if uses_global and gs.sonarr_require_approval:
                     approval_enqueued = True
                     from models.media_request import MediaRequest, RequestStatus
+                    series_uri = body.uri_id
                     existing_q = await db.execute(
                         select(MediaRequest).where(
                             MediaRequest.user_id == current_user.id,
-                            MediaRequest.tmdb_id == body.tmdb_id,
-                            MediaRequest.media_type == "series",
+                            MediaRequest.uri_id == series_uri,
                         )
                     )
                     existing = existing_q.scalar_one_or_none()
@@ -581,7 +680,7 @@ async def add_list_item(
                     else:
                         db.add(MediaRequest(
                             user_id=current_user.id,
-                            tmdb_id=body.tmdb_id,
+                            uri_id=series_uri,
                             media_type="series",
                             title=media.title or "",
                             poster_path=media.poster_path,
@@ -592,9 +691,12 @@ async def add_list_item(
                     from core import sonarr
                     try:
                         tvdb_id = (media.tmdb_data or {}).get("external_ids", {}).get("tvdb_id")
-                        if not tvdb_id:
+                        if not tvdb_id and media.uri_id:
+                            from utils.alias_lookup import get_provider_id_for_uri as _get_tvdb
+                            tvdb_id = await _get_tvdb(db, media.uri_id, "tvdb")
+                        if not tvdb_id and tmdb_id_int:
                             from core import tmdb as tmdb_core
-                            ext_ids = await tmdb_core.get_external_ids(body.tmdb_id, "tv", api_key=api_key)
+                            ext_ids = await tmdb_core.get_external_ids(tmdb_id_int, "tv", api_key=api_key)
                             tvdb_id = ext_ids.get("tvdb_id")
 
                         if tvdb_id:
@@ -623,7 +725,7 @@ async def add_list_item(
         .where(ListItem.list_id == list_id, ListItem.media_id == media.id)
     )
     formatted = _format_item(item_result.scalar_one())
-    await enrich_with_state(db, current_user.id, [formatted["media"]])
+    await enrich_with_state(db, current_user.id, [formatted["media"]], False)
     if approval_enqueued:
         formatted["auto_add_status"] = "pending_approval"
     return formatted
@@ -688,23 +790,22 @@ async def cleanup_collection_items(
     item_map = {}
     for li in lst.items:
         mtype = li.media.media_type
-        tid = li.media.tmdb_id
         items_to_check.append({
-            "tmdb_id": tid,
-            "type": mtype.value if hasattr(mtype, "value") else mtype
+            "uri_id": li.media.uri_id,
+            "tmdb_id": li.media.tmdb_id,
+            "type": mtype.value if hasattr(mtype, "value") else mtype,
+            "_list_item_db_id": li.media.id,
         })
-        item_map[(tid, mtype)] = li
+        item_map[li.media.id] = li
 
     # Use existing enrich_with_state logic to determine library status
-    enriched = await enrich_with_state(db, current_user.id, items_to_check)
-    
+    enriched = await enrich_with_state(db, current_user.id, items_to_check, False)
+
     to_delete = []
     for item in enriched:
         if item.get("in_library"):
-            tid = item.get("tmdb_id")
-            mtype_str = item.get("type")
-            mtype = MediaType(mtype_str)
-            li = item_map.get((tid, mtype))
+            internal_id = item.get("_internal_id") or item.get("_list_item_db_id")
+            li = item_map.get(internal_id)
             if li:
                 to_delete.append(li)
 

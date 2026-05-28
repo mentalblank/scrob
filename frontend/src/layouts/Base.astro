@@ -61,6 +61,20 @@ const bottomNavItem = (active: boolean) =>
     html.light #moon-icon { display: none; }
   </style>
   <script is:inline>
+    // Pre-flight: migrate localStorage integer IDs to URI format (Phase 4 URI migration)
+    (function () {
+      var keys = ['last_watched_id', 'last_show_id', 'last_movie_id'];
+      keys.forEach(function (key) {
+        var val = localStorage.getItem(key);
+        if (val && /^\d+$/.test(val)) {
+          // Prefix numeric IDs with tmdb:s: (shows) or tmdb:m: (movies)
+          var prefix = key.includes('movie') ? 'tmdb:m:' : 'tmdb:s:';
+          localStorage.setItem(key, prefix + val);
+        }
+      });
+    })();
+  </script>
+  <script is:inline>
     // Theme initialization to avoid FOUC
     const theme = (() => {
       if (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) {
@@ -396,6 +410,77 @@ const bottomNavItem = (active: boolean) =>
   </div>
 
   <script>
+    // ── Global URL helper ─────────────────────────────────────────────────────
+    // Constructs canonical media URLs, preferring uri_id over integer IDs.
+    window["buildItemUrl"] = function(item: any, preferTvdb = false): string {
+      const t = item?.type;
+      
+      if (preferTvdb) {
+        if (t === 'series' && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+        if (t === 'person' && item.tvdb_id) return `/person/tvdb:p:${item.tvdb_id}`;
+      }
+
+      if (item?.uri_id) {
+        const p = item.uri_id.split(':');
+        if (p.length === 3) {
+          const [prov, pfx, numId] = p;
+          if (preferTvdb && pfx === 's' && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+          if (preferTvdb && pfx === 'p' && item.tvdb_id) return `/person/tvdb:p:${item.tvdb_id}`;
+          
+          if (pfx === 's') return `/show/${prov}:s:${numId}`;
+          if (pfx === 'm') return `/media/movie/${prov}:m:${numId}`;
+          if (pfx === 'p') return `/person/${prov}:p:${numId}`;
+        }
+      }
+
+      if (t === 'movie') {
+        if (item.tmdb_id) return `/media/movie/tmdb:m:${item.tmdb_id}`;
+        return '/';
+      }
+      if (t === 'series') {
+        if (preferTvdb && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+        if (item.tmdb_id) return `/show/tmdb:s:${item.tmdb_id}`;
+        if (item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+        return '/';
+      }
+      if (t === 'episode' || t === 'season') {
+        const sn = item.season_number, en = item.episode_number;
+        const showUri = item.show_uri_id;
+        if (showUri) {
+          const sp = showUri.split(':');
+          if (sp.length === 3 && sp[1] === 's') {
+            const base = `/show/${sp[0]}:s:${sp[2]}`;
+            if (sn != null && en != null) return `${base}/season/${sn}/${en}`;
+            if (sn != null) return `${base}/season/${sn}`;
+            return base;
+          }
+        }
+        const st = item.show_tmdb_id || null;
+        const sv = item.show_tvdb_id || null;
+        if (sn != null && en != null) {
+          if (preferTvdb && sv) return `/show/tvdb:s:${sv}/season/${sn}/${en}`;
+          if (st) return `/show/tmdb:s:${st}/season/${sn}/${en}`;
+          if (sv) return `/show/tvdb:s:${sv}/season/${sn}/${en}`;
+        }
+        if (sn != null) {
+          if (preferTvdb && sv) return `/show/tvdb:s:${sv}/season/${sn}`;
+          if (st) return `/show/tmdb:s:${st}/season/${sn}`;
+          if (sv) return `/show/tvdb:s:${sv}/season/${sn}`;
+        }
+        if (preferTvdb && sv) return `/show/tvdb:s:${sv}`;
+        if (st) return `/show/tmdb:s:${st}`;
+        if (sv) return `/show/tvdb:s:${sv}`;
+        return '/';
+      }
+      if (t === 'person') {
+        if (item.tvdb_id && (!item.tmdb_id || preferTvdb)) return `/person/tvdb:p:${item.tvdb_id}`;
+        if (item.tmdb_id) return `/person/tmdb:p:${item.tmdb_id}`;
+        return '/';
+      }
+      if (item?.tmdb_id) return `/media/${t}/tmdb:${t === 'movie' ? 'm' : 's'}:${item.tmdb_id}`;
+      return '/';
+    };
+
     // ── Theme toggle ───────────────────────────────────────────────────────────
     const themeToggle = document.getElementById('theme-toggle');
 
@@ -501,15 +586,7 @@ const bottomNavItem = (active: boolean) =>
       results.slice(0, 6).forEach(item => {
         const isMovie = item.type === 'movie';
         const isPerson = item.type === 'person';
-        const href = isMovie
-          ? `/media/movie/${item.tmdb_id}`
-          : isPerson
-            ? (primarySource === 'tvdb' && item.tvdb_id
-              ? `/person/tvdb/${item.tvdb_id}`
-              : `/person/${item.tmdb_id}`)
-            : (primarySource === 'tvdb' && item.tvdb_id
-              ? `/show/tvdb/${item.tvdb_id}`
-              : (item.tmdb_id ? `/show/${item.tmdb_id}` : `/show/tvdb/${item.tvdb_id}`));
+        const href = window["buildItemUrl"](item, primarySource === 'tvdb');
         const icon = isMovie ? movieSvg : (isPerson ? personSvg : tvSvg);
         
         let badge = '';
@@ -554,7 +631,7 @@ const bottomNavItem = (active: boolean) =>
       }
       try {
         const res = await fetch(`/api/proxy/media/search?q=${encodeURIComponent(query)}&page=1`, {
-          headers: { 'Authorization': `Bearer ${(window as any).__AUTH_TOKEN__ ?? ''}` }
+          headers: { 'Authorization': `Bearer ${window["__AUTH_TOKEN__"] ?? ''}` }
         });
         if (!res.ok) throw new Error();
         const data = await res.json();
@@ -603,14 +680,35 @@ const bottomNavItem = (active: boolean) =>
     window.__USE_24H__ = __use24h;
 
     // ── Now Playing poller (Global) ──────────────────────────────────────────
-    function esc(str) {
+    window.esc = function(str) {
       if (str == null) return '';
       return String(str)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
-    }
+    };
+    const esc = window.esc;
+
+    window.showMessage = function(text, type = 'success') {
+      const msg = document.getElementById('js-message');
+      if (!msg) return;
+      msg.textContent = text;
+      msg.className = `p-4 rounded-lg mb-8 ${
+        type === 'success'
+          ? 'bg-green-500/10 border border-green-500 text-green-500'
+          : 'bg-red-500/10 border border-red-500 text-red-500'
+      }`;
+      msg.classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      
+      const w = window;
+      if (w._messageTimeout) clearTimeout(w._messageTimeout);
+      if (w._msgTimeout) clearTimeout(w._msgTimeout);
+      const timer = setTimeout(() => msg.classList.add('hidden'), 4000);
+      w._messageTimeout = timer;
+      w._msgTimeout = timer;
+    };
 
     function calcLivePct(progressSeconds, updatedAt, runtime, playing) {
       if (!runtime || runtime <= 0) return 0;
@@ -633,21 +731,7 @@ const bottomNavItem = (active: boolean) =>
           ? `S${String(m.season_number).padStart(2,'0')}E${String(m.episode_number).padStart(2,'0')} · ${m.title}`
           : null;
         const primarySource = document.cookie.split('; ').find(row => row.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
-        const href = isEpisode
-          ? (primarySource === 'tvdb' && m.show_tvdb_id && m.season_number && m.episode_number
-              ? `/show/tvdb/${m.show_tvdb_id}/season/${m.season_number}/${m.episode_number}`
-              : m.show_tmdb_id && m.season_number && m.episode_number
-                ? `/show/${m.show_tmdb_id}/season/${m.season_number}/${m.episode_number}`
-                : m.show_tvdb_id && m.season_number && m.episode_number
-                  ? `/show/tvdb/${m.show_tvdb_id}/season/${m.season_number}/${m.episode_number}`
-                  : primarySource === 'tvdb' && m.show_tvdb_id
-                    ? `/show/tvdb/${m.show_tvdb_id}`
-                    : m.show_tmdb_id
-                      ? `/show/${m.show_tmdb_id}`
-                      : m.show_tvdb_id
-                        ? `/show/tvdb/${m.show_tvdb_id}`
-                        : null)
-          : (m.tmdb_id ? `/media/movie/${m.tmdb_id}` : null);
+        const href = window["buildItemUrl"](m, primarySource === 'tvdb') || null;
         const isPaused = session.state === 'paused';
         const sourceLabels = { plex: 'Plex', emby: 'Emby', kodi: 'Kodi', jellyfin: 'Jellyfin', manual: 'Scrob' };
         const sourceLabel = sourceLabels[session.source] ?? session.source;
@@ -779,7 +863,7 @@ const bottomNavItem = (active: boolean) =>
   <script>
     // ── Card action bar ────────────────────────────────────────────────────────
     const API = '/api/proxy';
-    const TOKEN = () => (window as any).__AUTH_TOKEN__ ?? '';
+    const TOKEN = () => window["__AUTH_TOKEN__"] ?? '';
 
     function esc(s: unknown): string {
       if (s == null) return '';
@@ -897,7 +981,7 @@ const bottomNavItem = (active: boolean) =>
     }
 
     // ── Toast system ──────────────────────────────────────────────────────────
-    (window as any).showToast = showToast;
+    window["showToast"] = showToast;
     function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
       const existing = document.querySelectorAll('.scrob-toast');
       existing.forEach(t => {
@@ -942,7 +1026,7 @@ const bottomNavItem = (active: boolean) =>
       _activeRatingBtn = null;
     }
 
-    function openRatingPopover(btn: HTMLElement, tmdbId: string, mediaType: string, currentRating: number | null, seasonNumber: number | null = null) {
+    function openRatingPopover(btn: HTMLElement, uriIdForRating: string, mediaType: string, currentRating: number | null, seasonNumber: number | null = null) {
       _activeRatingBtn = btn;
       const popover = document.getElementById('rating-popover')!;
       const starsEl = document.getElementById('rating-stars')!;
@@ -969,7 +1053,7 @@ const bottomNavItem = (active: boolean) =>
         });
         half.addEventListener('click', async () => {
           try {
-            const ratingBody: Record<string, unknown> = { tmdb_id: Number(tmdbId), media_type: mediaType, rating: i };
+            const ratingBody: Record<string, unknown> = { uri_id: uriIdForRating, media_type: mediaType, rating: i };
             if (seasonNumber !== null) ratingBody.season_number = seasonNumber;
             await apiFetch('/ratings', 'POST', ratingBody);
             btn.dataset.userRating = String(i);
@@ -996,7 +1080,7 @@ const bottomNavItem = (active: boolean) =>
       removeBtn.onclick = async () => {
         try {
           const seasonQuery = seasonNumber !== null ? `&season_number=${seasonNumber}` : '';
-          await apiFetch(`/ratings?tmdb_id=${tmdbId}&media_type=${mediaType}${seasonQuery}`, 'DELETE');
+          await apiFetch(`/ratings?uri_id=${encodeURIComponent(uriIdForRating)}&media_type=${mediaType}${seasonQuery}`, 'DELETE');
           btn.dataset.userRating = '';
           btn.dataset.state = 'inactive';
           btn.classList.remove('bg-amber-500/20', 'text-amber-400', 'hover:bg-amber-500/40');
@@ -1026,18 +1110,28 @@ const bottomNavItem = (active: boolean) =>
 
     // ── List popover ───────────────────────────────────────────────────────────
     let _activeListBtn: HTMLElement | null = null;
-    let _listTmdbId = '';
+    let _listUriId = '';
     let _listMediaType = '';
+    let _listShowUri: string | null = null;
+    let _listSeason: string | null = null;
+    let _listEpisode: string | null = null;
 
     function closeListPopover() {
       document.getElementById('list-popover')!.classList.add('hidden');
       _activeListBtn = null;
     }
 
-    async function openListPopover(btn: HTMLElement, tmdbId: string, mediaType: string) {
+    async function openListPopover(btn: HTMLElement, uriIdForList: string, mediaType: string) {
       _activeListBtn = btn;
-      _listTmdbId = tmdbId;
+      _listUriId = uriIdForList;
       _listMediaType = mediaType;
+      // Episode context for episodes not yet in the DB (lets backend resolve/create the row).
+      const _listCard = btn.closest('[data-card]') as HTMLElement | null;
+      const _clean = (v: string | undefined): string | null =>
+        (v && v !== 'null' && v !== 'undefined' && v.trim() !== '') ? v : null;
+      _listShowUri = _clean(_listCard?.dataset.showUriId);
+      _listSeason = _clean(_listCard?.dataset.season);
+      _listEpisode = _clean(_listCard?.dataset.episodeNumber);
       const popover = document.getElementById('list-popover')!;
       const itemsEl = document.getElementById('list-popover-items')!;
       itemsEl.innerHTML = '<div class="px-3 py-2 text-xs text-zinc-500">Loading…</div>';
@@ -1076,11 +1170,16 @@ const bottomNavItem = (active: boolean) =>
           const listId = cb.dataset.listId!;
           try {
             if (cb.checked) {
-              await apiFetch(`/lists/${listId}/items`, 'POST', { tmdb_id: Number(_listTmdbId), media_type: _listMediaType });
+              const listBody: Record<string, string | number> = { uri_id: _listUriId, media_type: _listMediaType };
+              if (_listMediaType === 'episode') {
+                if (_listShowUri) listBody.show_uri_id = _listShowUri;
+                if (_listSeason) listBody.season_number = Number(_listSeason);
+                if (_listEpisode) listBody.episode_number = Number(_listEpisode);
+              }
+              await apiFetch(`/lists/${listId}/items`, 'POST', listBody);
             } else {
-              // Find the list_item id — need to fetch list detail
               const detail = await apiFetch(`/lists/${listId}`);
-              const item = detail.items?.find((i: { media: { tmdb_id: number } }) => i.media?.tmdb_id === Number(_listTmdbId));
+              const item = detail.items?.find((i: { media: { uri_id: string } }) => i.media?.uri_id === _listUriId);
               if (item) {
                 await apiFetch(`/lists/${listId}/items/${item.id}`, 'DELETE');
                 // If we're on the list detail page for this list, remove the card immediately
@@ -1164,7 +1263,7 @@ const bottomNavItem = (active: boolean) =>
         // Re-open popover if we had an active card
         if (_activeListBtn) {
           const card = _activeListBtn.closest('[data-card]') as HTMLElement;
-          if (card) openListPopover(_activeListBtn, card.dataset.tmdbId!, card.dataset.mediaType!);
+          if (card) openListPopover(_activeListBtn, card.dataset.uriId!, card.dataset.mediaType!);
         }
       } catch { /* ignore */ }
     });
@@ -1222,11 +1321,22 @@ const bottomNavItem = (active: boolean) =>
     const toUTC = (d: Date) => d.toISOString().slice(0, 16);
 
     let _watchHistoryMediaId: string | null = null;
+    let _watchHistoryUriId: string | null = null;
+    let _watchHistoryShowUri: string | null = null;
+    let _watchHistorySeason: string | null = null;
+    let _watchHistoryEpisode: string | null = null;
 
-    async function openWatchHistoryModal(_btn: HTMLElement | null, tmdbId: string | null, mediaType: string, mediaId: string | null = null) {
-      _watchHistoryTmdbId = tmdbId;
+    async function openWatchHistoryModal(_btn: HTMLElement | null, uriIdForHistory: string | null, mediaType: string, mediaId: string | null = null, showUri: string | null = null, season: string | null = null, episode: string | null = null) {
+      // dataset values can be the literal strings "null"/"undefined"/"" — normalise to null.
+      const _clean = (v: string | null): string | null =>
+        (v && v !== 'null' && v !== 'undefined' && v.trim() !== '') ? v : null;
+      _watchHistoryTmdbId = null;
+      _watchHistoryUriId = _clean(uriIdForHistory);
       _watchHistoryMediaType = mediaType;
-      _watchHistoryMediaId = mediaId;
+      _watchHistoryMediaId = _clean(mediaId);
+      _watchHistoryShowUri = _clean(showUri);
+      _watchHistorySeason = _clean(season);
+      _watchHistoryEpisode = _clean(episode);
 
       // Reset "add play" form to "Just now"
       _watchHistoryUseNow = true;
@@ -1250,7 +1360,17 @@ const bottomNavItem = (active: boolean) =>
       const eventsEl = document.getElementById('watch-history-modal-events')!;
       eventsEl.innerHTML = '<div class="text-zinc-500 text-sm text-center py-8 flex justify-center items-center gap-2"><svg class="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading plays...</div>';
       try {
-        const query = _watchHistoryTmdbId ? `tmdb_id=${_watchHistoryTmdbId}` : `id=${_watchHistoryMediaId}`;
+        let query: string;
+        if (_watchHistoryMediaId) {
+          query = `id=${encodeURIComponent(_watchHistoryMediaId)}`;
+        } else if (_watchHistoryUriId) {
+          query = `uri_id=${encodeURIComponent(_watchHistoryUriId)}`;
+        } else if (_watchHistoryShowUri && _watchHistorySeason && _watchHistoryEpisode) {
+          // Episode not in the library: resolve via parent show + season + episode.
+          query = `show_uri_id=${encodeURIComponent(_watchHistoryShowUri)}&season_number=${_watchHistorySeason}&episode_number=${_watchHistoryEpisode}`;
+        } else {
+          query = '';  // no identifier — backend returns empty events
+        }
         const res = await fetch(`/api/proxy/history/item/events?${query}&media_type=${_watchHistoryMediaType}`, {
           headers: { 'Authorization': `Bearer ${TOKEN()}` }
         });
@@ -1264,7 +1384,7 @@ const bottomNavItem = (active: boolean) =>
           const formatter = new Intl.DateTimeFormat(undefined, {
             dateStyle: 'medium',
             timeStyle: 'short',
-            hour12: !(window as any).__USE_24H__
+            hour12: !window["__USE_24H__"]
           });
 
           eventsEl.innerHTML = events.map((ev: any) => {
@@ -1287,9 +1407,11 @@ const bottomNavItem = (active: boolean) =>
         }
         
         const isWatched = events.some((e: any) => e.completed);
-        document.querySelectorAll<HTMLElement>(
-          `[data-card][data-tmdb-id="${_watchHistoryTmdbId}"][data-media-type="${_watchHistoryMediaType}"] [data-action="watched"]`
-        ).forEach(b => updateWatchedButtonUI(b, isWatched));
+        if (_watchHistoryUriId) {
+          document.querySelectorAll<HTMLElement>(
+            `[data-card][data-uri-id="${CSS.escape(_watchHistoryUriId)}"][data-media-type="${_watchHistoryMediaType}"] [data-action="watched"]`
+          ).forEach(b => updateWatchedButtonUI(b, isWatched));
+        }
       } catch {
         eventsEl.innerHTML = '<div class="px-4 py-2 text-xs text-red-400">Failed to load history</div>';
       }
@@ -1303,7 +1425,7 @@ const bottomNavItem = (active: boolean) =>
     document.getElementById('watch-history-modal-close')!.addEventListener('click', closeWatchHistoryModal);
     document.getElementById('watch-history-modal-backdrop')!.addEventListener('click', closeWatchHistoryModal);
 
-    (window as any).openWatchHistoryModal = openWatchHistoryModal;
+    window["openWatchHistoryModal"] = openWatchHistoryModal;
     document.getElementById('watch-history-modal')!.addEventListener('click', (e) => {
       if (e.target === document.getElementById('watch-history-modal')) closeWatchHistoryModal();
     });
@@ -1354,11 +1476,14 @@ const bottomNavItem = (active: boolean) =>
         logBtn.textContent = 'Logging…';
         try {
           await apiFetch('/history', 'POST', {
-            tmdb_id: _watchHistoryTmdbId ? Number(_watchHistoryTmdbId) : null,
+            uri_id: _watchHistoryUriId,
             media_id: _watchHistoryMediaId ? Number(_watchHistoryMediaId) : null,
             media_type: _watchHistoryMediaType,
             completed: true,
             watched_at: watchedAt,
+            show_uri_id: _watchHistoryShowUri,
+            season_number: _watchHistorySeason ? Number(_watchHistorySeason) : null,
+            episode_number: _watchHistoryEpisode ? Number(_watchHistoryEpisode) : null,
           });
           await loadWatchHistoryEvents();
           // Reset to "Just now" after logging
@@ -1430,14 +1555,24 @@ const bottomNavItem = (active: boolean) =>
 
       let tmdbIdRaw = card.dataset.tmdbId;
       let tmdbId = tmdbIdRaw && tmdbIdRaw !== 'null' ? tmdbIdRaw : '';
+      let uriId = card.dataset.uriId || '';
       const mediaId = card.dataset.id || '';
       let mediaType = card.dataset.mediaType!;
 
       const isBlockAction = ['block', 'block-item', 'drop', 'unified-block'].includes(action);
-      if (isBlockAction && mediaType === 'episode' && card.dataset.showTmdbId) {
-        tmdbId = card.dataset.showTmdbId;
+      if (isBlockAction && mediaType === 'episode') {
+        const showUriId = card.dataset.showUriId || '';
+        if (showUriId) uriId = showUriId;
         mediaType = 'series';
       }
+
+      // mediaType after the episode→series conversion above; used by block/drop branches.
+      const mediaTypeForBlock = mediaType;
+
+      const blockPayload = (uri: string, type: string, dropped: boolean) =>
+        ({ uri_id: uri, media_type: type, is_dropped: dropped });
+      const blockDeleteQuery = (uri: string, type: string) =>
+        `uri_id=${encodeURIComponent(uri)}&media_type=${type}`;
 
       if (action === 'unified-block') {
         const isDropped  = btn.dataset.isDropped  === 'true';
@@ -1462,7 +1597,7 @@ const bottomNavItem = (active: boolean) =>
         try {
           if (alreadyActive) {
             // Undo: remove from blocklist entirely
-            await apiFetch(`/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
+            await apiFetch(`/media/blocklist?${blockDeleteQuery(uriId, mediaType)}`, 'DELETE');
             btn.dataset.isDropped = 'false';
             btn.dataset.isBlocked = 'false';
             card.dataset.isDropped = 'false';
@@ -1481,27 +1616,27 @@ const bottomNavItem = (active: boolean) =>
               btn.title = 'Block';
               btn.innerHTML = ICON_BLOCK;
             }
-            (window as any).showToast(isDropped ? 'Tracking resumed' : 'Unblocked', 'success');
+            window["showToast"](isDropped ? 'Tracking resumed' : 'Unblocked', 'success');
             window.dispatchEvent(new CustomEvent('unified-block-changed', {
-              detail: { tmdbId, mediaType, isBlocked: false, isDropped: false }
+              detail: { uriId, tmdbId, mediaType, isBlocked: false, isDropped: false }
             }));
             triggerDashboardRefresh(card);
           } else {
             // Apply: drop or block
             if (shouldDrop) {
-              await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, is_dropped: true });
+              await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, true));
               btn.dataset.isDropped = 'true';
               card.dataset.isDropped = 'true';
               btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white';
               btn.title = 'Resume tracking';
               btn.innerHTML = ICON_DROP;
-              (window as any).showToast('Show dropped', 'success');
+              window["showToast"]('Show dropped', 'success');
               window.dispatchEvent(new CustomEvent('unified-block-changed', {
-                detail: { tmdbId, mediaType, isBlocked: false, isDropped: true }
+                detail: { uriId, tmdbId, mediaType, isBlocked: false, isDropped: true }
               }));
               triggerDashboardRefresh(card);
             } else {
-              await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, is_dropped: false });
+              await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, false));
               btn.dataset.isBlocked = 'true';
               card.dataset.isBlocked = 'true';
               // For discovery cards: fade the card out (like old 'block' behaviour)
@@ -1517,9 +1652,9 @@ const bottomNavItem = (active: boolean) =>
                 btn.title = 'Unblock';
                 btn.innerHTML = ICON_BLOCK;
               }
-              (window as any).showToast('Blocked', 'success');
+              window["showToast"]('Blocked', 'success');
               window.dispatchEvent(new CustomEvent('unified-block-changed', {
-                detail: { tmdbId, mediaType, isBlocked: true, isDropped: false }
+                detail: { uriId, tmdbId, mediaType, isBlocked: true, isDropped: false }
               }));
               triggerDashboardRefresh(card);
             }
@@ -1541,7 +1676,7 @@ const bottomNavItem = (active: boolean) =>
         );
         if (!confirmed) return;
         try {
-          await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType });
+          await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, false));
           card.style.transition = 'all 0.3s ease';
           card.style.opacity = '0';
           card.style.transform = 'scale(0.9)';
@@ -1551,7 +1686,6 @@ const bottomNavItem = (active: boolean) =>
         } catch { /* ignore */ }
         return;
       }
-
 
       if (action === 'block-item') {
         const isBlocked = btn.dataset.blocked === 'true';
@@ -1568,11 +1702,11 @@ const bottomNavItem = (active: boolean) =>
 
         try {
           if (isBlocked) {
-            await apiFetch(`/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
-            (window as any).showToast('Unblocked successfully', 'success');
+            await apiFetch(`/media/blocklist?${blockDeleteQuery(uriId, mediaType)}`, 'DELETE');
+            window["showToast"]('Unblocked successfully', 'success');
           } else {
-            await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType });
-            (window as any).showToast('Blocked successfully', 'success');
+            await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, false));
+            window["showToast"]('Blocked successfully', 'success');
           }
           
           const nowBlocked = !isBlocked;
@@ -1598,9 +1732,9 @@ const bottomNavItem = (active: boolean) =>
         const isDropped = btn.dataset.dropped === 'true';
         try {
           if (isDropped) {
-            await apiFetch(`/media/blocklist?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
+            await apiFetch(`/media/blocklist?${blockDeleteQuery(uriId, mediaType)}`, 'DELETE');
           } else {
-            await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, is_dropped: true });
+            await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, true));
           }
           
           const nowDropped = !isDropped;
@@ -1619,7 +1753,7 @@ const bottomNavItem = (active: boolean) =>
             btn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-amber-500/10', 'hover:text-amber-400');
           }
           
-          (window as any).showToast(nowDropped ? 'Show dropped' : 'Tracking resumed', 'success');
+          window["showToast"](nowDropped ? 'Show dropped' : 'Tracking resumed', 'success');
           triggerDashboardRefresh(card);
         } catch { /* ignore */ }
         return;
@@ -1632,7 +1766,7 @@ const bottomNavItem = (active: boolean) =>
         );
         if (!confirmed) return;
         try {
-          await apiFetch(`/history/continue-watching?tmdb_id=${tmdbId}&media_type=${mediaType}`, 'DELETE');
+          await apiFetch(`/history/continue-watching?uri_id=${encodeURIComponent(uriId)}&media_type=${mediaType}`, 'DELETE');
           const wrapper = card.closest('.flex-shrink-0') || card;
           wrapper.style.transition = 'all 0.3s ease';
           wrapper.style.opacity = '0';
@@ -1664,7 +1798,7 @@ const bottomNavItem = (active: boolean) =>
               }
             }
           }, 300);
-          (window as any).showToast('Removed from Continue Watching', 'success');
+          window["showToast"]('Removed from Continue Watching', 'success');
         } catch { /* ignore */ }
         return;
       }
@@ -1678,7 +1812,10 @@ const bottomNavItem = (active: boolean) =>
         const seriesId = showTmdbId || tmdbId;
 
         if (mediaType === 'movie' || mediaType === 'episode') {
-          await openWatchHistoryModal(btn, tmdbId, mediaType, card.dataset.mediaId || null);
+          await openWatchHistoryModal(
+            btn, uriId || null, mediaType, card.dataset.mediaId || null,
+            card.dataset.showUriId || null, card.dataset.season || null, card.dataset.episodeNumber || null,
+          );
           return;
         }
 
@@ -1699,16 +1836,19 @@ const bottomNavItem = (active: boolean) =>
 
         try {
           if (mediaType === 'series' && season) {
+            const showUri = uriId || card.dataset.showUriId;
+            if (!showUri) { alert('Missing show URI'); return; }
             if (isWatched) {
-              await apiFetch(`/history/season?series_tmdb_id=${seriesId}&season_number=${season}`, 'DELETE');
+              await apiFetch(`/history/season?show_uri_id=${encodeURIComponent(showUri)}&season_number=${season}`, 'DELETE');
             } else {
-              await apiFetch('/history/season', 'POST', { series_tmdb_id: Number(seriesId), season_number: Number(season) });
+              await apiFetch('/history/season', 'POST', { show_uri_id: showUri, season_number: Number(season) });
             }
           } else if (mediaType === 'series') {
+            if (!uriId) { alert('Missing show URI'); return; }
             if (isWatched) {
-              await apiFetch(`/history/show-all?series_tmdb_id=${tmdbId}`, 'DELETE');
+              await apiFetch(`/history/show-all?show_uri_id=${encodeURIComponent(uriId)}`, 'DELETE');
             } else {
-              await apiFetch('/history/show-all', 'POST', { series_tmdb_id: Number(tmdbId) });
+              await apiFetch('/history/show-all', 'POST', { show_uri_id: uriId });
             }
           }
           const nowWatched = !isWatched;
@@ -1717,18 +1857,17 @@ const bottomNavItem = (active: boolean) =>
 
           // If marking a show as watched/unwatched, update all season/episode cards on the page
           if (mediaType === 'series' && !season) {
-            // Find season cards: can be [data-tmdb-id=SHOW_ID] with [data-season] set, 
-            // OR [data-show-tmdb-id=SHOW_ID] with [data-season] set.
-            const allSeasonCards = document.querySelectorAll(`
-              [data-card][data-media-type="series"][data-tmdb-id="${tmdbId}"][data-season]:not([data-season=""]),
-              [data-card][data-media-type="series"][data-show-tmdb-id="${tmdbId}"][data-season]:not([data-season=""])
-            `);
+            const showUri = uriId || (tmdbId ? `tmdb:s:${tmdbId}` : '');
+            const allSeasonCards = showUri
+              ? document.querySelectorAll(`[data-card][data-media-type="series"][data-uri-id="${CSS.escape(showUri)}"][data-season]:not([data-season=""])`)
+              : document.querySelectorAll(`[data-card][data-media-type="series"][data-tmdb-id="${tmdbId}"][data-season]:not([data-season=""])`);
             allSeasonCards.forEach(c => {
               const sBtn = c.querySelector('[data-action="watched"]');
               if (sBtn) updateWatchedButtonUI(sBtn, nowWatched);
             });
-            // Also update any episode cards for this show
-            const allEpCards = document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${tmdbId}"]`);
+            const allEpCards = showUri
+              ? document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-uri-id="${CSS.escape(showUri)}"]`)
+              : document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${tmdbId}"]`);
             allEpCards.forEach(c => {
               const eBtn = c.querySelector('[data-action="watched"]');
               if (eBtn) updateWatchedButtonUI(eBtn, nowWatched);
@@ -1737,7 +1876,10 @@ const bottomNavItem = (active: boolean) =>
 
           // If marking a season as watched/unwatched, update all episodes for that season on the page
           if (mediaType === 'series' && season) {
-            const allEpCards = document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${seriesId}"][data-season="${season}"]`);
+            const showUri = uriId || (card.dataset.showUriId) || (seriesId ? `tmdb:s:${seriesId}` : '');
+            const allEpCards = showUri
+              ? document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-uri-id="${CSS.escape(showUri)}"][data-season="${season}"]`)
+              : document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${seriesId}"][data-season="${season}"]`);
             allEpCards.forEach(c => {
               const eBtn = c.querySelector('[data-action="watched"]');
               if (eBtn) updateWatchedButtonUI(eBtn, nowWatched);
@@ -1749,8 +1891,8 @@ const bottomNavItem = (active: boolean) =>
           if (mediaType === 'episode' && nowWatched) {
             const nextUpContainer = card.closest('[data-next-up-grid], [data-next-up-list], [data-next-up-hero]');
             if (nextUpContainer) {
-              const showId = card.dataset.showTmdbId || card.dataset.tmdbId;
-              if (showId) {
+              const showUriForNext = card.dataset.showUriId || card.dataset.uriId;
+              if (showUriForNext) {
                 // DASHBOARD CASE: Refresh the whole section to update hero, backdrop, and order.
                 const dashboardSection = card.closest('#dashboard-next-up');
                 if (dashboardSection) {
@@ -1797,7 +1939,7 @@ const bottomNavItem = (active: boolean) =>
                 card.style.pointerEvents = 'none';
 
                 try {
-                  const res = await fetch(`/partials/next-up-item?show_tmdb_id=${showId}`, {
+                  const res = await fetch(`/partials/next-up-item?show_uri_id=${encodeURIComponent(showUriForNext)}`, {
                     headers: { 'Authorization': `Bearer ${TOKEN()}` }
                   });
                   if (res.ok) {
@@ -1844,9 +1986,9 @@ const bottomNavItem = (active: boolean) =>
         } catch { /* ignore */ }
 
       } else if (action === 'list') {
-        if (!tmdbId) { alert('Cannot add unmatched item to lists'); return; }
+        if (!uriId) { alert('Cannot add unmatched item to lists'); return; }
         if (document.getElementById('list-popover')!.classList.contains('hidden') || _activeListBtn !== btn) {
-          openListPopover(btn, tmdbId, mediaType);
+          openListPopover(btn, uriId, mediaType);
         } else {
           closeListPopover();
         }
@@ -1854,39 +1996,41 @@ const bottomNavItem = (active: boolean) =>
       } else if (action === 'collected') {
         const season = card.dataset.season;
         const showTmdbId = card.dataset.showTmdbId;
+        const showUriId = card.dataset.showUriId;
         const inLibrary = btn.dataset.inLibrary === 'true';
         const seriesId = showTmdbId || tmdbId;
+        const seriesUri = showUriId || uriId;
         try {
           if (mediaType === 'series' && !season) {
-            // Show-level collect/uncollect — covers all seasons
+            if (!uriId) { alert('Missing show URI'); return; }
             if (inLibrary) {
               const ok = await showConfirm('Remove show from collection?', 'This will remove all collection entries for every episode in this show.');
               if (!ok) return;
-              await apiFetch(`/media/collect-show?tmdb_id=${tmdbId}`, 'DELETE');
+              await apiFetch(`/media/collect-show?uri_id=${encodeURIComponent(uriId)}`, 'DELETE');
             } else {
-              await apiFetch('/media/collect-show', 'POST', { tmdb_id: Number(tmdbId), media_type: 'series' });
+              await apiFetch('/media/collect-show', 'POST', { uri_id: uriId, media_type: 'series' });
             }
           } else if (mediaType === 'series' && season) {
-            // Season-level collect/uncollect
+            if (!seriesUri) { alert('Missing show URI'); return; }
             if (inLibrary) {
               const ok = await showConfirm('Remove season from collection?', 'This will remove all collection entries for this season.');
               if (!ok) return;
-              await apiFetch(`/media/collect-season?series_tmdb_id=${seriesId}&season_number=${season}`, 'DELETE');
+              await apiFetch(`/media/collect-season?show_uri_id=${encodeURIComponent(seriesUri)}&season_number=${season}`, 'DELETE');
             } else {
-              await apiFetch('/media/collect-season', 'POST', { series_tmdb_id: Number(seriesId), season_number: Number(season) });
+              await apiFetch('/media/collect-season', 'POST', { show_uri_id: seriesUri, season_number: Number(season) });
             }
           } else {
             if (inLibrary) {
               const ok = await showConfirm('Remove from collection?', 'This will remove all collection entries for this item.');
               if (!ok) return;
-              const query = tmdbId ? `tmdb_id=${tmdbId}` : `id=${mediaId}`;
+              const query = uriId ? `uri_id=${encodeURIComponent(uriId)}` : `id=${mediaId}`;
               await apiFetch(`/media/collect?${query}&media_type=${mediaType}`, 'DELETE');
             } else {
-              if (!tmdbId) { alert('Cannot manually collect unmatched items'); return; }
-              const collectBody: Record<string, number | string> = { tmdb_id: Number(tmdbId), media_type: mediaType };
+              if (!uriId) { alert('Cannot manually collect unmatched items'); return; }
+              const collectBody: Record<string, number | string> = { uri_id: uriId, media_type: mediaType };
               if (mediaType === 'episode') {
                 const epNum = card.dataset.episodeNumber;
-                if (showTmdbId) collectBody.series_tmdb_id = Number(showTmdbId);
+                if (showUriId) collectBody.show_uri_id = showUriId;
                 if (season) collectBody.season_number = Number(season);
                 if (epNum) collectBody.episode_number = Number(epNum);
               }
@@ -1915,7 +2059,7 @@ const bottomNavItem = (active: boolean) =>
         const currentRating = btn.dataset.userRating ? Number(btn.dataset.userRating) : null;
         const ratingSeason = (mediaType === 'series' && card.dataset.season) ? Number(card.dataset.season) : null;
         if (document.getElementById('rating-popover')!.classList.contains('hidden') || _activeRatingBtn !== btn) {
-          openRatingPopover(btn, tmdbId, mediaType, currentRating, ratingSeason);
+          openRatingPopover(btn, uriId, mediaType, currentRating, ratingSeason);
         } else {
           closeRatingPopover();
         }
@@ -1963,15 +2107,15 @@ const bottomNavItem = (active: boolean) =>
       if (!btn) return;
       const card = btn.closest<HTMLElement>('[data-card]');
       if (!card) return;
-      const tmdbId = card.dataset.tmdbId;
+      const uriIdReq = card.dataset.uriId;
       const mediaType = card.dataset.mediaType;
-      if (!tmdbId || !mediaType) return;
+      if (!uriIdReq || !mediaType) return;
 
       const API = '/api/proxy';
-      const TOKEN = () => (window as any).__AUTH_TOKEN__ ?? '';
+      const TOKEN = () => window["__AUTH_TOKEN__"] ?? '';
 
       try {
-        const res = await fetch(`${API}/media/request-status?tmdb_id=${tmdbId}&media_type=${mediaType}`, {
+        const res = await fetch(`${API}/media/request-status?uri_id=${encodeURIComponent(uriIdReq)}&media_type=${mediaType}`, {
           headers: { Authorization: `Bearer ${TOKEN()}` },
         });
         if (!res.ok) return; // service down — keep disabled
@@ -2003,7 +2147,7 @@ const bottomNavItem = (active: boolean) =>
 
     // Don't show if already running as installed PWA
     const isInstalled = window.matchMedia('(display-mode: standalone)').matches
-      || (navigator as any).standalone === true;
+      || navigator.standalone === true;
 
     const wasDismissed = (() => {
       const val = localStorage.getItem(DISMISS_KEY);
@@ -2158,11 +2302,7 @@ const bottomNavItem = (active: boolean) =>
     // Re-run if using Astro View Transitions (if added in the future)
     document.addEventListener('astro:after-swap', initDragScroll);
     
-    // Also re-run after dynamic content is loaded (for Trending/Airing sections)
-    // We can use a simple interval or a MutationObserver. 
-    // Given the project style, an interval or manual trigger is common.
-    // For now, let's also hook into the loadSection calls if they existed here, 
-    // but they are in index.astro. For general discovery, we'll use a MutationObserver.
+    // Watch for DOM updates to re-initialize drag scroll on dynamic sections.
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (mutation.addedNodes.length) {

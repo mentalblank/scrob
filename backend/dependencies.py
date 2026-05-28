@@ -70,3 +70,18 @@ async def get_optional_user(
     result = await db.execute(query)
     user = result.scalar_one_or_none()
     return user
+
+
+async def get_user_by_api_key(
+    api_key: str,
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    user_result = await db.execute(select(User).where(User.api_key == api_key))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key",
+        )
+    return user
+

@@ -1,0 +1,65 @@
+---
+interface Props {
+  refreshUrl: string;
+  showRefreshBtn?: boolean;
+}
+
+const { refreshUrl, showRefreshBtn = true } = Astro.props;
+const token = Astro.locals.token;
+---
+{showRefreshBtn && (
+  <button
+    id="refresh-metadata-btn"
+    class="w-full h-11 flex items-center justify-center gap-2 px-5 text-sm font-bold leading-none text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
+    data-refresh-url={refreshUrl}
+    data-token={token}
+  >
+    <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+      <path d="M21 3v5h-5"/>
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+      <path d="M8 16H3v5"/>
+    </svg>
+    <span id="refresh-label">Refresh Metadata</span>
+  </button>
+)}
+
+<script>
+  document.addEventListener('click', async (e) => {
+    const btn = (e.target as HTMLElement).closest('#refresh-metadata-btn') as HTMLButtonElement | null;
+    if (!btn) return;
+
+    const refreshUrl = btn.getAttribute('data-refresh-url');
+    const token = btn.getAttribute('data-token');
+    if (!refreshUrl) return;
+
+    const icon = btn.querySelector('#refresh-icon');
+    const label = btn.querySelector('#refresh-label');
+    if (!label || !icon) return;
+
+    btn.setAttribute('disabled', 'true');
+    btn.classList.add('opacity-60', 'cursor-not-allowed');
+    icon.classList.add('animate-spin');
+    label.textContent = 'Refreshing...';
+
+    try {
+      const res = await fetch(refreshUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Refresh failed');
+      }
+      label.textContent = 'Done!';
+      icon.classList.remove('animate-spin');
+      setTimeout(() => { window.location.reload(); }, 800);
+    } catch (err) {
+      icon.classList.remove('animate-spin');
+      label.textContent = 'Refresh failed';
+      btn.removeAttribute('disabled');
+      btn.classList.remove('opacity-60', 'cursor-not-allowed');
+      setTimeout(() => { label.textContent = 'Refresh Metadata'; }, 3000);
+    }
+  });
+</script>

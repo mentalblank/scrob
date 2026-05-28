@@ -1,6 +1,8 @@
 ---
 interface Props {
-  tmdbId: number;
+  tmdbId?: number | null;
+  uriId?: string | null;
+  showUriId?: string | null;
   mediaType: string;
   watched: boolean;
   inLists: number[];
@@ -26,6 +28,8 @@ interface Props {
 
 const {
   tmdbId,
+  uriId,
+  showUriId,
   mediaType,
   watched,
   inLists,
@@ -54,8 +58,8 @@ const effectivelyHideRate = hideRate || !showUserRatings;
 
 const effectivelyHideBlock = hideBlock;
 
-const isSeries = mediaType === "series" || (mediaType === "episode" && showTmdbId != null);
-const showRequest = !hideRequest && requestEnabled && (mediaType === "movie" || mediaType === "series" || (mediaType === "episode" && showTmdbId != null));
+const isSeries = mediaType === "series" || (mediaType === "episode" && (showTmdbId != null || showUriId != null));
+const showRequest = !hideRequest && requestEnabled && (mediaType === "movie" || mediaType === "series" || (mediaType === "episode" && (showTmdbId != null || showUriId != null)));
 const ratingLabel = userRating != null ? userRating.toFixed(1) : "Rate";
 
 // Shared button classes
@@ -98,13 +102,22 @@ const requestTitle = isMonitored
     : requestStatus === "rejected"
       ? "Request rejected"
       : (isSeries ? "Request on Sonarr" : "Request on Radarr");
+
+let effectiveUriId = uriId;
+if (!effectiveUriId && tmdbId) {
+  if (mediaType === "movie") effectiveUriId = `tmdb:m:${tmdbId}`;
+  else if (mediaType === "series") effectiveUriId = `tmdb:s:${tmdbId}`;
+  else if (mediaType === "episode") effectiveUriId = `tmdb:e:${tmdbId}`;
+}
 ---
 
 <div
   data-card
-  data-tmdb-id={String(tmdbId)}
+  data-tmdb-id={tmdbId != null ? String(tmdbId) : ""}
+  data-uri-id={effectiveUriId ?? ""}
   data-media-type={mediaType}
   data-show-tmdb-id={showTmdbId ? String(showTmdbId) : ""}
+  data-show-uri-id={showUriId ?? ""}
   data-season={seasonNumber != null ? String(seasonNumber) : ""}
   data-episode-number={episodeNumber != null ? String(episodeNumber) : ""}
   data-media-id={mediaId != null ? String(mediaId) : ""}

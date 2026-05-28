@@ -1,5 +1,6 @@
 ---
 import Base from "../../layouts/Base.astro";
+import PosterModal from "../../components/PosterModal.astro";
 import MediaCard from "../../components/MediaCard.astro";
 import CommentsSection from "../../components/CommentsSection.astro";
 import Pagination from "../../components/Pagination.astro";
@@ -11,13 +12,38 @@ const { id } = Astro.params;
 const { token } = Astro.locals;
 const page = Number(Astro.url.searchParams.get("page") ?? 1);
 
-const person = await api.media.getPerson(Number(id), page, token);
+// Parse URI or legacy integer ID. URI format: `tmdb:p:123` or `tvdb:p:456`.
+// Provider param `?provider=tvdb` also supported for raw integer IDs.
+let provider: "tmdb" | "tvdb" = "tmdb";
+let numericId: number;
+let fetchKey: string;
+const rawId = id ?? "";
+if (rawId.includes(":")) {
+  const parts = rawId.split(":");
+  if (parts.length === 3) {
+    provider = parts[0] === "tvdb" ? "tvdb" : "tmdb";
+    numericId = Number(parts[2]);
+  } else {
+    numericId = Number(rawId);
+  }
+  fetchKey = rawId;  // URI passthrough
+} else {
+  numericId = Number(rawId);
+  const queryProvider = Astro.url.searchParams.get("provider");
+  if (queryProvider === "tvdb") provider = "tvdb";
+  fetchKey = provider === "tvdb" ? `tvdb:p:${numericId}` : `tmdb:p:${numericId}`;
+}
+
+// Backend `/media/person/{id}` accepts URI string ("tvdb:p:X", "tmdb:p:X") or raw integer
+const person = await api.media.getPerson(fetchKey, page, token);
+
 const profile = await api.profile.get(token!);
 const paginationType = profile?.pagination_type ?? "infinite_scroll";
 
 const credits = person.credits || [];
 const totalPages = Math.ceil(person.total_credits / person.page_size);
-const baseUrl = `/person/${id}`;
+const baseUrl = `/person/${rawId}`;
+const personUri = (person as any).uri_id ?? fetchKey;
 ---
 
 <Base title={person.name}>
@@ -27,7 +53,7 @@ const baseUrl = `/person/${id}`;
       <div class="sticky top-8">
         {person.profile_path ? (
           <div class="relative w-full aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl mb-6 group/photo">
-            <button id="photo-zoom-btn" class="w-full h-full block cursor-zoom-in" aria-label={`Enlarge photo of ${person.name}`}>
+            <button id="poster-zoom-btn" class="w-full h-full block cursor-zoom-in" aria-label={`Enlarge photo of ${person.name}`}>
               <img
                 src={person.profile_path}
                 alt={person.name}
@@ -113,60 +139,19 @@ const baseUrl = `/person/${id}`;
             type="person_credits"
             currentPage={page}
             totalPages={totalPages}
-            params={{ person_id: id, source: 'tmdb' }}
+            params={{ person_id: String(numericId), source: provider }}
             targetSelector="#credits-grid"
             endpoint="/partials/person-credits"
           />
         )}
       </div>
-
-      <CommentsSection
-        mediaType="person"
-        tmdbId={person.tmdb_id}
-      />
-    </div>
-  </div>
+<CommentsSection
+  mediaType="person"
+  uriId={personUri}
+/>
+</div>
+</div>
+<PosterModal posterPath={person.profile_path} title={person.name} />
+)}
 </Base>
 
-{person.profile_path && (
-  <div id="photo-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
-    <div id="photo-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
-    <img
-      src={person.profile_path}
-      alt={person.name}
-      class="relative max-h-[90vh] max-w-[85vw] md:max-w-[50vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
-    />
-    <button
-      id="photo-modal-close"
-      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
-      aria-label="Close"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-      </svg>
-    </button>
-  </div>
-)}
-
-<script>
-  const zoomBtn = document.getElementById('photo-zoom-btn');
-  const modal = document.getElementById('photo-modal');
-  const backdrop = document.getElementById('photo-modal-backdrop');
-  const closeBtn = document.getElementById('photo-modal-close');
-
-  if (zoomBtn && modal) {
-    function openModal() {
-      modal.classList.remove('hidden');
-      document.body.style.overflow = 'hidden';
-    }
-    function closeModal() {
-      modal.classList.add('hidden');
-      document.body.style.overflow = '';
-    }
-
-    zoomBtn.addEventListener('click', openModal);
-    backdrop?.addEventListener('click', closeModal);
-    closeBtn?.addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
-  }
-</script>

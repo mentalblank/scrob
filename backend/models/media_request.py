@@ -19,7 +19,7 @@ class MediaRequest(Base):
 
     id          : Mapped[int]            = mapped_column(Integer, primary_key=True)
     user_id     : Mapped[int]            = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    tmdb_id     : Mapped[int]            = mapped_column(Integer, nullable=False)
+    uri_id      : Mapped[str]            = mapped_column(String(50), nullable=False, index=True)
     media_type  : Mapped[str]            = mapped_column(String(10), nullable=False)  # "movie" | "series"
     title       : Mapped[str]            = mapped_column(String(500), nullable=False, server_default="")
     poster_path : Mapped[Optional[str]]  = mapped_column(String(500))

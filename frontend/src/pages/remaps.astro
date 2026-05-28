@@ -30,26 +30,28 @@ try {
   if (resEp.ok) episodeOverrides = (await resEp.json()).overrides || [];
   else error += "Failed to load episode overrides. ";
   
-  // Group episode overrides by show ID
-  const groupedEpisodeOverrides: Record<number, any> = {};
+  // Group episode overrides by show URI
+  const groupedEpisodeOverrides: Record<string, any> = {};
   episodeOverrides.forEach((override: any) => {
-    const showId = override.source_show_tmdb_id;
-    if (!groupedEpisodeOverrides[showId]) {
-      groupedEpisodeOverrides[showId] = {
+    const showKey = override.source_show_uri_id ?? String(override.source_show_id);
+    if (!groupedEpisodeOverrides[showKey]) {
+      groupedEpisodeOverrides[showKey] = {
+        show_key: showKey.replace(/[^a-zA-Z0-9_-]/g, '_'),
         show_title: override.source_show_title,
-        show_tmdb_id: showId,
+        show_uri_id: override.source_show_uri_id,
+        show_tmdb_id: override.source_show_id,
         show_poster_path: override.source_show_poster_path,
         overrides: [],
         seasons: {}
       };
     }
-    groupedEpisodeOverrides[showId].overrides.push(override);
-    
+    groupedEpisodeOverrides[showKey].overrides.push(override);
+
     const seasonNum = override.source_season_number;
-    if (!groupedEpisodeOverrides[showId].seasons[seasonNum]) {
-      groupedEpisodeOverrides[showId].seasons[seasonNum] = [];
+    if (!groupedEpisodeOverrides[showKey].seasons[seasonNum]) {
+      groupedEpisodeOverrides[showKey].seasons[seasonNum] = [];
     }
-    groupedEpisodeOverrides[showId].seasons[seasonNum].push(override);
+    groupedEpisodeOverrides[showKey].seasons[seasonNum].push(override);
   });
   groupedShowsList = Object.values(groupedEpisodeOverrides);
   
@@ -59,7 +61,7 @@ try {
     // Group custom titles by show ID
     const groupedCustomTitles: Record<string, any> = {};
     customTitles.forEach((item: any) => {
-      let groupId = String(item.show_tmdb_id || 0);
+      let groupId = item.show_uri_id ?? String(item.show_tmdb_id ?? 0);
       let groupTitle = item.show_title || "Global / Unlinked";
       let groupPoster = item.show_poster_path || null;
 
@@ -72,6 +74,7 @@ try {
       if (!groupedCustomTitles[groupId]) {
         groupedCustomTitles[groupId] = {
           show_title: groupTitle,
+          show_uri_id: item.show_uri_id ?? null,
           show_tmdb_id: item.show_tmdb_id || 0,
           show_poster_path: groupPoster,
           items: [],
@@ -84,8 +87,8 @@ try {
     groupedCustomTitlesList = Object.values(groupedCustomTitles).sort((a: any, b: any) => {
       if (a.isMovies) return -1;
       if (b.isMovies) return 1;
-      if (a.show_tmdb_id === 0) return 1;
-      if (b.show_tmdb_id === 0) return -1;
+      if (!a.show_uri_id && !a.show_tmdb_id) return 1;
+      if (!b.show_uri_id && !b.show_tmdb_id) return -1;
       return a.show_title.localeCompare(b.show_title);
     });
   } else {
@@ -157,10 +160,13 @@ try {
               <div class="flex items-center gap-3 w-full md:w-2/5 min-w-0">
                 <div class="min-w-0 flex-1">
                   <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider">Source Show</span>
-                  <a href={`/show/${override.source_show_tmdb_id}`} class="block text-zinc-100 font-bold truncate text-sm mt-0.5 hover:text-blue-400 transition-colors" title={override.source_show_title}>{override.source_show_title}</a>
+                  {override.source_show_uri_id
+                    ? <a href={`/show/${override.source_show_uri_id}`} class="block text-zinc-100 font-bold truncate text-sm mt-0.5 hover:text-blue-400 transition-colors" title={override.source_show_title}>{override.source_show_title}</a>
+                    : <span class="block text-zinc-100 font-bold truncate text-sm mt-0.5">{override.source_show_title}</span>
+                  }
                   <div class="flex flex-wrap items-center gap-1.5 mt-1">
                     <span class="px-2 py-0.5 bg-zinc-800 border border-zinc-750 rounded-md text-[10px] font-bold text-zinc-300">Season {override.source_season_number}</span>
-                    <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-850">TMDB: {override.source_show_tmdb_id}</span>
+                    <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-850">{override.source_show_uri_id}</span>
                   </div>
                 </div>
               </div>
@@ -176,17 +182,20 @@ try {
               <div class="flex items-center gap-3 w-full md:w-2/5 min-w-0">
                 <div class="min-w-0 flex-1">
                   <span class="text-[9px] font-extrabold uppercase text-blue-400 tracking-wider">Target TMDB Show</span>
-                  <a href={`/show/${override.target_show_tmdb_id}`} class="block text-zinc-100 font-bold truncate text-sm mt-0.5 hover:text-blue-400 transition-colors" title={override.target_show_title}>{override.target_show_title}</a>
+                  {override.target_show_uri_id
+                    ? <a href={`/show/${override.target_show_uri_id}`} class="block text-zinc-100 font-bold truncate text-sm mt-0.5 hover:text-blue-400 transition-colors" title={override.target_show_title}>{override.target_show_title}</a>
+                    : <span class="block text-zinc-100 font-bold truncate text-sm mt-0.5">{override.target_show_title}</span>
+                  }
                   <div class="flex flex-wrap items-center gap-1.5 mt-1">
                     <span class="px-2 py-0.5 bg-blue-950/40 border border-blue-900/30 rounded-md text-[10px] font-bold text-blue-400">Season {override.target_season_number}</span>
-                    <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-850">TMDB: {override.target_show_tmdb_id}</span>
+                    <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-850">{override.target_show_uri_id}</span>
                   </div>
                 </div>
               </div>
 
               <!-- Actions -->
               <div class="flex items-center gap-2 w-full md:w-auto justify-end shrink-0 border-t border-zinc-800 md:border-t-0 pt-4 md:pt-0">
-                <button class="edit-season-btn flex items-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" data-source-tmdb={override.source_show_tmdb_id} data-source-season={override.source_season_number} data-target-tmdb={override.target_show_tmdb_id} data-target-season={override.target_season_number} title="Edit override">
+                <button class="edit-season-btn flex items-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm" data-source-uri={override.source_show_uri_id} data-source-season={override.source_season_number} data-target-uri={override.target_show_uri_id} data-target-season={override.target_season_number} title="Edit override">
                   <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                   Edit
                 </button>
@@ -249,18 +258,18 @@ try {
       ) : (
         <div class="space-y-4">
           {groupedShowsList.map((showGroup: any) => (
-            <div class="show-episodes-panel border border-zinc-800 rounded-3xl bg-zinc-900/20 overflow-hidden backdrop-blur-md transition-all duration-300" data-show-tmdb={showGroup.show_tmdb_id}>
+            <div class="show-episodes-panel border border-zinc-800 rounded-3xl bg-zinc-900/20 overflow-hidden backdrop-blur-md transition-all duration-300" data-show-uri={showGroup.show_uri_id ?? showGroup.show_key}>
               
               <!-- Show Panel Header (Collapsible Toggle) -->
               <div 
                 class="flex items-center justify-between p-5 bg-zinc-900/60 border-b border-zinc-850 cursor-pointer select-none hover:bg-zinc-800/40 transition-colors"
-                data-show-toggle={showGroup.show_tmdb_id}
+                data-show-toggle={showGroup.show_key}
               >
                 <div class="flex items-center gap-4 min-w-0">
                   <!-- Collapsible chevron icon -->
                   <svg 
                     class="w-5 h-5 text-zinc-400 transition-transform duration-300 transform" 
-                    id={`chevron-${showGroup.show_tmdb_id}`} 
+                    id={`chevron-${showGroup.show_key}`} 
                     xmlns="http://www.w3.org/2000/svg" 
                     width="24" 
                     height="24" 
@@ -278,7 +287,7 @@ try {
                     <h3 class="text-base font-bold text-zinc-100 truncate hover:text-indigo-400 transition-colors">
                       {showGroup.show_title}
                     </h3>
-                    <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850 mt-1 inline-block">TMDB ID: {showGroup.show_tmdb_id}</span>
+                    <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850 mt-1 inline-block">{showGroup.show_uri_id ?? ("TMDB ID: " + showGroup.show_tmdb_id)}</span>
                   </div>
                 </div>
 
@@ -291,7 +300,7 @@ try {
 
               <!-- Collapsible Content Panel (Hidden by default) -->
               <div 
-                id={`panel-${showGroup.show_tmdb_id}`} 
+                id={`panel-${showGroup.show_key}`} 
                 class="hidden divide-y divide-zinc-850 bg-zinc-950/20"
               >
                 
@@ -301,14 +310,14 @@ try {
                     <input 
                       type="checkbox" 
                       class="bulk-show-select-all rounded border-zinc-700 bg-zinc-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4" 
-                      data-show-id={showGroup.show_tmdb_id} 
+                      data-show-id={showGroup.show_key} 
                     />
                     <span class="text-xs font-bold text-zinc-400">Select All in Show</span>
                   </div>
                   
                   <button 
                     class="bulk-delete-btn flex items-center justify-center gap-1.5 px-3 py-1.5 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/40 text-rose-400 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                    data-show-id={showGroup.show_tmdb_id}
+                    data-show-id={showGroup.show_key}
                     disabled
                   >
                     <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
@@ -325,14 +334,14 @@ try {
                       const sortedOverrides = [...overrides].sort((a: any, b: any) => a.source_episode_number - b.source_episode_number);
                       
                       return (
-                        <div class="season-group-container bg-zinc-950/10" data-season-num={seasonNum} data-show-id={showGroup.show_tmdb_id}>
+                        <div class="season-group-container bg-zinc-950/10" data-season-num={seasonNum} data-show-id={showGroup.show_key}>
                           <!-- Season Sub-Header -->
                           <div class="px-5 py-2.5 bg-zinc-900/15 flex items-center justify-between border-b border-zinc-850/40">
                             <div class="flex items-center gap-2.5">
                               <input
                                 type="checkbox"
                                 class="bulk-season-select-all rounded border-zinc-700 bg-zinc-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-3.5 h-3.5 shrink-0"
-                                data-show-id={showGroup.show_tmdb_id}
+                                data-show-id={showGroup.show_key}
                                 data-season-num={seasonNum}
                                 title={`Select all in Season ${seasonNum}`}
                               />
@@ -357,14 +366,14 @@ try {
                                 data-source-title={(override.source_episode_title || "").toLowerCase()}
                                 data-target-title={(override.target_episode_title || "").toLowerCase()}
                                 data-show-title={showGroup.show_title.toLowerCase()}
-                                data-show-tmdb={showGroup.show_tmdb_id}
+                                data-show-uri={showGroup.show_uri_id ?? showGroup.show_key}
                               >
                                 <!-- Checkbox -->
                                 <input 
                                   type="checkbox" 
                                   class="override-row-checkbox rounded border-zinc-700 bg-zinc-950 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-3.5 h-3.5 shrink-0" 
                                   data-override-id={override.id}
-                                  data-show-id={showGroup.show_tmdb_id}
+                                  data-show-id={showGroup.show_key}
                                 />
 
                                 <!-- Mapping chips -->
@@ -376,7 +385,7 @@ try {
                                   <span class="font-mono text-[11px] font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded shrink-0">
                                     S{override.target_season_number.toString().padStart(2, '0')}E{override.target_episode_number.toString().padStart(2, '0')}
                                   </span>
-                                  {override.source_show_tmdb_id !== override.target_show_tmdb_id && (
+                                  {override.source_show_uri_id !== override.target_show_uri_id && (
                                     <span class="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-black truncate" title={override.target_show_title}>
                                       {override.target_show_title}
                                     </span>
@@ -385,7 +394,7 @@ try {
 
                                 <!-- Actions (visible on hover) -->
                                 <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                                  <button class="edit-ep-btn p-1 rounded-lg text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 transition-all cursor-pointer" data-src-tmdb={override.source_show_tmdb_id} data-src-season={override.source_season_number} data-src-ep={override.source_episode_number} data-tgt-tmdb={override.target_show_tmdb_id} data-tgt-season={override.target_season_number} data-tgt-ep={override.target_episode_number} title="Edit">
+                                  <button class="edit-ep-btn p-1 rounded-lg text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 transition-all cursor-pointer" data-src-uri={override.source_show_uri_id} data-src-season={override.source_season_number} data-src-ep={override.source_episode_number} data-tgt-uri={override.target_show_uri_id} data-tgt-season={override.target_season_number} data-tgt-ep={override.target_episode_number} title="Edit">
                                     <svg class="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                                   </button>
                                   <button data-ep-apply-id={override.id} class="p-1 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-zinc-800 transition-all cursor-pointer" title="Re-apply">
@@ -456,18 +465,18 @@ try {
       ) : (
         <div class="space-y-4">
           {groupedCustomTitlesList.map((showGroup: any) => (
-            <div class="show-renames-panel border border-zinc-800 rounded-3xl bg-zinc-900/20 overflow-hidden backdrop-blur-md transition-all duration-300" data-rename-tmdb={showGroup.show_tmdb_id}>
+            <div class="show-renames-panel border border-zinc-800 rounded-3xl bg-zinc-900/20 overflow-hidden backdrop-blur-md transition-all duration-300" data-rename-uri={showGroup.show_uri_id ?? showGroup.show_key}>
               
               <!-- Show Panel Header (Collapsible Toggle) -->
               <div 
                 class="flex items-center justify-between p-5 bg-zinc-900/60 border-b border-zinc-850 cursor-pointer select-none hover:bg-zinc-800/40 transition-colors"
-                data-rename-toggle={showGroup.show_tmdb_id}
+                data-rename-toggle={showGroup.show_key}
               >
                 <div class="flex items-center gap-4 min-w-0">
                   <!-- Collapsible chevron icon -->
                   <svg 
                     class="w-5 h-5 text-zinc-400 transition-transform duration-300 transform" 
-                    id={`rename-chevron-${showGroup.show_tmdb_id}`} 
+                    id={`rename-chevron-${showGroup.show_key}`} 
                     xmlns="http://www.w3.org/2000/svg" 
                     width="24" 
                     height="24" 
@@ -482,7 +491,7 @@ try {
                   </svg>
                   
                   <!-- Show Poster Image -->
-                  {showGroup.show_tmdb_id > 0 && (
+                  {(showGroup.show_uri_id || showGroup.show_tmdb_id) && (
                     <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
                       {showGroup.show_poster_path ? (
                         <img src={showGroup.show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
@@ -496,8 +505,8 @@ try {
                     <h3 class="text-base font-bold text-zinc-100 truncate hover:text-indigo-400 transition-colors">
                       {showGroup.show_title}
                     </h3>
-                    {showGroup.show_tmdb_id > 0 && (
-                      <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850 mt-1 inline-block">TMDB ID: {showGroup.show_tmdb_id}</span>
+                    {(showGroup.show_uri_id || showGroup.show_tmdb_id) && (
+                      <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850 mt-1 inline-block">{showGroup.show_uri_id ?? ("TMDB ID: " + showGroup.show_tmdb_id)}</span>
                     )}
                   </div>
                 </div>
@@ -511,7 +520,7 @@ try {
 
               <!-- Collapsible Content Panel (Hidden by default) -->
               <div 
-                id={`rename-panel-${showGroup.show_tmdb_id}`} 
+                id={`rename-panel-${showGroup.show_key}`} 
                 class="hidden divide-y divide-zinc-850 bg-zinc-950/20"
               >
                 <div class="overflow-x-auto">
@@ -981,18 +990,18 @@ try {
       const rawVal = sourceShowTmdbInput.value.trim();
       if (!rawVal) return;
 
-      const tmdbId = type === "tvdb" ? (-parseInt(rawVal)).toString() : rawVal;
+      const uriForLookup = rawVal.includes(":") ? rawVal : `${type}:s:${rawVal}`;
 
       sourceShowLookupBtn.textContent = "...";
       try {
-        const res = await fetch(`/api/proxy/sync/tmdb-show-preview/${tmdbId}`, {
+        const res = await fetch(`/api/proxy/sync/tmdb-show-preview/${uriForLookup}`, {
           headers: { "Authorization": `Bearer ${token}` }
         });
         if (res.ok) {
           const data = await res.json();
           sourceManualTitle.textContent = data.title;
           const year = data.first_air_date ? new Date(data.first_air_date).getFullYear() : 'N/A';
-          sourceManualMeta.textContent = `${year} • ${data.tmdb_id < 0 ? 'TVDB ID: ' + Math.abs(data.tmdb_id) : 'TMDB ID: ' + data.tmdb_id}`;
+          sourceManualMeta.textContent = `${year} • ${(data.uri_id?.startsWith('tvdb:') || data.tvdb_id && !data.tmdb_id) ? 'TVDB ID: ' + data.tvdb_id : 'TMDB ID: ' + data.tmdb_id}`;
           
           if (data.poster_path) {
             sourceManualPoster.src = data.poster_path;
@@ -1021,18 +1030,18 @@ try {
       const rawVal = targetShowTmdbInput.value.trim();
       if (!rawVal) return;
 
-      const tmdbId = type === "tvdb" ? (-parseInt(rawVal)).toString() : rawVal;
+      const uriForLookupTgt = rawVal.includes(":") ? rawVal : `${type}:s:${rawVal}`;
 
       targetShowLookupBtn.textContent = "...";
       try {
-        const res = await fetch(`/api/proxy/sync/tmdb-show-preview/${tmdbId}`, {
+        const res = await fetch(`/api/proxy/sync/tmdb-show-preview/${uriForLookupTgt}`, {
           headers: { "Authorization": `Bearer ${token}` }
         });
         if (res.ok) {
           const data = await res.json();
           targetManualTitle.textContent = data.title;
           const year = data.first_air_date ? new Date(data.first_air_date).getFullYear() : 'N/A';
-          targetManualMeta.textContent = `${year} • ${data.tmdb_id < 0 ? 'TVDB ID: ' + Math.abs(data.tmdb_id) : 'TMDB ID: ' + data.tmdb_id}`;
+          targetManualMeta.textContent = `${year} • ${(data.uri_id?.startsWith('tvdb:') || data.tvdb_id && !data.tmdb_id) ? 'TVDB ID: ' + data.tvdb_id : 'TMDB ID: ' + data.tmdb_id}`;
           
           if (data.poster_path) {
             targetManualPoster.src = data.poster_path;
@@ -1082,14 +1091,12 @@ try {
       const srcType = (document.getElementById("source-show-id-type") as HTMLSelectElement).value;
       const tgtType = (document.getElementById("target-show-id-type") as HTMLSelectElement).value;
 
-      let sourceTmdbId = parseInt(sourceShowTmdbInput.value);
-      if (srcType === "tvdb" && sourceTmdbId > 0) sourceTmdbId = -sourceTmdbId;
+      const srcRaw = sourceShowTmdbInput.value.trim();
+      const tgtRaw = targetShowTmdbInput.value.trim();
+      const sourceUri = srcRaw.includes(":") ? srcRaw : `${srcType}:s:${srcRaw}`;
+      const targetUri = tgtRaw.includes(":") ? tgtRaw : `${tgtType}:s:${tgtRaw}`;
 
       const sourceSeasonNum = parseInt(sourceSeasonInput.value);
-
-      let targetTmdbId = parseInt(targetShowTmdbInput.value);
-      if (tgtType === "tvdb" && targetTmdbId > 0) targetTmdbId = -targetTmdbId;
-
       const targetSeasonNum = parseInt(targetSeasonInput.value);
 
       saveRemapBtn.disabled = true;
@@ -1103,9 +1110,9 @@ try {
             "Authorization": `Bearer ${token}`
           },
           body: JSON.stringify({
-            source_show_tmdb_id: sourceTmdbId,
+            source_show_uri_id: sourceUri,
             source_season_number: sourceSeasonNum,
-            target_show_tmdb_id: targetTmdbId,
+            target_show_uri_id: targetUri,
             target_season_number: targetSeasonNum
           })
         });
@@ -1289,7 +1296,7 @@ try {
         const year = (media.first_air_date || media.release_date) ? new Date(media.first_air_date || media.release_date).getFullYear() : "N/A";
         const typeLabel = isMovie ? "MOVIE" : "SHOW";
 
-        const idLabel = media.tmdb_id < 0 ? `TVDB: ${Math.abs(media.tmdb_id)}` : `TMDB: ${media.tmdb_id}`;
+        const idLabel = (media.uri_id?.startsWith('tvdb:') || (media.tvdb_id && !media.tmdb_id)) ? `TVDB: ${media.tvdb_id ?? media.uri_id?.split(':')[2]}` : `TMDB: ${media.tmdb_id}`;
         card.innerHTML = `
           ${posterHtml}
           <div class="min-w-0">
@@ -1314,7 +1321,7 @@ try {
 
       renameSelectedShowTitle.textContent = media.title;
       const year = (media.first_air_date || media.release_date) ? new Date(media.first_air_date || media.release_date).getFullYear() : "N/A";
-      const idLabel = media.tmdb_id < 0 ? `TVDB ID: ${Math.abs(media.tmdb_id)}` : `TMDB ID: ${media.tmdb_id}`;
+      const idLabel = (media.uri_id?.startsWith('tvdb:') || (media.tvdb_id && !media.tmdb_id)) ? `TVDB ID: ${media.tvdb_id ?? media.uri_id?.split(':')[2]}` : `TMDB ID: ${media.tmdb_id}`;
       renameSelectedShowYear.textContent = `${year} • ${idLabel}`;
       if (media.poster_path) {
         renameSelectedShowPoster.src = media.poster_path;
@@ -1386,7 +1393,7 @@ try {
           renameSelectedSeason = season.season_number;
           
           if (renameType === "episode") {
-            fetchRenameEpisodes(renameSelectedShow.tmdb_id, season.season_number);
+            fetchRenameEpisodes(renameSelectedShow.uri_id ?? `tmdb:s:${renameSelectedShow.tmdb_id}`, season.season_number);
           }
           validateRenameForm();
         });
@@ -1395,10 +1402,10 @@ try {
       });
     }
 
-    async function fetchRenameEpisodes(showTmdbId: number, seasonNumber: number) {
+    async function fetchRenameEpisodes(showUri: string, seasonNumber: number) {
       renameEpisodeContainer.innerHTML = '<div class="text-xs text-zinc-500 py-4 text-center">Loading episodes...</div>';
       try {
-        const res = await fetch(`/api/proxy/shows/${showTmdbId}/season/${seasonNumber}`, {
+        const res = await fetch(`/api/proxy/shows/${encodeURIComponent(showUri)}/season/${seasonNumber}`, {
           headers: { "Authorization": `Bearer ${token}` }
         });
         if (res.ok) {
@@ -1509,13 +1516,13 @@ try {
       const body: any = {};
 
       if (renameType === "show") {
-        body.show_tmdb_id = renameSelectedShow.tmdb_id;
+        body.show_uri_id = renameSelectedShow.uri_id ?? (renameSelectedShow.tvdb_id ? `tvdb:s:${renameSelectedShow.tvdb_id}` : `tmdb:s:${renameSelectedShow.tmdb_id}`);
         body.custom_title = customTitle;
       } else if (renameType === "movie") {
         body.media_id = renameSelectedShow.id;
         body.custom_title = customTitle;
       } else if (renameType === "season") {
-        body.show_tmdb_id = renameSelectedShow.tmdb_id;
+        body.show_uri_id = renameSelectedShow.uri_id ?? (renameSelectedShow.tvdb_id ? `tvdb:s:${renameSelectedShow.tvdb_id}` : `tmdb:s:${renameSelectedShow.tmdb_id}`);
         body.season_number = renameSelectedSeason;
         body.season_custom_name = customTitle;
       } else if (renameType === "episode") {
@@ -2050,9 +2057,9 @@ try {
         const body: any = { custom_title: newName.trim() === '' ? null : newName.trim() };
         
         if (item.type === 'show') {
-          body.show_tmdb_id = item.show_tmdb_id;
+          body.show_uri_id = item.show_uri_id;
         } else if (item.type === 'season') {
-          body.show_tmdb_id = item.show_tmdb_id;
+          body.show_uri_id = item.show_uri_id;
           body.season_number = item.season_number;
           body.season_custom_name = body.custom_title;
           delete body.custom_title;
@@ -2069,7 +2076,7 @@ try {
             },
             body: JSON.stringify(body)
           });
-          
+
           if (res.ok) {
             window.showToast?.("Custom title updated successfully", "success");
             setTimeout(() => window.location.reload(), 600);
@@ -2091,11 +2098,11 @@ try {
         if (!confirm(`Are you sure you want to remove the custom title for ${item.context}? It will revert to '${item.original_title}'.`)) return;
 
         const body: any = { custom_title: null };
-        
+
         if (item.type === 'show') {
-          body.show_tmdb_id = item.show_tmdb_id;
+          body.show_uri_id = item.show_uri_id;
         } else if (item.type === 'season') {
-          body.show_tmdb_id = item.show_tmdb_id;
+          body.show_uri_id = item.show_uri_id;
           body.season_number = item.season_number;
           body.season_custom_name = null;
           delete body.custom_title;
@@ -2186,11 +2193,10 @@ try {
       const srcType = (document.getElementById("ep-src-type") as HTMLSelectElement).value;
       const tgtType = (document.getElementById("ep-tgt-type") as HTMLSelectElement).value;
 
-      let srcTmdb = parseInt(epSrcTmdbInput.value);
-      if (srcType === "tvdb" && srcTmdb > 0) srcTmdb = -srcTmdb;
-
-      let tgtTmdb = parseInt(epTgtTmdbInput.value);
-      if (tgtType === "tvdb" && tgtTmdb > 0) tgtTmdb = -tgtTmdb;
+      const srcRaw = epSrcTmdbInput.value.trim();
+      const tgtRaw = epTgtTmdbInput.value.trim();
+      const srcUri = srcRaw.includes(":") ? srcRaw : `${srcType}:s:${srcRaw}`;
+      const tgtUri = tgtRaw.includes(":") ? tgtRaw : `${tgtType}:s:${tgtRaw}`;
 
       const srcSeason = parseInt(epSrcSeasonInput.value);
       const srcEpStart = parseInt(epSrcEpisodeStartInput.value);
@@ -2198,7 +2204,7 @@ try {
       const tgtSeason = parseInt(epTgtSeasonInput.value);
       const tgtEpStart = parseInt(epTgtEpisodeStartInput.value);
 
-      if (isNaN(srcTmdb) || isNaN(tgtTmdb) || isNaN(srcSeason) || isNaN(srcEpStart) || isNaN(tgtSeason) || isNaN(tgtEpStart)) {
+      if (!srcRaw || !tgtRaw || isNaN(srcSeason) || isNaN(srcEpStart) || isNaN(tgtSeason) || isNaN(tgtEpStart)) {
         window.showToast?.("Please enter valid IDs, Season, and Episode Start values.", "error");
         return;
       }
@@ -2213,10 +2219,10 @@ try {
       const overridesToSave = [];
       for (let i = 0; i < count; i++) {
         overridesToSave.push({
-          source_show_tmdb_id: srcTmdb,
+          source_show_uri_id: srcUri,
           source_season_number: srcSeason,
           source_episode_number: srcEpStart + i,
-          target_show_tmdb_id: tgtTmdb,
+          target_show_uri_id: tgtUri,
           target_season_number: tgtSeason,
           target_episode_number: tgtEpStart + i
         });
@@ -2268,10 +2274,10 @@ try {
     // Edit Existing Mappings Logic
     document.querySelectorAll(".edit-ep-btn").forEach(btn => {
       btn.addEventListener("click", () => {
-        const srcTmdb = btn.getAttribute("data-src-tmdb");
+        const srcUri = btn.getAttribute("data-src-uri") || "";
         const srcSeason = btn.getAttribute("data-src-season");
         const srcEp = btn.getAttribute("data-src-ep");
-        const tgtTmdb = btn.getAttribute("data-tgt-tmdb");
+        const tgtUri = btn.getAttribute("data-tgt-uri") || "";
         const tgtSeason = btn.getAttribute("data-tgt-season");
         const tgtEp = btn.getAttribute("data-tgt-ep");
 
@@ -2280,27 +2286,17 @@ try {
         const srcTypeSelect = document.getElementById("ep-src-type") as HTMLSelectElement;
         const tgtTypeSelect = document.getElementById("ep-tgt-type") as HTMLSelectElement;
 
-        const srcTmdbVal = parseInt(srcTmdb || "0");
-        if (srcTmdbVal < 0) {
-          if (srcTypeSelect) srcTypeSelect.value = "tvdb";
-          epSrcTmdbInput.value = Math.abs(srcTmdbVal).toString();
-        } else {
-          if (srcTypeSelect) srcTypeSelect.value = "tmdb";
-          epSrcTmdbInput.value = srcTmdb || "";
-        }
+        const srcProvider = srcUri.split(":")[0] || "tmdb";
+        if (srcTypeSelect) srcTypeSelect.value = srcProvider;
+        epSrcTmdbInput.value = srcUri;
 
-        const tgtTmdbVal = parseInt(tgtTmdb || "0");
-        if (tgtTmdbVal < 0) {
-          if (tgtTypeSelect) tgtTypeSelect.value = "tvdb";
-          epTgtTmdbInput.value = Math.abs(tgtTmdbVal).toString();
-        } else {
-          if (tgtTypeSelect) tgtTypeSelect.value = "tmdb";
-          epTgtTmdbInput.value = tgtTmdb || "";
-        }
+        const tgtProvider = tgtUri.split(":")[0] || "tmdb";
+        if (tgtTypeSelect) tgtTypeSelect.value = tgtProvider;
+        epTgtTmdbInput.value = tgtUri;
 
         epSrcSeasonInput.value = srcSeason || "";
         epSrcEpisodeStartInput.value = srcEp || "";
-        epSrcEpisodeEndInput.value = ""; // Default empty end for range on edit
+        epSrcEpisodeEndInput.value = "";
         epTgtSeasonInput.value = tgtSeason || "";
         epTgtEpisodeStartInput.value = tgtEp || "";
       });
@@ -2311,29 +2307,15 @@ try {
     const mode = params.get('mode');
     
     if (mode === 'season') {
-      const tmdb = params.get('src_tmdb');
+      const uri = params.get('src_uri');
       const season = params.get('src_season');
-      
-      if (tmdb) {
-        // 1. Open the Season Remap Modal
+
+      if (uri) {
         resetModalState();
         remapModal.classList.remove("opacity-0", "pointer-events-none");
-        
-        const tmdbVal = parseInt(tmdb);
-        const typeSelectSrc = document.getElementById("source-show-id-type") as HTMLSelectElement;
-        const typeSelectTgt = document.getElementById("target-show-id-type") as HTMLSelectElement;
 
-        if (tmdbVal < 0) {
-          if (typeSelectSrc) typeSelectSrc.value = "tvdb";
-          if (typeSelectTgt) typeSelectTgt.value = "tvdb";
-          sourceShowTmdbInput.value = Math.abs(tmdbVal).toString();
-          targetShowTmdbInput.value = Math.abs(tmdbVal).toString();
-        } else {
-          if (typeSelectSrc) typeSelectSrc.value = "tmdb";
-          if (typeSelectTgt) typeSelectTgt.value = "tmdb";
-          sourceShowTmdbInput.value = tmdb;
-          targetShowTmdbInput.value = tmdb;
-        }
+        sourceShowTmdbInput.value = uri;
+        targetShowTmdbInput.value = uri;
 
         // 2. Pre-fill season coordinates
         if (season) {
@@ -2351,29 +2333,14 @@ try {
       // Remove params from URL so refresh doesn't pop it open again
       window.history.replaceState({}, document.title, window.location.pathname);
     } else if (mode === 'ep') {
-      const tmdb = params.get('src_tmdb');
+      const uri = params.get('src_uri');
       const season = params.get('src_season');
       const ep = params.get('src_ep');
-      
-      if (tmdb) {
-        // 1. Open the Episode Remap Modal
-        openEpModal();
-        
-        const tmdbVal = parseInt(tmdb);
-        const epSrcTypeSelect = document.getElementById("ep-src-type") as HTMLSelectElement;
-        const epTgtTypeSelect = document.getElementById("ep-tgt-type") as HTMLSelectElement;
 
-        if (tmdbVal < 0) {
-          if (epSrcTypeSelect) epSrcTypeSelect.value = "tvdb";
-          if (epTgtTypeSelect) epTgtTypeSelect.value = "tvdb";
-          epSrcTmdbInput.value = Math.abs(tmdbVal).toString();
-          epTgtTmdbInput.value = Math.abs(tmdbVal).toString();
-        } else {
-          if (epSrcTypeSelect) epSrcTypeSelect.value = "tmdb";
-          if (epTgtTypeSelect) epTgtTypeSelect.value = "tmdb";
-          epSrcTmdbInput.value = tmdb;
-          epTgtTmdbInput.value = tmdb;
-        }
+      if (uri) {
+        openEpModal();
+        epSrcTmdbInput.value = uri;
+        epTgtTmdbInput.value = uri;
 
         // 2. Fill coordinates
         if (season) epSrcSeasonInput.value = season;

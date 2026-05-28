@@ -28,6 +28,7 @@ from routers.media import (
 from dependencies import get_current_user
 from core import tmdb
 from core import tvdb as tvdb_client
+from core import skyhook
 import unicodedata
 
 router = APIRouter()
@@ -78,6 +79,7 @@ def format_show(show: ShowModel) -> dict:
     return {
         "id": show.id,
         "tmdb_id": show.tmdb_id,
+        "uri_id": show.uri_id,
         "tvdb_id": show.tvdb_id if show.tvdb_id else (
             int(show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
             if (show.tmdb_data and show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
@@ -105,12 +107,17 @@ def format_show(show: ShowModel) -> dict:
 
 
 async def get_enriched_show_info(db: AsyncSession, current_user_id: int, series_tmdb_id: int, show_info: dict) -> dict:
+    # Look up the show by tmdb_id to get its DB id
+    _show_q = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id))
+    _show_row = _show_q.scalar_one_or_none()
+    _show_pk = _show_row.id if _show_row else None
+
     overrides_res = await db.execute(
         select(ShowSeasonOverride).where(
             ShowSeasonOverride.user_id == current_user_id,
-            ShowSeasonOverride.target_show_tmdb_id == series_tmdb_id
+            ShowSeasonOverride.target_show_id == _show_pk,
         )
-    )
+    ) if _show_pk else (await db.execute(select(ShowSeasonOverride).where(False)))
     season_overrides = overrides_res.scalars().all()
     
     existing_snums = {s.get("season_number") for s in show_info.get("seasons_meta", [])}
@@ -126,7 +133,7 @@ async def get_enriched_show_info(db: AsyncSession, current_user_id: int, series_
             episode_count = 0
             
             src_show_q = await db.execute(
-                select(ShowModel).where(ShowModel.tmdb_id == override.source_show_tmdb_id)
+                select(ShowModel).where(ShowModel.id == override.source_show_id)
             )
             src_show = src_show_q.scalar_one_or_none()
             if src_show and src_show.tmdb_data:
@@ -255,12 +262,20 @@ async def list_shows(
     }
 
 
-@router.get("/{series_tmdb_id}")
+@router.get("/{series_id}")
 async def get_show(
-    series_tmdb_id: int,
+    series_id: str | int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Accept both URI format ("tmdb:s:123", "tvdb:s:456") and legacy integer strings
+    if isinstance(series_id, str) and ":" in series_id:
+        return await get_show_by_uri(series_id, db=db, current_user=current_user)
+    try:
+        series_tmdb_id = int(series_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Invalid show ID: {series_id!r}")
+
     user_settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     user_settings = user_settings_q.scalar_one_or_none()
     include_specials = False
@@ -319,21 +334,7 @@ async def get_show(
                     tmdb.get_tv_images(series_tmdb_id, api_key=api_key),
                 )
                 # Extract first official YouTube trailer
-                trailer_youtube_id = next(
-                    (
-                        v["key"]
-                        for v in videos_data.get("results", [])
-                        if v.get("type") == "Trailer" and v.get("site") == "YouTube" and v.get("official")
-                    ),
-                    next(
-                        (
-                            v["key"]
-                            for v in videos_data.get("results", [])
-                            if v.get("type") == "Trailer" and v.get("site") == "YouTube"
-                        ),
-                        None,
-                    ),
-                )
+                trailer_youtube_id = tmdb.extract_trailer(videos_data)
                 networks = [
                     {
                         "id": n["id"],
@@ -394,13 +395,13 @@ async def get_show(
         # --- Per-season states ---
         season_states: dict = {}
 
-        # Get season overrides where this show is the target or the source
+        # Get season overrides where this show is the target or the source (query by shows.id FK)
         overrides_all_q = await db.execute(
             select(ShowSeasonOverride).where(
                 ShowSeasonOverride.user_id == current_user.id,
                 or_(
-                    ShowSeasonOverride.source_show_tmdb_id == series_tmdb_id,
-                    ShowSeasonOverride.target_show_tmdb_id == series_tmdb_id
+                    ShowSeasonOverride.source_show_id == show.id,
+                    ShowSeasonOverride.target_show_id == show.id,
                 )
             )
         )
@@ -440,17 +441,17 @@ async def get_show(
 
         # Merge remapped seasons from overrides
         for override in overrides_all:
-            if override.source_show_tmdb_id == series_tmdb_id:
+            if override.source_show_id == show.id:
                 this_season = override.source_season_number
-                other_show_tmdb_id = override.target_show_tmdb_id
+                other_show_id = override.target_show_id
                 other_season = override.target_season_number
             else:
                 this_season = override.target_season_number
-                other_show_tmdb_id = override.source_show_tmdb_id
+                other_show_id = override.source_show_id
                 other_season = override.source_season_number
 
             other_show_q = await db.execute(
-                select(ShowModel).where(ShowModel.tmdb_id == other_show_tmdb_id)
+                select(ShowModel).where(ShowModel.id == other_show_id)
             )
             other_show = other_show_q.scalar_one_or_none()
             if other_show:
@@ -516,15 +517,15 @@ async def get_show(
 
         # Apply overrides to season_ep_counts
         for override in overrides_all:
-            if override.source_show_tmdb_id == series_tmdb_id:
+            if override.source_show_id == show.id:
                 # Remapped away! Exclude this season from counts (intra-show only)
-                if override.source_show_tmdb_id == override.target_show_tmdb_id:
+                if override.source_show_id == override.target_show_id:
                     if override.source_season_number in season_ep_counts:
                         del season_ep_counts[override.source_season_number]
-            elif override.target_show_tmdb_id == series_tmdb_id:
+            elif override.target_show_id == show.id:
                 # Remapped to! Include the source season's episode count
                 src_show_q = await db.execute(
-                    select(ShowModel).where(ShowModel.tmdb_id == override.source_show_tmdb_id)
+                    select(ShowModel).where(ShowModel.id == override.source_show_id)
                 )
                 src_show = src_show_q.scalar_one_or_none()
                 ep_count = 0
@@ -574,7 +575,7 @@ async def get_show(
         # Remove any seasons that are source of a season-level override (intra-show only)
         source_seasons_to_remove = {
             o.source_season_number for o in overrides_all
-            if o.source_show_tmdb_id == series_tmdb_id and o.source_show_tmdb_id == o.target_show_tmdb_id
+            if o.source_show_id == show.id and o.source_show_id == o.target_show_id
         }
         base_seasons_meta = [
             s for s in (show.tmdb_data or {}).get("seasons", [])
@@ -582,7 +583,7 @@ async def get_show(
         ]
         
         existing_snums = {s.get("season_number") for s in base_seasons_meta}
-        season_overrides = {o.target_season_number: o for o in overrides_all if o.target_show_tmdb_id == series_tmdb_id}
+        season_overrides = {o.target_season_number: o for o in overrides_all if o.target_show_id == show.id}
 
         for s_num in seasons.keys():
             if s_num not in existing_snums:
@@ -591,10 +592,10 @@ async def get_show(
                 overview = None
                 air_date = None
                 name = f"Season {s_num}"
-                
+
                 if override:
                     src_show_q = await db.execute(
-                        select(ShowModel).where(ShowModel.tmdb_id == override.source_show_tmdb_id)
+                        select(ShowModel).where(ShowModel.id == override.source_show_id)
                     )
                     src_show = src_show_q.scalar_one_or_none()
                     if src_show and src_show.tmdb_data:
@@ -693,21 +694,7 @@ async def get_show(
             tmdb.get_tv_videos(series_tmdb_id, api_key=api_key),
             tmdb.get_tv_images(series_tmdb_id, api_key=api_key),
         )
-        trailer_youtube_id_tmdb = next(
-            (
-                v["key"]
-                for v in videos_data.get("results", [])
-                if v.get("type") == "Trailer" and v.get("site") == "YouTube" and v.get("official")
-            ),
-            next(
-                (
-                    v["key"]
-                    for v in videos_data.get("results", [])
-                    if v.get("type") == "Trailer" and v.get("site") == "YouTube"
-                ),
-                None,
-            ),
-        )
+        trailer_youtube_id_tmdb = tmdb.extract_trailer(videos_data)
 
         # Pick best backdrop + logo using No Language → user lang → any priority
         picked_backdrop = tmdb.pick_image(tv_images.get("backdrops", []), preferred_lang=user_lang, size="original")
@@ -835,13 +822,25 @@ async def get_show(
 
 
 
-@router.get("/{series_tmdb_id}/recommendations")
+@router.get("/{series_id}/recommendations")
 async def get_show_recommendations(
-    series_tmdb_id: int,
+    series_id: str | int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Fetch series recommendations from TMDB and enrich with state."""
+    if isinstance(series_id, str) and ":" in series_id:
+        # Resolve URI to tmdb_id for TMDB recommendations
+        from utils.alias_lookup import get_provider_id_for_uri
+        tmdb_str = await get_provider_id_for_uri(db, series_id, "tmdb")
+        if not tmdb_str:
+            return {"results": []}
+        series_tmdb_id = int(tmdb_str)
+    else:
+        try:
+            series_tmdb_id = int(series_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Invalid show ID: {series_id!r}")
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(tmdb_key):
         return {"results": []}
@@ -875,41 +874,51 @@ async def get_show_recommendations(
         return {"results": []}
 
 
-@router.get("/{series_tmdb_id}/season/{season_number}")
+@router.get("/{series_id}/season/{season_number}")
 async def get_show_season(
-    series_tmdb_id: int,
+    series_id: str | int,
     season_number: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if series_tmdb_id < 0:
-        res = await get_tvdb_season(-series_tmdb_id, season_number, db, current_user)
-        res["tmdb_id"] = series_tmdb_id
-        if "show" in res:
-            res["show"]["tmdb_id"] = series_tmdb_id
-        return res
+    if isinstance(series_id, str) and ":" in series_id:
+        parts = series_id.split(":", 2)
+        if len(parts) == 3 and parts[1] == "s":
+            if parts[0] == "tvdb":
+                return await get_tvdb_season(int(parts[2]), season_number, db, current_user)
+            series_tmdb_id = int(parts[2])
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid show URI: {series_id!r}")
+    else:
+        try:
+            series_tmdb_id = int(series_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Invalid show ID: {series_id!r}")
 
-    # Check for active season override
-    override_result = await db.execute(
-        select(ShowSeasonOverride).where(
-            ShowSeasonOverride.user_id == current_user.id,
-            ShowSeasonOverride.target_show_tmdb_id == series_tmdb_id,
-            ShowSeasonOverride.target_season_number == season_number
-        )
-    )
-    season_override = override_result.scalar_one_or_none()
-
-    query_show_tmdb_id = series_tmdb_id
-    query_season_number = season_number
-    if season_override:
-        query_show_tmdb_id = season_override.source_show_tmdb_id
-        query_season_number = season_override.source_season_number
-
-    # 1. Try to find show and local episodes for this season
+    # 1. Try to find show
     show_result = await db.execute(
         select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id)
     )
     show = show_result.scalar_one_or_none()
+
+    # Check for active season override (keyed by show.id FK)
+    query_show_tmdb_id = series_tmdb_id
+    query_season_number = season_number
+    if show:
+        override_result = await db.execute(
+            select(ShowSeasonOverride).where(
+                ShowSeasonOverride.user_id == current_user.id,
+                ShowSeasonOverride.target_show_id == show.id,
+                ShowSeasonOverride.target_season_number == season_number,
+            )
+        )
+        season_override = override_result.scalar_one_or_none()
+        if season_override:
+            src_show_q = await db.execute(select(ShowModel).where(ShowModel.id == season_override.source_show_id))
+            src_show = src_show_q.scalar_one_or_none()
+            if src_show and src_show.tmdb_id:
+                query_show_tmdb_id = src_show.tmdb_id
+            query_season_number = season_override.source_season_number
 
     local_episodes = []
     if show:
@@ -1207,8 +1216,14 @@ async def get_show_season(
                 ep_num = local_ep.episode_number
                 if ep_num in seen_ep_nums:
                     continue
-                seen_ep_nums.add(ep_num)
                 local_media_id = local_ep.id
+                is_in_library = local_media_id in collected_media_ids
+                
+                # Hide ghost episodes that are no longer in the library
+                if not is_in_library:
+                    continue
+                    
+                seen_ep_nums.add(ep_num)
                 is_watched = local_media_id in watched_media_ids
                 is_in_library = local_media_id in collected_media_ids
                 user_rating = episode_ratings.get(local_media_id)
@@ -1311,57 +1326,78 @@ async def get_show_season(
         raise HTTPException(status_code=404, detail=f"Season not found: {e}")
 
 
-@router.get("/{series_tmdb_id}/season/{season_number}/{episode_number}")
+@router.get("/{series_id}/season/{season_number}/{episode_number}")
 async def get_episode_detail(
-    series_tmdb_id: int,
+    series_id: str | int,
     season_number: int,
     episode_number: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Resolve series_id (URI or integer string) to TMDB integer
+    if isinstance(series_id, str) and ":" in series_id:
+        parts = series_id.split(":", 2)
+        if len(parts) == 3 and parts[1] == "s":
+            if parts[0] == "tvdb":
+                from routers.shows import get_tvdb_episode as _tvdb_ep
+                return await get_tvdb_episode(int(parts[2]), season_number, episode_number, db, current_user)
+            series_tmdb_id = int(parts[2])
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid show URI: {series_id!r}")
+    else:
+        try:
+            series_tmdb_id = int(series_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Invalid show ID: {series_id!r}")
+
     api_key = await get_user_tmdb_key(db, current_user.id)
     user_lang = await get_user_content_language(db, current_user.id)
     if not check_tmdb_key(api_key):
         raise HTTPException(status_code=404, detail="TMDB API Key not configured")
 
-    # Check for active episode or season override
-    ep_override_result = await db.execute(
-        select(ShowEpisodeOverride).where(
-            ShowEpisodeOverride.user_id == current_user.id,
-            ShowEpisodeOverride.target_show_tmdb_id == series_tmdb_id,
-            ShowEpisodeOverride.target_season_number == season_number,
-            ShowEpisodeOverride.target_episode_number == episode_number
-        )
-    )
-    ep_override = ep_override_result.scalar_one_or_none()
-
     query_show_tmdb_id = series_tmdb_id
     query_season_number = season_number
     query_episode_number = episode_number
-    season_override = None
-
-    if ep_override:
-        query_show_tmdb_id = ep_override.source_show_tmdb_id
-        query_season_number = ep_override.source_season_number
-        query_episode_number = ep_override.source_episode_number
-    else:
-        season_override_result = await db.execute(
-            select(ShowSeasonOverride).where(
-                ShowSeasonOverride.user_id == current_user.id,
-                ShowSeasonOverride.target_show_tmdb_id == series_tmdb_id,
-                ShowSeasonOverride.target_season_number == season_number
-            )
-        )
-        season_override = season_override_result.scalar_one_or_none()
-        if season_override:
-            query_show_tmdb_id = season_override.source_show_tmdb_id
-            query_season_number = season_override.source_season_number
 
     try:
         show_result = await db.execute(
             select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id)
         )
         show = show_result.scalar_one_or_none()
+
+        # Check for active episode or season override (keyed by show.id FK)
+        if show:
+            ep_override_result = await db.execute(
+                select(ShowEpisodeOverride).where(
+                    ShowEpisodeOverride.user_id == current_user.id,
+                    ShowEpisodeOverride.target_show_id == show.id,
+                    ShowEpisodeOverride.target_season_number == season_number,
+                    ShowEpisodeOverride.target_episode_number == episode_number,
+                )
+            )
+            ep_override = ep_override_result.scalar_one_or_none()
+            if ep_override:
+                src_show_q = await db.execute(select(ShowModel).where(ShowModel.id == ep_override.source_show_id))
+                src_show = src_show_q.scalar_one_or_none()
+                if src_show and src_show.tmdb_id:
+                    query_show_tmdb_id = src_show.tmdb_id
+                query_season_number = ep_override.source_season_number
+                query_episode_number = ep_override.source_episode_number
+            else:
+                season_override_result = await db.execute(
+                    select(ShowSeasonOverride).where(
+                        ShowSeasonOverride.user_id == current_user.id,
+                        ShowSeasonOverride.target_show_id == show.id,
+                        ShowSeasonOverride.target_season_number == season_number,
+                    )
+                )
+                season_override = season_override_result.scalar_one_or_none()
+                if season_override:
+                    src_show_q = await db.execute(select(ShowModel).where(ShowModel.id == season_override.source_show_id))
+                    src_show = src_show_q.scalar_one_or_none()
+                    if src_show and src_show.tmdb_id:
+                        query_show_tmdb_id = src_show.tmdb_id
+                    query_season_number = season_override.source_season_number
 
         local_ep = None
         library_info = None
@@ -1530,8 +1566,10 @@ async def get_episode_detail(
 
         ep_state: dict = {
             "tmdb_id": ep_tmdb_id,
+            "uri_id": f"tmdb:e:{ep_tmdb_id}" if ep_tmdb_id else None,
             "type": "episode",
             "show_tmdb_id": series_tmdb_id,
+            "show_uri_id": show.uri_id if show else (f"tmdb:s:{series_tmdb_id}" if series_tmdb_id else None),
         }
         await enrich_with_state(db, current_user.id, [ep_state])
 
@@ -1567,20 +1605,48 @@ async def get_episode_detail(
         raise HTTPException(status_code=404, detail=f"Episode not found: {e}")
 
 
-@router.post("/{series_tmdb_id}/refresh")
+@router.post("/{series_id}/refresh")
 async def refresh_show_metadata(
-    series_tmdb_id: int,
+    series_id: str | int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    series_tmdb_id = None
+    show = None
+
+    # Accept URI or integer. TVDB URI dispatches to TVDB-specific refresh.
+    if isinstance(series_id, str) and ":" in series_id:
+        parts = series_id.split(":", 2)
+        if len(parts) == 3 and parts[1] == "s" and parts[0] == "tvdb":
+            return await refresh_tvdb_show_metadata(int(parts[2]), db, current_user)
+        elif len(parts) == 3 and parts[1] == "s" and parts[0] == "tmdb":
+            series_tmdb_id = int(parts[2])
+            show_result = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id))
+            show = show_result.scalar_one_or_none()
+        else:
+            from utils.alias_lookup import get_internal_id_for_uri
+            show_pk = await get_internal_id_for_uri(db, series_id)
+            if not show_pk:
+                raise HTTPException(status_code=404, detail="Show not found for URI")
+            show_result = await db.execute(select(ShowModel).where(ShowModel.id == show_pk))
+            show = show_result.scalar_one_or_none()
+            if show and show.tmdb_id:
+                series_tmdb_id = show.tmdb_id
+    else:
+        try:
+            series_tmdb_id = int(series_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Invalid show ID: {series_id!r}")
+        show_result = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id))
+        show = show_result.scalar_one_or_none()
+
+    if not series_tmdb_id:
+        raise HTTPException(status_code=400, detail="Cannot refresh TMDB metadata without a TMDB ID")
+
     api_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(api_key):
         raise HTTPException(status_code=400, detail="TMDB API key not configured")
 
-    show_result = await db.execute(
-        select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id)
-    )
-    show = show_result.scalar_one_or_none()
     if not show:
         raise HTTPException(status_code=404, detail="Show not found in local library")
 
@@ -1625,10 +1691,7 @@ async def refresh_show_metadata(
     )
     episodes = ep_result.scalars().all()
 
-    # Also find orphaned episodes (show_id = null) in this user's collection
-    # whose (season_number, episode_number) match TMDB data for this show.
-    # This happens when the show's TMDB lookup failed during the original sync,
-    # leaving episodes with no show_id even though they belong to this show.
+    # Find orphaned episodes (no show_id) in collection matching this show's season/episode.
     user_media_ids_sq = select(Collection.media_id).where(Collection.user_id == current_user.id)
     orphan_result = await db.execute(
         select(Media)
@@ -1671,20 +1734,92 @@ async def refresh_show_metadata(
         media.tmdb_rating = ep.get("vote_average")
         media.tmdb_data = {"runtime": ep.get("runtime"), "cast": []}
 
+    ghost_episodes_to_delete = []
+    
+    # Build a lookup map of TMDB ID -> episode data to fix numbering mismatches
+    tmdb_id_to_ep = {}
+    for s_num, eps_in_season in season_data.items():
+        for ep_num, ep_data in eps_in_season.items():
+            if ep_data.get("id"):
+                tmdb_id_to_ep[ep_data["id"]] = ep_data
+
     for media in episodes:
-        if media.season_number is None:
-            continue
-        ep = season_data.get(media.season_number, {}).get(media.episode_number)
+        ep = None
+        # First try to map by TMDB ID. If the numbering shifted (e.g. S03E01 is now S02E34),
+        # this safely remaps the local episode to the correct TMDB numbering.
+        if media.tmdb_id and media.tmdb_id in tmdb_id_to_ep:
+            ep = tmdb_id_to_ep[media.tmdb_id]
+            new_s_num = ep.get("season_number")
+            new_e_num = ep.get("episode_number")
+            if new_s_num is not None and new_e_num is not None:
+                media.season_number = new_s_num
+                media.episode_number = new_e_num
+        elif media.season_number is not None and media.episode_number is not None:
+            # Fallback to season/episode numbering match
+            ep = season_data.get(media.season_number, {}).get(media.episode_number)
+            
         if ep:
             apply_episode_data(media, ep)
+        else:
+            ghost_episodes_to_delete.append(media)
 
     # Adopt orphans whose (season, episode) has exactly one candidate in this show's TMDB data
     for media in orphans:
-        if media.season_number is None or media.episode_number is None:
-            continue
-        ep = season_data.get(media.season_number, {}).get(media.episode_number)
+        ep = None
+        if media.tmdb_id and media.tmdb_id in tmdb_id_to_ep:
+            ep = tmdb_id_to_ep[media.tmdb_id]
+            new_s_num = ep.get("season_number")
+            new_e_num = ep.get("episode_number")
+            if new_s_num is not None and new_e_num is not None:
+                media.season_number = new_s_num
+                media.episode_number = new_e_num
+        elif media.season_number is not None and media.episode_number is not None:
+            ep = season_data.get(media.season_number, {}).get(media.episode_number)
+            
         if ep:
             apply_episode_data(media, ep)
+        else:
+            ghost_episodes_to_delete.append(media)
+
+    if ghost_episodes_to_delete:
+        ghost_ids = [m.id for m in ghost_episodes_to_delete]
+        
+        # Check CollectionFile
+        cf_q = await db.execute(
+            select(Collection.media_id)
+            .join(CollectionFile, Collection.id == CollectionFile.collection_id)
+            .where(Collection.media_id.in_(ghost_ids))
+            .distinct()
+        )
+        has_cf = {r[0] for r in cf_q.all()}
+        
+        # Check WatchEvent
+        we_q = await db.execute(
+            select(WatchEvent.media_id)
+            .where(WatchEvent.media_id.in_(ghost_ids))
+            .distinct()
+        )
+        has_we = {r[0] for r in we_q.all()}
+        
+        # Check Rating
+        rt_q = await db.execute(
+            select(Rating.media_id)
+            .where(Rating.media_id.in_(ghost_ids))
+            .distinct()
+        )
+        has_rt = {r[0] for r in rt_q.all()}
+        
+        safe_to_delete_ids = set(ghost_ids) - has_cf - has_we - has_rt
+        
+        if safe_to_delete_ids:
+            for m in ghost_episodes_to_delete:
+                if m.id in safe_to_delete_ids:
+                    await db.delete(m)
+                    if m in episodes:
+                        episodes.remove(m)
+                    if m in orphans:
+                        orphans.remove(m)
+            print(f"Deleted {len(safe_to_delete_ids)} untouched ghost episodes for show {show.title}")
 
     all_media_ids = [ep.id for ep in episodes] + [ep.id for ep in orphans]
     await refresh_technical_data(db, all_media_ids, current_user.id)
@@ -1710,28 +1845,26 @@ async def _get_tvdb_show_state(
 
     is_blocked = False
     is_dropped = False
-    
-    block_ids = [-tvdb_id]
+
+    # Build the possible URIs for this show
+    uris = {f"tvdb:s:{tvdb_id}"}
+    if local_show and local_show.uri_id:
+        uris.add(local_show.uri_id)
     if show_data.get("tmdb_id_cross"):
-        block_ids.append(show_data["tmdb_id_cross"])
-    if local_show and local_show.tmdb_id:
-        if local_show.tmdb_id not in block_ids:
-            block_ids.append(local_show.tmdb_id)
+        uris.add(f"tmdb:s:{show_data['tmdb_id_cross']}")
 
     block_q = await db.execute(
         select(BlocklistItem.is_dropped)
         .where(
             BlocklistItem.user_id == user_id,
-            BlocklistItem.media_type == MediaType.series,
-            BlocklistItem.tmdb_id.in_(block_ids),
+            BlocklistItem.uri_id.in_(uris),
         )
     )
-    # Check all rows to see if any are blocked (is_dropped=False) or dropped (is_dropped=True)
     rows = block_q.all()
     for row in rows:
-        if row[0]: # is_dropped
+        if row[0]:
             is_dropped = True
-        else: # is_blocked
+        else:
             is_blocked = True
 
     if not is_blocked:
@@ -1745,39 +1878,107 @@ async def _get_tvdb_show_state(
         }
         is_blocked = _is_content_filtered(temp_item, *cf)
 
-    # Pending/rejected request state
+    # Pending/rejected request state — only look up if we have a TMDB ID
     request_status = None
-    # Use TMDB ID for request if available, otherwise TVDB ID (negative)
-    primary_tid = show_data.get("tmdb_id_cross") or (local_show.tmdb_id if local_show else None)
-    lookup_tid = primary_tid if primary_tid else -tvdb_id
-    
-    req_q = await db.execute(
-        select(MediaRequest.status)
-        .where(
-            MediaRequest.user_id == user_id,
-            MediaRequest.tmdb_id == lookup_tid,
-            MediaRequest.media_type == MediaType.series,
-            MediaRequest.status.in_([RequestStatus.pending, RequestStatus.rejected]),
+    lookup_tid = show_data.get("tmdb_id_cross") or (local_show.tmdb_id if local_show else None)
+    # Also build URI-based lookup for new MediaRequest rows
+    lookup_uris: list[str] = []
+    if local_show and local_show.uri_id:
+        lookup_uris.append(local_show.uri_id)
+    if lookup_tid:
+        lookup_uris.append(f"tmdb:s:{lookup_tid}")
+    lookup_uris.append(f"tvdb:s:{tvdb_id}")
+
+    if lookup_uris:
+        req_q = await db.execute(
+            select(MediaRequest.status)
+            .where(
+                MediaRequest.user_id == user_id,
+                MediaRequest.uri_id.in_(lookup_uris),
+                MediaRequest.media_type == MediaType.series,
+                MediaRequest.status.in_([RequestStatus.pending, RequestStatus.rejected]),
+            )
+            .order_by(MediaRequest.updated_at.desc())
+            .limit(1)
         )
-        .order_by(MediaRequest.updated_at.desc())
-        .limit(1)
-    )
-    req_row = req_q.first()
-    if req_row:
-        request_status = req_row[0].value
+        req_row = req_q.first()
+        if req_row:
+            request_status = req_row[0].value
 
     return is_blocked, is_dropped, request_status
 
 
-@router.get("/tvdb/{tvdb_id}")
+async def _upsert_aliases_for_tvdb_show(
+    db: AsyncSession,
+    show_db_id: int,
+    tvdb_id: int,
+    raw_tvdb_data: dict,
+) -> None:
+    """Harvest external IDs from a TVDB series response and upsert into media_aliases."""
+    from utils.alias_lookup import upsert_alias
+
+    await upsert_alias(db, show_db_id, "series", "tvdb", str(tvdb_id))
+
+    for rid in raw_tvdb_data.get("remoteIds") or []:
+        source = (rid.get("sourceName") or "").upper()
+        ext_id = rid.get("id")
+        if not ext_id:
+            continue
+        if "MOVIEDB" in source:
+            try:
+                await upsert_alias(db, show_db_id, "series", "tmdb", str(int(ext_id)))
+            except (TypeError, ValueError):
+                pass
+        elif source == "IMDB":
+            await upsert_alias(db, show_db_id, "series", "imdb", str(ext_id))
+        elif "ZAP2IT" in source:
+            await upsert_alias(db, show_db_id, "series", "zap2it", str(ext_id))
+
+
+# Internal dispatch helper — called by `/shows/{series_id}` when URI form passed.
+async def get_show_by_uri(
+    uri_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unified show endpoint — accepts any MediaURI (tmdb:s:123, tvdb:s:456, etc.)."""
+    from utils.media_uri import MediaURI
+    try:
+        uri = MediaURI.parse(uri_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid MediaURI: {uri_id!r}")
+
+    if uri.type_prefix != "s":
+        raise HTTPException(status_code=400, detail="URI must be a series (type prefix 's')")
+
+    if uri.provider == "tmdb":
+        return await get_show(int(uri.id), db=db, current_user=current_user)
+    elif uri.provider == "tvdb":
+        return await get_tvdb_show(int(uri.id), db=db, current_user=current_user)
+
+    # Unknown provider — try alias resolution to find a local show
+    from utils.alias_lookup import get_internal_id_for_uri
+    from sqlalchemy import select as _select
+    internal_id = await get_internal_id_for_uri(db, uri_id)
+    if internal_id is None:
+        raise HTTPException(status_code=404, detail=f"No show found for URI: {uri_id}")
+    show_row = await db.execute(_select(ShowModel).where(ShowModel.id == internal_id))
+    show = show_row.scalar_one_or_none()
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    if show.tmdb_id:
+        return await get_show(show.tmdb_id, db=db, current_user=current_user)
+    if show.tvdb_id:
+        return await get_tvdb_show(show.tvdb_id, db=db, current_user=current_user)
+    raise HTTPException(status_code=404, detail="Show found but has no resolvable provider ID")
+
+
+# Internal handler — invoked via `/shows/{id}` URI dispatcher when provider=tvdb.
 async def get_tvdb_show(
     tvdb_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_q.scalar_one_or_none()
-
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
@@ -1785,17 +1986,83 @@ async def get_tvdb_show(
     user_lang = await get_user_content_language(db, current_user.id)
     tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
 
+    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_q.scalar_one_or_none()
+
+    # Look up local Show row first — if we have cached data, use it as fallback
+    show_result = await db.execute(select(ShowModel).where(ShowModel.tvdb_id == tvdb_id))
+    show = show_result.scalar_one_or_none()
+
     try:
         raw = await tvdb_client.get_series(tvdb_id, api_key, lang=tvdb_lang)
     except Exception as e:
+        err_str = str(e)
+        if "404" in err_str or "Not Found" in err_str:
+            # TVDB ID doesn't exist. If this ID is wrong but the show is in the alias table
+            # under a different URI, the dispatcher should have resolved it already.
+            # Return 404 so the frontend can show a proper "not found" page.
+            raise HTTPException(status_code=404, detail=f"TVDB series {tvdb_id} not found")
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
     show_data = tvdb_client.format_series(raw, lang=tvdb_lang)
     cast = tvdb_client.format_cast(raw)
 
-    # Look up local Show row by tvdb_id
-    show_result = await db.execute(select(ShowModel).where(ShowModel.tvdb_id == tvdb_id))
-    show = show_result.scalar_one_or_none()
+    # Phase 3: Harvest external IDs from TVDB response into media_aliases
+    if show:
+        try:
+            await _upsert_aliases_for_tvdb_show(db, show.id, tvdb_id, raw)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+
+    # Skyhook supplement — cross IDs (tmdbId/imdbId), ClearLogo/fanart, season posters.
+    # Cached in show.tmdb_data["skyhook"] so we only hit the proxy once per show.
+    sky_images: dict = {}
+    sky_season_images: dict = {}
+    sky_tmdb: int | None = None
+    sky_imdb: str | None = None
+    sky_lang = tvdb_client.to_two_letter_lang(tvdb_lang) or "en"
+    cached_sky = (show.tmdb_data or {}).get("skyhook") if (show and show.tmdb_data) else None
+    if cached_sky:
+        sky_images = cached_sky.get("images") or {}
+        sky_season_images = {int(k): v for k, v in (cached_sky.get("season_images") or {}).items()}
+        sky_tmdb = cached_sky.get("tmdb")
+        sky_imdb = cached_sky.get("imdb")
+    else:
+        sky_raw = await skyhook.get_show(tvdb_id, lang=sky_lang)
+        if sky_raw:
+            sky_images = skyhook.extract_images(sky_raw)
+            sky_season_images = skyhook.extract_season_images(sky_raw)
+            cross = skyhook.extract_cross_ids(sky_raw)
+            sky_tmdb = cross["tmdb"]
+            sky_imdb = cross["imdb"]
+            if show:
+                try:
+                    from utils.alias_lookup import upsert_alias
+                    if cross["tmdb"]:
+                        await upsert_alias(db, show.id, "series", "tmdb", str(cross["tmdb"]))
+                        if not show.tmdb_id:
+                            show.tmdb_id = cross["tmdb"]
+                    if cross["imdb"]:
+                        await upsert_alias(db, show.id, "series", "imdb", str(cross["imdb"]))
+                    show.tmdb_data = {
+                        **(show.tmdb_data or {}),
+                        "skyhook": {
+                            "images": sky_images,
+                            "season_images": {str(k): v for k, v in sky_season_images.items()},
+                            "tmdb": cross["tmdb"],
+                            "imdb": cross["imdb"],
+                        },
+                    }
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+
+    # Fill missing show artwork from Skyhook (TVDB sometimes lacks fanart/poster).
+    if not show_data.get("backdrop_path") and sky_images.get("fanart"):
+        show_data["backdrop_path"] = sky_images["fanart"]
+    if not show_data.get("poster_path") and sky_images.get("poster"):
+        show_data["poster_path"] = sky_images["poster"]
 
     # Collect per-season library state if we have a local show
     season_states: dict = {}
@@ -1885,8 +2152,20 @@ async def get_tvdb_show(
         except Exception:
             pass
 
-    # Where to watch (local media servers only; no TMDB streaming for TVDB-only shows)
-    where_to_watch = await get_where_to_watch(db, current_user.id, tvdb_id, MediaType.series, show=show) if show else []
+    tmdb_id_cross = show_data.get("tmdb_id_cross") or (show.tmdb_id if show and show.tmdb_id else None) or sky_tmdb
+    
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    valid_tmdb_key = check_tmdb_key(tmdb_key)
+
+    # Where to watch (now supports TMDB streaming providers if we have a cross-referenced TMDB ID)
+    if tmdb_id_cross and valid_tmdb_key:
+        where_to_watch = await get_where_to_watch(
+            db, current_user.id, tmdb_id_cross, MediaType.series, show=show, tmdb_key=tmdb_key
+        )
+    else:
+        where_to_watch = await get_where_to_watch(
+            db, current_user.id, tvdb_id, MediaType.series, show=show
+        ) if show else []
 
     # Networks (name only; TVDB doesn't provide logos)
     networks = [{"id": None, "name": n.get("name"), "logo_path": None, "origin_country": None}
@@ -1901,20 +2180,34 @@ async def get_tvdb_show(
         {
             **s,
             "name": sanitize_season_name(s.get("name"), s.get("season_number"), user_lang),
+            # Backfill season poster from Skyhook when TVDB lacks one.
+            "poster_path": s.get("poster_path") or (sky_season_images.get(s.get("season_number")) or {}).get("poster"),
         }
         for s in show_data.get("seasons", [])
         if s.get("episode_count", 0) > 0
     ]
 
+    logo_path = None
+    if tmdb_id_cross and valid_tmdb_key:
+        try:
+            tv_images = await tmdb.get_tv_images(tmdb_id_cross, api_key=tmdb_key)
+            logo_path = tmdb.pick_image(tv_images.get("logos", []), preferred_lang=user_lang, size="w500")
+        except Exception:
+            pass
+    # Skyhook ClearLogo — fills the logo without needing a TMDB key/cross-ID.
+    if not logo_path and sky_images.get("clearlogo"):
+        logo_path = sky_images["clearlogo"]
+
     return {
         **show_data,
         "id": show.id if show else None,
+        "uri_id": show.uri_id if show else f"tvdb:s:{tvdb_id}",
         "tmdb_id": None,
         "type": "series",
         "tagline": None,
         "tmdb_rating": None,
-        "imdb_id": show_data.get("imdb_id"),
-        "tmdb_id_cross": show_data.get("tmdb_id_cross") or (show.tmdb_id if show and show.tmdb_id else None),
+        "imdb_id": show_data.get("imdb_id") or sky_imdb,
+        "tmdb_id_cross": tmdb_id_cross,
         "adult": False,
         "in_library": in_library,
         "watched": watched_overall,
@@ -1934,25 +2227,32 @@ async def get_tvdb_show(
         "networks": networks,
         "where_to_watch": where_to_watch,
         "include_specials": include_specials,
+        # Fields zeroed for TVDB so frontend renders unified shape
+        "seasons": {},
+        "trailer_youtube_id": None,
+        "logo_path": logo_path,
+        "recommendations": [],
+        "watched_episodes_count": 0,
+        "total_episodes_count": 0,
     }
 
 
-@router.get("/tvdb/{tvdb_id}/season/{season_number}")
+# Internal handler — invoked by `/shows/{id}/season/{n}` URI dispatcher.
 async def get_tvdb_season(
     tvdb_id: int,
     season_number: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_q.scalar_one_or_none()
-
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
 
     user_lang = await get_user_content_language(db, current_user.id)
     tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
+    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_q.scalar_one_or_none()
 
     try:
         raw_series, raw_episodes = await asyncio.gather(
@@ -2039,6 +2339,13 @@ async def get_tvdb_season(
             "watched": local_m.id in watched_ep_ids if local_m else False,
             "user_rating": episode_ratings.get(local_m.id) if local_m else None,
             "in_lists": [],
+            "title": (local_m.custom_title or ep.get("title")) if local_m else ep.get("title"),
+            "poster_path": ep.get("still_path"),
+            "still_path": ep.get("still_path"),
+            "type": "episode",
+            "tmdb_rating": None,
+            "tmdb_id": local_m.tmdb_id if (local_m and local_m.tmdb_id) else None,
+            "tvdb_id": ep.get("tvdb_id"),
         })
 
     filtered_seasons = [
@@ -2094,6 +2401,7 @@ async def get_tvdb_season(
         "poster_path": season_meta.get("poster_path"),
         "backdrop_path": show_data["backdrop_path"],
         "air_date": season_meta.get("air_date"),
+        "tmdb_rating": None,
         "episodes": enriched_eps,
         "season_in_library": season_in_library,
         "season_watched": season_watched,
@@ -2106,19 +2414,26 @@ async def get_tvdb_season(
         "show_request_enabled": request_enabled,
         "show_is_monitored": is_monitored,
         "show_in_library": show is not None,
+        # Unified Season fields zeroed for TVDB
+        "show_watched": False,
+        "show_in_lists": [],
+        "show_collection_pct": 0,
         "show": {
             "id": show.id if show else None,
             "tvdb_id": tvdb_id,
+            "tmdb_id": show.tmdb_id if show else None,
             "tmdb_id_cross": show_data.get("tmdb_id_cross") or (show.tmdb_id if show and show.tmdb_id else None),
+            "uri_id": show.uri_id if show else f"tvdb:s:{tvdb_id}",
             "title": show_data["title"],
             "poster_path": show_data["poster_path"],
             "backdrop_path": show_data["backdrop_path"],
             "seasons_meta": filtered_seasons,
+            "adult": False,
         },
     }
 
 
-@router.get("/tvdb/{tvdb_id}/season/{season_number}/episode/{episode_number}")
+# Internal handler — invoked by `/shows/{id}/season/{n}/{ep}` URI dispatcher.
 async def get_tvdb_episode(
     tvdb_id: int,
     season_number: int,
@@ -2126,15 +2441,15 @@ async def get_tvdb_episode(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_q.scalar_one_or_none()
-
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
 
     user_lang = await get_user_content_language(db, current_user.id)
     tvdb_lang = tvdb_client.to_three_letter_lang(user_lang)
+
+    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_q.scalar_one_or_none()
 
     try:
         raw_series, raw_episodes = await asyncio.gather(
@@ -2159,6 +2474,7 @@ async def get_tvdb_episode(
     show_result = await db.execute(select(ShowModel).where(ShowModel.tvdb_id == tvdb_id))
     show = show_result.scalar_one_or_none()
 
+    local_ep = None
     in_library = False
     watched = False
     user_rating = None
@@ -2245,7 +2561,8 @@ async def get_tvdb_episode(
     request_enabled = sonarr_cfg is not None
 
     ep_state: dict = {
-        "tmdb_id": -tvdb_id,
+        "tmdb_id": None,
+        "uri_id": show.uri_id if show else f"tvdb:s:{tvdb_id}",
         "type": "episode",
         "show_tvdb_id": tvdb_id,
     }
@@ -2269,15 +2586,22 @@ async def get_tvdb_episode(
         "request_enabled": request_enabled,
         "library": library_info,
         "cast": cast,
-        "episodes": [{"episode_number": e["episode_number"], "name": e["name"]} for e in eps],
+        "title": (local_ep.custom_title or ep_data.get("title")) if (show and local_ep) else ep_data.get("title"),
+        "still_path": ep_data.get("still_path"),
+        "tmdb_rating": None,
+        "tmdb_id": local_ep.tmdb_id if (local_ep and local_ep.tmdb_id) else None,
+        "episodes": [{"episode_number": e["episode_number"], "name": e["title"], "title": e["title"]} for e in eps],
         "show": {
             "id": show.id if show else None,
             "tvdb_id": tvdb_id,
+            "tmdb_id": show.tmdb_id if show else None,
             "tmdb_id_cross": show_data.get("tmdb_id_cross") or (show.tmdb_id if show and show.tmdb_id else None),
+            "uri_id": show.uri_id if show else f"tvdb:s:{tvdb_id}",
             "title": show_data["title"],
             "poster_path": show_data["poster_path"],
             "backdrop_path": show_data["backdrop_path"],
             "seasons_meta": show_data["seasons"],
+            "adult": False,
         },
         "season": {
             "name": season_meta.get("name") or f"Season {season_number}",
@@ -2287,7 +2611,7 @@ async def get_tvdb_episode(
     }
 
 
-@router.post("/tvdb/{tvdb_id}/refresh")
+# Internal handler — TVDB-only refresh, currently unrouted. Trigger via `/shows/{uri}/refresh` if needed.
 async def refresh_tvdb_show_metadata(
     tvdb_id: int,
     db: AsyncSession = Depends(get_db),

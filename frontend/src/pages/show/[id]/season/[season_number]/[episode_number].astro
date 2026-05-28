@@ -1,11 +1,16 @@
 ---
 import Base from "../../../../../layouts/Base.astro";
+import ErrorState from "../../../../../components/ErrorState.astro";
+import PosterModal from "../../../../../components/PosterModal.astro";
+import RefreshMetadataButton from "../../../../../components/RefreshMetadataButton.astro";
 import ActionBar from "../../../../../components/ActionBar.astro";
 import CommentsSection from "../../../../../components/CommentsSection.astro";
 import VideoPlayer from "../../../../../components/VideoPlayer.astro";
 import ManualScrobble from "../../../../../components/ManualScrobble.astro";
 import ProgressStrip from "../../../../../components/ProgressStrip.astro";
 import { api, type EpisodeDetail } from "../../../../../lib/api";
+import { parseShowId } from "../../../../../lib/normalize";
+import { personUrl } from "../../../../../lib/urls";
 
 export const prerender = false;
 
@@ -13,24 +18,22 @@ const { id, season_number, episode_number } = Astro.params;
 const { token } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
 
+const { provider, numericId: resolvedShowId, uri: fetchKey } = parseShowId(id);
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
 let episode: EpisodeDetail | null = null;
 let error = "";
 
 try {
-  episode = await api.shows.getEpisode(Number(id), Number(season_number), Number(episode_number), token);
+  episode = await api.shows.getEpisode(fetchKey, Number(season_number), Number(episode_number), token);
+  if (episode && provider !== "tvdb" && primaryMetadataSource === "tvdb" && (episode as any).show?.tvdb_id) {
+    episode = await api.shows.getEpisode(`tvdb:s:${(episode as any).show.tvdb_id}`, Number(season_number), Number(episode_number), token);
+  }
 } catch (e: any) {
   error = e.message;
 }
 
 if (!episode && !error) {
   return Astro.redirect("/404");
-}
-
-if (episode) {
-  const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
-  if (primaryMetadataSource === "tvdb" && episode.show?.tvdb_id) {
-    return Astro.redirect(`/show/tvdb/${episode.show.tvdb_id}/season/${season_number}/${episode_number}`);
-  }
 }
 
 const show = episode?.show;
@@ -51,15 +54,7 @@ const activeButtonsCount = [
 ---
 
 <Base title={episode ? `${show?.title} — ${seasonName} — ${episode.title}` : "Episode Details"}>
-  {error && !episode && (
-    <div class="max-w-md mx-auto mt-20 text-center">
-      <div class="bg-red-500/10 border border-red-500/20 text-red-500 p-6 rounded-2xl mb-6">
-        <p class="font-bold text-lg mb-2">Oops!</p>
-        <p class="text-sm opacity-80">{error}</p>
-      </div>
-      <a href="/" class="text-blue-500 hover:underline">Return to Dashboard</a>
-    </div>
-  )}
+  {error && !episode && <ErrorState error={error} />}
 
   {episode && (
     <div class="relative">
@@ -211,12 +206,14 @@ const activeButtonsCount = [
             <div class="bg-zinc-900/20 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-2xl space-y-4">
               <ActionBar
                 tmdbId={episode.tmdb_id}
+                uriId={episode.uri_id ?? (episode.tmdb_id ? `tmdb:e:${episode.tmdb_id}` : episode.tvdb_id ? `tvdb:e:${episode.tvdb_id}` : null)}
                 mediaType="episode"
                 watched={episode.watched ?? false}
                 inLists={episode.in_lists ?? []}
                 inLibrary={episode.in_library ?? false}
                 collectionPct={episode.collection_pct ?? (episode.in_library ? 100 : 0)}
-                showTmdbId={Number(id)}
+                showTmdbId={show?.tmdb_id || (provider === "tmdb" ? resolvedShowId : undefined)}
+                showUriId={show?.uri_id ?? fetchKey}
                 seasonNumber={Number(season_number)}
                 episodeNumber={Number(episode_number)}
                 requestEnabled={episode.request_enabled ?? false}
@@ -245,36 +242,26 @@ const activeButtonsCount = [
               <div class={`grid gap-2 w-full grid-cols-${activeButtonsCount}`}>
                 {episode.in_library && (
                   <VideoPlayer
+                    uriId={(episode as any).uri_id ?? (episode.tmdb_id ? `tmdb:e:${episode.tmdb_id}` : undefined)}
                     tmdbId={episode.tmdb_id}
                     mediaType="episode"
                     inLibrary={episode.in_library ?? false}
                     title={`${show?.title} — ${episode.title}`}
                     token={token || ""}
+                    mediaId={episode.id}
                   />
                 )}
                 <ManualScrobble
-                  tmdbId={episode.tmdb_id}
+                  uriId={episode.id ? `tmdb:e:${episode.tmdb_id}` : null}
+                  mediaId={episode.id}
                   mediaType="episode"
                   runtime={episode.runtime}
                   title={episode.title}
-                  showTmdbId={Number(id)}
+                  showUriId={episode.show?.uri_id ?? `tmdb:s:${resolvedShowId}`}
                   seasonNumber={Number(season_number)}
                   episodeNumber={Number(episode_number)}
                 />
-                {episode.in_library && (
-                  <button
-                    id="refresh-metadata-btn"
-                    class="w-full h-11 flex items-center justify-center gap-2 px-5 text-sm font-bold leading-none text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
-                  >
-                    <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                      <path d="M21 3v5h-5"/>
-                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                      <path d="M8 16H3v5"/>
-                    </svg>
-                    <span id="refresh-label">Refresh Metadata</span>
-                  </button>
-                )}
+                <RefreshMetadataButton refreshUrl={`/api/proxy/shows/${id}/refresh`} showRefreshBtn={episode.in_library} />
               </div>
             )}
           </div>
@@ -308,7 +295,7 @@ const activeButtonsCount = [
                 </span>
               )}
               {!!episode.play_count && (
-                <span id="play-count-badge" class="inline-flex items-center px-2.5 py-1 bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 text-xs font-bold rounded-lg cursor-pointer transition-all duration-200" title="Click to view/remove specific plays" data-tmdb-id={episode.tmdb_id} data-media-type="episode">
+                <span id="play-count-badge" class="inline-flex items-center px-2.5 py-1 bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 text-xs font-bold rounded-lg cursor-pointer transition-all duration-200" title="Click to view/remove specific plays" data-uri-id={episode.uri_id ?? (episode.tmdb_id ? `tmdb:e:${episode.tmdb_id}` : "")} data-media-type="episode" data-media-id={episode.id ?? ""} data-show-uri={show?.uri_id ?? fetchKey} data-season={season_number} data-episode={episode_number}>
                   {episode.play_count} {episode.play_count === 1 ? 'Play' : 'Plays'}
                 </span>
               )}
@@ -364,7 +351,7 @@ const activeButtonsCount = [
 
             <CommentsSection
               mediaType="series"
-              tmdbId={Number(id)}
+              uriId={episode?.show?.uri_id ?? fetchKey}
               seasonNumber={Number(season_number)}
               episodeNumber={Number(episode_number)}
             />
@@ -378,7 +365,7 @@ const activeButtonsCount = [
                 </h2>
                 <div class="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-5 xl:grid-cols-6 gap-3">
                   {episode.cast.map((person) => (
-                    <a href={`/person/${person.tmdb_id}`} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
+                    <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
                       <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
                         {person.profile_path ? (
                           <img
@@ -411,7 +398,7 @@ const activeButtonsCount = [
                 </h2>
                 <div class="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-5 xl:grid-cols-6 gap-3">
                   {episode.guest_stars.map((person) => (
-                    <a href={`/person/${person.tmdb_id}`} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
+                    <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
                       <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
                         {person.profile_path ? (
                           <img
@@ -442,91 +429,30 @@ const activeButtonsCount = [
 
 </Base>
 
-{thumbnail && (
-  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
-    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
-    <img
-      src={thumbnail}
-      alt={episode?.title}
-      class="relative max-h-[90vh] max-w-[90vw] md:max-w-[70vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
-    />
-    <button
-      id="poster-modal-close"
-      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
-      aria-label="Close"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-      </svg>
-    </button>
-  </div>
-)}
+<PosterModal posterPath={thumbnail} title={episode?.title || ""} />
 
 <script define:vars={{ token: Astro.locals.token }}>
   const badge = document.getElementById('play-count-badge');
 
   if (badge) {
-    const tmdbId = badge.getAttribute('data-tmdb-id');
+    const uriId = badge.getAttribute('data-uri-id');
     const mediaType = badge.getAttribute('data-media-type');
+    const mediaId = badge.getAttribute('data-media-id');
+    const showUri = badge.getAttribute('data-show-uri');
+    const season = badge.getAttribute('data-season');
+    const episode = badge.getAttribute('data-episode');
 
     badge.addEventListener('click', () => {
-      if ((window as any).openWatchHistoryModal) {
-        (window as any).openWatchHistoryModal(null, tmdbId, mediaType);
+      if (window["openWatchHistoryModal"]) {
+        window["openWatchHistoryModal"](null, uriId, mediaType, mediaId, showUri, season, episode);
       }
     });
   }
 </script>
+
+
 
 <script>
-  const zoomBtn = document.getElementById('poster-zoom-btn');
-  const modal = document.getElementById('poster-modal');
-  const backdrop = document.getElementById('poster-modal-backdrop');
-  const closeBtn = document.getElementById('poster-modal-close');
-  if (zoomBtn && modal) {
-    const openModal = () => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
-    const closeModal = () => { modal.classList.add('hidden'); document.body.style.overflow = ''; };
-    zoomBtn.addEventListener('click', openModal);
-    backdrop?.addEventListener('click', closeModal);
-    closeBtn?.addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
-  }
-</script>
-
-<script define:vars={{ showId: id, token: Astro.locals.token }}>
-  const btn = document.getElementById('refresh-metadata-btn');
-  if (btn) {
-    btn.addEventListener('click', async () => {
-      const icon = document.getElementById('refresh-icon');
-      const label = document.getElementById('refresh-label');
-      if (!label || !icon) return;
-
-      btn.setAttribute('disabled', 'true');
-      btn.classList.add('opacity-60', 'cursor-not-allowed');
-      icon.classList.add('animate-spin');
-      label.textContent = 'Refreshing...';
-
-      try {
-        const res = await fetch(`/api/proxy/shows/${showId}/refresh`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.detail || 'Refresh failed');
-        }
-        label.textContent = 'Done!';
-        icon.classList.remove('animate-spin');
-        setTimeout(() => { window.location.reload(); }, 800);
-      } catch (err) {
-        icon.classList.remove('animate-spin');
-        label.textContent = 'Refresh failed';
-        btn.removeAttribute('disabled');
-        btn.classList.remove('opacity-60', 'cursor-not-allowed');
-        setTimeout(() => { label.textContent = 'Refresh Metadata'; }, 3000);
-      }
-    });
-  }
-
   // Rename Episode Logic
   const renameBtn = document.getElementById('rename-episode-btn');
   if (renameBtn) {
@@ -536,9 +462,10 @@ const activeButtonsCount = [
       
       if (newName === null) return; // Cancelled
 
-      const token = document.getElementById("app-data")?.dataset.token || 
+      const token = window["__AUTH_TOKEN__"] || document.getElementById("app-data")?.dataset.token || 
                     document.querySelector("[data-token]")?.getAttribute("data-token") ||
                     document.cookie.split('; ').find(row => row.startsWith('auth_token='))?.split('=')[1];
+
       
       if (!token) {
         window.showToast?.('Authentication error: No token found', 'error');

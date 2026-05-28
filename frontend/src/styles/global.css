@@ -281,13 +281,7 @@ html.light #now-playing-section .text-yellow-400 { color: #a16207; }
     padding-top: 2rem; /* Offset the md:-mt-8 in index.astro */
   }
 }
-
-/* ── ActionBar buttons — light mode ───────────────────────────────────────────
-   All states use solid named colours — no transparency, no Tailwind opacity classes.
-   Inactive base: gray (zinc variable remap handles this automatically).
-   Inactive hover: color-100 (light preview of the colour).
-   Active base:    color-200 (clearly active).
-   Active hover:   color-100 (lighter = hover feedback on active). */
+/* ActionBar buttons - light mode states. Use solid colors. */
 
 html.light [data-action]:hover { filter: none; }
 

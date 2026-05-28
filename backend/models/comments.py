@@ -4,18 +4,20 @@ from sqlalchemy import Integer, String, Text, Boolean, ForeignKey, DateTime, fun
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
+
 class Comment(Base):
     __tablename__ = "comments"
     __table_args__ = (
-        Index("idx_comments_media", "media_type", "tmdb_id", "season_number", "episode_number"),
+        Index("idx_comments_uri", "media_type", "uri_id", "season_number", "episode_number"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    # Generic entity referencing
-    media_type: Mapped[str] = mapped_column(String(50), nullable=False) # 'movie', 'series', 'season', 'episode', 'person'
-    tmdb_id: Mapped[int] = mapped_column(Integer, nullable=False) # For season/episode this is the SHOW's tmdb_id
+    media_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # URI of the show/movie/episode (e.g. tmdb:s:123, tmdb:m:456).
+    # For season/episode comments this is the SHOW's uri_id.
+    uri_id: Mapped[str] = mapped_column(String(50), nullable=False)
     season_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     episode_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 

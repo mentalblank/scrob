@@ -357,6 +357,7 @@ async def get_public_profile(
     )
     recently_watched_movies = [
         {
+            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "media_type": "movie",
             "title": media.title,
@@ -377,6 +378,7 @@ async def get_public_profile(
     )
     recently_watched_shows = [
         {
+            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "media_type": "episode",
             "title": media.title,
@@ -384,6 +386,7 @@ async def get_public_profile(
             "poster_path": show.poster_path if show else media.poster_path,
             "watched_at": we.watched_at.isoformat(),
             "show_title": show.title if show else None,
+            "show_uri_id": show.uri_id if show else None,
             "show_tmdb_id": show.tmdb_id if show else None,
             "show_tvdb_id": (show.tvdb_id if show.tvdb_id else (
                 int(show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
@@ -411,6 +414,7 @@ async def get_public_profile(
     )
     top_rated_movies = [
         {
+            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "media_type": "movie",
             "title": media.title,
@@ -424,7 +428,7 @@ async def get_public_profile(
     tr_shows_q = await db.execute(
         select(Rating, Media, ShowModel)
         .join(Media, Rating.media_id == Media.id)
-        .outerjoin(ShowModel, (Media.media_type == "series") & (Media.tmdb_id == ShowModel.tmdb_id))
+        .outerjoin(ShowModel, Media.show_id == ShowModel.id)
         .where(
             Rating.user_id == user_id,
             Rating.season_number.is_(None),
@@ -436,15 +440,12 @@ async def get_public_profile(
     )
     top_rated_shows = [
         {
+            "uri_id": (show.uri_id if show else media.uri_id),
             "tmdb_id": media.tmdb_id,
             "media_type": "series",
             "title": media.title,
             "poster_path": show.poster_path if show else media.poster_path,
-            "tvdb_id": (show.tvdb_id if show.tvdb_id else (
-                int(show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
-                if (show.tmdb_data and show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
-                else None
-            )) if show else None,
+            "tvdb_id": (show.tvdb_id if show else None),
             "user_rating": rating.rating,
         }
         for rating, media, show in tr_shows_q.all()
@@ -459,62 +460,50 @@ async def get_public_profile(
     )
     comments_list = recent_comments_q.scalars().all()
 
-    # Batch resolve titles for comments
-    show_tmdb_ids = list({c.tmdb_id for c in comments_list if c.media_type in ("series", "season", "episode")})
-    movie_tmdb_ids = list({c.tmdb_id for c in comments_list if c.media_type == "movie"})
+    # Batch resolve titles for comments using uri_id
+    show_uris = list({c.uri_id for c in comments_list if c.media_type in ("series", "season", "episode") and c.uri_id})
+    movie_uris = list({c.uri_id for c in comments_list if c.media_type == "movie" and c.uri_id})
 
-    show_titles: dict[int, tuple[str, str | None, dict | None, int | None, dict | None]] = {}
-    movie_titles: dict[int, tuple[str, str | None]] = {}
+    show_titles: dict[str, tuple[str, str | None, dict | None, str | None]] = {}
+    movie_titles: dict[str, tuple[str, str | None]] = {}
 
-    if show_tmdb_ids:
+    if show_uris:
         sq = await db.execute(
-            select(ShowModel.tmdb_id, ShowModel.title, ShowModel.poster_path, ShowModel.custom_season_names, ShowModel.tvdb_id, ShowModel.tmdb_data)
-            .where(ShowModel.tmdb_id.in_(show_tmdb_ids))
+            select(ShowModel.uri_id, ShowModel.title, ShowModel.poster_path, ShowModel.custom_season_names)
+            .where(ShowModel.uri_id.in_(show_uris))
         )
-        for tmdb_id, title, poster_path, custom_season_names, tvdb_id, tmdb_data in sq.all():
-            show_titles[tmdb_id] = (title, poster_path, custom_season_names, tvdb_id, tmdb_data)
+        for uri_id, title, poster_path, custom_season_names in sq.all():
+            show_titles[uri_id] = (title, poster_path, custom_season_names, uri_id)
 
-    if movie_tmdb_ids:
+    if movie_uris:
         mq = await db.execute(
-            select(Media.tmdb_id, Media.title, Media.poster_path)
-            .where(Media.tmdb_id.in_(movie_tmdb_ids), Media.media_type == "movie")
-            .group_by(Media.tmdb_id, Media.title, Media.poster_path)
+            select(Media.uri_id, Media.title, Media.poster_path)
+            .where(Media.uri_id.in_(movie_uris), Media.media_type == "movie")
+            .group_by(Media.uri_id, Media.title, Media.poster_path)
         )
-        for tmdb_id, title, poster_path in mq.all():
-            movie_titles[tmdb_id] = (title, poster_path)
+        for uri_id, title, poster_path in mq.all():
+            movie_titles[uri_id] = (title, poster_path)
 
     recent_comments = []
     for c in comments_list:
         season_name = None
-        show_tvdb_id = None
         if c.media_type in ("series", "season", "episode"):
-            info = show_titles.get(c.tmdb_id)
-            if info:
-                if c.season_number is not None:
-                    season_name = (info[2] or {}).get(str(c.season_number))
-                raw_tvdb = info[3]
-                if not raw_tvdb and info[4]:
-                    ext_tvdb = (info[4].get("external_ids") or {}).get("tvdb_id")
-                    if ext_tvdb:
-                        try:
-                            raw_tvdb = int(ext_tvdb)
-                        except (ValueError, TypeError):
-                            pass
-                show_tvdb_id = raw_tvdb
+            info = show_titles.get(c.uri_id)
+            if info and c.season_number is not None:
+                season_name = (info[2] or {}).get(str(c.season_number))
         else:
-            info = movie_titles.get(c.tmdb_id)
+            info = movie_titles.get(c.uri_id)
 
         recent_comments.append({
             "id": c.id,
             "content": c.content,
             "media_type": c.media_type,
-            "tmdb_id": c.tmdb_id,
+            "uri_id": c.uri_id,
             "season_number": c.season_number,
             "season_name": season_name,
             "episode_number": c.episode_number,
             "title": info[0] if info else None,
             "poster_path": info[1] if info else None,
-            "show_tvdb_id": show_tvdb_id,
             "created_at": c.created_at.isoformat(),
         })
 

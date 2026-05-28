@@ -19,11 +19,11 @@ const { token } = Astro.locals;
 
 <script>
   function setupSyncStatus() {
-    const container = document.getElementById('sync-status-container') as HTMLElement | null;
+    const container = document.getElementById('sync-status-container');
     if (!container) return;
 
     const activeJobsList = document.getElementById('active-jobs');
-    const abortBtn = document.getElementById('abort-sync-btn') as HTMLButtonElement | null;
+    const abortBtn = document.getElementById('abort-sync-btn');
     const token = container.dataset.token ?? '';
     const apiUrl = '/api/proxy';
 
@@ -51,10 +51,7 @@ const { token } = Astro.locals;
       });
     }
 
-    function esc(s: unknown): string {
-      if (s == null) return '';
-      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+    const esc = window.esc;
 
     async function updateStatus() {
       try {
@@ -64,12 +61,12 @@ const { token } = Astro.locals;
         if (!res.ok) return;
         
         const jobs = await res.json();
-        const activeJobs = jobs.filter((j: any) => j.status === 'running' || j.status === 'pending' || (j.status === 'failed' && new Date(j.updated_at).getTime() > Date.now() - 15000));
+        const activeJobs = jobs.filter((j) => j.status === 'running' || j.status === 'pending' || (j.status === 'failed' && new Date(j.updated_at).getTime() > Date.now() - 15000));
         
         if (activeJobs.length > 0) {
           container.classList.remove('hidden');
           if (activeJobsList) {
-            activeJobsList.innerHTML = activeJobs.map((job: any) => {
+            activeJobsList.innerHTML = activeJobs.map((job) => {
               const percent = job.total_items > 0
                 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100))
                 : 0;

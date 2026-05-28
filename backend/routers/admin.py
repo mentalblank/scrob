@@ -1,7 +1,3 @@
-import gzip
-import io
-import json
-import struct
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
@@ -22,7 +18,7 @@ from models.media_request import MediaRequest, RequestStatus
 from models.users import UserSettings
 from dependencies import require_admin
 from core.url_validator import validate_service_url
-from core.backup import asyncpg_conn, restore_backup
+from core.backup import pg_dump, pg_restore
 import schemas
 
 router = APIRouter()
@@ -133,41 +129,22 @@ async def delete_user(
 
 @router.get("/backup")
 async def backup_database(_: User = Depends(require_admin)):
-    conn = await asyncpg_conn()
+    """Full database backup via pg_dump (schema + data + sequences)."""
     try:
-        rows = await conn.fetch(
-            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename != 'alembic_version'"
-        )
-        tables = [r["tablename"] for r in rows]
+        payload = await pg_dump()
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
-        buf = io.BytesIO()
-        with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
-            header = json.dumps({"version": 1, "tables": tables}).encode()
-            gz.write(struct.pack(">I", len(header)))
-            gz.write(header)
-            for table in tables:
-                data_buf = io.BytesIO()
-                await conn.copy_from_table(table, output=data_buf, format="binary")
-                data = data_buf.getvalue()
-                name_bytes = table.encode()
-                gz.write(struct.pack(">H", len(name_bytes)))
-                gz.write(name_bytes)
-                gz.write(struct.pack(">Q", len(data)))
-                gz.write(data)
-
-        payload = buf.getvalue()
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        filename = f"scrob_backup_{timestamp}.bak"
-        return Response(
-            content=payload,
-            media_type="application/octet-stream",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Content-Length": str(len(payload)),
-            },
-        )
-    finally:
-        await conn.close()
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"scrob_backup_{timestamp}.pgdump"
+    return Response(
+        content=payload,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(payload)),
+        },
+    )
 
 
 @router.post("/maintenance/heal")
@@ -251,22 +228,21 @@ async def restore_database(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    if not (file.filename or "").endswith(".bak"):
-        raise HTTPException(status_code=400, detail="Only .bak backup files are accepted.")
+    """Restore database from a pg_dump custom-format backup file."""
+    fname = file.filename or ""
+    if not (fname.endswith(".pgdump") or fname.endswith(".bak")):
+        raise HTTPException(status_code=400, detail="Only .pgdump backup files are accepted.")
 
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # Release the SQLAlchemy session's open transaction before the raw asyncpg
-    # TRUNCATE. get_current_user (via require_admin) holds ACCESS SHARE on `users`
-    # for the duration of the transaction; TRUNCATE needs ACCESS EXCLUSIVE on all
-    # tables and would deadlock waiting for that lock to be released.
+    # Release SQLAlchemy session before pg_restore takes exclusive locks.
     await db.rollback()
 
     try:
-        await restore_backup(content)
-    except ValueError as e:
+        await pg_restore(content)
+    except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return {"status": "restored"}
@@ -331,7 +307,7 @@ async def list_requests(
     return [
         {
             "id":          req.id,
-            "tmdb_id":     req.tmdb_id,
+            "uri_id":      req.uri_id,
             "media_type":  req.media_type,
             "title":       req.title,
             "poster_path": req.poster_path,
@@ -364,17 +340,27 @@ async def approve_request(
     settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == req.user_id))
     settings = settings_q.scalar_one_or_none()
 
+    # Derive provider + numeric ID from uri_id
+    from utils.media_uri import MediaURI
+    try:
+        _uri = MediaURI.parse(req.uri_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid uri_id on request: {req.uri_id}")
+    _req_tmdb_id = int(_uri.id) if _uri.provider == "tmdb" else None
+
     if req.media_type == "movie":
         from routers.media import _effective_radarr
         from core import radarr as radarr_core
         radarr_cfg = _effective_radarr(settings, gs)
         if not radarr_cfg:
             raise HTTPException(status_code=400, detail="Radarr not configured")
+        if not _req_tmdb_id:
+            raise HTTPException(status_code=400, detail="Radarr requires TMDB ID; request is not TMDB-based")
         try:
             await radarr_core.add_movie(
                 url=radarr_cfg.radarr_url,
                 token=radarr_cfg.radarr_token,
-                tmdb_id=req.tmdb_id,
+                tmdb_id=_req_tmdb_id,
                 title=req.title or "",
                 root_folder=radarr_cfg.radarr_root_folder,
                 quality_profile_id=radarr_cfg.radarr_quality_profile,
@@ -391,8 +377,18 @@ async def approve_request(
             raise HTTPException(status_code=400, detail="Sonarr not configured")
         try:
             tmdb_key = await get_user_tmdb_key(db, current_user.id)
-            ext_ids = await tmdb_core.get_external_ids(req.tmdb_id, "tv", api_key=tmdb_key)
-            tvdb_id = ext_ids.get("tvdb_id")
+            # If URI is TVDB-based, use that ID directly. Otherwise try alias table then TMDB API.
+            if _uri.provider == "tvdb":
+                tvdb_id = int(_uri.id)
+            else:
+                tvdb_id = None
+                if req.uri_id:
+                    from utils.alias_lookup import get_provider_id_for_uri as _get_tvdb_admin
+                    _tvdb_str = await _get_tvdb_admin(db, req.uri_id, "tvdb")
+                    tvdb_id = int(_tvdb_str) if _tvdb_str else None
+                if not tvdb_id and _req_tmdb_id:
+                    ext_ids = await tmdb_core.get_external_ids(_req_tmdb_id, "tv", api_key=tmdb_key)
+                    tvdb_id = ext_ids.get("tvdb_id")
             if not tvdb_id:
                 raise HTTPException(status_code=400, detail="Could not find TVDB ID")
             await sonarr_core.add_series(

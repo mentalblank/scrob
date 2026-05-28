@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import PasswordToggle from "../components/PasswordToggle.astro";
 import { api } from "../lib/api";
 import type { AdminUser } from "../lib/api";
 
@@ -141,10 +142,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                   <div class="relative group/field">
                     <input type="password" name="radarr_token" id="radarr_token" value={globalSettings.radarr_token ?? ""}
                       class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-                    <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle visibility">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                    </button>
+                    <PasswordToggle />
                   </div>
                 </div>
               </div>
@@ -217,10 +215,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
                   <div class="relative group/field">
                     <input type="password" name="sonarr_token" id="sonarr_token" value={globalSettings.sonarr_token ?? ""}
                       class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-                    <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle visibility">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                    </button>
+                    <PasswordToggle />
                   </div>
                 </div>
               </div>
@@ -430,10 +425,10 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-3">
           <div>
             <h3 class="font-semibold text-zinc-100 mb-1">Restore</h3>
-            <p class="text-sm text-zinc-400">Upload a <code class="text-zinc-300">.bak</code> backup file to restore. <span class="text-red-400 font-medium">All existing data will be overwritten.</span></p>
+            <p class="text-sm text-zinc-400">Upload a <code class="text-zinc-300">.pgdump</code> backup file to restore. <span class="text-red-400 font-medium">All existing data will be overwritten.</span></p>
           </div>
           <div class="flex flex-col gap-3 mt-auto">
-            <input id="restore-file" type="file" accept=".bak"
+            <input id="restore-file" type="file" accept=".pgdump,.bak"
               class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
             <button id="restore-btn" disabled
               class="w-full sm:w-auto px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
@@ -531,24 +526,8 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
   const token = appData.dataset.token!;
   const currentUserId = parseInt(appData.dataset.currentUserId!);
 
-  function esc(s: string | null | undefined): string {
-    if (s == null) return '';
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function showMessage(text: string, type: 'success' | 'error' = 'success') {
-    const msg = document.getElementById('js-message')!;
-    msg.textContent = text;
-    msg.className = `p-4 rounded-lg mb-8 ${
-      type === 'success'
-        ? 'bg-green-500/10 border border-green-500 text-green-500'
-        : 'bg-red-500/10 border border-red-500 text-red-500'
-    }`;
-    msg.classList.remove('hidden');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    if ((window as any)._msgTimeout) clearTimeout((window as any)._msgTimeout);
-    (window as any)._msgTimeout = setTimeout(() => msg.classList.add('hidden'), 4000);
-  }
+  const esc = (window as any).esc;
+  const showMessage = (window as any).showMessage;
 
   function setConnStatus(id: string, state: 'checking' | 'connected' | 'disconnected') {
     const el = document.getElementById(id);
@@ -821,7 +800,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         throw new Error(data.detail || 'Backup failed');
       }
       const cd = res.headers.get('Content-Disposition');
-      const filename = cd?.match(/filename="([^"]+)"/)?.[1] ?? 'scrob_backup.bak';
+      const filename = cd?.match(/filename="([^"]+)"/)?.[1] ?? 'scrob_backup.pgdump';
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

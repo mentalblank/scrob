@@ -68,7 +68,8 @@ async function del<T>(path: string, params?: Record<string, string | number | bo
 // Shared sub-types
 
 export interface CastMember {
-  tmdb_id: number;
+  tmdb_id: number | null;
+  uri_id?: string | null;
   name: string;
   character: string;
   profile_path: string | null;
@@ -109,7 +110,8 @@ export interface SeasonState {
 
 export interface EpisodeItem {
   id: number | null;
-  tmdb_id: number;
+  tmdb_id: number | null;
+  uri_id?: string | null;
   episode_number: number;
   title: string;
   overview: string | null;
@@ -125,8 +127,9 @@ export interface EpisodeItem {
 }
 
 export interface ShowSummary {
-  tmdb_id: number;
+  tmdb_id: number | null;
   tvdb_id?: number | null;
+  uri_id?: string | null;
   title: string;
   poster_path: string | null;
   backdrop_path: string | null;
@@ -170,7 +173,9 @@ export interface EpisodeDetail {
   season_number: number;
   runtime: number | null;
   tmdb_rating: number | null;
-  tmdb_id: number;
+  tmdb_id: number | null;
+  tvdb_id?: number | null;
+  uri_id?: string | null;
   id: number | null;
   in_library: boolean;
   watched: boolean;
@@ -211,7 +216,8 @@ export interface PersonCredit {
 }
 
 export interface PersonDetail {
-  tmdb_id: number;
+  tmdb_id: number | null;
+  uri_id?: string | null;
   tvdb_id?: number | null;
   name: string;
   profile_path: string | null;
@@ -247,10 +253,16 @@ export interface SyncJob {
 
 export interface ShowSeasonOverride {
   id: number;
-  source_show_tmdb_id: number;
+  source_show_id: number;
+  source_show_uri_id: string | null;
   source_season_number: number;
-  target_show_tmdb_id: number;
+  source_show_title?: string;
+  source_show_poster_path?: string | null;
+  target_show_id: number | null;
+  target_show_uri_id: string | null;
   target_season_number: number;
+  target_show_title?: string;
+  target_show_poster_path?: string | null;
 }
 
 export interface UserList {
@@ -340,7 +352,7 @@ export interface GlobalSettings {
 
 export interface MediaRequestItem {
   id: number;
-  tmdb_id: number;
+  uri_id: string;
   media_type: string;
   title: string;
   poster_path: string | null;
@@ -546,6 +558,7 @@ export interface MediaItem {
   id: number | null;
   tmdb_id: number | null;
   tvdb_id?: number | null;
+  uri_id?: string | null;
   type: MediaType;
   title: string;
   original_title?: string | null;
@@ -571,6 +584,7 @@ export interface MediaItem {
   show_title?: string | null;
   show_tmdb_id?: number | null;
   show_tvdb_id?: number | null;
+  show_uri_id?: string | null;
   show_poster_path?: string | null;
   show_backdrop_path?: string | null;
   next_up_hidden?: boolean;
@@ -635,7 +649,8 @@ export interface PlaybackSource {
 
 export interface NowPlayingMedia {
   id: number;
-  tmdb_id: number;
+  tmdb_id: number | null;
+  uri_id?: string | null;
   type: MediaType;
   title: string;
   poster_path: string | null;
@@ -644,7 +659,8 @@ export interface NowPlayingMedia {
   episode_number: number | null;
   runtime: number | null;
   show_title?: string;
-  show_tmdb_id?: number;
+  show_tmdb_id?: number | null;
+  show_uri_id?: string | null;
   show_tvdb_id?: number | null;
   show_poster_path?: string | null;
 }
@@ -677,140 +693,22 @@ export interface CollectionDetail {
   poster_path: string | null;
   backdrop_path: string | null;
   genres: string[];
-  cast: { tmdb_id: number; name: string; profile_path: string | null; appearances: number }[];
+  cast: { tmdb_id: number | null; uri_id?: string | null; name: string; profile_path: string | null; appearances: number }[];
   parts: MediaItem[];
-}
-
-export interface TvdbEpisode {
-  tvdb_id: number | null;
-  season_number: number;
-  episode_number: number;
-  name: string | null;
-  overview: string | null;
-  air_date: string | null;
-  runtime: number | null;
-  image_url: string | null;
-  id: number | null;
-  in_library: boolean;
-  watched: boolean;
-  user_rating: number | null;
-  in_lists: number[];
-}
-
-export interface TvdbEpisodeDetail {
-  tvdb_id: number | null;
-  season_number: number;
-  episode_number: number;
-  name: string | null;
-  overview: string | null;
-  air_date: string | null;
-  runtime: number | null;
-  image_url: string | null;
-  id: number | null;
-  in_library: boolean;
-  watched: boolean;
-  user_rating: number | null;
-  play_count: number;
-  progress_percent?: number;
-  in_lists: number[];
-  library: {
-    resolution: string | null;
-    video_codec: string | null;
-    audio_codec: string | null;
-    audio_channels: string | null;
-    audio_languages: string[] | null;
-    subtitle_languages: string[] | null;
-  } | null;
-  cast: { tmdb_id: null; person_id: number | null; name: string; character: string; profile_path: string | null }[];
-  episodes: { episode_number: number; name: string | null }[];
-  show: { id: number | null; tvdb_id: number; tmdb_id_cross: number | null; title: string; poster_path: string | null; backdrop_path: string | null; seasons_meta?: TvdbSeasonMeta[] };
-  season: { name: string; season_number: number; poster_path: string | null };
-}
-
-export interface TvdbSeason {
-  tvdb_id: number;
-  season_number: number;
-  name: string;
-  overview: string | null;
-  poster_path: string | null;
-  backdrop_path: string | null;
-  air_date: string | null;
-  episodes: TvdbEpisode[];
-  season_in_library: boolean;
-  season_watched: boolean;
-  season_collection_pct: number;
-  season_watch_pct?: number;
-  season_user_rating: number | null;
-  show_in_library: boolean;
-  show: {
-    id: number | null;
-    tvdb_id: number;
-    tmdb_id_cross: number | null;
-    title: string;
-    poster_path: string | null;
-    backdrop_path: string | null;
-    seasons_meta: TvdbSeasonMeta[];
-  };
-}
-
-export interface TvdbSeasonMeta {
-  season_number: number;
-  name: string;
-  overview: string | null;
-  poster_path: string | null;
-  episode_count: number;
-  air_date: string | null;
-}
-
-export interface TvdbShow {
-  id: number | null;
-  tvdb_id: number;
-  tmdb_id: null;
-  type: string;
-  title: string;
-  original_title: string | null;
-  overview: string | null;
-  poster_path: string | null;
-  backdrop_path: string | null;
-  first_air_date: string | null;
-  last_air_date: string | null;
-  status: string | null;
-  tagline: null;
-  tmdb_rating: null;
-  age_rating: string | null;
-  original_language: string | null;
-  imdb_id: string | null;
-  tmdb_id_cross: number | null;
-  genres: string[];
-  network: string | null;
-  networks: { id: null; name: string; logo_path: null; origin_country: null }[];
-  seasons: TvdbSeasonMeta[];
-  seasons_meta: TvdbSeasonMeta[];
-  cast: { tmdb_id: null; person_id: number | null; name: string; character: string; profile_path: string | null }[];
-  in_library: boolean;
-  watched: boolean;
-  in_lists: number[];
-  collection_pct: number;
-  is_monitored: boolean;
-  request_enabled: boolean;
-  request_status: string | null;
-  user_rating: number | null;
-  is_blocked?: boolean;
-  is_dropped?: boolean;
-  season_states: Record<number, SeasonState>;
-  where_to_watch: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string; connection_id?: number | null }[];
-  watch_pct?: number;
 }
 
 export interface Show {
   id: number | null;
-  tmdb_id: number;
+  tmdb_id: number | null;          // null for TVDB-only shows
+  tvdb_id?: number | null;
+  tmdb_id_cross?: number | null;   // TVDB shows that cross-reference TMDB
+  uri_id?: string | null;
   title: string;
   original_title: string | null;
   overview: string;
   poster_path: string | null;
   backdrop_path: string | null;
-  tmdb_rating: number;
+  tmdb_rating: number | null;      // null for TVDB shows
   first_air_date: string | null;
   genres: string[];
   in_library: boolean;
@@ -834,7 +732,6 @@ export interface Show {
   is_blocked?: boolean;
   is_dropped?: boolean;
   user_rating?: number | null;
-  first_air_date: string | null;
   last_air_date: string | null;
   where_to_watch?: { type: string; name: string; logo: string | null; is_subscribed?: boolean; category?: string; url?: string | null; connection_id?: number | null }[];
   trailer_youtube_id?: string | null;
@@ -845,7 +742,8 @@ export interface Show {
 }
 
 export interface ProfileWatchedItem {
-  tmdb_id: number;
+  tmdb_id: number | null;
+  uri_id?: string | null;
   media_type: string;
   title: string;
   poster_path: string | null;
@@ -853,13 +751,15 @@ export interface ProfileWatchedItem {
   watched_at: string;
   show_title: string | null;
   show_tmdb_id: number | null;
+  show_uri_id?: string | null;
   show_poster_path: string | null;
   season_number: number | null;
   episode_number: number | null;
 }
 
 export interface ProfileRatedItem {
-  tmdb_id: number;
+  tmdb_id: number | null;
+  uri_id?: string | null;
   media_type: string;
   title: string;
   poster_path: string | null;
@@ -913,7 +813,8 @@ export interface ProfileCommentItem {
   id: number;
   content: string;
   media_type: string;
-  tmdb_id: number;
+  tmdb_id: number | null;
+  uri_id?: string | null;
   season_number: number | null;
   season_name: string | null;
   episode_number: number | null;
@@ -1009,7 +910,7 @@ export const api = {
     changePassword: (body: unknown, token: string) =>
       post<{ message: string }>("/auth/change-password", body, token),
     deleteAccount: (token: string) =>
-      del<{ message: string }>("/auth/me", token),
+      del<{ message: string }>("/auth/me", undefined, token),
     regenerateApiKey: (token: string) =>
       post<UserProfile>("/auth/api-key/regenerate", undefined, token),
     getConnections: (token: string) =>
@@ -1019,7 +920,7 @@ export const api = {
     updateConnection: (id: number, body: MediaServerConnectionUpdate, token: string) =>
       patch<MediaServerConnection>(`/auth/connections/${id}`, body, token),
     deleteConnection: (id: number, token: string) =>
-      del<{ status: string }>(`/auth/connections/${id}`, token),
+      del<{ status: string }>(`/auth/connections/${id}`, undefined, token),
     getScrobbleConnections: (token: string) =>
       get<ScrobbleConnection[]>("/auth/scrobble-connections", undefined, token),
     createScrobbleConnection: (body: ScrobbleConnectionCreate, token: string) =>
@@ -1027,7 +928,7 @@ export const api = {
     updateScrobbleConnection: (id: number, body: ScrobbleConnectionUpdate, token: string) =>
       patch<ScrobbleConnection>(`/auth/scrobble-connections/${id}`, body, token),
     deleteScrobbleConnection: (id: number, token: string) =>
-      del<{ status: string }>(`/auth/scrobble-connections/${id}`, token),
+      del<{ status: string }>(`/auth/scrobble-connections/${id}`, undefined, token),
     testJellyfin: (url: string, token: string, jellyfinUserId: string | null, userToken: string) =>
       post<{ success: boolean; message: string }>(`/auth/test-jellyfin?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}${jellyfinUserId ? `&user_id=${encodeURIComponent(jellyfinUserId)}` : ""}`, undefined, userToken),
     testEmby: (url: string, token: string, embyUserId: string | null, userToken: string) =>
@@ -1070,7 +971,7 @@ export const api = {
     devicePoll: (token: string) =>
       post<{ status: "pending" | "connected" }>("/trakt/auth/device/poll", undefined, token),
     disconnect: (token: string) =>
-      del<{ status: string }>("/trakt/auth/disconnect", token),
+      del<{ status: string }>("/trakt/auth/disconnect", undefined, token),
     sync: (token: string) =>
       post<{ status: string; job_id: number; message: string }>("/trakt/sync", undefined, token),
   },
@@ -1081,7 +982,7 @@ export const api = {
     pinPoll: (token: string) =>
       post<{ status: "pending" | "connected" }>("/simkl/auth/pin/poll", undefined, token),
     disconnect: (token: string) =>
-      del<{ status: string }>("/simkl/auth/disconnect", token),
+      del<{ status: string }>("/simkl/auth/disconnect", undefined, token),
     sync: (token: string) =>
       post<{ status: string; job_id: number; message: string }>("/simkl/sync", undefined, token),
     push: (token: string) =>
@@ -1092,17 +993,14 @@ export const api = {
     list: (params?: { type?: string; sort?: string; page?: number; genre?: string; year?: number }, token?: string) =>
       get<{ page: number; page_size: number; total_pages: number; total_results: number; results: MediaItem[] }>("/media", params, token),
 
-    get: (type: string, tmdbId: number, token?: string) =>
-      get<MediaItem>(`/media/${type}/${tmdbId}`, undefined, token),
+    get: (type: string, idOrUri: number | string, token?: string) =>
+      get<MediaItem>(`/media/${type}/${idOrUri}`, undefined, token),
 
-    getRecommendations: (type: string, tmdbId: number, token?: string) =>
-      get<{ results: MediaItem[] }>(`/media/${type}/${tmdbId}/recommendations`, undefined, token),
+    getRecommendations: (type: string, idOrUri: number | string, token?: string) =>
+      get<{ results: MediaItem[] }>(`/media/${type}/${idOrUri}/recommendations`, undefined, token),
 
-    getPerson: (personId: number, page: number = 1, token?: string) =>
+    getPerson: (personId: number | string, page: number = 1, token?: string) =>
       get<PersonDetail>(`/media/person/${personId}`, { page }, token),
-
-    getPersonTvdb: (personId: number, page: number = 1, token?: string) =>
-      get<PersonDetail>(`/media/person/tvdb/${personId}`, { page }, token),
 
     getCollection: (collectionId: number, token?: string) =>
       get<CollectionDetail>(`/media/collection/${collectionId}`, undefined, token),
@@ -1111,19 +1009,19 @@ export const api = {
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/tmdb/list", params, token),
 
     getBlocklist: (token?: string) =>
-      get<{ tmdb_id: number; media_type: string; is_dropped: boolean }[]>("/media/blocklist", undefined, token),
+      get<{ uri_id: string; tmdb_id: number | null; media_type: string; is_dropped: boolean }[]>("/media/blocklist", undefined, token),
 
     getBlocklistEnriched: (token?: string) =>
       get<MediaItem[]>("/media/blocklist/enriched", undefined, token),
 
-    block: (tmdbId: number, mediaType: string, token?: string) =>
-      post<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType, is_dropped: false }, token),
+    block: (uriId: string, mediaType: string, token?: string) =>
+      post<{ status: string }>("/media/blocklist", { uri_id: uriId, media_type: mediaType, is_dropped: false }, token),
 
-    drop: (tmdbId: number, mediaType: string, token?: string) =>
-      post<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType, is_dropped: true }, token),
+    drop: (uriId: string, mediaType: string, token?: string) =>
+      post<{ status: string }>("/media/blocklist", { uri_id: uriId, media_type: mediaType, is_dropped: true }, token),
 
-    unblock: (tmdbId: number, mediaType: string, token?: string) =>
-      del<{ status: string }>("/media/blocklist", { tmdb_id: tmdbId, media_type: mediaType }, token),
+    unblock: (uriId: string, mediaType: string, token?: string) =>
+      del<{ status: string }>("/media/blocklist", { uri_id: uriId, media_type: mediaType }, token),
 
     search: (q: string, type?: string, page: number = 1, year?: number, token?: string, inLibrary?: boolean) =>
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/search", { q, ...(type ? { type } : {}), page, ...(year ? { year } : {}), ...(inLibrary ? { in_library: true } : {}) }, token),
@@ -1164,20 +1062,20 @@ export const api = {
     forYou: (token?: string) =>
       get<{ results: MediaItem[] }>("/media/for-you", {}, token),
 
-    collect: (body: { tmdb_id: number; media_type: string }, token: string) =>
+    collect: (body: { uri_id: string; media_type: string }, token: string) =>
       post<{ status: string; message: string }>("/media/collect", body, token),
 
-    request: (type: string, tmdbId: number, token: string) =>
-      post<{ status: string; movie?: any; series?: any }>(`/media/${type}/${tmdbId}/request`, undefined, token),
+    request: (type: string, idOrUri: number | string, token: string) =>
+      post<{ status: string; movie?: any; series?: any }>(`/media/${type}/${idOrUri}/request`, undefined, token),
 
-    uncollect: (tmdbId: number, mediaType: string, token: string) =>
-      del<{ status: string }>(`/media/collect?tmdb_id=${tmdbId}&media_type=${mediaType}`, token),
+    uncollect: (uriId: string, mediaType: string, token: string) =>
+      del<{ status: string }>(`/media/collect?uri_id=${encodeURIComponent(uriId)}&media_type=${mediaType}`, undefined, token),
 
-    refreshMovie: (tmdbId: number, token: string) =>
-      post<{ message: string }>(`/media/movie/${tmdbId}/refresh`, undefined, token),
+    refreshMovie: (idOrUri: number | string, token: string) =>
+      post<{ message: string }>(`/media/movie/${idOrUri}/refresh`, undefined, token),
 
-    playbackSources: (type: string, tmdbId: number, token: string) =>
-      get<PlaybackSource[]>(`/media/playback/${type}/${tmdbId}`, undefined, token),
+    playbackSources: (type: string, mediaRef: string | number, token: string) =>
+      get<PlaybackSource[]>(`/media/playback/${type}/${mediaRef}`, undefined, token),
 
     getWatchProviders: (type: string = "movie", region: string = "US", token?: string) =>
       get<{ results: any[] }>("/media/watch-providers", { type, region }, token),
@@ -1198,52 +1096,44 @@ export const api = {
     list: (params?: { sort?: string; page?: number; page_size?: number; genre?: string; year?: number; status?: string }, token?: string) =>
       get<{ page: number; page_size: number; total_results: number; total_pages: number; results: any[] }>("/shows", params, token),
 
-    get: (seriesTmdbId: number, token?: string) =>
-      get<Show>(`/shows/${seriesTmdbId}`, undefined, token),
+    get: (seriesId: number | string, token?: string) =>
+      get<Show>(`/shows/${seriesId}`, undefined, token),
 
-    getRecommendations: (seriesTmdbId: number, token?: string) =>
-      get<{ results: MediaItem[] }>(`/shows/${seriesTmdbId}/recommendations`, undefined, token),
+    getRecommendations: (seriesId: number | string, token?: string) =>
+      get<{ results: MediaItem[] }>(`/shows/${seriesId}/recommendations`, undefined, token),
 
-    getSeason: (seriesTmdbId: number, seasonNumber: number, token?: string) =>
-      get<Season>(`/shows/${seriesTmdbId}/season/${seasonNumber}`, undefined, token),
+    getSeason: (seriesId: number | string, seasonNumber: number, token?: string) =>
+      get<Season>(`/shows/${seriesId}/season/${seasonNumber}`, undefined, token),
 
-    getEpisode: (seriesTmdbId: number, seasonNumber: number, episodeNumber: number, token?: string) =>
-      get<EpisodeDetail>(`/shows/${seriesTmdbId}/season/${seasonNumber}/${episodeNumber}`, undefined, token),
+    getEpisode: (seriesId: number | string, seasonNumber: number, episodeNumber: number, token?: string) =>
+      get<EpisodeDetail>(`/shows/${seriesId}/season/${seasonNumber}/${episodeNumber}`, undefined, token),
 
-    refreshMetadata: (seriesTmdbId: number, token: string) =>
-      post<{ message: string }>(`/shows/${seriesTmdbId}/refresh`, undefined, token),
+    refreshMetadata: (seriesId: number | string, token: string) =>
+      post<{ message: string }>(`/shows/${seriesId}/refresh`, undefined, token),
 
-    getTvdb: (tvdbId: number, token?: string) =>
-      get<TvdbShow>(`/shows/tvdb/${tvdbId}`, undefined, token),
-
-    getTvdbSeason: (tvdbId: number, seasonNumber: number, token?: string) =>
-      get<TvdbSeason>(`/shows/tvdb/${tvdbId}/season/${seasonNumber}`, undefined, token),
-
-    getTvdbEpisode: (tvdbId: number, seasonNumber: number, episodeNumber: number, token?: string) =>
-      get<TvdbEpisodeDetail>(`/shows/tvdb/${tvdbId}/season/${seasonNumber}/episode/${episodeNumber}`, undefined, token),
   },
 
   history: {
     list: (params?: { page?: number; page_size?: number; type?: string; start_date?: string; end_date?: string }, token?: string) =>
       get<{ page: number; page_size: number; total_pages: number; total_results: number; results: WatchEvent[] }>("/history", params, token),
 
-    markAsWatched: (body: { tmdb_id: number; media_type: string; watched_at?: string; completed?: boolean }, token: string) =>
+    markAsWatched: (body: { uri_id: string; media_type: string; watched_at?: string; completed?: boolean }, token: string) =>
       post<{ message: string }>("/history", body, token),
 
-    unwatchItem: (tmdbId: number, mediaType: string, token: string) =>
-      del<{ status: string }>(`/history/item?tmdb_id=${tmdbId}&media_type=${mediaType}`, token),
+    unwatchItem: (uriId: string, mediaType: string, token: string) =>
+      del<{ status: string }>(`/history/item?uri_id=${encodeURIComponent(uriId)}&media_type=${mediaType}`, undefined, token),
 
-    markSeasonWatched: (body: { series_tmdb_id: number; season_number: number }, token: string) =>
+    markSeasonWatched: (body: { show_uri_id: string; season_number: number }, token: string) =>
       post<{ status: string; count: number }>("/history/season", body, token),
 
-    unmarkSeasonWatched: (seriesTmdbId: number, seasonNumber: number, token: string) =>
-      del<{ status: string }>(`/history/season?series_tmdb_id=${seriesTmdbId}&season_number=${seasonNumber}`, token),
+    unmarkSeasonWatched: (showUriId: string, seasonNumber: number, token: string) =>
+      del<{ status: string }>(`/history/season?show_uri_id=${encodeURIComponent(showUriId)}&season_number=${seasonNumber}`, undefined, token),
 
-    markShowWatched: (body: { series_tmdb_id: number }, token: string) =>
+    markShowWatched: (body: { show_uri_id: string }, token: string) =>
       post<{ status: string; count: number }>("/history/show-all", body, token),
 
-    unmarkShowWatched: (seriesTmdbId: number, token: string) =>
-      del<{ status: string }>(`/history/show-all?series_tmdb_id=${seriesTmdbId}`, token),
+    unmarkShowWatched: (showUriId: string, token: string) =>
+      del<{ status: string }>(`/history/show-all?show_uri_id=${encodeURIComponent(showUriId)}`, undefined, token),
 
     continueWatching: (params?: { page?: number; page_size?: number } | string, token?: string) => {
       const finalParams = typeof params === "object" ? params : undefined;
@@ -1255,24 +1145,18 @@ export const api = {
       );
     },
 
-    deleteProgress: (tmdbId: number, mediaType: string, token: string) =>
-      del<{ status: string }>(`/history/continue-watching?tmdb_id=${tmdbId}&media_type=${mediaType}`, token),
+    deleteProgress: (uriId: string, mediaType: string, token: string) =>
+      del<{ status: string }>(`/history/continue-watching?uri_id=${encodeURIComponent(uriId)}&media_type=${mediaType}`, undefined, token),
 
     nextUp: (token?: string, limit?: number, includeHidden?: boolean) =>
       get<{ next_up: MediaItem[] }>("/history/next-up", { ...(limit ? { limit } : {}), ...(includeHidden ? { include_hidden: true } : {}) }, token),
 
-    hideNextUp: (showId: number, token: string) =>
-      post<{ status: string }>("/history/next-up/hide", { show_id: showId }, token),
-
-    unhideNextUp: (showId: number, token: string) =>
-      del<{ status: string }>(`/history/next-up/hide?show_id=${showId}`, token),
-
     nowPlaying: (token: string) =>
       get<{ now_playing: NowPlayingSession[] }>("/history/now-playing", undefined, token),
 
-    getItemEvents: (tmdbId: number, mediaType: string, token: string) =>
+    getItemEvents: (uriId: string, mediaType: string, token: string) =>
       get<{ events: { id: number; watched_at: string; progress_seconds: number | null; progress_percent: number | null; completed: boolean; play_count: number }[] }>(
-        `/history/item/events?tmdb_id=${tmdbId}&media_type=${mediaType}`,
+        `/history/item/events?uri_id=${encodeURIComponent(uriId)}&media_type=${mediaType}`,
         undefined,
         token
       ),
@@ -1293,11 +1177,11 @@ export const api = {
     update: (id: number, body: Partial<UserList>, token: string) =>
       patch<UserList>(`/lists/${id}`, body, token),
     delete: (id: number, token: string) =>
-      del<{ message: string }>(`/lists/${id}`, token),
-    addItem: (listId: number, body: { tmdb_id: number; media_type: string }, token: string) =>
+      del<{ message: string }>(`/lists/${id}`, undefined, token),
+    addItem: (listId: number, body: { uri_id: string; media_type: string }, token: string) =>
       post<ListItemEntry>(`/lists/${listId}/items`, body, token),
     removeItem: (listId: number, itemId: number, token: string) =>
-      del<{ message: string }>(`/lists/${listId}/items/${itemId}`, token),
+      del<{ message: string }>(`/lists/${listId}/items/${itemId}`, undefined, token),
   },
 
   sync: {
@@ -1329,11 +1213,11 @@ export const api = {
     uploadAvatar: (formData: FormData, token: string) =>
       request<{ avatar_url: string }>("/profile/me/avatar", "POST", undefined, formData, token),
     deleteAvatar: (token: string) =>
-      del<{ status: string }>("/profile/me/avatar", token),
+      del<{ status: string }>("/profile/me/avatar", undefined, token),
     follow: (userId: number, token: string) =>
       post<{ status: string }>(`/profile/${userId}/follow`, undefined, token),
     unfollow: (userId: number, token: string) =>
-      del<{ status: string }>(`/profile/${userId}/follow`, token),
+      del<{ status: string }>(`/profile/${userId}/follow`, undefined, token),
     searchUsers: (q: string, token?: string) =>
       get<{ results: UserSearchResult[] }>("/profile/search", { q }, token),
     getStats: (userId: number, token?: string) =>
@@ -1341,14 +1225,14 @@ export const api = {
   },
 
   comments: {
-    list: (params: { media_type: string; tmdb_id: number; season_number?: number; episode_number?: number }, token?: string) =>
+    list: (params: { media_type: string; uri_id: string; season_number?: number; episode_number?: number }, token?: string) =>
       get<Comment[]>("/comments", params, token),
-    create: (body: { media_type: string; tmdb_id: number; season_number?: number; episode_number?: number; content: string }, token: string) =>
+    create: (body: { media_type: string; uri_id: string; season_number?: number; episode_number?: number; content: string }, token: string) =>
       post<Comment>("/comments", body, token),
     update: (id: number, content: string, token: string) =>
       patch<{ id: number; content: string; updated_at: string | null }>(`/comments/${id}`, { content }, token),
     delete: (id: number, token: string) =>
-      del<{ message: string }>(`/comments/${id}`, token),
+      del<{ message: string }>(`/comments/${id}`, undefined, token),
   },
 
   admin: {
@@ -1361,7 +1245,7 @@ export const api = {
     toggleAdmin: (userId: number, token: string) =>
       patch<AdminUser>(`/admin/users/${userId}/toggle-admin`, undefined, token),
     deleteUser: (userId: number, token: string) =>
-      del<{ status: string }>(`/admin/users/${userId}`, token),
+      del<{ status: string }>(`/admin/users/${userId}`, undefined, token),
     getPendingCount: (token: string) =>
       get<{ pending: number }>("/admin/requests/pending-count", undefined, token),
     getRequests: (token: string) =>

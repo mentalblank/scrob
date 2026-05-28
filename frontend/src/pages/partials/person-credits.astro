@@ -15,11 +15,8 @@ if (!token || !personId) {
 
 let person: Awaited<ReturnType<typeof api.media.getPerson>>;
 try {
-  if (source === "tvdb") {
-    person = await api.media.getPersonTvdb(personId, page, token);
-  } else {
-    person = await api.media.getPerson(personId, page, token);
-  }
+  const fetchKey = source === "tvdb" ? `tvdb:p:${personId}` : String(personId);
+  person = await api.media.getPerson(fetchKey, page, token);
 } catch {
   return new Response(null, { status: 500 });
 }

@@ -25,7 +25,7 @@ router = APIRouter()
 
 
 class RatingIn(BaseModel):
-    tmdb_id: int
+    uri_id: str
     media_type: str
     rating: float = Field(..., ge=0.0, le=10.0)
     review: Optional[str] = None
@@ -37,6 +37,7 @@ def format_rating(rating: Rating, media: Media) -> dict:
         "id": rating.id,
         "media": {
             "id": media.id,
+            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "type": media.media_type,
             "title": media.title,
@@ -62,25 +63,38 @@ async def submit_rating(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid media_type: {body.media_type}")
 
-    # Look up existing Media row, create on-the-fly if missing
+    from utils.media_uri import MediaURI
+    try:
+        uri = MediaURI.parse(body.uri_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid uri_id: {body.uri_id!r}")
+
     result = await db.execute(
-        select(Media).where(Media.tmdb_id == body.tmdb_id, Media.media_type == media_type)
+        select(Media).where(Media.uri_id == body.uri_id, Media.media_type == media_type)
     )
     media = result.scalar_one_or_none()
 
     if not media:
+        if uri.provider != "tmdb":
+            raise HTTPException(status_code=400, detail="Only TMDB URIs supported for new rating media; sync first")
+        tmdb_id_int = int(uri.id)
         from routers.media import get_user_tmdb_key
         from core import tmdb
         api_key = await get_user_tmdb_key(db, current_user.id)
         try:
             if media_type == MediaType.movie:
-                data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
+                data = await tmdb.get_movie(tmdb_id_int, api_key=api_key)
                 title = data.get("title")
             elif media_type == MediaType.series:
-                title = None  # enrich_media will populate all fields including title
+                title = None
             else:
                 raise HTTPException(status_code=400, detail="Cannot create media row for episodes via rating")
-            media = Media(tmdb_id=body.tmdb_id, media_type=media_type, title=title or "")
+            media = Media(
+                tmdb_id=tmdb_id_int,
+                uri_id=body.uri_id,
+                media_type=media_type,
+                title=title or "",
+            )
             db.add(media)
             await db.flush()
             await enrich_media(media, api_key=api_key)
@@ -151,17 +165,24 @@ async def submit_rating(
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = settings_result.scalar_one_or_none()
-    if settings and settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and media.tmdb_id:
+
+    push_tmdb_id = media.tmdb_id
+    if not push_tmdb_id and media.uri_id:
+        from utils.alias_lookup import get_provider_id_for_uri
+        alias = await get_provider_id_for_uri(db, media.uri_id, "tmdb")
+        push_tmdb_id = int(alias) if alias else None
+
+    if settings and settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and push_tmdb_id:
         if media_type == MediaType.movie:
-            push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, body.rating))
+            push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, push_tmdb_id, body.rating))
         elif media_type == MediaType.series:
-            push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, body.rating))
-    if settings and settings.simkl_push_ratings and settings.simkl_access_token and settings.simkl_client_id and media.tmdb_id:
+            push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, push_tmdb_id, body.rating))
+    if settings and settings.simkl_push_ratings and settings.simkl_access_token and settings.simkl_client_id and push_tmdb_id:
         from core import simkl as simkl_client
         if media_type == MediaType.movie:
-            push_tasks.append(simkl_client.set_movie_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id, body.rating))
+            push_tasks.append(simkl_client.set_movie_rating(settings.simkl_client_id, settings.simkl_access_token, push_tmdb_id, body.rating))
         elif media_type == MediaType.series:
-            push_tasks.append(simkl_client.set_show_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id, body.rating))
+            push_tasks.append(simkl_client.set_show_rating(settings.simkl_client_id, settings.simkl_access_token, push_tmdb_id, body.rating))
     if push_tasks:
         await asyncio.gather(*push_tasks, return_exceptions=True)
 
@@ -201,7 +222,7 @@ async def get_media_rating(
 
 @router.delete("")
 async def delete_rating(
-    tmdb_id: int,
+    uri_id: str,
     media_type: str,
     season_number: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -213,7 +234,7 @@ async def delete_rating(
         raise HTTPException(status_code=400, detail=f"Invalid media_type: {media_type}")
 
     media_result = await db.execute(
-        select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == mt)
+        select(Media).where(Media.uri_id == uri_id, Media.media_type == mt)
     )
     media = media_result.scalar_one_or_none()
     if not media:
@@ -267,17 +288,24 @@ async def delete_rating(
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = settings_result.scalar_one_or_none()
-    if settings and settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and media.tmdb_id:
+
+    del_push_tmdb_id = media.tmdb_id
+    if not del_push_tmdb_id and media.uri_id:
+        from utils.alias_lookup import get_provider_id_for_uri
+        alias = await get_provider_id_for_uri(db, media.uri_id, "tmdb")
+        del_push_tmdb_id = int(alias) if alias else None
+
+    if settings and settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and del_push_tmdb_id:
         if mt == MediaType.movie:
-            push_tasks.append(trakt_client.remove_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
+            push_tasks.append(trakt_client.remove_movie_rating(settings.trakt_client_id, settings.trakt_access_token, del_push_tmdb_id))
         elif mt == MediaType.series:
-            push_tasks.append(trakt_client.remove_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
-    if settings and settings.simkl_push_ratings and settings.simkl_access_token and settings.simkl_client_id and media.tmdb_id:
+            push_tasks.append(trakt_client.remove_show_rating(settings.trakt_client_id, settings.trakt_access_token, del_push_tmdb_id))
+    if settings and settings.simkl_push_ratings and settings.simkl_access_token and settings.simkl_client_id and del_push_tmdb_id:
         from core import simkl as simkl_client
         if mt == MediaType.movie:
-            push_tasks.append(simkl_client.remove_movie_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id))
+            push_tasks.append(simkl_client.remove_movie_rating(settings.simkl_client_id, settings.simkl_access_token, del_push_tmdb_id))
         elif mt == MediaType.series:
-            push_tasks.append(simkl_client.remove_show_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id))
+            push_tasks.append(simkl_client.remove_show_rating(settings.simkl_client_id, settings.simkl_access_token, del_push_tmdb_id))
     if push_tasks:
         await asyncio.gather(*push_tasks, return_exceptions=True)
 

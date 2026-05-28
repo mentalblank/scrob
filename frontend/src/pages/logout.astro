@@ -1,8 +1,5 @@
 ---
-// Only allow POST to prevent logout CSRF via crafted GET links.
-// SameSite=Lax permits top-level cross-site navigations, so a GET logout
-// would allow any external site to log out the user by tricking them into
-// clicking a link.
+// Only allow POST to prevent logout CSRF.
 if (Astro.request.method !== "POST") {
   return Astro.redirect("/login");
 }

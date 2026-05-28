@@ -1,6 +1,7 @@
 ---
 interface Props {
-  tmdbId: number;
+  uriId?: string | null;
+  tmdbId?: number | null;
   mediaType: string; // "movie" | "episode" | "series" | "season"
   seasonNumber?: number;
   inLibrary: boolean;
@@ -10,7 +11,8 @@ interface Props {
   mediaId?: number | null;
 }
 
-const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = false, mediaId } = Astro.props;
+const { uriId, tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = false, mediaId } = Astro.props;
+const mediaRef = uriId ?? (tmdbId != null ? String(tmdbId) : "0");
 ---
 
 {inLibrary && (
@@ -29,7 +31,7 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
 
     <dialog
       id="player-dialog"
-      data-tmdb-id={tmdbId}
+      data-media-ref={mediaRef}
       data-media-id={mediaId ?? 0}
       data-media-type={mediaType}
       data-season-number={seasonNumber || ""}
@@ -54,51 +56,48 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
 )}
 
 <script>
-  function esc(str: string | null | undefined): string {
-    if (str == null) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  const esc = window.esc;
 
-  const dialog = document.getElementById('player-dialog') as HTMLDialogElement | null;
+  const dialog = document.getElementById('player-dialog');
   if (dialog) {
-    const tmdbId    = dialog.dataset.tmdbId!;
+    const mediaRef  = dialog.dataset.mediaRef;
     const mediaId   = parseInt(dialog.dataset.mediaId ?? '0', 10) || null;
-    const mediaType = dialog.dataset.mediaType!;
+    const mediaType = dialog.dataset.mediaType;
     const seasonNum = dialog.dataset.seasonNumber;
-    const title     = dialog.dataset.title!;
-    const token     = dialog.dataset.token!;
+    const title     = dialog.dataset.title;
+    const token     = dialog.dataset.token;
     const mediaIdParam = mediaId ? `&media_id=${mediaId}` : '';
 
-    const playBtn   = document.getElementById('play-btn') as HTMLButtonElement | null;
-    const video     = document.getElementById('player-video') as HTMLVideoElement;
-    const titleEl   = document.getElementById('player-title') as HTMLSpanElement;
-    const sourcesEl = document.getElementById('player-sources') as HTMLDivElement;
-    const closeBtn  = document.getElementById('player-close') as HTMLButtonElement | null;
+    const playBtn   = document.getElementById('play-btn');
+    const video     = document.getElementById('player-video');
+    const titleEl   = document.getElementById('player-title');
+    const sourcesEl = document.getElementById('player-sources');
+    const closeBtn  = document.getElementById('player-close');
 
-    let currentConnectionId: string | null = null;
-    let currentSubtitles: { index: number; language: string; label: string }[] = [];
-    let sessionTimer: ReturnType<typeof setInterval> | null = null;
+    let currentConnectionId = null;
+    let currentSubtitles = [];
+    let sessionTimer = null;
 
-    function stopSession(): void {
+    function stopSession() {
       if (sessionTimer) { clearInterval(sessionTimer); sessionTimer = null; }
     }
 
-    function attachSubtitles(connectionId: string, subtitles: typeof currentSubtitles): void {
+    function attachSubtitles(connectionId, subtitles) {
       Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
       subtitles.forEach(sub => {
         const track = document.createElement('track');
         track.kind = 'subtitles';
-        track.src = `/api/proxy/media/subtitles/${mediaType}/${tmdbId}?connection_id=${connectionId}&stream_index=${sub.index}${mediaIdParam}`;
+        track.src = `/api/proxy/media/subtitles/${mediaType}/${mediaRef}?connection_id=${connectionId}&stream_index=${sub.index}${mediaIdParam}`;
         track.srclang = sub.language || '';
         track.label = sub.label || sub.language || 'Subtitle';
         video.appendChild(track);
       });
     }
 
-    async function reportSession(state: string): Promise<void> {
+    async function reportSession(state) {
       if (!currentConnectionId) return;
       try {
-        await fetch(`/api/proxy/media/session/report/${mediaType}/${tmdbId}${mediaIdParam}`, {
+        await fetch(`/api/proxy/media/session/report/${mediaType}/${mediaRef}${mediaIdParam}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -115,33 +114,27 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
     }
 
     function loadSource(
-      connectionId: string,
-      subtitles: typeof currentSubtitles,
-    ): void {
+      connectionId,
+      subtitles,
+    ) {
       stopSession();
       currentConnectionId = connectionId;
       currentSubtitles = subtitles;
       attachSubtitles(connectionId, subtitles);
 
-      video.src = `/api/proxy/media/stream/${mediaType}/${tmdbId}?connection_id=${connectionId}${mediaIdParam}`;
+      video.src = `/api/proxy/media/stream/${mediaType}/${mediaRef}?connection_id=${connectionId}${mediaIdParam}`;
       video.load();
       video.play().catch(() => {});
       reportSession('playing');
       sessionTimer = setInterval(() => {
         if (!video.paused && !video.ended) reportSession('progress');
-      }, 10_000);
+      }, 10000);
     }
 
     video.addEventListener('pause', () => { reportSession('paused'); });
     video.addEventListener('play',  () => { reportSession('playing'); });
 
-    function renderSources(sources: {
-      connection_id: string;
-      source: string;
-      name: string;
-      resolution?: string;
-      subtitles: { index: number; language: string; label: string }[];
-    }[]): void {
+    function renderSources(sources) {
       if (sources.length === 0) {
         sourcesEl.innerHTML = '<span class="text-xs text-zinc-500">No playback source found.</span>';
         return;
@@ -158,7 +151,7 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
         </button>`
       ).join('');
 
-      sourcesEl.querySelectorAll<HTMLButtonElement>('.source-btn').forEach(btn => {
+      sourcesEl.querySelectorAll('.source-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           sourcesEl.querySelectorAll('.source-btn').forEach(b => {
             b.classList.remove('bg-blue-600', 'border-blue-500', 'text-white', 'hover:bg-blue-500');
@@ -166,12 +159,12 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
           });
           btn.classList.add('bg-blue-600', 'border-blue-500', 'text-white', 'hover:bg-blue-500');
           btn.classList.remove('bg-zinc-900/40', 'border-zinc-800', 'text-zinc-300', 'hover:border-zinc-700');
-          loadSource(btn.dataset.connectionId!, JSON.parse(btn.dataset.subtitles || '[]'));
+          loadSource(btn.dataset.connectionId, JSON.parse(btn.dataset.subtitles || '[]'));
         });
       });
     }
 
-    function closePlayer(): void {
+    function closePlayer() {
       reportSession('stopped');
       stopSession();
       video.pause();
@@ -179,7 +172,7 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
       dialog.close();
     }
 
-    async function startPlayback(preferredConnectionId?: number) {
+    async function startPlayback(preferredConnectionId) {
       if (playBtn) {
         const origText = playBtn.innerHTML;
         playBtn.innerHTML = '<span class="animate-pulse flex items-center justify-center gap-2"><svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading</span>';
@@ -187,7 +180,7 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
       }
 
       try {
-        const url = new URL(`/api/proxy/media/playback/${mediaType}/${tmdbId}`, window.location.origin);
+        const url = new URL(`/api/proxy/media/playback/${mediaType}/${mediaRef}`, window.location.origin);
         if (seasonNum) url.searchParams.append('season_number', seasonNum);
         if (mediaId) url.searchParams.append('media_id', String(mediaId));
         
@@ -204,8 +197,8 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
 
         // Try to find the preferred source if provided, otherwise the first external one
         const targetSource = preferredConnectionId 
-          ? sources.find((s: any) => s.connection_id == preferredConnectionId) 
-          : sources.find((s: any) => s.external_url);
+          ? sources.find((s) => s.connection_id == preferredConnectionId) 
+          : sources.find((s) => s.external_url);
 
         if (targetSource && targetSource.external_url) {
           window.open(targetSource.external_url, '_blank', 'noopener,noreferrer');
@@ -219,7 +212,7 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
         if (sources.length > 0) {
           // If preferred connection exists, select it, otherwise first
           const sourceToLoad = targetSource || sources[0];
-          const btn = sourcesEl.querySelector(`[data-connection-id="${sourceToLoad.connection_id}"]`) as HTMLButtonElement;
+          const btn = sourcesEl.querySelector(`[data-connection-id="${sourceToLoad.connection_id}"]`);
           if (btn) btn.click();
         } else {
           sourcesEl.innerHTML = '<span class="text-xs text-red-400">No local playback sources found.</span>';
@@ -238,8 +231,8 @@ const { tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = fa
     if (playBtn) playBtn.dataset.origText = playBtn.innerHTML;
     playBtn?.addEventListener('click', () => startPlayback());
 
-    document.addEventListener(`start-playback-${tmdbId}`, (e: Event) => {
-      const ce = e as CustomEvent<{ connectionId?: number }>;
+    document.addEventListener(`start-playback-${mediaRef}`, (e) => {
+      const ce = e;
       startPlayback(ce.detail?.connectionId);
     });
 

@@ -47,7 +47,15 @@ async def get_libraries(url: str, token: str, user_id: str) -> list:
     return data.get("Items", [])
 
 
-async def get_movies(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
+async def _get_all_paginated_items(
+    library_id: str,
+    url: str,
+    token: str,
+    user_id: str,
+    item_type: str,
+    fields: str,
+    min_date: Optional[str] = None
+) -> list:
     all_items = []
     start = 0
     page_size = 500
@@ -55,9 +63,9 @@ async def get_movies(library_id: str, url: str, token: str, user_id: str, min_da
     while True:
         params = {
             "ParentId": library_id,
-            "IncludeItemTypes": "Movie",
+            "IncludeItemTypes": item_type,
             "Recursive": True,
-            "Fields": "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData",
+            "Fields": fields,
             "Limit": page_size,
             "StartIndex": start,
         }
@@ -74,34 +82,23 @@ async def get_movies(library_id: str, url: str, token: str, user_id: str, min_da
             break
 
     return all_items
+
+
+async def get_movies(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
+    return await _get_all_paginated_items(
+        library_id, url, token, user_id, "Movie",
+        "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData",
+        min_date
+    )
+
 
 async def get_shows(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
-    all_items = []
-    start = 0
-    page_size = 500
+    return await _get_all_paginated_items(
+        library_id, url, token, user_id, "Series",
+        "ProviderIds",
+        min_date
+    )
 
-    while True:
-        params = {
-            "ParentId": library_id,
-            "IncludeItemTypes": "Series",
-            "Recursive": True,
-            "Fields": "ProviderIds",
-            "Limit": page_size,
-            "StartIndex": start,
-        }
-        if min_date:
-            params["MinDateLastSaved"] = min_date
-
-        data = await _get(url, token, f"Users/{user_id}/Items", params=params)
-        items = data.get("Items", [])
-        all_items.extend(items)
-
-        total = data.get("TotalRecordCount", 0)
-        start += page_size
-        if start >= total:
-            break
-
-    return all_items
 
 async def get_items_by_ids(url: str, token: str, user_id: str, item_ids: List[str]) -> List[Dict]:
     """Fetch specific items by their IDs in one batch call."""
@@ -114,33 +111,13 @@ async def get_items_by_ids(url: str, token: str, user_id: str, item_ids: List[st
     data = await _get(url, token, f"Users/{user_id}/Items", params=params)
     return data.get("Items", [])
 
+
 async def get_episodes(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
-    all_items = []
-    start = 0
-    page_size = 500
-
-    while True:
-        params = {
-            "ParentId": library_id,
-            "IncludeItemTypes": "Episode",
-            "Recursive": True,
-            "Fields": "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,RunTimeTicks,PremiereDate,UserData",
-            "Limit": page_size,
-            "StartIndex": start,
-        }
-        if min_date:
-            params["MinDateLastSaved"] = min_date
-
-        data = await _get(url, token, f"Users/{user_id}/Items", params=params)
-        items = data.get("Items", [])
-        all_items.extend(items)
-
-        total = data.get("TotalRecordCount", 0)
-        start += page_size
-        if start >= total:
-            break
-
-    return all_items
+    return await _get_all_paginated_items(
+        library_id, url, token, user_id, "Episode",
+        "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,RunTimeTicks,PremiereDate,UserData",
+        min_date
+    )
 
 def extract_quality(media_streams: list) -> dict:
     quality = {

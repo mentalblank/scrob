@@ -490,14 +490,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
 }}>
   // Reload when restored from bfcache so DOM mutations (newly added items) aren't lost.
 
-  function esc(str) {
-    if (str == null) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
+  const esc = window.esc;
   // --- Edit list ---
   const editModal = document.getElementById('edit-modal');
   const editForm = document.getElementById('edit-form');
@@ -1068,7 +1061,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
           <p class="text-sm font-bold text-zinc-300 truncate group-hover:text-zinc-100 transition-colors leading-snug">${esc(item.title)}</p>
           <p class="text-xs text-zinc-500 mt-0.5">${esc(meta) || (isPerson ? 'Person' : '')}</p>
         `;
-        el.addEventListener('click', () => addItem(item.tmdb_id, item.type, el, item));
+        el.addEventListener('click', () => addItem(item.uri_id, item.type, el, item));
         searchResults.appendChild(el);
       });
     } catch (err) {
@@ -1085,11 +1078,8 @@ Astro.response.headers.set("Cache-Control", "no-store");
     const isSeries = media.type === 'series';
     const showActionBar = !isPerson && media.type !== 'collection';
 
-    const href = isSeries
-      ? `/show/${media.tmdb_id}`
-      : isPerson
-      ? `/person/${media.tmdb_id}`
-      : `/media/${media.type}/${media.tmdb_id}`;
+    const primarySrc = document.cookie.split('; ').find(r => r.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
+    const href = window.buildItemUrl?.(media, primarySrc === 'tvdb') || '/';
 
     const poster = media.poster_path
       ? (media.poster_path.startsWith('http') ? media.poster_path : `https://image.tmdb.org/t/p/w500${media.poster_path}`)
@@ -1169,8 +1159,10 @@ Astro.response.headers.set("Cache-Control", "no-store");
         class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1"
         data-card
         data-tmdb-id="${media.tmdb_id}"
+        data-uri-id="${media.uri_id ?? ''}"
         data-media-type="${esc(media.type)}"
         data-show-tmdb-id="${media.show_tmdb_id ?? ''}"
+        data-show-uri-id="${media.show_uri_id ?? (media.show_tvdb_id && !media.show_tmdb_id ? `tvdb:s:${media.show_tvdb_id}` : media.show_tmdb_id ? `tmdb:s:${media.show_tmdb_id}` : '')}"
         data-season="${media.season_number ?? ''}"
         data-watched="${media.watched ?? false}"
         data-collected="${media.in_library ?? false}"
@@ -1206,9 +1198,8 @@ Astro.response.headers.set("Cache-Control", "no-store");
       </div>`;
   }
 
-  async function addItem(tmdbId, mediaType, btn, searchItem) {
+  async function addItem(uriId, mediaType, btn, searchItem) {
     btn.disabled = true;
-    // Show spinner immediately
     const overlay = btn.querySelector('.add-overlay');
     if (overlay) {
       overlay.classList.remove('opacity-0', 'group-hover:opacity-100');
@@ -1219,7 +1210,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
       const res = await fetch(`/api/proxy/lists/${listId}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tmdb_id: tmdbId, media_type: mediaType }),
+        body: JSON.stringify({ uri_id: uriId, media_type: mediaType }),
       });
 
       if (res.status === 409) {

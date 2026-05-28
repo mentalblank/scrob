@@ -19,6 +19,7 @@ class Media(Base):
 
     id             : Mapped[int]             = mapped_column(Integer, primary_key=True)
     tmdb_id        : Mapped[Optional[int]]   = mapped_column(Integer)
+    uri_id         : Mapped[Optional[str]]   = mapped_column(String(50), nullable=True, index=True)
     media_type     : Mapped[MediaType]       = mapped_column(Enum(MediaType), nullable=False)
     title          : Mapped[str]             = mapped_column(String(500), nullable=False)
     original_title : Mapped[Optional[str]]   = mapped_column(String(500))

@@ -1,8 +1,4 @@
-"""TVDB v4 API client.
-
-Token-based auth: POST /login returns a 30-day Bearer token.
-We cache the token in memory (module-level) and refresh it when it expires.
-"""
+"""TVDB v4 API client."""
 import asyncio
 import time
 import httpx
@@ -170,6 +166,42 @@ def to_two_letter_lang(lang_code: str | None) -> str | None:
     return _THREE_TO_TWO.get(lang_code)
 
 
+def get_season_label(lang: str) -> str:
+    """Return 'Season' localized for the given language."""
+    labels = {
+        "eng": "Season",
+        "spa": "Temporada",
+        "fra": "Saison",
+        "deu": "Staffel",
+        "ita": "Stagione",
+        "por": "Temporada",
+        "nld": "Seizoen",
+        "rus": "Сезон",
+        "zho": "季",
+        "jpn": "シーズン",
+        "kor": "시즌",
+    }
+    return labels.get(lang, "Season")
+
+
+def get_specials_label(lang: str) -> str:
+    """Return 'Specials' localized for the given language."""
+    labels = {
+        "eng": "Specials",
+        "spa": "Especiales",
+        "fra": "Spéciaux",
+        "deu": "Specials",
+        "ita": "Speciali",
+        "por": "Especiais",
+        "nld": "Specials",
+        "rus": "Спецвыпуски",
+        "zho": "特别篇",
+        "jpn": "スペシャル",
+        "kor": "스페셜",
+    }
+    return labels.get(lang, "Specials")
+
+
 async def validate_api_key(api_key: str) -> bool:
     if not api_key:
         return False
@@ -234,17 +266,15 @@ async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, la
                 params={"page": page, "season": season_number},
                 lang=lang
             )
-            batch = (data.get("data") or {}).get("episodes") or []
-            if not batch:
+            raw_batch = (data.get("data") or {}).get("episodes") or []
+            if not raw_batch:
                 break
-            
-            # Client-side filter to ensure we only get the requested season, 
-            # in case the API ignores the season param when lang is provided
-            batch = [e for e in batch if e.get("seasonNumber") == season_number]
-            
-            episodes.extend(batch)
-            # TVDB paginates at 500; if we got fewer, we're done
-            if len(batch) < 500:
+
+            # TVDB endpoint ignores season parameter; filter client-side. Paginate by raw count to avoid truncating long shows.
+            episodes.extend([e for e in raw_batch if e.get("seasonNumber") == season_number])
+
+            # TVDB paginates at 500; if the raw page was smaller, we've reached the end.
+            if len(raw_batch) < 500:
                 break
             page += 1
     except Exception:
@@ -256,47 +286,6 @@ async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, la
     return episodes
 
 
-def get_season_label(lang: str) -> str:
-    """Return a localized 'Season' label for common languages."""
-    labels = {
-        "eng": "Season",
-        "spa": "Temporada",
-        "fra": "Saison",
-        "deu": "Staffel",
-        "ita": "Stagione",
-        "por": "Temporada",
-        "nld": "Seizoen",
-        "rus": "Сезон",
-        "zho": "季",
-        "jpn": "シーズン",
-        "kor": "시즌",
-        "ara": "الموسم",
-        "pol": "Sezon",
-        "tur": "Sezon",
-        "dan": "Sæson",
-        "fin": "Kausi",
-        "nor": "Sesong",
-        "swe": "Säsong",
-    }
-    return labels.get(lang, "Season")
-
-
-def get_specials_label(lang: str) -> str:
-    """Return a localized 'Specials' label for common languages."""
-    labels = {
-        "eng": "Specials",
-        "spa": "Especiales",
-        "fra": "Hors-série",
-        "deu": "Specials",
-        "ita": "Speciali",
-        "por": "Especiais",
-        "nld": "Specials",
-        "rus": "Спецвыпуски",
-        "zho": "特别篇",
-        "jpn": "スペシャル",
-        "kor": "스페셜",
-    }
-    return labels.get(lang, "Specials")
 
 
 def format_series(raw: dict, lang: str = "eng") -> dict:
@@ -449,15 +438,23 @@ def format_cast(raw: dict) -> list[dict]:
 
 
 def format_episode(raw: dict) -> dict:
+    # Handle localized names if they come as a dict
+    title = raw.get("name")
+    if raw.get("nameTranslations") and isinstance(raw.get("nameTranslations"), dict):
+        title = raw.get("nameTranslations").get("eng", title)
+        
     return {
         "tvdb_id": raw.get("id"),
         "season_number": raw.get("seasonNumber"),
         "episode_number": raw.get("number"),
-        "name": raw.get("name"),
+        "title": title,
+        "name": title, # Keep for backwards compat temporarily
         "overview": raw.get("overview"),
         "air_date": raw.get("aired"),
         "runtime": raw.get("runtime"),
-        "image_url": _image_url(raw.get("image")),
+        "still_path": _image_url(raw.get("image")),
+        "image_url": _image_url(raw.get("image")), # Keep for backwards compat
+        "type": "episode",
     }
 
 

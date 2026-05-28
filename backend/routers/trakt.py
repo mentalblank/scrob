@@ -1,11 +1,4 @@
-"""Trakt.tv integration router.
-
-Endpoints:
-  POST /trakt/auth/device/start   – Start device auth flow
-  POST /trakt/auth/device/poll    – Poll for token completion
-  DELETE /trakt/auth/disconnect   – Revoke token and clear stored credentials
-  POST /trakt/sync                – Trigger a Trakt import (watched history + ratings)
-"""
+"""Trakt.tv integration router."""
 
 import asyncio
 import logging
@@ -19,6 +12,7 @@ from core import trakt as trakt_client
 from core.enrichment import enrich_media
 from db import get_db, engine
 from dependencies import get_current_user
+from utils.scrobble import should_track_scrobble
 from models.base import MediaType
 from models.events import WatchEvent
 from models.lists import List as ListModel, ListItem
@@ -160,9 +154,26 @@ async def _get_or_create_show(db: AsyncSession, tmdb_id: int, title: str, api_ke
     from core import tmdb
     try:
         d = await tmdb.get_show(tmdb_id, api_key=api_key)
+
+        tvdb_id_raw = d.get("external_ids", {}).get("tvdb_id")
+        tvdb_id_val = int(tvdb_id_raw) if tvdb_id_raw else None
+
+        if tvdb_id_val:
+            existing_tvdb_res = await db.execute(select(Show).where(Show.tvdb_id == tvdb_id_val))
+            existing_show = existing_tvdb_res.scalars().first()
+            if existing_show:
+                if existing_show.tmdb_id is None:
+                    existing_show.tmdb_id = tmdb_id
+                    existing_show.uri_id = f"tmdb:s:{tmdb_id}"
+                    await db.flush()
+                    return existing_show
+                else:
+                    tvdb_id_val = None
+
         show = Show(
             tmdb_id=tmdb_id,
-            tvdb_id=int(d.get("external_ids", {}).get("tvdb_id")) if d.get("external_ids", {}).get("tvdb_id") else None,
+            uri_id=f"tmdb:s:{tmdb_id}",
+            tvdb_id=tvdb_id_val,
             title=d.get("name") or title,
             original_title=d.get("original_name"),
             overview=d.get("overview"),
@@ -203,11 +214,42 @@ async def _get_or_create_movie_media(db: AsyncSession, tmdb_id: int, title: str,
     media = result.scalars().first()
     if media:
         return media
-    media = Media(tmdb_id=tmdb_id, media_type=MediaType.movie, title=title)
+    media = Media(tmdb_id=tmdb_id, uri_id=f"tmdb:m:{tmdb_id}", media_type=MediaType.movie, title=title)
     db.add(media)
     await db.flush()
     await enrich_media(media, api_key=api_key)
     return media
+
+
+async def _get_or_create_series_media(db: AsyncSession, tmdb_id: int, title: str, api_key: str | None) -> Media | None:
+    result = await db.execute(
+        select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
+    )
+    media = result.scalars().first()
+    if media:
+        return media
+    from core import tmdb
+    try:
+        d = await tmdb.get_show(tmdb_id, api_key=api_key)
+        media = Media(
+            tmdb_id=tmdb_id,
+            uri_id=f"tmdb:s:{tmdb_id}",
+            media_type=MediaType.series,
+            title=d.get("name") or title,
+            poster_path=tmdb.poster_url(d.get("poster_path")),
+            backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
+            release_date=d.get("first_air_date"),
+            tmdb_rating=d.get("vote_average"),
+            overview=d.get("overview"),
+            adult=d.get("adult", False),
+        )
+        db.add(media)
+        await db.flush()
+        return media
+    except Exception as exc:
+        logger.warning("Could not fetch show tmdb=%s: %s", tmdb_id, exc)
+        return None
+
 
 
 async def _get_or_create_episode_media(
@@ -237,8 +279,10 @@ async def _get_or_create_episode_media(
             season_data = await tmdb.get_season(show_tmdb_id, season_number, api_key=api_key)
         ep_map = {ep["episode_number"]: ep for ep in season_data.get("episodes", [])}
         ep = ep_map.get(episode_number)
+        _ep_tid = ep["id"] if ep else None
         media = Media(
-            tmdb_id=ep["id"] if ep else None,
+            tmdb_id=_ep_tid,
+            uri_id=f"tmdb:e:{_ep_tid}" if _ep_tid else None,
             media_type=MediaType.episode,
             title=ep["name"] if ep else f"S{season_number:02d}E{episode_number:02d}",
             overview=ep.get("overview") if ep else None,
@@ -338,8 +382,13 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
                     await db.commit()
 
                     # Pre-load existing watch events
-                    we_res = await db.execute(select(WatchEvent.media_id).where(WatchEvent.user_id == user_id))
-                    existing_watched = {row[0] for row in we_res}
+                    we_res = await db.execute(select(WatchEvent.media_id, WatchEvent.watched_at).where(WatchEvent.user_id == user_id))
+                    existing_watched_media_ids: set[int] = set()
+                    existing_watched_keys: set[tuple[int, int]] = set()
+                    for row in we_res:
+                        existing_watched_media_ids.add(row[0])
+                        if row[1]:
+                            existing_watched_keys.add((row[0], int(row[1].timestamp())))
 
                     for entry in history:
                         item_type = entry.get("type")
@@ -357,11 +406,13 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
                             tmdb_id = movie_data.get("ids", {}).get("tmdb")
                             if not tmdb_id: continue
                             media = await _get_or_create_movie_media(db, tmdb_id, movie_data.get("title", ""), api_key)
-                            if media and media.id not in existing_watched:
-                                db.add(WatchEvent(user_id=user_id, media_id=media.id, watched_at=watched_at or datetime.utcnow(), completed=True))
-                                existing_watched.add(media.id)
-                                _new_watched.add(media.id)
-                                stats["movies"] += 1
+                            if media:
+                                should_add = should_track_scrobble(media.id, watched_at, existing_watched_keys, existing_watched_media_ids)
+                                
+                                if should_add:
+                                    db.add(WatchEvent(user_id=user_id, media_id=media.id, watched_at=watched_at or datetime.utcnow(), completed=True))
+                                    _new_watched.add(media.id)
+                                    stats["movies"] += 1
                         
                         elif item_type == "episode":
                             show_data = entry.get("show", {})
@@ -374,11 +425,13 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
                             season_num = ep_data.get("season")
                             ep_num = ep_data.get("number")
                             media = await _get_or_create_episode_media(db, show.id, show_tmdb_id, season_num, ep_num, api_key)
-                            if media and media.id not in existing_watched:
-                                db.add(WatchEvent(user_id=user_id, media_id=media.id, watched_at=watched_at or datetime.utcnow(), completed=True))
-                                existing_watched.add(media.id)
-                                _new_watched.add(media.id)
-                                stats["episodes"] += 1
+                            if media:
+                                should_add = should_track_scrobble(media.id, watched_at, existing_watched_keys, existing_watched_media_ids)
+                                
+                                if should_add:
+                                    db.add(WatchEvent(user_id=user_id, media_id=media.id, watched_at=watched_at or datetime.utcnow(), completed=True))
+                                    _new_watched.add(media.id)
+                                    stats["episodes"] += 1
                     
                     await db.commit()
 
@@ -418,9 +471,14 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
 
                 # Pre-load existing watch events for this user
                 we_res = await db.execute(
-                    select(WatchEvent.media_id).where(WatchEvent.user_id == user_id)
+                    select(WatchEvent.media_id, WatchEvent.watched_at).where(WatchEvent.user_id == user_id)
                 )
-                existing_watched: set[int] = {row[0] for row in we_res}
+                existing_watched_media_ids: set[int] = set()
+                existing_watched_keys: set[tuple[int, int]] = set()
+                for row in we_res:
+                    existing_watched_media_ids.add(row[0])
+                    if row[1]:
+                        existing_watched_keys.add((row[0], int(row[1].timestamp())))
 
                 for item in watched_movies:
                     movie_data = item.get("movie", {})
@@ -434,15 +492,18 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
                             if not media:
                                 stats["errors"] += 1
                                 continue
-                            if media.id not in existing_watched:
-                                last_watched = item.get("last_watched_at")
-                                watched_at = None
-                                if last_watched:
-                                    from dateutil import parser as dt_parser
-                                    dt = dt_parser.isoparse(last_watched)
-                                    if dt.tzinfo:
-                                        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-                                    watched_at = dt
+                            last_watched = item.get("last_watched_at")
+                            watched_at = None
+                            if last_watched:
+                                from dateutil import parser as dt_parser
+                                dt = dt_parser.isoparse(last_watched)
+                                if dt.tzinfo:
+                                    dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                                watched_at = dt
+                                
+                            should_add = should_track_scrobble(media.id, watched_at, existing_watched_keys, existing_watched_media_ids)
+
+                            if should_add:
                                 db.add(WatchEvent(
                                     user_id=user_id,
                                     media_id=media.id,
@@ -450,10 +511,9 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
                                     completed=True,
                                     play_count=item.get("plays", 1),
                                 ))
-                                existing_watched.add(media.id)
                                 _new_watched.add(media.id)
                                 stats["movies"] += 1
-                            else:
+                            elif media.id in existing_watched_media_ids:
                                 stats["skipped"] += 1
                     except Exception as exc:
                         logger.warning("Error processing Trakt movie tmdb=%s: %s", tmdb_id, exc)
@@ -478,9 +538,14 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
 
                 # Re-fetch watched set (may have grown from movie sync)
                 we_res = await db.execute(
-                    select(WatchEvent.media_id).where(WatchEvent.user_id == user_id)
+                    select(WatchEvent.media_id, WatchEvent.watched_at).where(WatchEvent.user_id == user_id)
                 )
-                existing_watched = {row[0] for row in we_res}
+                existing_watched_media_ids: set[int] = set()
+                existing_watched_keys: set[tuple[int, int]] = set()
+                for row in we_res:
+                    existing_watched_media_ids.add(row[0])
+                    if row[1]:
+                        existing_watched_keys.add((row[0], int(row[1].timestamp())))
 
                 async def process_show(show_entry: dict):
                     show_data = show_entry.get("show", {})
@@ -513,15 +578,18 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
                                         if not media:
                                             stats["errors"] += 1
                                             continue
-                                        if media.id not in existing_watched:
-                                            last_watched = ep_entry.get("last_watched_at")
-                                            watched_at = None
-                                            if last_watched:
-                                                from dateutil import parser as dt_parser
-                                                dt = dt_parser.isoparse(last_watched)
-                                                if dt.tzinfo:
-                                                    dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-                                                watched_at = dt
+                                        last_watched = ep_entry.get("last_watched_at")
+                                        watched_at = None
+                                        if last_watched:
+                                            from dateutil import parser as dt_parser
+                                            dt = dt_parser.isoparse(last_watched)
+                                            if dt.tzinfo:
+                                                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                                            watched_at = dt
+                                            
+                                        should_add = should_track_scrobble(media.id, watched_at, existing_watched_keys, existing_watched_media_ids)
+
+                                        if should_add:
                                             db.add(WatchEvent(
                                                 user_id=user_id,
                                                 media_id=media.id,
@@ -529,10 +597,9 @@ async def run_trakt_sync(user_id: int, job_id: int, partial: bool = False):
                                                 completed=True,
                                                 play_count=ep_entry.get("plays", 1),
                                             ))
-                                            existing_watched.add(media.id)
                                             _new_watched.add(media.id)
                                             stats["episodes"] += 1
-                                        else:
+                                        elif media.id in existing_watched_media_ids:
                                             stats["skipped"] += 1
                                 except Exception as exc:
                                     logger.warning("Error processing episode s%se%s for show tmdb=%s: %s", season_num, ep_num, show_tmdb_id, exc)
@@ -658,29 +725,48 @@ async def _run_trakt_push(user_id: int) -> None:
             shows_result = await db.execute(select(Show).where(Show.id.in_(show_ids)))
             shows_by_id = {s.id: s for s in shows_result.scalars().all()}
 
+        from utils.alias_lookup import get_provider_id_for_uri
+        alias_cache: dict[str, int | None] = {}
+
+        async def _resolve_tmdb(uri: str | None, existing_id: int | None) -> int | None:
+            if existing_id:
+                return existing_id
+            if not uri:
+                return None
+            if uri not in alias_cache:
+                a = await get_provider_id_for_uri(db, uri, "tmdb")
+                alias_cache[uri] = int(a) if a else None
+            return alias_cache[uri]
+
         push_tasks = []
 
         if settings.trakt_push_watched:
             for mid in watched_ids:
                 media = media_by_id.get(mid)
-                if not media or not media.tmdb_id:
+                if not media:
                     continue
-                if media.media_type == MediaType.movie:
-                    push_tasks.append(trakt_client.add_movie_to_history(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id))
+                tmdb_id = await _resolve_tmdb(media.uri_id, media.tmdb_id)
+                if media.media_type == MediaType.movie and tmdb_id:
+                    push_tasks.append(trakt_client.add_movie_to_history(settings.trakt_client_id, settings.trakt_access_token, tmdb_id))
                 elif media.media_type == MediaType.episode and media.show_id and media.season_number is not None and media.episode_number is not None:
                     show = shows_by_id.get(media.show_id)
-                    if show and show.tmdb_id:
-                        push_tasks.append(trakt_client.add_episode_to_history(settings.trakt_client_id, settings.trakt_access_token, show.tmdb_id, media.season_number, media.episode_number))
+                    if show:
+                        show_tmdb_id = await _resolve_tmdb(show.uri_id, show.tmdb_id)
+                        if show_tmdb_id:
+                            push_tasks.append(trakt_client.add_episode_to_history(settings.trakt_client_id, settings.trakt_access_token, show_tmdb_id, media.season_number, media.episode_number))
 
         if settings.trakt_push_ratings:
             for mid, rating in ratings_map.items():
                 media = media_by_id.get(mid)
-                if not media or not media.tmdb_id:
+                if not media:
+                    continue
+                tmdb_id = await _resolve_tmdb(media.uri_id, media.tmdb_id)
+                if not tmdb_id:
                     continue
                 if media.media_type == MediaType.movie:
-                    push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, rating))
+                    push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, tmdb_id, rating))
                 elif media.media_type in (MediaType.series, MediaType.episode):
-                    push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, media.tmdb_id, rating))
+                    push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, tmdb_id, rating))
 
         if not push_tasks:
             print("Trakt full push: no items with Trakt-compatible data found")
@@ -762,7 +848,7 @@ async def _sync_trakt_ratings(db: AsyncSession, user_id: int, client_id: str, ac
                 if not media:
                     from core import tmdb
                     d = await tmdb.get_show(tmdb_id, api_key=api_key)
-                    media = Media(tmdb_id=tmdb_id, media_type=MediaType.series, title=d.get("name") or show_data.get("title", ""))
+                    media = Media(tmdb_id=tmdb_id, uri_id=f"tmdb:s:{tmdb_id}", media_type=MediaType.series, title=d.get("name") or show_data.get("title", ""))
                     db.add(media)
                     await db.flush()
                     await enrich_media(media, api_key=api_key)
@@ -874,26 +960,7 @@ async def _sync_trakt_lists(db: AsyncSession, user_id: int, client_id: str, acce
                     if not tmdb_id_item:
                         continue
                     async with db.begin_nested():
-                        r2 = await db.execute(
-                            select(Media).where(Media.tmdb_id == tmdb_id_item, Media.media_type == MediaType.series)
-                        )
-                        media = r2.scalar_one_or_none()
-                        if not media:
-                            from core import tmdb
-                            d = await tmdb.get_show(tmdb_id_item, api_key=api_key)
-                            media = Media(
-                                tmdb_id=tmdb_id_item,
-                                media_type=MediaType.series,
-                                title=d.get("name") or show_data.get("title", ""),
-                                poster_path=tmdb.poster_url(d.get("poster_path")),
-                                backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
-                                release_date=d.get("first_air_date"),
-                                tmdb_rating=d.get("vote_average"),
-                                overview=d.get("overview"),
-                                adult=d.get("adult", False),
-                            )
-                            db.add(media)
-                            await db.flush()
+                        media = await _get_or_create_series_media(db, tmdb_id_item, show_data.get("title", ""), api_key)
                     if media and media.id not in shows_existing:
                         db.add(ListItem(list_id=shows_list.id, media_id=media.id))
                         shows_existing.add(media.id)
@@ -939,26 +1006,7 @@ async def _sync_trakt_lists(db: AsyncSession, user_id: int, client_id: str, acce
                     if not tmdb_id_item:
                         continue
                     async with db.begin_nested():
-                        r2 = await db.execute(
-                            select(Media).where(Media.tmdb_id == tmdb_id_item, Media.media_type == MediaType.series)
-                        )
-                        media = r2.scalar_one_or_none()
-                        if not media:
-                            from core import tmdb
-                            d = await tmdb.get_show(tmdb_id_item, api_key=api_key)
-                            media = Media(
-                                tmdb_id=tmdb_id_item,
-                                media_type=MediaType.series,
-                                title=d.get("name") or show_data.get("title", ""),
-                                poster_path=tmdb.poster_url(d.get("poster_path")),
-                                backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
-                                release_date=d.get("first_air_date"),
-                                tmdb_rating=d.get("vote_average"),
-                                overview=d.get("overview"),
-                                adult=d.get("adult", False),
-                            )
-                            db.add(media)
-                            await db.flush()
+                        media = await _get_or_create_series_media(db, tmdb_id_item, show_data.get("title", ""), api_key)
                 else:
                     continue
 
@@ -1032,25 +1080,6 @@ async def _sync_trakt_lists(db: AsyncSession, user_id: int, client_id: str, acce
                     if not tmdb_id:
                         continue
                     async with db.begin_nested():
-                        result2 = await db.execute(
-                            select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
-                        )
-                        media = result2.scalar_one_or_none()
-                        if not media:
-                            from core import tmdb
-                            d = await tmdb.get_show(tmdb_id, api_key=api_key)
-                            media = Media(
-                                tmdb_id=tmdb_id,
-                                media_type=MediaType.series,
-                                title=d.get("name") or show_data.get("title", ""),
-                                poster_path=tmdb.poster_url(d.get("poster_path")),
-                                backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
-                                release_date=d.get("first_air_date"),
-                                tmdb_rating=d.get("vote_average"),
-                                overview=d.get("overview"),
-                                adult=d.get("adult", False),
-                            )
-                            db.add(media)
                             await db.flush()
                 else:
                     continue

@@ -1,13 +1,4 @@
-"""
-URL validation for user-supplied service URLs (Plex, Jellyfin, Radarr, Sonarr).
-
-Prevents SSRF attacks where a user sets a URL that causes the backend to make
-server-side HTTP requests to internal or cloud-metadata endpoints.
-
-We block cloud metadata IP ranges (169.254.0.0/16, etc.) which are the main
-target for credential theft, while deliberately keeping RFC-1918 private ranges
-allowed because Plex/Jellyfin/Radarr/Sonarr are typically LAN services.
-"""
+"""URL validation for user-supplied service URLs to prevent SSRF attacks."""
 
 import asyncio
 import ipaddress

@@ -1,0 +1,51 @@
+---
+interface Props {
+  posterPath: string | null | undefined;
+  title: string;
+}
+
+const { posterPath, title } = Astro.props;
+---
+{posterPath && (
+  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
+    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
+    <img
+      src={posterPath}
+      alt={title}
+      class="relative max-h-[90vh] max-w-[85vw] md:max-w-[50vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
+    />
+    <button
+      id="poster-modal-close"
+      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
+      aria-label="Close"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+)}
+
+<script>
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    const zoomBtn = target.closest('#poster-zoom-btn');
+    if (zoomBtn) {
+      const modal = document.getElementById('poster-modal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+      }
+      return;
+    }
+    const closeBtn = target.closest('#poster-modal-close');
+    const backdrop = target.closest('#poster-modal-backdrop');
+    if (closeBtn || backdrop) {
+      const modal = document.getElementById('poster-modal');
+      if (modal) {
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+      }
+    }
+  });
+</script>

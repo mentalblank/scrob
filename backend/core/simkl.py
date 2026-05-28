@@ -1,11 +1,4 @@
-"""Simkl API client.
-
-Uses the PIN (device) authentication flow — only a client_id is needed,
-no client_secret. Access tokens are long-lived and do not expire or refresh.
-
-API base: https://api.simkl.com
-Rate limits: 1000 requests per 10 minutes per user.
-"""
+"""Simkl API client."""
 
 import logging
 from typing import Optional
@@ -146,6 +139,18 @@ async def remove_movie_from_history(client_id: str, access_token: str, tmdb_id: 
         resp.raise_for_status()
 
 
+def _episode_history_payload(show_tmdb_id: int, season_number: int, episode_number: int) -> dict:
+    return {
+        "shows": [{
+            "ids": {"tmdb": show_tmdb_id},
+            "seasons": [{
+                "number": season_number,
+                "episodes": [{"number": episode_number}],
+            }],
+        }]
+    }
+
+
 async def add_episode_to_history(
     client_id: str,
     access_token: str,
@@ -157,15 +162,7 @@ async def add_episode_to_history(
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
             f"{SIMKL_BASE}/sync/history",
-            json={
-                "shows": [{
-                    "ids": {"tmdb": show_tmdb_id},
-                    "seasons": [{
-                        "number": season_number,
-                        "episodes": [{"number": episode_number}],
-                    }],
-                }]
-            },
+            json=_episode_history_payload(show_tmdb_id, season_number, episode_number),
             headers=_headers(client_id, access_token),
         )
         resp.raise_for_status()
@@ -182,15 +179,7 @@ async def remove_episode_from_history(
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.delete(
             f"{SIMKL_BASE}/sync/history",
-            json={
-                "shows": [{
-                    "ids": {"tmdb": show_tmdb_id},
-                    "seasons": [{
-                        "number": season_number,
-                        "episodes": [{"number": episode_number}],
-                    }],
-                }]
-            },
+            json=_episode_history_payload(show_tmdb_id, season_number, episode_number),
             headers=_headers(client_id, access_token),
         )
         resp.raise_for_status()

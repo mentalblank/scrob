@@ -13,32 +13,25 @@ from dependencies import get_current_user, get_optional_user
 
 router = APIRouter()
 
+
 class CommentCreate(BaseModel):
     media_type: str
-    tmdb_id: int
+    uri_id: str
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
     content: str
     is_spoiler: bool = False
 
+
 class CommentUpdate(BaseModel):
     content: str
     is_spoiler: bool = False
 
-class CommentResponse(BaseModel):
-    id: int
-    user_id: int
-    username: str
-    display_name: str
-    user_is_public: bool
-    content: str
-    created_at: str
-    updated_at: Optional[str] = None
 
 @router.get("")
 async def list_comments(
     media_type: str,
-    tmdb_id: int,
+    uri_id: str,
     season_number: Optional[int] = None,
     episode_number: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
@@ -51,17 +44,12 @@ async def list_comments(
         .options(joinedload(Comment.user).joinedload(User.profile))
         .where(
             Comment.media_type == media_type,
-            Comment.tmdb_id == tmdb_id,
+            Comment.uri_id == uri_id,
             Comment.season_number == season_number,
             Comment.episode_number == episode_number,
         )
     )
 
-    # Privacy filtering:
-    # 1. Profile is public
-    # 2. OR owner is the current user
-    # 3. OR current user is admin
-    # Note: If no profile exists, it's considered private (default).
     if current_user:
         query = query.where(
             or_(
@@ -74,10 +62,9 @@ async def list_comments(
         query = query.where(UserProfileData.privacy_level == PrivacyLevel.public)
 
     query = query.order_by(Comment.created_at.desc())
-    
     result = await db.execute(query)
     comments = result.scalars().all()
-    
+
     return [
         {
             "id": c.id,
@@ -94,6 +81,7 @@ async def list_comments(
         for c in comments
     ]
 
+
 @router.post("")
 async def create_comment(
     body: CommentCreate,
@@ -102,11 +90,11 @@ async def create_comment(
 ):
     if not body.content.strip():
         raise HTTPException(status_code=400, detail="Comment content cannot be empty")
-        
+
     comment = Comment(
         user_id=current_user.id,
         media_type=body.media_type,
-        tmdb_id=body.tmdb_id,
+        uri_id=body.uri_id,
         season_number=body.season_number,
         episode_number=body.episode_number,
         content=body.content,
@@ -128,6 +116,7 @@ async def create_comment(
         "created_at": comment.created_at.isoformat(),
     }
 
+
 @router.patch("/{comment_id}")
 async def update_comment(
     comment_id: int,
@@ -140,7 +129,6 @@ async def update_comment(
 
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found")
-
     if comment.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to edit this comment")
 
@@ -160,23 +148,21 @@ async def update_comment(
         "updated_at": comment.updated_at.isoformat() if comment.updated_at else None,
     }
 
+
 @router.delete("/{comment_id}")
 async def delete_comment(
     comment_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(Comment).where(Comment.id == comment_id)
-    result = await db.execute(query)
+    result = await db.execute(select(Comment).where(Comment.id == comment_id))
     comment = result.scalar_one_or_none()
-    
+
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found")
-        
     if comment.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not authorized to delete this comment")
-        
+
     await db.execute(sa_delete(Comment).where(Comment.id == comment_id))
     await db.commit()
-    
     return {"message": "Comment deleted"}

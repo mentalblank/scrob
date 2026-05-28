@@ -14,8 +14,14 @@ const pending  = requests.filter(r => r.status === "pending");
 const approved = requests.filter(r => r.status === "approved");
 const rejected = requests.filter(r => r.status === "rejected");
 
-const itemUrl = (r: MediaRequestItem) =>
-  r.media_type === "movie" ? `/media/movie/${r.tmdb_id}` : `/show/${r.tmdb_id}`;
+const itemUrl = (r: MediaRequestItem) => {
+  const parts = r.uri_id.split(":");
+  if (parts.length === 3) {
+    if (parts[1] === "m") return `/media/movie/${r.uri_id}`;
+    if (parts[1] === "s") return `/show/${r.uri_id}`;
+  }
+  return "/";
+};
 ---
 
 <Base title="Requests">

@@ -15,10 +15,10 @@ if (!token || !type || !id) {
 let recommendations: any[] = [];
 try {
   if (type === "movie" || type === "episode") {
-    const res = await api.media.getRecommendations(type, parseInt(id), token);
+    const res = await api.media.getRecommendations(type, id.includes(":") ? id : parseInt(id), token);
     recommendations = res.results;
   } else if (type === "series") {
-    const res = await api.shows.getRecommendations(parseInt(id), token);
+    const res = await api.shows.getRecommendations(id.includes(":") ? id : parseInt(id), token);
     recommendations = res.results;
   }
 } catch (e) {

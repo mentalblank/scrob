@@ -5,17 +5,17 @@ import { api } from "../../lib/api";
 export const prerender = false;
 
 const { token } = Astro.locals;
-const showTmdbId = Astro.url.searchParams.get("show_tmdb_id");
+const showUriId = Astro.url.searchParams.get("show_uri_id");
 
-if (!showTmdbId) {
-  return new Response("Missing show_tmdb_id", { status: 400 });
+if (!showUriId) {
+  return new Response("Missing show_uri_id", { status: 400 });
 }
 
 let item = null;
 
 try {
   const data = await api.history.nextUp(token);
-  item = data.next_up.find(i => String(i.show_tmdb_id) === showTmdbId || String(i.tmdb_id) === showTmdbId);
+  item = data.next_up.find(i => i.show_uri_id === showUriId || i.uri_id === showUriId);
 } catch (e) {
   console.error("Failed to fetch next up item:", e);
 }

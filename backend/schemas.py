@@ -222,20 +222,23 @@ class PasswordUpdate(BaseModel):
     new_password: str
 
 class WatchEventCreate(BaseModel):
-    tmdb_id: Optional[int] = None
-    media_id: Optional[int] = None
+    uri_id: Optional[str] = None         # media URI (movie/series/episode)
+    media_id: Optional[int] = None       # when row already exists locally
     media_type: MediaType
     watched_at: Optional[datetime] = None
     completed: bool = True
+    show_uri_id: Optional[str] = None
+    season_number: Optional[int] = None
+    episode_number: Optional[int] = None
 
 
 class ManualSessionStart(BaseModel):
-    tmdb_id: Optional[int] = None
-    media_id: Optional[int] = None      # local DB id, preferred over tmdb_id for TVDB-only episodes
+    uri_id: str                          # REQUIRED — media URI
+    media_id: Optional[int] = None       # alternative when row already exists locally
     media_type: MediaType
     title: Optional[str] = None
-    runtime: Optional[int] = None       # minutes, used if Media.runtime is null
-    show_tmdb_id: Optional[int] = None  # episode context
+    runtime: Optional[int] = None
+    show_uri_id: Optional[str] = None    # episode context
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
 
@@ -330,7 +333,7 @@ class GlobalSettings(BaseModel):
 class MediaRequestOut(BaseModel):
     id          : int
     user_id     : int
-    tmdb_id     : int
+    uri_id      : str
     media_type  : str
     title       : str
     poster_path : Optional[str]
