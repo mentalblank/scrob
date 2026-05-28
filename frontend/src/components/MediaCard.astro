@@ -124,12 +124,12 @@ const showProgress = progressPct > 0 && !watched;
     <a href={href} class="block">
       <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300" data-adult={item.adult ? "true" : undefined}>
         {/* Unified block/drop button — top-right corner, smart icon/colour */}
-        {showActionBar && !hideBlock && !isPerson && !isCollection && !isSeason && !isEpisode && (() => {
+        {showActionBar && !hideBlock && !isPerson && !isCollection && !isSeason && (!isEpisode || (isEpisode && (item.show_tmdb_id || item.show_tvdb_id))) && (() => {
           const isBlocked = item.is_blocked ?? false;
           const isDropped = item.is_dropped ?? false;
           const alreadyActive = isBlocked || isDropped;
           // Drop (amber) for series that are in collection or have any watch progress
-          const showDrop = isSeries && (inLibrary || isPartialWatched || watched);
+          const showDrop = (isSeries || isEpisode) && (inLibrary || isPartialWatched || watched || isEpisode);
           const btnBase = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer';
           const btnInactiveDrop = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
           const btnInactiveBlock = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;

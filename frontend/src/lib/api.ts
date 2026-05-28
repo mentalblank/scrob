@@ -144,6 +144,8 @@ export interface Season {
   tmdb_rating?: number | null;
   episodes: EpisodeItem[];
   season_number: number;
+  is_blocked: boolean;
+  is_dropped: boolean;
   show_watched: boolean;
   season_watched: boolean;
   season_watch_pct: number;
@@ -154,6 +156,7 @@ export interface Season {
   show_in_library: boolean;
   show_collection_pct: number;
   show_request_enabled: boolean;
+  show_request_status?: string | null;
   show_is_monitored: boolean;
 }
 
@@ -176,6 +179,8 @@ export interface EpisodeDetail {
   user_rating?: number | null;
   play_count?: number;
   progress_percent?: number;
+  is_blocked: boolean;
+  is_dropped: boolean;
   cast: CastMember[];
   guest_stars: CastMember[];
   episodes: EpisodeItem[];
@@ -187,6 +192,8 @@ export interface EpisodeDetail {
     audio_languages: string[];
     subtitle_languages: string[];
   } | null;
+  request_enabled?: boolean;
+  request_status?: string | null;
 }
 
 export interface PersonCredit {

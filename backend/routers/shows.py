@@ -1280,6 +1280,7 @@ async def get_show_season(
                 "tmdb_rating": tmdb_data.get("vote_average"),
                 "episodes": episodes,
                 "show": show_info,
+                "is_blocked": show_state.get("is_blocked", False),
                 "is_dropped": show_state.get("is_dropped", False),
                 "show_watched": show_state.get("watched", False),
                 "season_watched": season_watched,
@@ -1291,6 +1292,7 @@ async def get_show_season(
                 "show_in_library": show_state.get("collection_pct", 0) > 0,
                 "show_collection_pct": show_state.get("collection_pct", 0),
                 "show_request_enabled": show_state.get("request_enabled", False),
+                "show_request_status": show_state.get("request_status"),
                 "show_is_monitored": show_state.get("is_monitored", False),
             }
         elif show:
@@ -1526,7 +1528,11 @@ async def get_episode_detail(
             for ep in season_tmdb.get("episodes", [])
         ]
 
-        ep_state: dict = {"tmdb_id": ep_tmdb_id, "type": "episode"}
+        ep_state: dict = {
+            "tmdb_id": ep_tmdb_id,
+            "type": "episode",
+            "show_tmdb_id": series_tmdb_id,
+        }
         await enrich_with_state(db, current_user.id, [ep_state])
 
         return {
@@ -1539,6 +1545,8 @@ async def get_episode_detail(
             "user_rating": ep_state.get("user_rating"),
             "play_count": ep_state.get("play_count", 0),
             "progress_percent": ep_state.get("progress_percent"),
+            "is_blocked": ep_state.get("is_blocked", False),
+            "is_dropped": ep_state.get("is_dropped", False),
             "episode_number": episode_number,
             "season_number": season_number,
             "title": local_ep.custom_title or ep_data.get("name") if local_ep else ep_data.get("name"),
@@ -1686,6 +1694,79 @@ async def refresh_show_metadata(
 
 
 # ── TVDB Show Endpoints ─────────────────────────────────────────────────────
+
+
+async def _get_tvdb_show_state(
+    db: AsyncSession,
+    user_id: int,
+    tvdb_id: int,
+    show_data: dict,
+    local_show: ShowModel | None,
+) -> tuple[bool, bool, str | None]:
+    """Calculate is_blocked, is_dropped, and request_status for a TVDB show."""
+    from models.blocklist import BlocklistItem
+    from models.media_request import MediaRequest, RequestStatus
+    from models.base import MediaType
+
+    is_blocked = False
+    is_dropped = False
+    
+    block_ids = [-tvdb_id]
+    if show_data.get("tmdb_id_cross"):
+        block_ids.append(show_data["tmdb_id_cross"])
+    if local_show and local_show.tmdb_id:
+        if local_show.tmdb_id not in block_ids:
+            block_ids.append(local_show.tmdb_id)
+
+    block_q = await db.execute(
+        select(BlocklistItem.is_dropped)
+        .where(
+            BlocklistItem.user_id == user_id,
+            BlocklistItem.media_type == MediaType.series,
+            BlocklistItem.tmdb_id.in_(block_ids),
+        )
+    )
+    # Check all rows to see if any are blocked (is_dropped=False) or dropped (is_dropped=True)
+    rows = block_q.all()
+    for row in rows:
+        if row[0]: # is_dropped
+            is_dropped = True
+        else: # is_blocked
+            is_blocked = True
+
+    if not is_blocked:
+        cf = await _get_content_filters(db, user_id)
+        temp_item = {
+            "type": "series",
+            "title": show_data.get("title"),
+            "genres": show_data.get("genres", []),
+            "original_language": show_data.get("original_language"),
+            "age_rating": show_data.get("age_rating"),
+        }
+        is_blocked = _is_content_filtered(temp_item, *cf)
+
+    # Pending/rejected request state
+    request_status = None
+    # Use TMDB ID for request if available, otherwise TVDB ID (negative)
+    primary_tid = show_data.get("tmdb_id_cross") or (local_show.tmdb_id if local_show else None)
+    lookup_tid = primary_tid if primary_tid else -tvdb_id
+    
+    req_q = await db.execute(
+        select(MediaRequest.status)
+        .where(
+            MediaRequest.user_id == user_id,
+            MediaRequest.tmdb_id == lookup_tid,
+            MediaRequest.media_type == MediaType.series,
+            MediaRequest.status.in_([RequestStatus.pending, RequestStatus.rejected]),
+        )
+        .order_by(MediaRequest.updated_at.desc())
+        .limit(1)
+    )
+    req_row = req_q.first()
+    if req_row:
+        request_status = req_row[0].value
+
+    return is_blocked, is_dropped, request_status
 
 
 @router.get("/tvdb/{tvdb_id}")
@@ -1892,6 +1973,9 @@ async def get_tvdb_season(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_q.scalar_one_or_none()
+
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
@@ -2005,6 +2089,32 @@ async def get_tvdb_season(
     season_watched = bool(local_eps) and len(watched_ep_ids) >= len(local_eps) if show else False
     season_watch_pct = min(100, int((len(watched_ep_ids) / effective_total) * 100)) if effective_total > 0 else 0
 
+    # Get show-level state
+    is_blocked, is_dropped, request_status = await _get_tvdb_show_state(
+        db, current_user.id, tvdb_id, show_data, show
+    )
+    gs = await _get_global_settings(db)
+    sonarr_cfg = _effective_sonarr(settings, gs)
+    request_enabled = sonarr_cfg is not None
+    is_monitored = False
+    if sonarr_cfg:
+        # Check monitoring status (could be optimized, but consistent with get_tvdb_show)
+        try:
+            import httpx as _httpx
+            url = sonarr_cfg.sonarr_url.rstrip("/")
+            async with _httpx.AsyncClient(timeout=5.0) as client:
+                res = await client.get(
+                    f"{url}/api/v3/series/lookup",
+                    params={"apiKey": sonarr_cfg.sonarr_token, "term": f"tvdb:{tvdb_id}"},
+                )
+                if res.status_code == 200:
+                    for entry in res.json():
+                        if entry.get("id"):
+                            is_monitored = True
+                            break
+        except Exception:
+            pass
+
     return {
         "tvdb_id": tvdb_id,
         "season_number": season_number,
@@ -2019,6 +2129,11 @@ async def get_tvdb_season(
         "season_watch_pct": season_watch_pct,
         "season_collection_pct": season_collection_pct,
         "season_user_rating": None,
+        "is_blocked": is_blocked,
+        "is_dropped": is_dropped,
+        "show_request_status": request_status,
+        "show_request_enabled": request_enabled,
+        "show_is_monitored": is_monitored,
         "show_in_library": show is not None,
         "show": {
             "id": show.id if show else None,
@@ -2040,6 +2155,9 @@ async def get_tvdb_episode(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_q.scalar_one_or_none()
+
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
@@ -2147,6 +2265,24 @@ async def get_tvdb_episode(
     cast = tvdb_client.format_cast(raw_series)
     season_meta = next((s for s in show_data["seasons"] if s["season_number"] == season_number), {})
 
+    # Get show-level state for episode
+    is_blocked, is_dropped, request_status = await _get_tvdb_show_state(
+        db, current_user.id, tvdb_id, show_data, show
+    )
+    gs = await _get_global_settings(db)
+    sonarr_cfg = _effective_sonarr(settings, gs)
+    request_enabled = sonarr_cfg is not None
+
+    ep_state: dict = {
+        "tmdb_id": -tvdb_id,
+        "type": "episode",
+        "show_tvdb_id": tvdb_id,
+    }
+    if show and show.tmdb_id:
+        ep_state["show_tmdb_id"] = show.tmdb_id
+
+    await enrich_with_state(db, current_user.id, [ep_state])
+
     return {
         **ep_data,
         "id": local_ep_id,
@@ -2155,7 +2291,11 @@ async def get_tvdb_episode(
         "user_rating": user_rating,
         "play_count": play_count,
         "progress_percent": progress_percent,
-        "in_lists": [],
+        "in_lists": ep_state.get("in_lists", []),
+        "is_blocked": is_blocked,
+        "is_dropped": is_dropped,
+        "request_status": request_status,
+        "request_enabled": request_enabled,
         "library": library_info,
         "cast": cast,
         "episodes": [{"episode_number": e["episode_number"], "name": e["name"]} for e in eps],

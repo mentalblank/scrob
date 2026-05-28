@@ -190,6 +190,7 @@ const activeButtonsCount = [
               mediaId={item.id}
               userRating={item.user_rating ?? null}
               isBlocked={item.is_blocked ?? false}
+              isDropped={item.is_dropped ?? false}
             />
 
             {item && item.progress_percent !== undefined && item.progress_percent !== null && item.progress_percent > 0 && (

@@ -423,6 +423,7 @@ async def get_next_up(
     )
     if dropped_tmdb_ids and not include_hidden:
         query = query.where(Show.tmdb_id.not_in(dropped_tmdb_ids))
+        query = query.where(or_(Show.tvdb_id.is_(None), (-Show.tvdb_id).not_in(dropped_tmdb_ids)))
 
     result = await db.execute(
         query
@@ -503,7 +504,13 @@ async def get_next_up(
     items = [_format_media_item(m) for m in next_up]
     for item in items:
         show_tmdb_id = item.get("show_tmdb_id")
-        item["next_up_hidden"] = show_tmdb_id is not None and show_tmdb_id in dropped_show_tmdb_ids
+        show_tvdb_id = item.get("show_tvdb_id")
+        is_dropped = False
+        if show_tmdb_id is not None and show_tmdb_id in dropped_show_tmdb_ids:
+            is_dropped = True
+        if show_tvdb_id is not None and (-show_tvdb_id) in dropped_show_tmdb_ids:
+            is_dropped = True
+        item["next_up_hidden"] = is_dropped
     if items:
         await enrich_with_state(db, current_user.id, items)
 

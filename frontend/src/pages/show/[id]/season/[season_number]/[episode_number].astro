@@ -219,9 +219,12 @@ const activeButtonsCount = [
                 showTmdbId={Number(id)}
                 seasonNumber={Number(season_number)}
                 episodeNumber={Number(episode_number)}
+                requestEnabled={episode.request_enabled ?? false}
+                requestStatus={episode.request_status ?? null}
                 mediaId={episode.id ?? null}
                 userRating={episode.user_rating ?? null}
-                hideBlock={true}
+                isBlocked={episode.is_blocked ?? false}
+                isDropped={episode.is_dropped ?? false}
               />
 
               {episode && episode.progress_percent !== undefined && episode.progress_percent !== null && episode.progress_percent > 0 && (

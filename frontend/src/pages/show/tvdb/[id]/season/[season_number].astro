@@ -170,7 +170,7 @@ try {
             <!-- ActionBar & Progress -->
             <div class="bg-zinc-900/20 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-2xl space-y-4">
               <ActionBar
-                tmdbId={Number(id)}
+                tmdbId={season.show.tmdb_id_cross || -Number(id)}
                 mediaType="series"
                 watched={season.season_watched ?? false}
                 inLists={[]}
@@ -178,10 +178,15 @@ try {
                 collectionPct={season.season_collection_pct ?? 0}
                 watchPct={season.season_watch_pct ?? 0}
                 seasonNumber={Number(season_number)}
-                requestEnabled={false}
-                hideLists={true}
+                showTmdbId={season.show.tmdb_id_cross || -Number(id)}
+                isMonitored={season.show_is_monitored ?? false}
+                requestEnabled={season.show_request_enabled ?? false}
+                requestStatus={season.show_request_status ?? null}
+                hideLists={false}
                 userRating={season.season_user_rating ?? null}
-                hideBlock={true}
+                hideBlock={false}
+                isBlocked={season.is_blocked ?? false}
+                isDropped={season.is_dropped ?? false}
               />
               {showProgress && (
                 <div class="pt-2 border-t border-zinc-800/60">

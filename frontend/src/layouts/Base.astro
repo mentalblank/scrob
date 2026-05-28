@@ -1372,6 +1372,46 @@ const bottomNavItem = (active: boolean) =>
       });
     })();
 
+    async function triggerDashboardRefresh(cardElement: HTMLElement) {
+      const dashboardSection = cardElement.closest('#dashboard-next-up');
+      if (dashboardSection) {
+        (dashboardSection as HTMLElement).style.opacity = '0.7';
+        (dashboardSection as HTMLElement).style.pointerEvents = 'none';
+
+        try {
+          const res = await fetch('/partials/dashboard-next-up', {
+            headers: { 'Authorization': `Bearer ${TOKEN()}` }
+          });
+          if (res.ok) {
+            const html = (await res.text()).trim();
+            if (html) {
+              const temp = document.createElement('div');
+              temp.innerHTML = html;
+              const newSection = temp.firstElementChild as HTMLElement;
+              if (newSection) {
+                (dashboardSection as HTMLElement).style.transition = 'opacity 0.3s ease';
+                (dashboardSection as HTMLElement).style.opacity = '0';
+                setTimeout(() => {
+                  (dashboardSection as HTMLElement).replaceWith(newSection);
+                  newSection.style.opacity = '0';
+                  requestAnimationFrame(() => {
+                    newSection.style.transition = 'opacity 0.5s ease';
+                    newSection.style.opacity = '1';
+                  });
+                }, 300);
+              }
+            } else {
+              dashboardSection.remove();
+            }
+          }
+        } catch (e) {
+          console.error('Dashboard refresh failed:', e);
+          (dashboardSection as HTMLElement).style.opacity = '1';
+          (dashboardSection as HTMLElement).style.pointerEvents = 'auto';
+        }
+      }
+    }
+
     // ── Main event delegation ──────────────────────────────────────────────────
     document.addEventListener('click', async (e) => {
       const target = e.target as Element;
@@ -1388,10 +1428,16 @@ const bottomNavItem = (active: boolean) =>
       e.preventDefault();
       e.stopPropagation();
 
-      const tmdbIdRaw = card.dataset.tmdbId;
-      const tmdbId = tmdbIdRaw && tmdbIdRaw !== 'null' ? tmdbIdRaw : '';
+      let tmdbIdRaw = card.dataset.tmdbId;
+      let tmdbId = tmdbIdRaw && tmdbIdRaw !== 'null' ? tmdbIdRaw : '';
       const mediaId = card.dataset.id || '';
-      const mediaType = card.dataset.mediaType!;
+      let mediaType = card.dataset.mediaType!;
+
+      const isBlockAction = ['block', 'block-item', 'drop', 'unified-block'].includes(action);
+      if (isBlockAction && mediaType === 'episode' && card.dataset.showTmdbId) {
+        tmdbId = card.dataset.showTmdbId;
+        mediaType = 'series';
+      }
 
       if (action === 'unified-block') {
         const isDropped  = btn.dataset.isDropped  === 'true';
@@ -1403,7 +1449,7 @@ const bottomNavItem = (active: boolean) =>
 
         // Determine intent: undo if already active, else decide drop vs block
         const alreadyActive = isDropped || isBlocked;
-        const shouldDrop    = isSeries && (inLibrary || isWatched || partialWatched);
+        const shouldDrop    = isSeries && (inLibrary || isWatched || partialWatched || card.closest('#dashboard-next-up') !== null || card.closest('#next-up-grid') !== null || window.location.pathname.startsWith('/next-up'));
 
         // SVG icons
         const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
@@ -1439,6 +1485,7 @@ const bottomNavItem = (active: boolean) =>
             window.dispatchEvent(new CustomEvent('unified-block-changed', {
               detail: { tmdbId, mediaType, isBlocked: false, isDropped: false }
             }));
+            triggerDashboardRefresh(card);
           } else {
             // Apply: drop or block
             if (shouldDrop) {
@@ -1452,6 +1499,7 @@ const bottomNavItem = (active: boolean) =>
               window.dispatchEvent(new CustomEvent('unified-block-changed', {
                 detail: { tmdbId, mediaType, isBlocked: false, isDropped: true }
               }));
+              triggerDashboardRefresh(card);
             } else {
               await apiFetch('/media/blocklist', 'POST', { tmdb_id: Number(tmdbId), media_type: mediaType, is_dropped: false });
               btn.dataset.isBlocked = 'true';
@@ -1473,6 +1521,7 @@ const bottomNavItem = (active: boolean) =>
               window.dispatchEvent(new CustomEvent('unified-block-changed', {
                 detail: { tmdbId, mediaType, isBlocked: true, isDropped: false }
               }));
+              triggerDashboardRefresh(card);
             }
           }
         } catch {
@@ -1498,6 +1547,7 @@ const bottomNavItem = (active: boolean) =>
           card.style.transform = 'scale(0.9)';
           card.style.pointerEvents = 'none';
           setTimeout(() => card.remove(), 300);
+          triggerDashboardRefresh(card);
         } catch { /* ignore */ }
         return;
       }
@@ -1539,6 +1589,7 @@ const bottomNavItem = (active: boolean) =>
             btn.classList.remove('bg-red-500/20', 'text-red-400', 'hover:bg-red-500/30');
             btn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-red-500/10', 'hover:text-red-400');
           }
+          triggerDashboardRefresh(card);
         } catch { /* ignore */ }
         return;
       }
@@ -1569,6 +1620,7 @@ const bottomNavItem = (active: boolean) =>
           }
           
           (window as any).showToast(nowDropped ? 'Show dropped' : 'Tracking resumed', 'success');
+          triggerDashboardRefresh(card);
         } catch { /* ignore */ }
         return;
       }

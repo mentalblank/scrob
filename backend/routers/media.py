@@ -119,6 +119,14 @@ async def enrich_with_state(
     """Add watched, in_lists, collection_pct, and is_monitored fields to a list of media items."""
     movie_tmdb_ids = [i["tmdb_id"] for i in items if i.get("type") == "movie" and i.get("tmdb_id")]
     show_tmdb_ids  = [i["tmdb_id"] for i in items if i.get("type") == "series" and i.get("tmdb_id")]
+    for i in items:
+        if i.get("type") == "episode":
+            s_tmdb = i.get("show_tmdb_id")
+            if s_tmdb:
+                show_tmdb_ids.append(s_tmdb)
+            s_tvdb = i.get("show_tvdb_id")
+            if s_tvdb:
+                show_tmdb_ids.append(-s_tvdb)
     ep_tmdb_ids    = [i["tmdb_id"] for i in items if i.get("type") == "episode" and i.get("tmdb_id")]
     all_tmdb_ids   = [i["tmdb_id"] for i in items if i.get("tmdb_id")]
 
@@ -146,8 +154,12 @@ async def enrich_with_state(
         for item in items:
             tid = item.get("tmdb_id")
             t = item.get("type")
-            if t == "movie": request_enabled_map[tid] = radarr_ready
-            elif t == "series": request_enabled_map[tid] = sonarr_ready
+            if t == "movie": 
+                request_enabled_map[tid] = radarr_ready
+            elif t == "series": 
+                request_enabled_map[tid] = sonarr_ready
+            elif t == "episode":
+                request_enabled_map[tid] = sonarr_ready
 
     # --- Pending/rejected request state ---
     request_status_map: dict[int, str] = {}
@@ -155,13 +167,20 @@ async def enrich_with_state(
         item = items[0]
         tid = item.get("tmdb_id")
         t   = item.get("type")
-        if t in ("movie", "series") and tid:
+        
+        lookup_tid = tid
+        lookup_type = t
+        if t == "episode":
+            lookup_tid = item.get("show_tmdb_id")
+            lookup_type = "series"
+
+        if lookup_type in ("movie", "series") and lookup_tid:
             req_q = await db.execute(
                 select(MediaRequest)
                 .where(
                     MediaRequest.user_id == user_id,
-                    MediaRequest.tmdb_id == tid,
-                    MediaRequest.media_type == t,
+                    MediaRequest.tmdb_id == lookup_tid,
+                    MediaRequest.media_type == lookup_type,
                     MediaRequest.status.in_([RequestStatus.pending, RequestStatus.rejected]),
                 )
                 .order_by(MediaRequest.updated_at.desc())
@@ -206,7 +225,7 @@ async def enrich_with_state(
                 resolved_tvdb_ids[tid] = local_shows_by_tmdb_id[tid].tvdb_id
 
         # Fetch external IDs for shows we don't have local mappings for
-        missing_tvdb_ids = [tid for tid in show_tmdb_ids if tid not in resolved_tvdb_ids]
+        missing_tvdb_ids = [tid for tid in show_tmdb_ids if tid > 0 and tid not in resolved_tvdb_ids]
         if missing_tvdb_ids:
             tmdb_key = await get_user_tmdb_key(db, user_id)
             if check_tmdb_key(tmdb_key):
@@ -614,6 +633,8 @@ async def enrich_with_state(
         block_query_ids = list(all_tmdb_ids)
         alt_to_input_ids = {}
         for tid in show_tmdb_ids:
+            if tid not in block_query_ids:
+                block_query_ids.append(tid)
             local_show = input_tmdb_to_local_show.get(tid)
             if local_show and local_show.tmdb_id:
                 db_tid = local_show.tmdb_id
@@ -729,10 +750,32 @@ async def enrich_with_state(
 
         # Blocked status: individual or global filter
         is_blocked = tid in blocked_ids.get(t, set())
+        is_dropped = tid in dropped_ids.get(t, set())
+        if t == "episode":
+            s_tmdb = item.get("show_tmdb_id")
+            s_tvdb = item.get("show_tvdb_id")
+            parent_blocked = False
+            parent_dropped = False
+            if s_tmdb:
+                if s_tmdb in blocked_ids.get("series", set()):
+                    parent_blocked = True
+                if s_tmdb in dropped_ids.get("series", set()):
+                    parent_dropped = True
+            if s_tvdb:
+                neg_tvdb = -s_tvdb
+                if neg_tvdb in blocked_ids.get("series", set()):
+                    parent_blocked = True
+                if neg_tvdb in dropped_ids.get("series", set()):
+                    parent_dropped = True
+            if parent_blocked:
+                is_blocked = True
+            if parent_dropped:
+                is_dropped = True
+
         if not is_blocked:
             is_blocked = _is_content_filtered(item, *cf)
         item["is_blocked"] = is_blocked
-        item["is_dropped"] = tid in dropped_ids.get(t, set())
+        item["is_dropped"] = is_dropped
 
     return items
 
@@ -3236,14 +3279,25 @@ async def manually_collect(
     # collection percentages and season-page "collected" indicators stay consistent.
     if media and body.media_type == MediaType.episode and not media.show_id and body.series_tmdb_id:
         from models.show import Show as ShowModel
-        show_link_q = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == body.series_tmdb_id))
+        if body.series_tmdb_id < 0:
+            show_link_q = await db.execute(select(ShowModel).where(ShowModel.tvdb_id == abs(body.series_tmdb_id)))
+        else:
+            show_link_q = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == body.series_tmdb_id))
         show_link = show_link_q.scalar_one_or_none()
         if show_link:
             media.show_id = show_link.id
 
     if not media:
-        if not check_tmdb_key(tmdb_key):
-            raise HTTPException(status_code=404, detail="Media not found and no TMDB key configured")
+        is_tvdb = body.series_tmdb_id is not None and body.series_tmdb_id < 0
+        if is_tvdb:
+            from routers.shows import get_user_tvdb_key
+            tvdb_api_key = await get_user_tvdb_key(db, current_user.id)
+            if not tvdb_api_key:
+                raise HTTPException(status_code=400, detail="TVDB API key required to collect this TVDB episode")
+        else:
+            if not check_tmdb_key(tmdb_key):
+                raise HTTPException(status_code=404, detail="Media not found and no TMDB key configured")
+
         try:
             from core.enrichment import enrich_media
             if body.media_type == MediaType.movie:
@@ -3260,60 +3314,125 @@ async def manually_collect(
                         detail="series_tmdb_id, season_number, and episode_number are required to collect a new episode",
                     )
                 
-                # Link to parent show
-                from models.show import Show as ShowModel
-                show_q = await db.execute(
-                    select(ShowModel).where(ShowModel.tmdb_id == body.series_tmdb_id)
-                )
-                show = show_q.scalar_one_or_none()
-                if not show:
-                    # If show doesn't exist locally, create it first so the episode has a show_id
-                    show_data = await tmdb.get_show(body.series_tmdb_id, api_key=tmdb_key)
-                    show = ShowModel(
-                        tmdb_id=body.series_tmdb_id,
-                        title=show_data.get("name", ""),
-                        poster_path=tmdb.poster_url(show_data.get("poster_path")),
-                        backdrop_path=tmdb.poster_url(show_data.get("backdrop_path"), size="w1280"),
-                        tmdb_rating=show_data.get("vote_average"),
-                        status=show_data.get("status"),
-                        first_air_date=show_data.get("first_air_date"),
-                        last_air_date=show_data.get("last_air_date"),
-                        tmdb_data={
-                            "genres": [g["name"] for g in show_data.get("genres", [])],
-                            "seasons": [
-                                {
-                                    "season_number": s["season_number"],
-                                    "poster_path": tmdb.poster_url(s.get("poster_path")),
-                                    "episode_count": s["episode_count"],
-                                    "name": s["name"],
-                                }
-                                for s in show_data.get("seasons", [])
-                            ]
-                        }
-                    )
-                    db.add(show)
-                    await db.flush()
+                if is_tvdb:
+                    from routers.shows import get_user_tvdb_key
+                    from routers.media import get_user_content_language
+                    from core import tvdb as tvdb_client
+                    tvdb_api_key = await get_user_tvdb_key(db, current_user.id)
+                    lang_code = await get_user_content_language(db, current_user.id)
+                    tvdb_lang = tvdb_client.to_three_letter_lang(lang_code)
 
-                ep_data = await tmdb.get_episode(
-                    body.series_tmdb_id, body.season_number, body.episode_number, api_key=tmdb_key
-                )
-                media = Media(
-                    tmdb_id=body.tmdb_id,
-                    media_type=MediaType.episode,
-                    title=ep_data.get("name", ""),
-                    season_number=body.season_number,
-                    episode_number=body.episode_number,
-                    show_id=show.id,
-                )
-                db.add(media)
-                await db.flush()
-                await enrich_media(media, api_key=tmdb_key, series_tmdb_id=body.series_tmdb_id)
+                    tvdb_id = abs(body.series_tmdb_id)
+                    show_q = await db.execute(
+                        select(ShowModel).where(ShowModel.tvdb_id == tvdb_id)
+                    )
+                    show = show_q.scalar_one_or_none()
+                    if not show:
+                        show_data = await tvdb_client.get_series(tvdb_id, tvdb_api_key, lang=tvdb_lang)
+                        formatted_show = tvdb_client.format_series(show_data, lang=tvdb_lang)
+                        show = ShowModel(
+                            tvdb_id=tvdb_id,
+                            tmdb_id=formatted_show.get("tmdb_id_cross"),
+                            title=formatted_show.get("title", ""),
+                            poster_path=formatted_show.get("poster_path"),
+                            backdrop_path=formatted_show.get("backdrop_path"),
+                            tmdb_rating=None,
+                            status=formatted_show.get("status"),
+                            first_air_date=formatted_show.get("first_air_date"),
+                            last_air_date=formatted_show.get("last_air_date"),
+                            tmdb_data={
+                                "genres": formatted_show.get("genres", []),
+                                "seasons": [
+                                    {
+                                        "season_number": s["season_number"],
+                                        "poster_path": s.get("poster_path"),
+                                        "episode_count": s.get("episode_count", 0),
+                                        "name": s.get("name"),
+                                    }
+                                    for s in formatted_show.get("seasons", [])
+                                ],
+                                "source": "tvdb",
+                            },
+                        )
+                        db.add(show)
+                        await db.flush()
+
+                    raw_eps = await tvdb_client.get_series_episodes(tvdb_id, body.season_number, tvdb_api_key, lang=tvdb_lang)
+                    ep = next((e for e in raw_eps if e.get("number") == body.episode_number), None)
+                    ep_title = ep.get("name") if ep else f"Episode {body.episode_number}"
+                    media = Media(
+                        tmdb_id=body.tmdb_id,
+                        media_type=MediaType.episode,
+                        title=ep_title,
+                        season_number=body.season_number,
+                        episode_number=body.episode_number,
+                        show_id=show.id,
+                    )
+                    db.add(media)
+                    await db.flush()
+                    await enrich_media(
+                        media,
+                        api_key=tmdb_key,
+                        is_tvdb=True,
+                        tvdb_api_key=tvdb_api_key,
+                        tvdb_lang=tvdb_lang,
+                        series_tvdb_id=tvdb_id,
+                    )
+                else:
+                    # Link to parent show
+                    from models.show import Show as ShowModel
+                    show_q = await db.execute(
+                        select(ShowModel).where(ShowModel.tmdb_id == body.series_tmdb_id)
+                    )
+                    show = show_q.scalar_one_or_none()
+                    if not show:
+                        # If show doesn't exist locally, create it first so the episode has a show_id
+                        show_data = await tmdb.get_show(body.series_tmdb_id, api_key=tmdb_key)
+                        show = ShowModel(
+                            tmdb_id=body.series_tmdb_id,
+                            title=show_data.get("name", ""),
+                            poster_path=tmdb.poster_url(show_data.get("poster_path")),
+                            backdrop_path=tmdb.poster_url(show_data.get("backdrop_path"), size="w1280"),
+                            tmdb_rating=show_data.get("vote_average"),
+                            status=show_data.get("status"),
+                            first_air_date=show_data.get("first_air_date"),
+                            last_air_date=show_data.get("last_air_date"),
+                            tmdb_data={
+                                "genres": [g["name"] for g in show_data.get("genres", [])],
+                                "seasons": [
+                                    {
+                                        "season_number": s["season_number"],
+                                        "poster_path": tmdb.poster_url(s.get("poster_path")),
+                                        "episode_count": s["episode_count"],
+                                        "name": s["name"],
+                                    }
+                                    for s in show_data.get("seasons", [])
+                                ]
+                            }
+                        )
+                        db.add(show)
+                        await db.flush()
+
+                    ep_data = await tmdb.get_episode(
+                        body.series_tmdb_id, body.season_number, body.episode_number, api_key=tmdb_key
+                    )
+                    media = Media(
+                        tmdb_id=body.tmdb_id,
+                        media_type=MediaType.episode,
+                        title=ep_data.get("name", ""),
+                        season_number=body.season_number,
+                        episode_number=body.episode_number,
+                        show_id=show.id,
+                    )
+                    db.add(media)
+                    await db.flush()
+                    await enrich_media(media, api_key=tmdb_key, series_tmdb_id=body.series_tmdb_id)
             else:
                 raise HTTPException(status_code=400, detail=f"Manual collection not supported for type: {body.media_type}")
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=404, detail=f"TMDB lookup failed: {e}")
+            raise HTTPException(status_code=404, detail=f"Lookup failed: {e}")
 
     # Check for existing collection entry
     existing_q = await db.execute(
@@ -3444,6 +3563,78 @@ async def _resolve_season_episodes(
                 release_date=ep.get("air_date"),
                 tmdb_rating=ep.get("vote_average"),
                 poster_path=tmdb.poster_url(ep.get("still_path"), size="w500"),
+            )
+            db.add(media)
+        result.append(media)
+
+    await db.flush()
+    return result
+
+
+async def _resolve_season_episodes_tvdb(
+    db: AsyncSession, show: "ShowModel", series_tvdb_id: int, season_number: int, tvdb_api_key: str | None, lang: str = "eng"
+) -> list:
+    """Return all Media rows for a TVDB season, creating or adopting rows as needed."""
+    from core import tvdb as tvdb_client
+    if not tvdb_api_key:
+        q = await db.execute(
+            select(Media).where(
+                Media.show_id == show.id,
+                Media.media_type == MediaType.episode,
+                Media.season_number == season_number,
+            )
+        )
+        return q.scalars().all()
+
+    try:
+        tvdb_episodes = await tvdb_client.get_series_episodes(series_tvdb_id, season_number, tvdb_api_key, lang=lang)
+    except Exception:
+        q = await db.execute(
+            select(Media).where(
+                Media.show_id == show.id,
+                Media.media_type == MediaType.episode,
+                Media.season_number == season_number,
+            )
+        )
+        return q.scalars().all()
+
+    if not tvdb_episodes:
+        return []
+
+    tvdb_ids = [ep["id"] for ep in tvdb_episodes if ep.get("id")]
+    existing_q = await db.execute(
+        select(Media).where(
+            Media.tmdb_id.in_(tvdb_ids),
+            Media.media_type == MediaType.episode,
+        )
+    )
+    existing_by_tvdb: dict[int, Media] = {m.tmdb_id: m for m in existing_q.scalars().all()}
+
+    result: list[Media] = []
+    for ep in tvdb_episodes:
+        tid = ep.get("id")
+        if not tid:
+            continue
+        media = existing_by_tvdb.get(tid)
+        if media:
+            if not media.show_id:
+                media.show_id = show.id
+        else:
+            media = Media(
+                tmdb_id=tid,
+                media_type=MediaType.episode,
+                title=ep.get("name") or f"Episode {ep.get('number')}",
+                season_number=season_number,
+                episode_number=ep.get("number"),
+                show_id=show.id,
+                overview=ep.get("overview"),
+                release_date=ep.get("aired"),
+                tmdb_data={
+                    "runtime": ep.get("runtime"),
+                    "tvdb_episode_id": tid,
+                    "source": "tvdb",
+                },
+                poster_path=tvdb_client._image_url(ep.get("image")),
             )
             db.add(media)
         result.append(media)
@@ -4794,6 +4985,47 @@ async def report_session(
     return {"ok": True}
 
 
+async def _get_linked_series_ids(db: AsyncSession, tmdb_id: int, user_id: int) -> list[int]:
+    """Given a tmdb_id (which could be positive TMDB ID or negative TVDB ID),
+    return a list of all linked IDs (e.g. [positive_tmdb_id, negative_tvdb_id]).
+    """
+    ids = [tmdb_id]
+    from models.show import Show as ShowModel
+    
+    if tmdb_id > 0:
+        # Check local DB
+        result = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == tmdb_id))
+        show = result.scalar_one_or_none()
+        if show and show.tvdb_id:
+            neg_tvdb = -show.tvdb_id
+            if neg_tvdb not in ids:
+                ids.append(neg_tvdb)
+        else:
+            # If not local, try TMDB external IDs
+            tmdb_key = await get_user_tmdb_key(db, user_id)
+            if check_tmdb_key(tmdb_key):
+                try:
+                    ext = await tmdb.get_external_ids(tmdb_id, "tv", api_key=tmdb_key)
+                    tvdb_id_val = ext.get("tvdb_id")
+                    if tvdb_id_val:
+                        neg_tvdb = -int(tvdb_id_val)
+                        if neg_tvdb not in ids:
+                            ids.append(neg_tvdb)
+                except Exception:
+                    pass
+    else:
+        # Negative TVDB ID
+        tvdb_id = abs(tmdb_id)
+        result = await db.execute(select(ShowModel).where(ShowModel.tvdb_id == tvdb_id))
+        show = result.scalar_one_or_none()
+        if show and show.tmdb_id:
+            pos_tmdb = show.tmdb_id
+            if pos_tmdb not in ids:
+                ids.append(pos_tmdb)
+                
+    return ids
+
+
 # ── Blocklist ───────────────────────────────────────────────────────────────
 
 @router.get("/blocklist")
@@ -4934,6 +5166,7 @@ async def get_blocklist_enriched(
                         "backdrop_path": show_fmt.get("backdrop_path"),
                         "overview": show_fmt.get("overview"),
                         "tmdb_rating": None,
+                        "tmdb_id_cross": show_fmt.get("tmdb_id_cross"),
                     }
                 except Exception as e:
                     print(f"Failed to fetch blocked TVDB show {-tmdb_id}: {e}")
@@ -4965,11 +5198,60 @@ async def get_blocklist_enriched(
     results = await asyncio.gather(*(t[1] for t in tasks))
     
     output = []
+    seen_shows = set()  # set of tuple/ids (e.g. ('local', show_id), ('tmdb', tmdb_id), ('tvdb', tvdb_id))
     for (b, _), data in zip(tasks, results):
-        if data:
-            data["is_dropped"] = b.is_dropped
-            output.append(data)
+        if not data:
+            continue
+        data["is_dropped"] = b.is_dropped
+        
+        if b.media_type == MediaType.series:
+            show_id = data.get("id")
+            t_id = data.get("tmdb_id")  # positive or negative
             
+            pos_tmdb = None
+            neg_tvdb = None
+            
+            if show_id:
+                local_show_row = None
+                for s in local_shows.values():
+                    if s.id == show_id:
+                        local_show_row = s
+                        break
+                if local_show_row:
+                    pos_tmdb = local_show_row.tmdb_id
+                    if local_show_row.tvdb_id:
+                        neg_tvdb = -local_show_row.tvdb_id
+            
+            if not pos_tmdb and t_id and t_id > 0:
+                pos_tmdb = t_id
+            if not neg_tvdb and t_id and t_id < 0:
+                neg_tvdb = t_id
+                
+            if "tmdb_id_cross" in data and data["tmdb_id_cross"]:
+                pos_tmdb = data["tmdb_id_cross"]
+            
+            # Check if duplicate
+            duplicate = False
+            if show_id and ('local', show_id) in seen_shows:
+                duplicate = True
+            if pos_tmdb and ('tmdb', pos_tmdb) in seen_shows:
+                duplicate = True
+            if neg_tvdb and ('tvdb', neg_tvdb) in seen_shows:
+                duplicate = True
+                
+            if duplicate:
+                continue
+                
+            # Mark seen
+            if show_id:
+                seen_shows.add(('local', show_id))
+            if pos_tmdb:
+                seen_shows.add(('tmdb', pos_tmdb))
+            if neg_tvdb:
+                seen_shows.add(('tvdb', neg_tvdb))
+                
+        output.append(data)
+        
     return output
 
 
@@ -4987,28 +5269,54 @@ async def block_item(
     current_user: User = Depends(get_current_user),
 ):
     """Block or drop a media item."""
-    existing_q = await db.execute(
-        select(BlocklistItem).where(
-            BlocklistItem.user_id == current_user.id,
-            BlocklistItem.tmdb_id == req.tmdb_id,
-            BlocklistItem.media_type == req.media_type,
-        )
-    )
-    existing = existing_q.scalar_one_or_none()
-    if existing:
-        existing.is_dropped = req.is_dropped
+    if req.media_type == MediaType.series:
+        linked_ids = await _get_linked_series_ids(db, req.tmdb_id, current_user.id)
+        status = "ok"
+        for tid in linked_ids:
+            existing_q = await db.execute(
+                select(BlocklistItem).where(
+                    BlocklistItem.user_id == current_user.id,
+                    BlocklistItem.tmdb_id == tid,
+                    BlocklistItem.media_type == req.media_type,
+                )
+            )
+            existing = existing_q.scalar_one_or_none()
+            if existing:
+                existing.is_dropped = req.is_dropped
+                status = "updated"
+            else:
+                new_block = BlocklistItem(
+                    user_id=current_user.id,
+                    tmdb_id=tid,
+                    media_type=req.media_type,
+                    is_dropped=req.is_dropped
+                )
+                db.add(new_block)
         await db.commit()
-        return {"status": "updated", "is_dropped": req.is_dropped}
+        return {"status": status, "is_dropped": req.is_dropped}
+    else:
+        existing_q = await db.execute(
+            select(BlocklistItem).where(
+                BlocklistItem.user_id == current_user.id,
+                BlocklistItem.tmdb_id == req.tmdb_id,
+                BlocklistItem.media_type == req.media_type,
+            )
+        )
+        existing = existing_q.scalar_one_or_none()
+        if existing:
+            existing.is_dropped = req.is_dropped
+            await db.commit()
+            return {"status": "updated", "is_dropped": req.is_dropped}
 
-    new_block = BlocklistItem(
-        user_id=current_user.id,
-        tmdb_id=req.tmdb_id,
-        media_type=req.media_type,
-        is_dropped=req.is_dropped
-    )
-    db.add(new_block)
-    await db.commit()
-    return {"status": "ok", "is_dropped": req.is_dropped}
+        new_block = BlocklistItem(
+            user_id=current_user.id,
+            tmdb_id=req.tmdb_id,
+            media_type=req.media_type,
+            is_dropped=req.is_dropped
+        )
+        db.add(new_block)
+        await db.commit()
+        return {"status": "ok", "is_dropped": req.is_dropped}
 
 
 @router.delete("/blocklist")
@@ -5019,19 +5327,35 @@ async def unblock_item(
     current_user: User = Depends(get_current_user),
 ):
     """Unblock or undrop a media item."""
-    q = select(BlocklistItem).where(
-        BlocklistItem.user_id == current_user.id,
-        BlocklistItem.tmdb_id == tmdb_id,
-        BlocklistItem.media_type == media_type,
-    )
-    result = await db.execute(q)
-    block = result.scalar_one_or_none()
-    if not block:
-        return {"status": "not blocked"}
+    if media_type == MediaType.series:
+        linked_ids = await _get_linked_series_ids(db, tmdb_id, current_user.id)
+        q = select(BlocklistItem).where(
+            BlocklistItem.user_id == current_user.id,
+            BlocklistItem.tmdb_id.in_(linked_ids),
+            BlocklistItem.media_type == media_type,
+        )
+        result = await db.execute(q)
+        blocks = result.scalars().all()
+        if not blocks:
+            return {"status": "not blocked"}
+        for block in blocks:
+            await db.delete(block)
+        await db.commit()
+        return {"status": "unblocked"}
+    else:
+        q = select(BlocklistItem).where(
+            BlocklistItem.user_id == current_user.id,
+            BlocklistItem.tmdb_id == tmdb_id,
+            BlocklistItem.media_type == media_type,
+        )
+        result = await db.execute(q)
+        block = result.scalar_one_or_none()
+        if not block:
+            return {"status": "not blocked"}
 
-    await db.delete(block)
-    await db.commit()
-    return {"status": "unblocked"}
+        await db.delete(block)
+        await db.commit()
+        return {"status": "unblocked"}
 
 
 @router.get("/{type}/{tmdb_id}")
@@ -5210,6 +5534,7 @@ async def get_media_details(
                 "user_rating": ep_state.get("user_rating"),
                 "play_count": ep_state.get("play_count", 0),
                 "is_blocked": ep_state.get("is_blocked", False),
+                "is_dropped": ep_state.get("is_dropped", False),
                 "library": library_info,
             }
         else:

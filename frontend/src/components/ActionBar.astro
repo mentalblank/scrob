@@ -52,11 +52,10 @@ const {
 const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false";
 const effectivelyHideRate = hideRate || !showUserRatings;
 
-const isSeasonOrEpisode = seasonNumber != null || episodeNumber != null;
-const effectivelyHideBlock = hideBlock || isSeasonOrEpisode;
+const effectivelyHideBlock = hideBlock;
 
-const isSeries = mediaType === "series";
-const showRequest = !hideRequest && requestEnabled && (mediaType === "movie" || mediaType === "series");
+const isSeries = mediaType === "series" || (mediaType === "episode" && showTmdbId != null);
+const showRequest = !hideRequest && requestEnabled && (mediaType === "movie" || mediaType === "series" || (mediaType === "episode" && showTmdbId != null));
 const ratingLabel = userRating != null ? userRating.toFixed(1) : "Rate";
 
 // Shared button classes
@@ -66,7 +65,7 @@ const btnW = "w-11 h-11 md:w-13 md:h-13 flex-shrink-0 last:border-r-0";
 // Consistent state classes per button colour — inactive / active
 // inactive: bg-zinc-800 text-zinc-500 hover:bg-[c]-500/10 hover:text-[c]-400
 // active:   bg-[c]-500/20 text-[c]-400 hover:bg-[c]-500/30
-const watchActive = isSeries ? watchPct > 0 : watched;
+const watchActive = (mediaType === "series") ? watchPct > 0 : watched;
 const watchedCls  = watchActive
   ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
   : "bg-zinc-950/25 text-zinc-500 hover:bg-green-500/10 hover:text-green-400";
@@ -120,7 +119,7 @@ const requestTitle = isMonitored
         data-watched={String(watched)}
         data-watch-pct={String(watchPct)}
         data-state={watchActive ? "active" : "inactive"}
-        title={isSeries ? `${watchPct}% watched` : (watched ? "Mark as unwatched" : "Mark as watched")}
+        title={mediaType === "series" ? `${watchPct}% watched` : (watched ? "Mark as unwatched" : "Mark as watched")}
         class={`${btn} ${btnW} border-r border-zinc-800/60 ${watchedCls}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -173,7 +172,7 @@ const requestTitle = isMonitored
         data-in-library={String(inLibrary)}
         data-collection-pct={String(collectionPct)}
         data-state={inLibrary ? "active" : "inactive"}
-        title={isSeries ? `${collectionPct}% in library` : (inLibrary ? "In collection" : "Add to collection")}
+        title={mediaType === "series" ? `${collectionPct}% in library` : (inLibrary ? "In collection" : "Add to collection")}
         class={`${btn} ${btnW} relative overflow-hidden border-r border-zinc-800/60 ${collectedCls}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

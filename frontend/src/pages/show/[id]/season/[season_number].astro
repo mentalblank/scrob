@@ -173,16 +173,20 @@ try {
                 tmdbId={Number(id)}
                 mediaType="series"
                 watched={season.season_watched ?? false}
-                inLists={[]}
+                inLists={season.show_in_lists ?? []}
                 inLibrary={season.season_in_library ?? season.show_in_library ?? false}
                 collectionPct={season.season_collection_pct ?? season.show_collection_pct ?? 0}
                 watchPct={season.season_watch_pct ?? 0}
                 seasonNumber={Number(season_number)}
+                showTmdbId={Number(id)}
                 isMonitored={season.show_is_monitored ?? false}
-                requestEnabled={false}
+                requestEnabled={season.show_request_enabled ?? false}
+                requestStatus={season.show_request_status ?? null}
                 hideLists={false}
                 userRating={season.season_user_rating ?? null}
-                hideBlock={true}
+                hideBlock={false}
+                isBlocked={season.is_blocked ?? false}
+                isDropped={season.is_dropped ?? false}
               />
               {showProgress && (
                 <div class="pt-2 border-t border-zinc-800/60">
