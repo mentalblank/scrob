@@ -3,7 +3,8 @@ name: Dev Build
 on:
   push:
     branches:
-      - 'dev'
+      - '**'
+      - '!main'
   workflow_dispatch:
 
 jobs:
@@ -44,10 +45,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            APP_VERSION=dev
-            APP_BRANCH=dev
+            APP_VERSION=${{ github.ref_name }}
+            APP_BRANCH=${{ github.ref_name }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:dev
-            ghcr.io/${{ github.repository_owner }}/scrob:dev
-          cache-from: type=gha,scope=scrob-dev
-          cache-to: type=gha,mode=max,scope=scrob-dev
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/scrob:${{ github.ref_name }}
+          cache-from: type=gha,scope=scrob-${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=scrob-${{ github.ref_name }}
