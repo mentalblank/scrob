@@ -1369,33 +1369,43 @@ async def get_person_details(
             raise HTTPException(status_code=404, detail="TMDB API Key not configured")
         data = await tmdb.get_person(person_id, api_key=tmdb_key)
         credits = data.get("combined_credits", {})
-        cast_credits = credits.get("cast", [])
         formatted_credits = []
-        for c in cast_credits:
+        for c in credits.get("cast", []):
             m_type = "movie" if c.get("media_type") == "movie" else "series"
             popularity = c.get("popularity", 0)
-            # Role weight: how significant was this person's role?
-            # Movies: billing order (0 = lead, higher = smaller part)
-            # TV: episode count (more episodes = regular cast, not a guest)
             if c.get("media_type") == "tv":
                 episode_count = c.get("episode_count") or 0
                 role_weight = min(episode_count, 20) / 20.0
             else:
                 order = c.get("order") or 0
                 role_weight = max(0.05, 1.0 - order * 0.05)
-            formatted_credits.append(
-                {
-                    "tmdb_id": c.get("id"),
-                    "type": m_type,
-                    "title": c.get("title") or c.get("name"),
-                    "poster_path": tmdb.poster_url(c.get("poster_path")),
-                    "release_date": c.get("release_date") or c.get("first_air_date"),
-                    "character": c.get("character"),
-                    "popularity": popularity,
-                    "adult": c.get("adult", False),
-                    "_score": popularity * max(role_weight, 0.05),
-                }
-            )
+            formatted_credits.append({
+                "tmdb_id": c.get("id"),
+                "type": m_type,
+                "title": c.get("title") or c.get("name"),
+                "poster_path": tmdb.poster_url(c.get("poster_path")),
+                "release_date": c.get("release_date") or c.get("first_air_date"),
+                "character": c.get("character"),
+                "popularity": popularity,
+                "adult": c.get("adult", False),
+                "_score": popularity * max(role_weight, 0.05),
+            })
+        _crew_dept_weight = {"Directing": 1.0, "Writing": 0.9, "Production": 0.7, "Creator": 1.0}
+        for c in credits.get("crew", []):
+            m_type = "movie" if c.get("media_type") == "movie" else "series"
+            popularity = c.get("popularity", 0)
+            role_weight = _crew_dept_weight.get(c.get("department", ""), 0.5)
+            formatted_credits.append({
+                "tmdb_id": c.get("id"),
+                "type": m_type,
+                "title": c.get("title") or c.get("name"),
+                "poster_path": tmdb.poster_url(c.get("poster_path")),
+                "release_date": c.get("release_date") or c.get("first_air_date"),
+                "character": c.get("job"),
+                "popularity": popularity,
+                "adult": c.get("adult", False),
+                "_score": popularity * role_weight,
+            })
         # Deduplicate by tmdb_id — a person may appear in multiple episodes of the
         # same show; keep the entry with the highest score.
         seen: dict[int, int] = {}  # tmdb_id -> index in formatted_credits
