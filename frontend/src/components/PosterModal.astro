@@ -8,7 +8,7 @@ const { posterPath, title } = Astro.props;
 ---
 {posterPath && (
   <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
-    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
+    <div id="poster-modal-backdrop" class="absolute inset-0 bg-zinc-950/85 backdrop-blur-sm cursor-pointer"></div>
     <img
       src={posterPath}
       alt={title}
@@ -16,7 +16,7 @@ const { posterPath, title } = Astro.props;
     />
     <button
       id="poster-modal-close"
-      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
+      class="absolute top-4 right-4 p-2 rounded-full bg-zinc-950/60 hover:bg-zinc-950/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
       aria-label="Close"
     >
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">

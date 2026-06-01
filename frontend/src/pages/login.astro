@@ -104,13 +104,13 @@ if (token) {
     <h1 class="text-3xl font-bold mb-6 text-zinc-100 text-center">Login</h1>
     
     {error && (
-      <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg mb-6">
+      <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-xl mb-6">
         {error}
       </div>
     )}
 
     {success && (
-      <div class="bg-green-500/10 border border-green-500 text-green-400 p-3 rounded-lg mb-6">
+      <div class="bg-green-500/10 border border-green-500 text-green-400 p-3 rounded-xl mb-6">
         {success}
       </div>
     )}
@@ -122,7 +122,7 @@ if (token) {
           <a
             href="/oidc-start"
             tabindex="2"
-            class="flex items-center justify-center gap-2 w-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 font-bold py-2 rounded-lg transition-colors cursor-pointer mb-4"
+            class="flex items-center justify-center gap-2 w-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 font-bold py-2 rounded-xl transition-colors cursor-pointer mb-4"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
@@ -155,7 +155,7 @@ if (token) {
                 id="username"
                 required
                 tabindex="3"
-                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
             </div>
             <div>
@@ -172,7 +172,7 @@ if (token) {
                   id="password"
                   required
                   tabindex="4"
-                  class="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
                 <PasswordToggle tabindex="5" />
               </div>
@@ -215,7 +215,7 @@ if (token) {
             autocomplete="one-time-code"
             inputmode="numeric"
             placeholder="000000 or XXXX-XXXX"
-            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-center tracking-widest text-lg font-mono"
+            class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-center tracking-widest text-lg font-mono"
           />
         </div>
         <button
@@ -243,13 +243,13 @@ if (token) {
         <p class="text-sm text-zinc-400 mb-4">Upload a <code class="text-zinc-300">.bak</code> file to restore a previous installation.</p>
         <div class="flex flex-col gap-3">
           <input id="bootstrap-restore-file" type="file" accept=".bak"
-            class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
+            class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
           <button id="bootstrap-restore-btn" disabled
             class="w-full px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
             Restore Database
           </button>
         </div>
-        <div id="bootstrap-restore-error" class="hidden mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"></div>
+        <div id="bootstrap-restore-error" class="hidden mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2"></div>
       </div>
     </div>
   )}
@@ -257,7 +257,7 @@ if (token) {
 
 <!-- Bootstrap Restore Confirmation Modal -->
 <div id="bootstrap-restore-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
-  <div id="bootstrap-restore-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+  <div id="bootstrap-restore-modal-backdrop" class="absolute inset-0 bg-zinc-950/85 backdrop-blur-sm"></div>
   <div class="relative bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-xl overflow-hidden">
     <h2 class="text-xl font-black text-zinc-100 mb-2">Restore Database?</h2>
     <p class="text-sm text-zinc-400 mb-1">Restoring from:</p>

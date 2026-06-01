@@ -84,9 +84,9 @@ const showProgress = progressPct > 0 && !watched;
           const alreadyActive = isBlocked || isDropped;
           // Drop (amber) for series that are in collection or have any watch progress
           const showDrop = (isSeries || isEpisode) && (inLibrary || isPartialWatched || watched || isEpisode);
-          const btnBase = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer';
-          const btnInactiveDrop = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
-          const btnInactiveBlock = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+          const btnBase = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+          const btnInactiveDrop = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+          const btnInactiveBlock = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
           const btnActiveDrop  = `${btnBase} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
           const btnActiveBlock = `${btnBase} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
           const cls = isDropped ? btnActiveDrop : isBlocked ? btnActiveBlock : showDrop ? btnInactiveDrop : btnInactiveBlock;
@@ -126,13 +126,13 @@ const showProgress = progressPct > 0 && !watched;
         <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 
         {rating && (
-          <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1">
+          <div class="absolute top-2 left-2 bg-zinc-950/85 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800/50 flex items-center gap-1">
             <span class="text-xs leading-none">★</span> {rating}
           </div>
         )}
 
         {item.library?.resolution && (
-          <div class="absolute bottom-2 left-2 bg-zinc-900/90 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-md border border-zinc-700/50 shadow-lg tracking-tighter">
+          <div class="absolute bottom-2 left-2 bg-zinc-900/90 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-xl border border-zinc-700/50 shadow-lg tracking-tighter">
             {item.library.resolution}
           </div>
         )}
@@ -162,7 +162,7 @@ const showProgress = progressPct > 0 && !watched;
           </div>
         )}
         {rating && (
-          <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1">
+          <div class="absolute top-2 left-2 bg-zinc-950/85 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800/50 flex items-center gap-1">
             <span class="text-xs leading-none">★</span> {rating}
           </div>
         )}

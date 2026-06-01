@@ -33,7 +33,7 @@ if (me.totp_enabled) {
   <div class="max-w-4xl mx-auto">
     <h1 class="page-title mb-8">Settings</h1>
 
-    <div id="js-message" class="hidden p-4 rounded-lg mb-8"></div>
+    <div id="js-message" class="hidden p-4 rounded-xl mb-8"></div>
 
     <!-- Tabs Header Navigation -->
     <div class="flex flex-nowrap gap-2 mb-8 border-b border-zinc-800/80 pb-4 w-full overflow-x-auto no-scrollbar">
@@ -65,7 +65,7 @@ if (me.totp_enabled) {
                       id="tmdb_api_key"
                       value={settings.tmdb_api_key || ""}
                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
                     <PasswordToggle />
                   </div>
@@ -73,7 +73,7 @@ if (me.totp_enabled) {
                     type="button"
                     data-action="test_tmdb"
                     title="Test TMDB key"
-                    class="js-action-btn px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                    class="js-action-btn px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
@@ -100,7 +100,7 @@ if (me.totp_enabled) {
                       id="tvdb_api_key"
                       value={settings.tvdb_api_key || ""}
                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
                     <PasswordToggle />
                   </div>
@@ -108,7 +108,7 @@ if (me.totp_enabled) {
                     type="button"
                     data-action="test_tvdb"
                     title="Test TVDB key"
-                    class="js-action-btn px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                    class="js-action-btn px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
@@ -130,7 +130,7 @@ if (me.totp_enabled) {
                 <select
                   name="primary_metadata_source"
                   id="primary_metadata_source"
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
                 >
                   <option value="tmdb" selected={settings.preferences?.primary_metadata_source !== "tvdb"}>TheMovieDB (TMDB) - Default</option>
                   <option value="tvdb" selected={settings.preferences?.primary_metadata_source === "tvdb"}>TheTVDB (TVDB)</option>
@@ -149,11 +149,11 @@ if (me.totp_enabled) {
                   <p class="text-sm text-zinc-400">Choose how items you've already watched or collected appear on Explore pages.</p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
-                  <a href="/blocklist" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm font-medium transition-all active:scale-95">
+                  <a href="/blocklist" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm font-medium transition-all active:scale-95">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
                     Manage Blocklist
                   </a>
-                  <a href="/remaps" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm font-medium transition-all active:scale-95">
+                  <a href="/remaps" class="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm font-medium transition-all active:scale-95">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
                     Metadata Overrides
                   </a>
@@ -190,12 +190,12 @@ if (me.totp_enabled) {
                   <div>
                     <p class="text-sm font-semibold text-zinc-100">{label}</p>
                   </div>
-                  <div class="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-1" data-v-group={key}>
+                  <div class="flex items-center bg-zinc-950 border border-zinc-800 rounded-xl p-1" data-v-group={key}>
                     {['show', 'fade', 'hide'].map((action) => (
                       <button
                         type="button"
                         data-v-action={action}
-                        class={`px-3 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all cursor-pointer ${settings.preferences?.explore_filters?.[key] === action || (!settings.preferences?.explore_filters?.[key] && action === 'show') ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
+                        class={`px-3 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all cursor-pointer ${settings.preferences?.explore_filters?.[key] === action || (!settings.preferences?.explore_filters?.[key] && action === 'show') ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}
                       >
                         {action}
                       </button>
@@ -368,15 +368,15 @@ if (me.totp_enabled) {
                       <button type="button" data-action="sync_connection" data-conn-id={conn.id} data-conn-type={conn.type}
                         disabled={!hasTmdbKey}
                         title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Full sync of ${conn.name}`}
-                        class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
+                        class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
                       >Full Sync</button>
                       <button type="button" data-action="sync_connection" data-conn-id={conn.id} data-conn-type={conn.type} data-partial="true"
                         disabled={!hasTmdbKey}
                         title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Partial sync of ${conn.name}`}
-                        class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
+                        class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
                       >Partial Sync</button>
                       <button type="button" data-action="delete_connection" data-conn-id={conn.id} data-conn-name={conn.name}
-                        class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-red-900/30 text-red-400 border border-zinc-700 hover:border-red-700 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                        class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-red-900/30 text-red-400 border border-zinc-700 hover:border-red-700 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                       >Delete</button>
                     </div>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
@@ -405,22 +405,22 @@ if (me.totp_enabled) {
                     <div class="space-y-4">
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Display Name</label>
-                        <input type="text" class="conn-name-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.name} data-conn-id={conn.id} />
+                        <input type="text" class="conn-name-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.name} data-conn-id={conn.id} />
                       </div>
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Server URL</label>
-                        <input type="url" class="conn-url-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.url} data-conn-id={conn.id} />
+                        <input type="url" class="conn-url-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.url} data-conn-id={conn.id} />
                       </div>
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">
                           External Server URL <span class="text-xs text-zinc-600">(Optional)</span>
                         </label>
-                        <input type="url" class="conn-external-url-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.external_server_url || ""} data-conn-id={conn.id} />
+                        <input type="url" class="conn-external-url-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.external_server_url || ""} data-conn-id={conn.id} />
                       </div>
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">{conn.type === "plex" ? "X-Plex-Token" : "API Token"}</label>
                         <div class="relative">
-                          <input type="password" class="conn-token-input w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.token} data-conn-id={conn.id} />
+                          <input type="password" class="conn-token-input w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.token} data-conn-id={conn.id} />
                           <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle token visibility">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
@@ -430,14 +430,14 @@ if (me.totp_enabled) {
                       {conn.type !== "plex" && (
                         <div class="space-y-2">
                           <label class="block text-sm font-medium text-zinc-400">User ID</label>
-                          <input type="text" class="conn-user-id-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_user_id || ""} data-conn-id={conn.id} />
+                          <input type="text" class="conn-user-id-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_user_id || ""} data-conn-id={conn.id} />
                         </div>
                       )}
                       {conn.type === "plex" && (
                         <div class="space-y-2">
                           <label class="block text-sm font-medium text-zinc-400">Plex Username</label>
                           <p class="text-xs text-zinc-500">Required to attribute events when multiple users share a server.</p>
-                          <input type="text" class="conn-username-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_username || ""} data-conn-id={conn.id} />
+                          <input type="text" class="conn-username-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_username || ""} data-conn-id={conn.id} />
                         </div>
                       )}
                       <div class="space-y-2">
@@ -446,15 +446,15 @@ if (me.totp_enabled) {
                           <div class="conn-libraries-list space-y-1 text-sm text-zinc-500 italic">Checking connection…</div>
                           <p class="text-xs text-zinc-400 mt-1">Leave all unchecked to sync every library.</p>
                           <div class="mt-3">
-                            <button type="button" data-action="scan_libraries" data-conn-id={conn.id} class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer">Trigger library scan</button>
+                            <button type="button" data-action="scan_libraries" data-conn-id={conn.id} class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-xl transition-colors cursor-pointer">Trigger library scan</button>
                           </div>
                         </div>
                       </div>
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Webhook URL</label>
                         <div class="flex gap-2">
-                          <input type="text" readonly class="conn-webhook-url flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
-                          <button type="button" class="conn-copy-webhook px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer" data-conn-id={conn.id}>
+                          <input type="text" readonly class="conn-webhook-url flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
+                          <button type="button" class="conn-copy-webhook px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer" data-conn-id={conn.id}>
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
                           </button>
                         </div>
@@ -479,7 +479,7 @@ if (me.totp_enabled) {
                           <button type="button" data-action="sync_connection" data-conn-id={conn.id} data-conn-type={conn.type} data-conn-name={conn.name}
                             disabled={!hasTmdbKey}
                             title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Pull from ${conn.name}`}
-                            class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
+                            class={`js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
                           >Pull</button>
                           <span id={`${conn.type}-last-sync`} class="hidden text-xs text-zinc-500"></span>
                         </div>
@@ -497,7 +497,7 @@ if (me.totp_enabled) {
                         ))}
                         <button type="button" data-action="push_upstream" data-conn-id={conn.id} data-conn-name={conn.name}
                           title="Push all watched states and ratings from Scrob to this server"
-                          class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                          class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                         >Push</button>
                       </div>
                       <div class="bg-zinc-950 rounded-xl p-4 space-y-4">
@@ -505,7 +505,7 @@ if (me.totp_enabled) {
                         <div class="space-y-3">
                           <div class="flex items-center justify-between gap-4">
                             <label class="text-sm text-zinc-300">Full Audit</label>
-                            <select class="conn-auto-sync bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
+                            <select class="conn-auto-sync bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
                               <option value="" selected={!conn.auto_sync_interval}>Disabled</option>
                               {[6, 12, 24, 48, 168].map(h => (
                                 <option value={String(h)} selected={conn.auto_sync_interval === h}>Every {h === 168 ? 'week' : h + 'h'}</option>
@@ -517,7 +517,7 @@ if (me.totp_enabled) {
                               <label class="text-sm text-zinc-300">Partial Sync</label>
                               <span class="text-[10px] text-zinc-500 italic">Incremental changes only</span>
                             </div>
-                            <select class="conn-partial-sync bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
+                            <select class="conn-partial-sync bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
                               <option value="" selected={!conn.partial_sync_interval}>Disabled</option>
                               {[1, 2, 4, 8, 12, 24].map(h => (
                                 <option value={String(h)} selected={conn.partial_sync_interval === h}>Every {h}h</option>
@@ -565,8 +565,8 @@ if (me.totp_enabled) {
                     </div>
                   </div>
                   <div class="border-t border-zinc-800 px-6 py-4 flex gap-2">
-                    <button type="button" data-action="save_connection" data-conn-id={conn.id} class="js-action-btn text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer">Save changes</button>
-                    <button type="button" data-action="test_connection" data-conn-id={conn.id} data-conn-type={conn.type} class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer">Test</button>
+                    <button type="button" data-action="save_connection" data-conn-id={conn.id} class="js-action-btn text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl transition-colors cursor-pointer">Save changes</button>
+                    <button type="button" data-action="test_connection" data-conn-id={conn.id} data-conn-type={conn.type} class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-xl transition-colors cursor-pointer">Test</button>
                   </div>
                 </div>
               </div>
@@ -585,11 +585,11 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="new-conn-name" class="block text-sm font-medium text-zinc-400">Name</label>
-                      <input type="text" id="new-conn-name" placeholder="e.g. Home Plex" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="text" id="new-conn-name" placeholder="e.g. Home Plex" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-type" class="block text-sm font-medium text-zinc-400">Server Type</label>
-                      <select id="new-conn-type" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
+                      <select id="new-conn-type" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
                         <option value="jellyfin">Jellyfin</option>
                         <option value="emby">Emby</option>
                         <option value="plex">Plex</option>
@@ -597,19 +597,19 @@ if (me.totp_enabled) {
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-url" class="block text-sm font-medium text-zinc-400">Server URL</label>
-                      <input type="url" id="new-conn-url" placeholder="http://192.168.1.100:8096" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="url" id="new-conn-url" placeholder="http://192.168.1.100:8096" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-external-url" class="block text-sm font-medium text-zinc-400">
                         External Server URL <span class="text-xs text-zinc-600">(Optional)</span>
                       </label>
-                      <input type="url" id="new-conn-external-url" placeholder="https://app.plex.tv/desktop/#!/server/12345" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="url" id="new-conn-external-url" placeholder="https://app.plex.tv/desktop/#!/server/12345" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                       <p class="text-xs text-zinc-500 mt-1">If set, the Play button will redirect to this URL instead of the internal player. For Plex, use the base web URL including your machine identifier.</p>
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-token" class="block text-sm font-medium text-zinc-400">Token</label>
                       <div class="relative">
-                        <input type="password" id="new-conn-token" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <input type="password" id="new-conn-token" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                         <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle token visibility">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
@@ -618,15 +618,15 @@ if (me.totp_enabled) {
                     </div>
                     <div id="new-conn-user-id-row" class="space-y-2">
                       <label for="new-conn-user-id" class="block text-sm font-medium text-zinc-400">User ID</label>
-                      <input type="text" id="new-conn-user-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="text" id="new-conn-user-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div id="new-conn-username-row" class="space-y-2 hidden">
                       <label for="new-conn-username" class="block text-sm font-medium text-zinc-400">Plex Username</label>
-                      <input type="text" id="new-conn-username" placeholder="e.g. john_doe" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="text" id="new-conn-username" placeholder="e.g. john_doe" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="flex gap-2">
-                      <button type="button" id="create-connection-btn" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer">Add</button>
-                      <button type="button" id="test-new-connection-btn" class="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer">Test</button>
+                      <button type="button" id="create-connection-btn" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl transition-colors cursor-pointer">Add</button>
+                      <button type="button" id="test-new-connection-btn" class="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-xl transition-colors cursor-pointer">Test</button>
                       <button type="button" id="cancel-add-connection-btn" class="text-sm text-zinc-500 hover:text-zinc-300 px-4 py-2 cursor-pointer">Cancel</button>
                     </div>
                   </div>
@@ -662,14 +662,14 @@ if (me.totp_enabled) {
                       <div class="space-y-3">
                         <div class="flex items-center justify-between gap-4">
                           <label class="text-sm text-zinc-300">Full Audit</label>
-                          <select id="new-auto-sync" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 cursor-pointer">
+                          <select id="new-auto-sync" class="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 cursor-pointer">
                             <option value="">Disabled</option>
                             {[6, 12, 24, 48, 168].map(h => (<option value={String(h)}>Every {h === 168 ? 'week' : h + 'h'}</option>))}
                           </select>
                         </div>
                         <div class="flex items-center justify-between gap-4">
                           <label class="text-sm text-zinc-300">Partial Sync</label>
-                          <select id="new-partial-sync" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 cursor-pointer">
+                          <select id="new-partial-sync" class="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 cursor-pointer">
                             <option value="">Disabled</option>
                             {[1, 2, 4, 8, 12, 24].map(h => (<option value={String(h)}>Every {h}h</option>))}
                           </select>
@@ -706,7 +706,7 @@ if (me.totp_enabled) {
                   <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
                     <div onclick="event.stopPropagation()">
                       <button type="button" data-action="delete_scrobble_connection" data-conn-id={conn.id} data-conn-name={conn.name}
-                        class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-red-900/30 text-red-400 border border-zinc-700 hover:border-red-700 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                        class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-red-900/30 text-red-400 border border-zinc-700 hover:border-red-700 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                       >Delete</button>
                     </div>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
@@ -720,7 +720,7 @@ if (me.totp_enabled) {
                     <div class="space-y-4">
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Display Name</label>
-                        <input type="text" class="scrobble-name-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.name} data-conn-id={conn.id} />
+                        <input type="text" class="scrobble-name-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.name} data-conn-id={conn.id} />
                       </div>
                       {conn.type === "plex" ? (
                         <div class="space-y-2">
@@ -736,8 +736,8 @@ if (me.totp_enabled) {
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">Webhook URL</label>
                         <div class="flex gap-2">
-                          <input type="text" readonly class="scrobble-webhook-url flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
-                          <button type="button" class="scrobble-copy-webhook px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer" data-conn-id={conn.id}>
+                          <input type="text" readonly class="scrobble-webhook-url flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
+                          <button type="button" class="scrobble-copy-webhook px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer" data-conn-id={conn.id}>
                             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.991 1.08 1.991 2.25v12a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.75a2.25 2.25 0 011.991-2.25c.639-.074 1.28-.135 1.927-.184" /></svg>
                           </button>
                         </div>
@@ -758,7 +758,7 @@ if (me.totp_enabled) {
                           </label>
                         ))}
                       </div>
-                      <button type="button" data-action="save_scrobble_connection" data-conn-id={conn.id} class="js-action-btn text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer">Save</button>
+                      <button type="button" data-action="save_scrobble_connection" data-conn-id={conn.id} class="js-action-btn text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl transition-colors cursor-pointer">Save</button>
                     </div>
                   </div>
                 </div>
@@ -779,11 +779,11 @@ if (me.totp_enabled) {
                 <div class="space-y-4 max-w-sm">
                   <div class="space-y-2">
                     <label for="new-scrobble-name" class="block text-sm font-medium text-zinc-400">Name</label>
-                    <input type="text" id="new-scrobble-name" placeholder="e.g. Home Plex" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    <input type="text" id="new-scrobble-name" placeholder="e.g. Home Plex" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                   </div>
                   <div class="space-y-2">
                     <label for="new-scrobble-type" class="block text-sm font-medium text-zinc-400">Server Type</label>
-                    <select id="new-scrobble-type" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
+                    <select id="new-scrobble-type" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
                       <option value="jellyfin">Jellyfin</option>
                       <option value="emby">Emby</option>
                       <option value="plex">Plex</option>
@@ -791,15 +791,15 @@ if (me.totp_enabled) {
                   </div>
                   <div id="new-scrobble-user-id-row" class="space-y-2">
                     <label for="new-scrobble-user-id" class="block text-sm font-medium text-zinc-400">User ID</label>
-                    <input type="text" id="new-scrobble-user-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    <input type="text" id="new-scrobble-user-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     <p class="text-xs text-zinc-500">Your Jellyfin/Emby user ID, used to match webhook events to your account.</p>
                   </div>
                   <div id="new-scrobble-username-row" class="space-y-2 hidden">
                     <label for="new-scrobble-username" class="block text-sm font-medium text-zinc-400">Plex Username</label>
-                    <input type="text" id="new-scrobble-username" placeholder="e.g. john_doe" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    <input type="text" id="new-scrobble-username" placeholder="e.g. john_doe" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     <p class="text-xs text-zinc-500">Your Plex username, used to match webhook events to your account.</p>
                   </div>
-                  <button type="button" id="create-scrobble-conn-btn" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer">Add Connection</button>
+                  <button type="button" id="create-scrobble-conn-btn" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl transition-colors cursor-pointer">Add Connection</button>
                 </div>
               </div>
             </div>
@@ -831,7 +831,7 @@ if (me.totp_enabled) {
                           data-action="sync_trakt"
                           disabled={!hasTmdbKey}
                           title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Full library audit and sync"}
-                          class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
+                          class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
                         >Full Sync</button>
                         <button
                           type="button"
@@ -839,12 +839,12 @@ if (me.totp_enabled) {
                           data-partial="true"
                           disabled={!hasTmdbKey}
                           title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Quick incremental sync (history check)"}
-                          class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
+                          class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
                         >Partial Sync</button>
-                        <button type="button" id="trakt-disconnect-btn" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Disconnect</button>
+                        <button type="button" id="trakt-disconnect-btn" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer">Disconnect</button>
                       </>
                     ) : (
-                      <button type="button" id="trakt-connect-btn" class="text-xs sm:text-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Connect Trakt</button>
+                      <button type="button" id="trakt-connect-btn" class="text-xs sm:text-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer">Connect Trakt</button>
                     )}
                   </div>
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
@@ -877,7 +877,7 @@ if (me.totp_enabled) {
                         id="trakt_client_id"
                         value={settings.trakt_client_id || ""}
                         placeholder="Your Trakt application Client ID"
-                        class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                       />
                     </div>
                     <div class="space-y-2">
@@ -889,7 +889,7 @@ if (me.totp_enabled) {
                           id="trakt_client_secret"
                           value={settings.trakt_client_secret || ""}
                           placeholder="Your Trakt application Client Secret"
-                          class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                          class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                         />
                         <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -901,8 +901,8 @@ if (me.totp_enabled) {
                     <div id="trakt-auth-panel" class="hidden space-y-3 bg-zinc-900/50 border border-zinc-700 rounded-xl p-4">
                       <p class="text-sm text-zinc-400">Go to <a href="#" target="_blank" id="trakt-verify-url" class="text-blue-400 hover:underline"></a> and enter this code:</p>
                       <div class="flex items-center gap-2">
-                        <div class="flex-1 font-mono text-2xl font-bold tracking-widest text-zinc-100 bg-zinc-950 border border-zinc-700 rounded-lg px-4 py-3 text-center select-all" id="trakt-user-code"></div>
-                        <button type="button" id="copy-trakt-code-btn" title="Copy to clipboard" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer self-stretch flex items-center justify-center">
+                        <div class="flex-1 font-mono text-2xl font-bold tracking-widest text-zinc-100 bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 text-center select-all" id="trakt-user-code"></div>
+                        <button type="button" id="copy-trakt-code-btn" title="Copy to clipboard" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer self-stretch flex items-center justify-center">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"> <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"></path> </svg>
                         </button>
                       </div>
@@ -945,7 +945,7 @@ if (me.totp_enabled) {
                           data-action="sync_trakt"
                           disabled={!hasTmdbKey}
                           title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Pull watched history and ratings from Trakt"}
-                          class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
+                          class={`js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
                         >Pull</button>
                       </div>
                       <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
@@ -963,7 +963,7 @@ if (me.totp_enabled) {
                         <button
                           type="button"
                           data-action="push_trakt"
-                          class="js-action-btn text-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                          class="js-action-btn text-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                           title="Push all watched states and ratings from Scrob to Trakt"
                         >Push</button>
                       </div>
@@ -972,7 +972,7 @@ if (me.totp_enabled) {
                         <div class="space-y-3">
                           <div class="flex items-center justify-between gap-4">
                             <label class="text-sm text-zinc-300">Full Audit</label>
-                            <select name="trakt_full_sync_interval" id="trakt_full_sync_interval" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all cursor-pointer">
+                            <select name="trakt_full_sync_interval" id="trakt_full_sync_interval" class="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all cursor-pointer">
                               <option value="" selected={!settings.trakt_full_sync_interval}>Disabled</option>
                               {[12, 24, 48, 168].map(h => (
                                 <option value={String(h)} selected={settings.trakt_full_sync_interval === h}>Every {h === 168 ? 'week' : h + 'h'}</option>
@@ -984,7 +984,7 @@ if (me.totp_enabled) {
                               <label class="text-sm text-zinc-300">Partial Sync</label>
                               <span class="text-[10px] text-zinc-500 italic">History scrobble check</span>
                             </div>
-                            <select name="trakt_partial_sync_interval" id="trakt_partial_sync_interval" class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all cursor-pointer">
+                            <select name="trakt_partial_sync_interval" id="trakt_partial_sync_interval" class="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all cursor-pointer">
                               <option value="" selected={!settings.trakt_partial_sync_interval}>Disabled</option>
                               {[1, 2, 4, 8, 12, 24].map(h => (
                                 <option value={String(h)} selected={settings.trakt_partial_sync_interval === h}>Every {h}h</option>
@@ -1012,9 +1012,9 @@ if (me.totp_enabled) {
                 <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
                   <div class="flex flex-wrap gap-2" onclick="event.stopPropagation()">
                     {settings.simkl_connected ? (
-                      <button type="button" id="simkl-disconnect-btn" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Disconnect</button>
+                      <button type="button" id="simkl-disconnect-btn" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer">Disconnect</button>
                     ) : (
-                      <button type="button" id="simkl-connect-btn" class="text-xs sm:text-sm bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Connect Simkl</button>
+                      <button type="button" id="simkl-connect-btn" class="text-xs sm:text-sm bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer">Connect Simkl</button>
                     )}
                   </div>
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
@@ -1047,13 +1047,13 @@ if (me.totp_enabled) {
                         id="simkl_client_id"
                         value={settings.simkl_client_id || ""}
                         placeholder="Your Simkl application Client ID"
-                        class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all"
+                        class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all"
                       />
                       <p class="text-xs text-zinc-500">Create a Simkl application at <span class="text-zinc-400">simkl.com/settings/developer</span> to get your Client ID.</p>
                     </div>
                     <div id="simkl-auth-panel" class="hidden space-y-3 bg-zinc-900/50 border border-zinc-700 rounded-xl p-4">
                       <p class="text-sm text-zinc-400">Go to <strong id="simkl-verify-url" class="text-zinc-100"></strong> and enter this PIN:</p>
-                      <div class="font-mono text-2xl font-bold tracking-widest text-zinc-100 bg-zinc-950 border border-zinc-700 rounded-lg px-4 py-3 text-center select-all" id="simkl-user-code"></div>
+                      <div class="font-mono text-2xl font-bold tracking-widest text-zinc-100 bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 text-center select-all" id="simkl-user-code"></div>
                       <p class="text-xs text-zinc-500" id="simkl-auth-status">Waiting for authorization…</p>
                     </div>
                     <p class="text-sm text-zinc-400">
@@ -1082,7 +1082,7 @@ if (me.totp_enabled) {
                           data-action="sync_simkl"
                           disabled={!hasTmdbKey}
                           title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Pull watched history and ratings from Simkl"}
-                          class={`js-action-btn text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
+                          class={`js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
                         >Pull</button>
                       </div>
                       <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
@@ -1099,7 +1099,7 @@ if (me.totp_enabled) {
                         <button
                           type="button"
                           data-action="push_simkl"
-                          class="js-action-btn text-sm bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                          class="js-action-btn text-sm bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                           title="Push all watched states and ratings from Scrob to Simkl"
                         >Push</button>
                       </div>
@@ -1125,7 +1125,7 @@ if (me.totp_enabled) {
                 </div>
                 <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
                   <div class="flex flex-wrap gap-2" onclick="event.stopPropagation()">
-                    <button type="button" data-action="test_radarr" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50">Test & Fetch</button>
+                    <button type="button" data-action="test_radarr" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50">Test & Fetch</button>
                   </div>
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
@@ -1152,12 +1152,12 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="radarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
-                      <input type="url" name="radarr_url" id="radarr_url" placeholder="http://192.168.1.100:7878" value={settings.radarr_url || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="url" name="radarr_url" id="radarr_url" placeholder="http://192.168.1.100:7878" value={settings.radarr_url || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="radarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
                       <div class="relative group/field">
-                        <input type="password" name="radarr_token" id="radarr_token" value={settings.radarr_token || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <input type="password" name="radarr_token" id="radarr_token" value={settings.radarr_token || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                         <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
@@ -1168,21 +1168,21 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="radarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
-                      <select name="radarr_root_folder" id="radarr_root_folder" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                      <select name="radarr_root_folder" id="radarr_root_folder" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                         <option value="">-- Select Folder --</option>
                         {settings.radarr_root_folder && <option value={settings.radarr_root_folder} selected>{settings.radarr_root_folder}</option>}
                       </select>
                     </div>
                     <div class="space-y-2">
                       <label for="radarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
-                      <select name="radarr_quality_profile" id="radarr_quality_profile" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                      <select name="radarr_quality_profile" id="radarr_quality_profile" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                         <option value="">-- Select Profile --</option>
                         {settings.radarr_quality_profile && <option value={settings.radarr_quality_profile} selected>Profile ID: {settings.radarr_quality_profile}</option>}
                       </select>
                     </div>
                     <div class="space-y-2">
                       <label class="block text-sm font-medium text-zinc-400">Tags</label>
-                      <div id="radarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
+                      <div id="radarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-950 border border-zinc-800 rounded-xl">
                         <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
                         {settings.radarr_tags?.map(tid => (
                           <input type="hidden" name="radarr_tags" value={tid} />
@@ -1206,7 +1206,7 @@ if (me.totp_enabled) {
                 </div>
                 <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
                   <div class="flex flex-wrap gap-2" onclick="event.stopPropagation()">
-                    <button type="button" data-action="test_sonarr" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50">Test & Fetch</button>
+                    <button type="button" data-action="test_sonarr" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50">Test & Fetch</button>
                   </div>
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
@@ -1233,12 +1233,12 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="sonarr_url" class="block text-sm font-medium text-zinc-400">Server URL</label>
-                      <input type="url" name="sonarr_url" id="sonarr_url" placeholder="http://192.168.1.100:8989" value={settings.sonarr_url || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                      <input type="url" name="sonarr_url" id="sonarr_url" placeholder="http://192.168.1.100:8989" value={settings.sonarr_url || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="sonarr_token" class="block text-sm font-medium text-zinc-400">API Key</label>
                       <div class="relative group/field">
-                        <input type="password" name="sonarr_token" id="sonarr_token" value={settings.sonarr_token || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                        <input type="password" name="sonarr_token" id="sonarr_token" value={settings.sonarr_token || ""} class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                         <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
@@ -1249,28 +1249,28 @@ if (me.totp_enabled) {
                   <div class="space-y-4">
                     <div class="space-y-2">
                       <label for="sonarr_root_folder" class="block text-sm font-medium text-zinc-400">Root Folder</label>
-                      <select name="sonarr_root_folder" id="sonarr_root_folder" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                      <select name="sonarr_root_folder" id="sonarr_root_folder" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                         <option value="">-- Select Folder --</option>
                         {settings.sonarr_root_folder && <option value={settings.sonarr_root_folder} selected>{settings.sonarr_root_folder}</option>}
                       </select>
                     </div>
                     <div class="space-y-2">
                       <label for="sonarr_quality_profile" class="block text-sm font-medium text-zinc-400">Quality Profile</label>
-                      <select name="sonarr_quality_profile" id="sonarr_quality_profile" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
+                      <select name="sonarr_quality_profile" id="sonarr_quality_profile" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none">
                         <option value="">-- Select Profile --</option>
                         {settings.sonarr_quality_profile && <option value={settings.sonarr_quality_profile} selected>Profile ID: {settings.sonarr_quality_profile}</option>}
                       </select>
                     </div>
                     <div class="space-y-2">
                       <label class="block text-sm font-medium text-zinc-400">Tags</label>
-                      <div id="sonarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
+                      <div id="sonarr_tags_list" class="flex flex-wrap gap-2 min-h-[42px] p-2 bg-zinc-950 border border-zinc-800 rounded-xl">
                         <span class="text-xs text-zinc-500 italic px-2 py-1">Fetch profiles to see tags</span>
                         {settings.sonarr_tags?.map(tid => (
                           <input type="hidden" name="sonarr_tags" value={tid} />
                         ))}
                       </div>
                     </div>
-                    <label class="flex items-center justify-between gap-3 p-3 bg-zinc-950 border border-zinc-800 rounded-lg cursor-pointer hover:bg-zinc-800/60 transition-colors">
+                    <label class="flex items-center justify-between gap-3 p-3 bg-zinc-950 border border-zinc-800 rounded-xl cursor-pointer hover:bg-zinc-800/60 transition-colors">
                       <span class="text-sm text-zinc-300">Use season folders</span>
                       <input type="checkbox" name="sonarr_season_folder" id="sonarr_season_folder" value="true" class="sr-only peer" checked={settings.sonarr_season_folder !== false} />
                       <div class="relative w-10 h-5 bg-zinc-700 peer-checked:bg-blue-600 rounded-full transition-colors pointer-events-none shrink-0 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5"></div>
@@ -1310,7 +1310,7 @@ if (me.totp_enabled) {
                 type="button"
                 disabled={!hasTmdbKey}
                 title={!hasTmdbKey ? "TMDB API Key is required" : ""}
-                class="ml-4 shrink-0 text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30"
+                class="ml-4 shrink-0 text-sm px-4 py-2 rounded-xl transition-colors cursor-pointer disabled:opacity-50 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30"
               >
                 Heal
               </button>
@@ -1338,7 +1338,7 @@ if (me.totp_enabled) {
               <button
                 id="clear-sessions-btn"
                 type="button"
-                class="ml-4 shrink-0 text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30"
+                class="ml-4 shrink-0 text-sm px-4 py-2 rounded-xl transition-colors cursor-pointer bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30"
               >
                 Clear
               </button>
@@ -1361,7 +1361,7 @@ if (me.totp_enabled) {
                   id="scrob_api_key"
                   readonly
                   value={me.api_key}
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
                 />
                 <PasswordToggle />
               </div>
@@ -1369,7 +1369,7 @@ if (me.totp_enabled) {
                 type="button"
                 id="copy-api-key-btn"
                 title="Copy to clipboard"
-                class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-lg transition-colors cursor-pointer"
+                class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
@@ -1380,7 +1380,7 @@ if (me.totp_enabled) {
           <button
             type="button"
             id="regenerate-api-key-btn"
-            class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-50"
+            class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50"
           >
             Regenerate Key
           </button>
@@ -1416,12 +1416,12 @@ if (me.totp_enabled) {
 
               <div class="flex flex-col md:flex-row gap-6 items-start">
                 <div class="shrink-0">
-                  <canvas id="totp-qr-canvas" class="rounded-lg bg-white p-2" width="160" height="160"></canvas>
+                  <canvas id="totp-qr-canvas" class="rounded-xl bg-white p-2" width="160" height="160"></canvas>
                 </div>
                 <div class="space-y-3 flex-1">
                   <div>
                     <p class="text-xs text-zinc-500 mb-1">Manual entry key</p>
-                    <code id="totp-secret-display" class="block bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-300 font-mono text-sm tracking-widest break-all select-all"></code>
+                    <code id="totp-secret-display" class="block bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-300 font-mono text-sm tracking-widest break-all select-all"></code>
                   </div>
                   <div class="space-y-2">
                     <label for="totp-verify-code" class="block text-sm font-medium text-zinc-400">Verification Code</label>
@@ -1432,21 +1432,21 @@ if (me.totp_enabled) {
                       inputmode="numeric"
                       maxlength="6"
                       placeholder="000000"
-                      class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
                   </div>
                   <div class="flex gap-3">
                     <button
                       type="button"
                       id="confirm-enable-2fa-btn"
-                      class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer text-sm disabled:opacity-50"
+                      class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm disabled:opacity-50"
                     >
                       Verify &amp; Enable
                     </button>
                     <button
                       type="button"
                       id="cancel-2fa-setup-btn"
-                      class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm transition-colors cursor-pointer"
+                      class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -1469,7 +1469,7 @@ if (me.totp_enabled) {
               <button
                 type="button"
                 id="2fa-new-codes-done-btn"
-                class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-lg hover:bg-zinc-200 transition-colors cursor-pointer text-sm"
+                class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm"
               >
                 Done — reload page
               </button>
@@ -1488,7 +1488,7 @@ if (me.totp_enabled) {
               <button
                 type="button"
                 id="disable-2fa-btn"
-                class="shrink-0 px-5 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/30 font-bold rounded-lg text-sm transition-colors cursor-pointer"
+                class="shrink-0 px-5 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/30 font-bold rounded-xl text-sm transition-colors cursor-pointer"
               >
                 Disable 2FA
               </button>
@@ -1505,20 +1505,20 @@ if (me.totp_enabled) {
                     id="totp-disable-code"
                     autocomplete="one-time-code"
                     placeholder="000000 or XXXX-XXXX"
-                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   />
                 </div>
                 <button
                   type="button"
                   id="confirm-disable-2fa-btn"
-                  class="px-5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-50"
+                  class="px-5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Confirm
                 </button>
                 <button
                   type="button"
                   id="cancel-disable-2fa-btn"
-                  class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-lg text-sm transition-colors cursor-pointer"
+                  class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1538,7 +1538,7 @@ if (me.totp_enabled) {
                 <p class="text-sm text-zinc-500">Used codes are shown with strikethrough and cannot be reused. Keep these somewhere safe.</p>
                 <div class="grid grid-cols-2 gap-2">
                   {backupCodes.map((bc) => (
-                    <span class={`font-mono text-sm px-3 py-1.5 rounded-lg border ${bc.used ? "text-zinc-400 border-zinc-800 line-through" : "text-zinc-300 border-zinc-700 bg-zinc-900"}`}>
+                    <span class={`font-mono text-sm px-3 py-1.5 rounded-xl border ${bc.used ? "text-zinc-400 border-zinc-800 line-through" : "text-zinc-300 border-zinc-700 bg-zinc-900"}`}>
                       {bc.code}
                     </span>
                   ))}
@@ -1559,7 +1559,7 @@ if (me.totp_enabled) {
                   name="current_password"
                   id="current_password"
                   required
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
                 <PasswordToggle />
               </div>
@@ -1572,7 +1572,7 @@ if (me.totp_enabled) {
                   name="new_password"
                   id="new_password"
                   required
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
                 <PasswordToggle />
               </div>
@@ -1585,7 +1585,7 @@ if (me.totp_enabled) {
                   name="confirm_password"
                   id="confirm_password"
                   required
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
                 <PasswordToggle />
               </div>
@@ -1595,7 +1595,7 @@ if (me.totp_enabled) {
             <button
               id="update-password-btn"
               type="submit"
-              class="bg-zinc-800 text-zinc-100 font-bold px-8 py-2 rounded-lg hover:bg-zinc-700 transition-colors cursor-pointer border border-zinc-700 disabled:opacity-50"
+              class="bg-zinc-800 text-zinc-100 font-bold px-8 py-2 rounded-xl hover:bg-zinc-700 transition-colors cursor-pointer border border-zinc-700 disabled:opacity-50"
             >
               Update Password
             </button>
@@ -1661,7 +1661,7 @@ if (me.totp_enabled) {
   </div>
 
   <!-- Delete Confirmation Modal -->
-  <div id="confirm-action-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
+  <div id="confirm-action-modal" class="fixed inset-0 bg-zinc-950/85 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
     <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl overflow-hidden">
       <h2 id="confirm-action-title" class="text-2xl font-bold text-zinc-100 mb-2"></h2>
       <p id="confirm-action-body" class="text-zinc-400 mb-8 text-sm leading-relaxed"></p>
@@ -1672,7 +1672,7 @@ if (me.totp_enabled) {
     </div>
   </div>
 
-  <div id="heal-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
+  <div id="heal-modal" class="fixed inset-0 bg-zinc-950/85 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
     <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl overflow-hidden">
       <h2 class="text-2xl font-bold text-zinc-100 mb-2">Heal missing metadata?</h2>
       <p class="text-zinc-400 mb-8 text-sm leading-relaxed">
@@ -1689,7 +1689,7 @@ if (me.totp_enabled) {
     </div>
   </div>
 
-  <div id="delete-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
+  <div id="delete-modal" class="fixed inset-0 bg-zinc-950/85 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
     <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl overflow-hidden">
       <h2 class="text-2xl font-bold text-zinc-100 mb-2">Are you sure?</h2>
       <p class="text-zinc-400 mb-8 text-sm leading-relaxed">
@@ -1699,7 +1699,7 @@ if (me.totp_enabled) {
         <button type="button" id="cancel-delete" class="flex-1 px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold rounded-xl transition-all cursor-pointer">
           Cancel
         </button>
-        <button type="button" id="confirm-delete" class="flex-1 px-6 py-3 bg-red-600 hover:bg-red-500 text-zinc-100 font-bold rounded-xl transition-all cursor-pointer">
+        <button type="button" id="confirm-delete" class="flex-1 px-6 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all cursor-pointer">
           Yes, delete
         </button>
       </div>
@@ -1707,7 +1707,7 @@ if (me.totp_enabled) {
   </div>
 
   <!-- Season remap / unmatched show match modal -->
-  <div id="season-remap-modal" class="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
+  <div id="season-remap-modal" class="fixed inset-0 bg-zinc-950/85 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
     <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh] backdrop-blur-xl overflow-hidden">
       <div class="flex items-center justify-between px-6 py-5 border-b border-zinc-800 shrink-0">
         <div>
@@ -1723,8 +1723,8 @@ if (me.totp_enabled) {
         <div id="remap-tmdb-section">
           <label id="remap-tmdb-label" class="block text-sm font-medium text-zinc-400 mb-2">Search for the correct TMDB show</label>
           <div class="flex gap-2">
-            <input type="text" id="remap-search-input" placeholder="Show title…" class="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-            <button type="button" id="remap-search-btn" class="px-4 py-2.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-100 text-sm font-medium rounded-lg transition-colors cursor-pointer shrink-0">Search</button>
+            <input type="text" id="remap-search-input" placeholder="Show title…" class="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+            <button type="button" id="remap-search-btn" class="px-4 py-2.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-100 text-sm font-medium rounded-xl transition-colors cursor-pointer shrink-0">Search</button>
           </div>
           <div id="remap-search-results" class="mt-2 space-y-1 max-h-48 overflow-y-auto"></div>
         </div>
@@ -1732,15 +1732,15 @@ if (me.totp_enabled) {
         <div id="remap-tvdb-section" class="hidden">
           <label class="block text-sm font-medium text-zinc-400 mb-2">Search for the show on TVDB</label>
           <div class="flex gap-2">
-            <input type="text" id="remap-tvdb-input" placeholder="Show title…" class="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-            <button type="button" id="remap-tvdb-search-btn" class="px-4 py-2.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-100 text-sm font-medium rounded-lg transition-colors cursor-pointer shrink-0">Search</button>
+            <input type="text" id="remap-tvdb-input" placeholder="Show title…" class="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+            <button type="button" id="remap-tvdb-search-btn" class="px-4 py-2.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-100 text-sm font-medium rounded-xl transition-colors cursor-pointer shrink-0">Search</button>
           </div>
           <div id="remap-tvdb-results" class="mt-2 space-y-1 max-h-48 overflow-y-auto"></div>
         </div>
         <!-- Selected show + season input -->
         <div id="remap-selected-area" class="hidden">
           <div class="flex items-center gap-3 p-3 bg-zinc-800 rounded-xl mb-4">
-            <img id="remap-selected-poster" src="" alt="" class="w-10 h-14 object-cover rounded-md bg-zinc-700 shrink-0" />
+            <img id="remap-selected-poster" src="" alt="" class="w-10 h-14 object-cover rounded-lg bg-zinc-700 shrink-0" />
             <div class="flex-1 min-w-0">
               <p id="remap-selected-title" class="text-sm font-medium text-zinc-100 truncate"></p>
               <p id="remap-selected-year" class="text-xs text-zinc-500"></p>
@@ -2340,7 +2340,7 @@ if (me.totp_enabled) {
           return;
         }
         listEl.innerHTML = data.libraries.map((lib: any) => `
-          <label class="flex items-center gap-2 cursor-pointer group px-2 py-1.5 rounded-lg border border-transparent hover:bg-zinc-800/50 transition-colors">
+          <label class="flex items-center gap-2 cursor-pointer group px-2 py-1.5 rounded-xl border border-transparent hover:bg-zinc-800/50 transition-colors">
             <input type="checkbox" class="library-checkbox w-4 h-4 rounded accent-blue-500 cursor-pointer" data-id="${esc(String(lib[idKey]))}" ${lib.selected ? 'checked' : ''} />
             <span class="text-zinc-300 group-hover:text-zinc-100 transition-colors not-italic">
               ${esc(lib.name)}
@@ -2381,7 +2381,7 @@ if (me.totp_enabled) {
     container.innerHTML = tags.map(tag => {
       const isSelected = selectedIds.includes(tag.id);
       return `
-        <label class="group relative flex items-center gap-1.5 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-md cursor-pointer transition-colors ${isSelected ? 'ring-1 ring-blue-500 border-blue-500/50 bg-blue-500/10' : ''}">
+        <label class="group relative flex items-center gap-1.5 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg cursor-pointer transition-colors ${isSelected ? 'ring-1 ring-blue-500 border-blue-500/50 bg-blue-500/10' : ''}">
           <input type="checkbox" name="${prefix}_tags" value="${esc(String(tag.id))}" ${isSelected ? 'checked' : ''} class="hidden tag-checkbox" />
           <span class="text-xs font-medium text-zinc-300 group-hover:text-zinc-100">${esc(tag.label)}</span>
         </label>
@@ -3179,7 +3179,7 @@ if (me.totp_enabled) {
     }
     
     container.innerHTML = libraries.map(lib => `
-      <label class="flex items-center gap-2 cursor-pointer group px-2 py-1.5 rounded-lg border border-transparent hover:bg-zinc-800/50 transition-colors">
+      <label class="flex items-center gap-2 cursor-pointer group px-2 py-1.5 rounded-xl border border-transparent hover:bg-zinc-800/50 transition-colors">
         <input
           type="checkbox"
           class="library-checkbox w-4 h-4 rounded accent-blue-500 cursor-pointer"
@@ -4080,10 +4080,10 @@ if (me.totp_enabled) {
                 </div>
                 <span class="text-xs text-zinc-600 shrink-0 mr-2">${w.affected_episodes} ep${w.affected_episodes !== 1 ? 's' : ''}</span>
                 <div class="flex items-center gap-1.5 shrink-0">
-                  <button type="button" class="remap-season-btn text-xs px-2.5 py-1 rounded-lg border cursor-pointer transition-colors ${existing ? 'border-green-700/50 text-green-400 hover:bg-green-900/20' : 'bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60'}" ${remapAttr}>
+                  <button type="button" class="remap-season-btn text-xs px-2.5 py-1 rounded-xl border cursor-pointer transition-colors ${existing ? 'border-green-700/50 text-green-400 hover:bg-green-900/20' : 'bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60'}" ${remapAttr}>
                     ${existing ? 'Edit remap' : 'Remap'}
                   </button>
-                  <a href="/remaps?mode=season&src_uri=tmdb:s:${w.tmdb_id}&src_season=${w.season}" class="text-xs px-2.5 py-1 rounded-lg border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40" title="Advanced mapping on the overrides page">
+                  <a href="/remaps?mode=season&src_uri=tmdb:s:${w.tmdb_id}&src_season=${w.season}" class="text-xs px-2.5 py-1 rounded-xl border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40" title="Advanced mapping on the overrides page">
                     Advanced
                   </a>
                 </div>
@@ -4161,11 +4161,11 @@ if (me.totp_enabled) {
                   ${plex_guids.length ? `<p class="text-xs text-zinc-600 font-mono mt-0.5">${plex_guids.map((g: string) => escapeHtml(g)).join(' · ')}</p>` : ''}
                 </div>
                 <div class="flex items-center gap-1.5 shrink-0">
-                  ${isMatched && matchHref ? `<a href="${escapeHtml(matchHref)}" class="text-xs px-2.5 py-1 rounded-lg border border-green-700/40 text-green-400 hover:bg-green-900/20 transition-colors">View</a>` : ''}
+                  ${isMatched && matchHref ? `<a href="${escapeHtml(matchHref)}" class="text-xs px-2.5 py-1 rounded-xl border border-green-700/40 text-green-400 hover:bg-green-900/20 transition-colors">View</a>` : ''}
                   ${isMatched
-                    ? `<button type="button" class="unmatch-show-btn text-xs px-2.5 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 cursor-pointer transition-colors"
+                    ? `<button type="button" class="unmatch-show-btn text-xs px-2.5 py-1 rounded-xl border border-zinc-700 text-zinc-400 hover:bg-zinc-800 cursor-pointer transition-colors"
                         data-series-name="${escapeHtml(seriesName)}">Unmatch</button>`
-                    : `<button type="button" class="match-show-btn text-xs px-2.5 py-1 rounded-lg border bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60 cursor-pointer transition-colors"
+                    : `<button type="button" class="match-show-btn text-xs px-2.5 py-1 rounded-xl border bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60 cursor-pointer transition-colors"
                         data-series-name="${escapeHtml(seriesName)}">Match</button>`
                   }
                 </div>
@@ -4189,11 +4189,11 @@ if (me.totp_enabled) {
                   ${w.plex_guids?.length ? `<p class="text-xs text-zinc-600 font-mono mt-0.5">${w.plex_guids.map((g: string) => escapeHtml(g)).join(' · ')}</p>` : ''}
                 </div>
                 <div class="flex items-center gap-1.5 shrink-0">
-                  ${wMatched && wMatchHref ? `<a href="${escapeHtml(wMatchHref)}" class="text-xs px-2.5 py-1 rounded-lg border border-green-700/40 text-green-400 hover:bg-green-900/20 transition-colors">View</a>` : ''}
+                  ${wMatched && wMatchHref ? `<a href="${escapeHtml(wMatchHref)}" class="text-xs px-2.5 py-1 rounded-xl border border-green-700/40 text-green-400 hover:bg-green-900/20 transition-colors">View</a>` : ''}
                   ${wMatched
-                    ? `<button type="button" class="unmatch-show-btn text-xs px-2.5 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 cursor-pointer transition-colors"
+                    ? `<button type="button" class="unmatch-show-btn text-xs px-2.5 py-1 rounded-xl border border-zinc-700 text-zinc-400 hover:bg-zinc-800 cursor-pointer transition-colors"
                         data-series-name="${escapeHtml(w.title)}" data-media-type="${escapeHtml(w.media_type ?? '')}">Unmatch</button>`
-                    : `<button type="button" class="match-show-btn text-xs px-2.5 py-1 rounded-lg border bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60 cursor-pointer transition-colors shrink-0"
+                    : `<button type="button" class="match-show-btn text-xs px-2.5 py-1 rounded-xl border bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60 cursor-pointer transition-colors shrink-0"
                         data-series-name="${escapeHtml(w.title)}" data-media-type="${escapeHtml(w.media_type ?? '')}">Match</button>`
                   }
                 </div>
@@ -4340,7 +4340,7 @@ if (me.totp_enabled) {
       resultsEl.innerHTML = '';
       const year = String(r.first_air_date ?? r.release_date ?? '').slice(0, 4);
       resultsEl.innerHTML = `
-        <button type="button" class="remap-result w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer text-left"
+        <button type="button" class="remap-result w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 transition-colors cursor-pointer text-left"
           data-tmdb="${r.tmdb_id}" data-title="${escapeHtml(r.title ?? '')}" data-year="${escapeHtml(year)}" data-poster="${escapeHtml(r.poster_path ?? '')}">
           <img src="${escapeHtml(r.poster_path ?? '')}" alt="" class="w-8 h-11 object-cover rounded bg-zinc-700 shrink-0" onerror="this.style.display='none'" />
           <div class="flex-1 min-w-0">
@@ -4403,7 +4403,7 @@ if (me.totp_enabled) {
           seasons.forEach((s: any) => {
             const seasonBtn = document.createElement('button');
             seasonBtn.type = 'button';
-            seasonBtn.className = 'remap-season-pick w-full flex items-center gap-3 px-3 py-2 rounded-lg border border-transparent hover:border-blue-600/50 hover:bg-blue-600/10 transition-colors cursor-pointer text-left';
+            seasonBtn.className = 'remap-season-pick w-full flex items-center gap-3 px-3 py-2 rounded-xl border border-transparent hover:border-blue-600/50 hover:bg-blue-600/10 transition-colors cursor-pointer text-left';
             seasonBtn.dataset.season = String(s.season_number);
             seasonBtn.innerHTML = `
               <img src="${escapeHtml(s.poster_path ?? '')}" alt="" class="w-8 h-11 object-cover rounded bg-zinc-700 shrink-0" onerror="this.style.display='none'" />
@@ -4450,7 +4450,7 @@ if (me.totp_enabled) {
         resultsEl.innerHTML = results.map((r: any) => {
           const year = escapeHtml(String(r.release_date ?? r.first_air_date ?? '').slice(0, 4));
           return `
-          <button type="button" class="remap-result w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer text-left"
+          <button type="button" class="remap-result w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 transition-colors cursor-pointer text-left"
             data-tmdb="${r.tmdb_id}" data-title="${escapeHtml(r.title ?? '')}" data-year="${year}" data-poster="${escapeHtml(r.poster_path ?? '')}">
             <img src="${escapeHtml(r.poster_path ?? '')}" alt="" class="w-8 h-11 object-cover rounded bg-zinc-700 shrink-0" onerror="this.style.display='none'" />
             <div class="flex-1 min-w-0">
@@ -4498,7 +4498,7 @@ if (me.totp_enabled) {
           return;
         }
         resultsEl.innerHTML = results.slice(0, 8).map((r: any) => `
-          <button type="button" class="remap-result w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer text-left"
+          <button type="button" class="remap-result w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 transition-colors cursor-pointer text-left"
             data-tvdb="${r.tvdb_id}" data-title="${escapeHtml(r.name ?? '')}" data-year="${escapeHtml(String(r.year ?? ''))}" data-poster="${escapeHtml(r.image ?? '')}">
             <img src="${escapeHtml(r.image ?? '')}" alt="" class="w-8 h-11 object-cover rounded bg-zinc-700 shrink-0" onerror="this.style.display='none'" />
             <div class="flex-1 min-w-0">
@@ -4764,7 +4764,7 @@ if (me.totp_enabled) {
 
         if (newCodesGrid) {
           newCodesGrid.innerHTML = data.codes
-            .map(bc => `<span class="font-mono text-sm px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300">${escapeHtml(bc.code)}</span>`)
+            .map(bc => `<span class="font-mono text-sm px-3 py-1.5 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-300">${escapeHtml(bc.code)}</span>`)
             .join('');
         }
         newCodesPanel?.classList.remove('hidden');

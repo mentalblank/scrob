@@ -69,7 +69,7 @@ if (Astro.request.method === "POST") {
     </h1>
     
     {error && (
-      <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg mb-6">
+      <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-xl mb-6">
         {error}
       </div>
     )}
@@ -97,7 +97,7 @@ if (Astro.request.method === "POST") {
           name="email"
           id="email"
           required
-          class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+          class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
         />
       </div>
       <div>
@@ -107,7 +107,7 @@ if (Astro.request.method === "POST") {
           name="username"
           id="username"
           required
-          class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+          class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
         />
       </div>
       <div>
@@ -118,7 +118,7 @@ if (Astro.request.method === "POST") {
             name="password"
             id="password"
             required
-            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
           <PasswordToggle />
         </div>
@@ -131,7 +131,7 @@ if (Astro.request.method === "POST") {
             name="confirm_password"
             id="confirm_password"
             required
-            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
           <PasswordToggle />
         </div>
@@ -162,13 +162,13 @@ if (Astro.request.method === "POST") {
         <p class="text-sm text-zinc-400 mb-4">Upload a <code class="text-zinc-300">.bak</code> file to restore a previous installation.</p>
         <div class="flex flex-col gap-3">
           <input id="bootstrap-restore-file" type="file" accept=".bak"
-            class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
+            class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
           <button id="bootstrap-restore-btn" disabled
             class="w-full px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
             Restore Database
           </button>
         </div>
-        <div id="bootstrap-restore-error" class="hidden mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"></div>
+        <div id="bootstrap-restore-error" class="hidden mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2"></div>
       </div>
     </div>
   )}
@@ -176,7 +176,7 @@ if (Astro.request.method === "POST") {
 
 <!-- Bootstrap Restore Confirmation Modal -->
 <div id="bootstrap-restore-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
-  <div id="bootstrap-restore-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+  <div id="bootstrap-restore-modal-backdrop" class="absolute inset-0 bg-zinc-950/85 backdrop-blur-sm"></div>
   <div class="relative bg-zinc-900/60 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-md">
     <h2 class="text-xl font-black text-zinc-100 mb-2">Restore Database?</h2>
     <p class="text-sm text-zinc-400 mb-1">Restoring from:</p>

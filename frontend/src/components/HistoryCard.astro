@@ -67,13 +67,13 @@ const showProgress = !event.completed && progressPct > 0;
       <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
       <!-- Time badge -->
-      <div class="time-badge absolute top-2 left-2 z-30 bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[10px] font-bold px-2 py-1 rounded-lg border border-zinc-800/80 shadow-lg uppercase tracking-wider">
+      <div class="time-badge absolute top-2 left-2 z-30 bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[10px] font-bold px-2 py-1 rounded-xl border border-zinc-800/80 shadow-lg uppercase tracking-wider">
         {timeString}
       </div>
 
       <!-- Delete button -->
       <button 
-        class="delete-history-btn absolute top-2 right-2 z-30 scale-0 group-hover:scale-100 origin-right transition-transform duration-200 p-1.5 rounded-lg bg-red-950/90 hover:bg-red-900 text-red-400 border border-red-900/30 cursor-pointer flex items-center justify-center shadow-lg active:scale-90"
+        class="delete-history-btn absolute top-2 right-2 z-30 scale-0 group-hover:scale-100 origin-right transition-transform duration-200 p-1.5 rounded-xl bg-red-950/90 hover:bg-red-900 text-red-400 border border-red-900/30 cursor-pointer flex items-center justify-center shadow-lg active:scale-90"
         data-event-id={event.id}
         title="Delete this play from history"
       >
