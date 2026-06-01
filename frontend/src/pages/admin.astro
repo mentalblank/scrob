@@ -526,7 +526,14 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
   const token = appData.dataset.token!;
   const currentUserId = parseInt(appData.dataset.currentUserId!);
 
-  const esc = (window as any).esc;
+  const esc = (window as any).esc || function(str: any) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
   const showMessage = (window as any).showMessage;
 
   function setConnStatus(id: string, state: 'checking' | 'connected' | 'disconnected') {

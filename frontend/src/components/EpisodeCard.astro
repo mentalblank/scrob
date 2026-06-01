@@ -65,6 +65,9 @@ const cardUriId = item.uri_id
   data-episode-number={item.episode_number != null ? String(item.episode_number) : ""}
   data-watched={String(watched)}
   data-collected={String(inLibrary)}
+  data-in-library={String(inLibrary)}
+  data-is-blocked={String(item.is_blocked ?? false)}
+  data-is-dropped={String(item.is_dropped ?? false)}
   data-listed={String(inLists.length > 0)}
 >
   {href ? (
@@ -136,10 +139,82 @@ const cardUriId = item.uri_id
         <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
         {item.library?.resolution && (
-          <div class={`absolute top-1.5 ${showDismiss ? 'right-10' : 'right-1.5'} bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-xl border border-zinc-800/80 shadow-lg tracking-tighter`}>
+          <div class={`absolute top-1.5 ${showDismiss ? 'right-10' : 'left-1.5'} bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-xl border border-zinc-800/80 shadow-lg tracking-tighter`}>
             {item.library.resolution}
           </div>
         )}
+
+        {!showDismiss && (() => {
+          const isBlocked = item.is_blocked ?? false;
+          const isDropped = item.is_dropped ?? false;
+          const showDrop = true;
+          const btnBase = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+          const btnBaseRight = `${btnBase} right-1.5`;
+          const btnBaseOffset = `${btnBase} right-[38px]`;
+
+          const btnInactiveDrop = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+          const btnInactiveBlock = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+          const btnActiveDrop  = `${btnBaseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+          const btnActiveBlock = `${btnBaseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+          const btnInactiveBlockOffset = `${btnBaseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
+          if (isDropped) {
+            return (
+              <>
+                <button
+                  data-action="unified-block"
+                  data-is-blocked="false"
+                  data-is-dropped="true"
+                  title="Resume tracking"
+                  class={btnActiveDrop}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+                </button>
+                <button
+                  data-action="unified-block"
+                  data-is-blocked="false"
+                  data-is-dropped="false"
+                  data-force-block="true"
+                  data-action-intent="block"
+                  title="Block"
+                  class={btnInactiveBlockOffset}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                </button>
+              </>
+            );
+          } else if (isBlocked) {
+            return (
+              <button
+                data-action="unified-block"
+                data-is-blocked="true"
+                data-is-dropped="false"
+                title="Unblock"
+                class={btnActiveBlock}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+              </button>
+            );
+          } else {
+            return (
+              <button
+                data-action="unified-block"
+                data-is-blocked="false"
+                data-is-dropped="false"
+                data-action-intent={showDrop ? 'drop' : 'block'}
+                title={showDrop ? 'Drop show' : 'Block'}
+                class={showDrop ? btnInactiveDrop : btnInactiveBlock}
+              >
+                {showDrop ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                )}
+              </button>
+            );
+          }
+        })()}
 
         {showDismiss && (
           <button

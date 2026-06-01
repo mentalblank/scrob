@@ -488,7 +488,7 @@ const COUNTRIES = (countriesRes || [])
                   { id: 'show-comments-toggle', name: 'show_comments', label: 'Show comments', desc: 'Show user comments on media detail pages site-wide.', checked: settings.show_comments !== false },
                   { id: 'show-user-ratings-toggle', name: 'show_user_ratings', label: 'Show user ratings', desc: 'Show ratings from users of this app. TMDB ratings will still be visible.', checked: settings.show_user_ratings !== false },
                   { id: 'media-server-enrichment-toggle', name: 'media_server_enrichment', label: 'Media server enrichment', desc: 'Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.', checked: settings.preferences?.media_server_enrichment !== false },
-                  { id: 'include-specials-toggle', name: 'include_specials', label: 'Include specials in counts', desc: 'Include Specials (Season 0) when calculating show and season watch/collection progress.', checked: settings.preferences?.include_specials === true }
+                  { id: 'include-specials-toggle', name: 'include_specials', label: 'Include specials in counts', desc: 'Include Specials (Season 0) when calculating show and season watch/collection progress.', checked: settings.preferences?.include_specials === true },
                 ].map(({ id, name, label, desc, checked }) => (
                   <div class="flex items-start justify-between gap-6 p-4 bg-zinc-950/40 rounded-2xl border border-zinc-800">
                     <div>
@@ -1452,23 +1452,276 @@ const COUNTRIES = (countriesRes || [])
                   </div>
                 </div>
               </div>
-            </div>
           </div>
-
-          <div id="save-settings-footer" class="pt-6 border-t border-zinc-800/60 mt-8 flex justify-end">
-            <button
-              id="save-settings-btn"
-              type="submit"
-              class="w-full sm:w-auto bg-zinc-100 text-zinc-950 font-bold px-8 py-3 rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              Save Changes
-            </button>
-          </div>
-        </form>
+        </div>
 
 
       <!-- Tab Panel: Security & API Keys -->
       <div data-settings-tab="security" class="space-y-12 hidden">
+        <!-- Change Password -->
+        <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-zinc-800 pb-2">
+            <h2 class="section-headline">Change Password</h2>
+          </div>
+          <div id="password-form" class="space-y-6 max-w-md">
+            <div class="space-y-4">
+              {me.has_password && <div class="space-y-2">
+                <label for="current_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Current Password</label>
+                <div class="relative group/field">
+                  <input
+                    type="password"
+                    name="current_password"
+                    id="current_password"
+                    required
+                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                  <PasswordToggle />
+                </div>
+              </div>}
+              <div class="space-y-2">
+                <label for="new_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">New Password</label>
+                <div class="relative group/field">
+                  <input
+                    type="password"
+                    name="new_password"
+                    id="new_password"
+                    required
+                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                  <PasswordToggle />
+                </div>
+              </div>
+              <div class="space-y-2">
+                <label for="confirm_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Confirm New Password</label>
+                <div class="relative group/field">
+                  <input
+                    type="password"
+                    name="confirm_password"
+                    id="confirm_password"
+                    required
+                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                  <PasswordToggle />
+                </div>
+              </div>
+            </div>
+            <div class="pt-2">
+              <button
+                id="update-password-btn"
+                type="button"
+                class="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold px-8 py-2 rounded-xl transition-colors cursor-pointer border border-zinc-700 disabled:opacity-50"
+              >
+                Update Password
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Two-Factor Authentication -->
+        <section id="2fa-section" class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-zinc-800 pb-2">
+            <h2 class="section-headline">Two-Factor Authentication</h2>
+          </div>
+
+          {!me.totp_enabled ? (
+            <div class="space-y-4">
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6">
+                <div>
+                  <h3 class="font-semibold text-zinc-100 mb-1">Authenticator App</h3>
+                  <p class="text-sm text-zinc-400">Protect your account with a time-based one-time password (TOTP) from any authenticator app.</p>
+                </div>
+                <button
+                  type="button"
+                  id="enable-2fa-btn"
+                  class="w-full sm:w-auto sm:shrink-0 px-6 py-3 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm"
+                >
+                  Enable 2FA
+                </button>
+              </div>
+
+              <!-- Setup panel (hidden until "Enable 2FA" is clicked) -->
+              <div id="2fa-setup-panel" class="hidden border border-zinc-800 rounded-2xl p-6 space-y-5 bg-zinc-950/40">
+                <div class="text-sm text-zinc-400">
+                  Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.), then enter the 6-digit code to confirm.
+                </div>
+
+                <div class="flex flex-col md:flex-row gap-6 items-start">
+                  <div class="shrink-0">
+                    <canvas id="totp-qr-canvas" class="rounded-xl bg-white p-2" width="160" height="160"></canvas>
+                  </div>
+                  <div class="space-y-3 flex-1">
+                    <div>
+                      <p class="text-xs text-zinc-500 mb-1">Manual entry key</p>
+                      <code id="totp-secret-display" class="block bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-300 font-mono text-sm tracking-widest break-all select-all"></code>
+                    </div>
+                    <div class="space-y-2">
+                      <label for="totp-verify-code" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Verification Code</label>
+                      <input
+                        type="text"
+                        id="totp-verify-code"
+                        autocomplete="one-time-code"
+                        inputmode="numeric"
+                        maxlength="6"
+                        placeholder="000000"
+                        class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      />
+                    </div>
+                    <div class="flex gap-3">
+                      <button
+                        type="button"
+                        id="confirm-enable-2fa-btn"
+                        class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm disabled:opacity-50"
+                      >
+                        Verify &amp; Enable
+                      </button>
+                      <button
+                        type="button"
+                        id="cancel-2fa-setup-btn"
+                        class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <p id="2fa-setup-error" class="hidden text-sm text-red-400"></p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Backup codes shown after successful enable (hidden initially) -->
+              <div id="2fa-new-codes-panel" class="hidden border border-green-500/30 bg-green-500/5 rounded-2xl p-6 space-y-4">
+                <div class="flex items-center gap-2 text-green-400 font-semibold">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  2FA Enabled
+                </div>
+                <p class="text-sm text-zinc-400">Save these backup codes somewhere safe. Each can only be used once. They cannot be shown again — regenerate them in settings if needed.</p>
+                <div id="2fa-new-codes-grid" class="grid grid-cols-2 gap-2"></div>
+                <button
+                  type="button"
+                  id="2fa-new-codes-done-btn"
+                  class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm"
+                >
+                  Done — reload page
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div class="space-y-4">
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6">
+                <div class="flex items-center gap-3">
+                  <span class="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0"></span>
+                  <div>
+                    <h3 class="font-semibold text-zinc-100">2FA is enabled</h3>
+                    <p class="text-sm text-zinc-400">Your account is protected with an authenticator app.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  id="disable-2fa-btn"
+                  class="shrink-0 px-5 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/30 font-bold rounded-xl text-sm transition-colors cursor-pointer"
+                >
+                  Disable 2FA
+                </button>
+              </div>
+
+              <!-- Disable confirmation (hidden initially) -->
+              <div id="2fa-disable-panel" class="hidden border border-zinc-800 rounded-2xl p-6 space-y-4 bg-zinc-950/40">
+                <p class="text-sm text-zinc-400">Enter your authenticator code or a backup code to disable 2FA.</p>
+                <div class="flex gap-3 items-end">
+                  <div class="space-y-2 flex-1">
+                    <label for="totp-disable-code" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Code</label>
+                    <input
+                      type="text"
+                      id="totp-disable-code"
+                      autocomplete="one-time-code"
+                      placeholder="000000 or XXXX-XXXX"
+                      class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    id="confirm-disable-2fa-btn"
+                    class="px-5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    type="button"
+                    id="cancel-disable-2fa-btn"
+                    class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p id="2fa-disable-error" class="hidden text-sm text-red-400"></p>
+              </div>
+
+              <!-- Backup codes -->
+              <details class="group border border-zinc-800 rounded-2xl bg-zinc-950/20 overflow-hidden">
+                <summary class="flex items-center justify-between px-6 py-4 cursor-pointer list-none select-none hover:bg-zinc-950/40 transition-colors">
+                  <span class="font-medium text-zinc-300">Backup Codes</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-zinc-500 transition-transform group-open:rotate-180">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </summary>
+                <div class="px-6 pb-6 space-y-4">
+                  <p class="text-sm text-zinc-500">Used codes are shown with strikethrough and cannot be reused. Keep these somewhere safe.</p>
+                  <div class="grid grid-cols-2 gap-2">
+                    {backupCodes.map((bc) => (
+                      <span class={`font-mono text-sm px-3 py-1.5 rounded-xl border ${bc.used ? "text-zinc-400 border-zinc-850 line-through" : "text-zinc-300 border-zinc-750 bg-zinc-950/40"}`}>
+                        {bc.code}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            </div>
+          )}
+        </section>
+
+        <!-- Your API Key -->
+        <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-zinc-800 pb-2">
+            <h2 class="section-headline">API Key</h2>
+          </div>
+          <div class="space-y-4 max-w-xl">
+            <p class="text-sm text-zinc-400">Use this key to authenticate requests to the Scrob API. Keep it secret — if it leaks, regenerate it immediately.</p>
+            <div class="space-y-2">
+              <label for="scrob_api_key" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Your API Key</label>
+              <div class="flex gap-2">
+                <div class="relative flex-1 group/field">
+                  <input
+                    type="password"
+                    id="scrob_api_key"
+                    readonly
+                    value={me.api_key}
+                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
+                  />
+                  <PasswordToggle />
+                </div>
+                <button
+                  type="button"
+                  id="copy-api-key-btn"
+                  title="Copy to clipboard"
+                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              id="regenerate-api-key-btn"
+              class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Regenerate Key
+            </button>
+          </div>
+        </section>
+
         <!-- API & Metadata Keys -->
         <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
           <div class="mb-4 border-b border-zinc-800 pb-2">
@@ -1563,374 +1816,125 @@ const COUNTRIES = (countriesRes || [])
 
         <!-- Maintenance -->
         <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
-        <h2 class="section-headline mb-4 border-b border-zinc-800 pb-2">Maintenance</h2>
-        <div class="space-y-3 max-w-xl">
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-            <div class="flex items-center justify-between px-5 py-4">
-              <div>
-                <p class="text-sm font-medium text-zinc-200">Heal missing metadata</p>
-                <p class="text-xs text-zinc-500 mt-0.5">Re-fetches posters and dates for collection items that are missing them due to TMDB errors during sync.</p>
-              </div>
-              <button
-                id="heal-btn"
-                type="button"
-                disabled={!hasTmdbKey}
-                title={!hasTmdbKey ? "TMDB API Key is required" : ""}
-                class="ml-4 shrink-0 text-sm px-4 py-2 rounded-xl transition-colors cursor-pointer disabled:opacity-50 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30"
-              >
-                Heal
-              </button>
-            </div>
-            <div id="heal-progress" class="hidden border-t border-zinc-800 px-5 py-3">
-              <div class="flex justify-between items-center mb-1.5">
-                <span id="heal-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
-                <span id="heal-job-pct" class="text-xs font-bold text-zinc-400"></span>
-              </div>
-              <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                <div id="heal-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-blue-600 animate-pulse" style="width: 100%"></div>
-              </div>
-              <div class="flex justify-between text-xs text-zinc-500 mt-1">
-                <span id="heal-job-items"></span>
-              </div>
-            </div>
+          <div class="mb-4 border-b border-zinc-800 pb-2">
+            <h2 class="section-headline">Maintenance</h2>
           </div>
+          <div class="space-y-4">
+            <!-- Heal missing metadata -->
+            <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div>
+                  <h3 class="text-lg font-bold text-zinc-100 mb-1">Heal missing metadata</h3>
+                  <p class="text-zinc-400 text-sm">Re-fetches posters and dates for collection items that are missing them due to TMDB errors during sync.</p>
+                </div>
+                <button
+                  id="heal-btn"
+                  type="button"
+                  disabled={!hasTmdbKey}
+                  title={!hasTmdbKey ? "TMDB API Key is required" : ""}
+                  class="w-full md:w-auto md:shrink-0 px-6 py-3 rounded-xl text-sm font-bold transition-all cursor-pointer disabled:opacity-50 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-center"
+                >
+                  Heal
+                </button>
+              </div>
+              <div id="heal-progress" class="hidden border-t border-zinc-800 px-6 py-4">
+                <div class="flex justify-between items-center mb-1.5">
+                  <span id="heal-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
+                  <span id="heal-job-pct" class="text-xs font-bold text-zinc-400"></span>
+                </div>
+                <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                  <div id="heal-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-blue-600 animate-pulse" style="width: 100%"></div>
+                </div>
+                <div class="flex justify-between text-xs text-zinc-500 mt-1">
+                  <span id="heal-job-items"></span>
+                </div>
+              </div>
+            </div>
 
-          <div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-            <div class="flex items-center justify-between px-5 py-4">
+            <!-- Clear now playing -->
+            <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div>
-                <p class="text-sm font-medium text-zinc-200">Clear now playing</p>
-                <p class="text-xs text-zinc-500 mt-0.5">Removes all active now playing sessions. Use this if a ghost session is stuck in the bar after a restart or network interruption.</p>
+                <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear now playing</h3>
+                <p class="text-zinc-400 text-sm">Removes all active now playing sessions. Use this if a ghost session is stuck in the bar after a restart or network interruption.</p>
               </div>
               <button
                 id="clear-sessions-btn"
                 type="button"
-                class="ml-4 shrink-0 text-sm px-4 py-2 rounded-xl transition-colors cursor-pointer bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30"
+                class="w-full md:w-auto md:shrink-0 px-6 py-3 rounded-xl text-sm font-bold transition-all cursor-pointer bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-center"
               >
                 Clear
               </button>
-            </div>      <!-- API Key -->
-      <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="section-headline">API Key</h2>
-        </div>
-        <div class="space-y-4 max-w-xl">
-          <p class="text-sm text-zinc-400">Use this key to authenticate requests to the Scrob API. Keep it secret — if it leaks, regenerate it immediately.</p>
-          <div class="space-y-2">
-            <label for="scrob_api_key" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Your API Key</label>
-            <div class="flex gap-2">
-              <div class="relative flex-1 group/field">
-                <input
-                  type="password"
-                  id="scrob_api_key"
-                  readonly
-                  value={me.api_key}
-                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
-                />
-                <PasswordToggle />
-              </div>
-              <button
-                type="button"
-                id="copy-api-key-btn"
-                title="Copy to clipboard"
-                class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                </svg>
-              </button>
             </div>
           </div>
-          <button
-            type="button"
-            id="regenerate-api-key-btn"
-            class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50"
-          >
-            Regenerate Key
-          </button>
-        </div>
-      </section>
+        </section>
 
-      <!-- Security -->
-      <section id="2fa-section" class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="section-headline">Two-Factor Authentication</h2>
-        </div>
-
-        {!me.totp_enabled ? (
+        <!-- Data Management -->
+        <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-zinc-800 pb-2">
+            <h2 class="section-headline">Data Management</h2>
+          </div>
           <div class="space-y-4">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6">
+            <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
               <div>
-                <h3 class="font-semibold text-zinc-100 mb-1">Authenticator App</h3>
-                <p class="text-sm text-zinc-400">Protect your account with a time-based one-time password (TOTP) from any authenticator app.</p>
+                <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Watch History</h3>
+                <p class="text-zinc-400 text-sm">This will permanently delete all your watch history and progress. Your collection and ratings will not be affected.</p>
               </div>
               <button
                 type="button"
-                id="enable-2fa-btn"
-                class="w-full sm:w-auto sm:shrink-0 px-6 py-3 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm"
+                id="clear-history-btn"
+                class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap text-center"
               >
-                Enable 2FA
+                Clear History
               </button>
             </div>
 
-            <!-- Setup panel (hidden until "Enable 2FA" is clicked) -->
-            <div id="2fa-setup-panel" class="hidden border border-zinc-800 rounded-2xl p-6 space-y-5 bg-zinc-950/40">
-              <div class="text-sm text-zinc-400">
-                Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.), then enter the 6-digit code to confirm.
-              </div>
-
-              <div class="flex flex-col md:flex-row gap-6 items-start">
-                <div class="shrink-0">
-                  <canvas id="totp-qr-canvas" class="rounded-xl bg-white p-2" width="160" height="160"></canvas>
-                </div>
-                <div class="space-y-3 flex-1">
-                  <div>
-                    <p class="text-xs text-zinc-500 mb-1">Manual entry key</p>
-                    <code id="totp-secret-display" class="block bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-300 font-mono text-sm tracking-widest break-all select-all"></code>
-                  </div>
-                  <div class="space-y-2">
-                    <label for="totp-verify-code" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Verification Code</label>
-                    <input
-                      type="text"
-                      id="totp-verify-code"
-                      autocomplete="one-time-code"
-                      inputmode="numeric"
-                      maxlength="6"
-                      placeholder="000000"
-                      class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
-                    />
-                  </div>
-                  <div class="flex gap-3">
-                    <button
-                      type="button"
-                      id="confirm-enable-2fa-btn"
-                      class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm disabled:opacity-50"
-                    >
-                      Verify &amp; Enable
-                    </button>
-                    <button
-                      type="button"
-                      id="cancel-2fa-setup-btn"
-                      class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  <p id="2fa-setup-error" class="hidden text-sm text-red-400"></p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Backup codes shown after successful enable (hidden initially) -->
-            <div id="2fa-new-codes-panel" class="hidden border border-green-500/30 bg-green-500/5 rounded-2xl p-6 space-y-4">
-              <div class="flex items-center gap-2 text-green-400 font-semibold">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                2FA Enabled
-              </div>
-              <p class="text-sm text-zinc-400">Save these backup codes somewhere safe. Each can only be used once. They cannot be shown again — regenerate them in settings if needed.</p>
-              <div id="2fa-new-codes-grid" class="grid grid-cols-2 gap-2"></div>
-              <button
-                type="button"
-                id="2fa-new-codes-done-btn"
-                class="px-5 py-2 bg-zinc-100 text-zinc-950 font-bold rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer text-sm"
-              >
-                Done — reload page
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div class="space-y-4">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6">
-              <div class="flex items-center gap-3">
-                <span class="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0"></span>
-                <div>
-                  <h3 class="font-semibold text-zinc-100">2FA is enabled</h3>
-                  <p class="text-sm text-zinc-400">Your account is protected with an authenticator app.</p>
-                </div>
+            <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div>
+                <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Collection</h3>
+                <p class="text-zinc-400 text-sm">This will permanently remove all items from your collection. Your watch history and ratings will not be affected.</p>
               </div>
               <button
                 type="button"
-                id="disable-2fa-btn"
-                class="shrink-0 px-5 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/30 font-bold rounded-xl text-sm transition-colors cursor-pointer"
+                id="clear-collection-btn"
+                class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap text-center"
               >
-                Disable 2FA
+                Clear Collection
               </button>
             </div>
-
-            <!-- Disable confirmation (hidden initially) -->
-            <div id="2fa-disable-panel" class="hidden border border-zinc-800 rounded-2xl p-6 space-y-4 bg-zinc-950/40">
-              <p class="text-sm text-zinc-400">Enter your authenticator code or a backup code to disable 2FA.</p>
-              <div class="flex gap-3 items-end">
-                <div class="space-y-2 flex-1">
-                  <label for="totp-disable-code" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Code</label>
-                  <input
-                    type="text"
-                    id="totp-disable-code"
-                    autocomplete="one-time-code"
-                    placeholder="000000 or XXXX-XXXX"
-                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
-                  />
-                </div>
-                <button
-                  type="button"
-                  id="confirm-disable-2fa-btn"
-                  class="px-5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  Confirm
-                </button>
-                <button
-                  type="button"
-                  id="cancel-disable-2fa-btn"
-                  class="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-              <p id="2fa-disable-error" class="hidden text-sm text-red-400"></p>
-            </div>
-
-            <!-- Backup codes -->
-            <details class="group border border-zinc-800 rounded-2xl bg-zinc-950/20 overflow-hidden">
-              <summary class="flex items-center justify-between px-6 py-4 cursor-pointer list-none select-none hover:bg-zinc-950/40 transition-colors">
-                <span class="font-medium text-zinc-300">Backup Codes</span>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-zinc-500 transition-transform group-open:rotate-180">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              </summary>
-              <div class="px-6 pb-6 space-y-4">
-                <p class="text-sm text-zinc-500">Used codes are shown with strikethrough and cannot be reused. Keep these somewhere safe.</p>
-                <div class="grid grid-cols-2 gap-2">
-                  {backupCodes.map((bc) => (
-                    <span class={`font-mono text-sm px-3 py-1.5 rounded-xl border ${bc.used ? "text-zinc-400 border-zinc-850 line-through" : "text-zinc-300 border-zinc-750 bg-zinc-950/40"}`}>
-                      {bc.code}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </details>
           </div>
-        )}
-      </section>
+        </section>
 
-      <!-- Change Password -->
-      <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="section-headline">Change Password</h2>
-        </div>
-        <div id="password-form" class="space-y-6 max-w-md">
-          <div class="space-y-4">
-            {me.has_password && <div class="space-y-2">
-              <label for="current_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Current Password</label>
-              <div class="relative group/field">
-                <input
-                  type="password"
-                  name="current_password"
-                  id="current_password"
-                  required
-                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
-                />
-                <PasswordToggle />
-              </div>
-            </div>}
-            <div class="space-y-2">
-              <label for="new_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">New Password</label>
-              <div class="relative group/field">
-                <input
-                  type="password"
-                  name="new_password"
-                  id="new_password"
-                  required
-                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
-                />
-                <PasswordToggle />
-              </div>
-            </div>
-            <div class="space-y-2">
-              <label for="confirm_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Confirm New Password</label>
-              <div class="relative group/field">
-                <input
-                  type="password"
-                  name="confirm_password"
-                  id="confirm_password"
-                  required
-                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
-                />
-                <PasswordToggle />
-              </div>
-            </div>
+        <!-- Danger Zone -->
+        <section class="bg-red-950/20 border border-red-500/20 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-red-500/20 pb-2">
+            <h2 class="text-2xl font-black text-red-500 tracking-tight">Danger Zone</h2>
           </div>
-          <div class="pt-2">
-            <button
-              id="update-password-btn"
-              type="button"
-              class="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold px-8 py-2 rounded-xl transition-colors cursor-pointer border border-zinc-700 disabled:opacity-50"
-            >
-              Update Password
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Data Management -->
-      <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
-        <div class="mb-4 border-b border-zinc-800 pb-2">
-          <h2 class="section-headline">Data Management</h2>
-        </div>
-        <div class="space-y-4">
-          <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="bg-red-950/30 border border-red-500/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
             <div>
-              <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Watch History</h3>
-              <p class="text-zinc-400 text-sm">This will permanently delete all your watch history and progress. Your collection and ratings will not be affected.</p>
+              <h3 class="text-lg font-bold text-zinc-100 mb-1">Delete Account</h3>
+              <p class="text-zinc-400 text-sm">Once you delete your account, there is no going back. All your data will be permanently removed.</p>
             </div>
             <button
               type="button"
-              id="clear-history-btn"
-              class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap"
+              id="delete-account-btn"
+              class="px-6 py-3 bg-red-600 hover:bg-red-500 text-zinc-100 font-bold rounded-xl transition-all shadow-lg shadow-red-600/20 active:scale-95 whitespace-nowrap cursor-pointer text-center"
             >
-              Clear History
+              Delete Account
             </button>
           </div>
-
-          <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div>
-              <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Collection</h3>
-              <p class="text-zinc-400 text-sm">This will permanently remove all items from your collection. Your watch history and ratings will not be affected.</p>
-            </div>
-            <button
-              type="button"
-              id="clear-collection-btn"
-              class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap"
-            >
-              Clear Collection
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Danger Zone -->
-      <section class="bg-red-950/20 border border-red-500/20 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
-        <div class="mb-4 border-b border-red-500/20 pb-2">
-          <h2 class="text-2xl font-black text-red-500 tracking-tight">Danger Zone</h2>
-        </div>
-        <div class="bg-red-950/30 border border-red-500/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div>
-            <h3 class="text-lg font-bold text-zinc-100 mb-1">Delete Account</h3>
-            <p class="text-zinc-400 text-sm">Once you delete your account, there is no going back. All your data will be permanently removed.</p>
-          </div>
-          <button
-            type="button"
-            id="delete-account-btn"
-            class="px-6 py-3 bg-red-600 hover:bg-red-500 text-zinc-100 font-bold rounded-xl transition-all shadow-lg shadow-red-600/20 active:scale-95 whitespace-nowrap cursor-pointer"
-          >
-            Delete Account
-          </button>
-        </div>
-      </section>Account
-          </button>
-        </div>
-      </section>
+        </section>
       </div>
+
+      <div id="save-settings-footer" class="pt-6 border-t border-zinc-800/60 mt-8 flex justify-end">
+        <button
+          id="save-settings-btn"
+          type="submit"
+          class="w-full sm:w-auto bg-zinc-100 text-zinc-950 font-bold px-8 py-3 rounded-xl hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+        >
+          Save Changes
+        </button>
+      </div>
+    </form>
     </div>
   </div>
 
@@ -2068,14 +2072,7 @@ const COUNTRIES = (countriesRes || [])
         }
       });
 
-      const saveFooter = document.getElementById('save-settings-footer');
-      if (saveFooter) {
-        if (tabId === 'security') {
-          saveFooter.classList.add('hidden');
-        } else {
-          saveFooter.classList.remove('hidden');
-        }
-      }
+
 
       localStorage.setItem('active-settings-tab', tabId);
       history.replaceState(null, '', `#tab-${tabId}`);
@@ -2106,7 +2103,14 @@ const COUNTRIES = (countriesRes || [])
 
   setupTabs();
 
-  const esc = (window as any).esc;
+  const esc = (window as any).esc || function(str: any) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
   const showMessage = (window as any).showMessage;
 
   // ── Per-connection progress tracking ─────────────────────────────────────

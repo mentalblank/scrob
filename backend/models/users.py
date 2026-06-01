@@ -31,6 +31,12 @@ class User(Base):
         return self.username
 
     @property
+    def avatar_url(self) -> Optional[str]:
+        if self.profile and self.profile.avatar_path:
+            return f"/profile/avatar/{self.id}"
+        return None
+
+    @property
     def has_password(self) -> bool:
         return self.password_hash is not None
 

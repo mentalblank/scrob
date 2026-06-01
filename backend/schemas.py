@@ -16,6 +16,7 @@ class User(UserBase):
     api_key: str
     display_name: str
     is_admin: bool = False
+    avatar_url: Optional[str] = None
     totp_enabled: bool = False
     email_confirmed: bool = True
     has_password: bool = True

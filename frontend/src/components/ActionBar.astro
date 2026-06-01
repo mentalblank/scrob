@@ -64,7 +64,7 @@ const ratingLabel = userRating != null ? userRating.toFixed(1) : "Rate";
 
 // Shared button classes
 const btn = "flex items-center justify-center transition-all cursor-pointer";
-const btnW = "w-11 h-11 md:w-13 md:h-13 flex-shrink-0 last:border-r-0";
+const btnW = "w-11 h-full md:w-13 md:h-full flex-shrink-0 last:border-r-0";
 
 // Consistent state classes per button colour — inactive / active
 // inactive: bg-zinc-800 text-zinc-500 hover:bg-[c]-500/10 hover:text-[c]-400
@@ -121,9 +121,9 @@ if (!effectiveUriId && tmdbId) {
   data-season={seasonNumber != null ? String(seasonNumber) : ""}
   data-episode-number={episodeNumber != null ? String(episodeNumber) : ""}
   data-media-id={mediaId != null ? String(mediaId) : ""}
-  class="flex w-full justify-center"
+  class="flex w-full max-w-full overflow-hidden"
 >
-  <div class="flex flex-row rounded-2xl overflow-hidden bg-zinc-950/20 border border-zinc-800/80 shadow-lg backdrop-blur-md h-11 md:h-13 w-fit">
+  <div class="flex flex-row rounded-2xl overflow-x-auto no-scrollbar bg-zinc-950/20 border border-zinc-800/80 shadow-lg backdrop-blur-md h-11 md:h-13 w-fit max-w-full mx-auto">
 
     <!-- Watched (green) -->
     {!listOnly && (

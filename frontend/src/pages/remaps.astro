@@ -830,7 +830,7 @@ try {
 
   <!-- Custom Rename Modal -->
   <div id="rename-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
-    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] backdrop-blur-xl">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] backdrop-blur-xl">
       
       <!-- Modal Header -->
       <div class="px-6 py-5 border-b border-zinc-850 flex items-center justify-between shrink-0">
@@ -847,69 +847,117 @@ try {
       </div>
 
       <!-- Modal Body (Scrollable) -->
-      <div class="p-6 overflow-y-auto space-y-6 flex-1">
-        
-        <!-- Select Media -->
-        <div class="space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
-          <label id="rename-media-label" class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Select Show or Movie</label>
-          <div class="flex gap-2">
-            <input type="text" id="rename-show-search" placeholder="Search local library..." class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
-            <button id="rename-show-search-btn" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold rounded-xl text-xs transition cursor-pointer">Search</button>
-          </div>
-          <!-- Media Search Results -->
-          <div id="rename-show-results" class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto mt-2 no-scrollbar hidden"></div>
-          <!-- Selected Media Card -->
-          <div id="rename-selected-show-card" class="hidden p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl flex items-center justify-between">
-            <div class="flex items-center gap-3 min-w-0">
-              <img id="rename-selected-show-poster" class="w-10 h-14 rounded-lg object-cover bg-zinc-950 border border-zinc-850 shrink-0" src="" />
-              <div class="min-w-0">
-                <div id="rename-selected-show-title" class="text-xs font-bold text-zinc-200 truncate"></div>
-                <div id="rename-selected-show-year" class="text-[10px] text-zinc-500 font-medium"></div>
+      <div class="p-6 overflow-y-auto flex-1 no-scrollbar">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+          
+          <!-- Left Column: Source Media & Type Selection -->
+          <div class="space-y-4">
+            <!-- Select Media -->
+            <div class="space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
+              <label id="rename-media-label" class="block text-xs font-black uppercase tracking-widest text-zinc-400">1. Select Show or Movie</label>
+              <div class="flex gap-2">
+                <input type="text" id="rename-show-search" placeholder="Search local library..." class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
+                <button id="rename-show-search-btn" class="px-4 py-2 bg-zinc-800 hover:bg-zinc-750 text-zinc-200 font-bold rounded-xl text-xs transition cursor-pointer">Search</button>
+              </div>
+              <!-- Media Search Results -->
+              <div id="rename-show-results" class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto mt-2 no-scrollbar hidden"></div>
+              <!-- Selected Media Card -->
+              <div id="rename-selected-show-card" class="hidden p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl flex items-center justify-between">
+                <div class="flex items-center gap-3 min-w-0">
+                  <img id="rename-selected-show-poster" class="w-10 h-14 rounded-lg object-cover bg-zinc-950 border border-zinc-850 shrink-0" src="" />
+                  <div class="min-w-0">
+                    <div id="rename-selected-show-title" class="text-xs font-bold text-zinc-200 truncate"></div>
+                    <div id="rename-selected-show-year" class="text-[10px] text-zinc-500 font-medium"></div>
+                  </div>
+                </div>
+                <button id="rename-change-show-btn" class="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded-lg text-[10px] font-bold transition cursor-pointer shrink-0">Change</button>
+              </div>
+              
+              <div id="rename-manual-toggle-container" class="pt-1">
+                <button type="button" id="rename-show-manual-btn" class="text-[10px] font-bold text-zinc-500 hover:text-zinc-400 uppercase tracking-widest transition cursor-pointer">
+                  Or Enter ID Manually
+                </button>
+              </div>
+
+              <!-- Manual ID Inputs -->
+              <div id="rename-manual-fields" class="hidden space-y-4 pt-2">
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Media Type</label>
+                    <select id="rename-manual-media-type" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-2.5 text-zinc-300 text-xs focus:border-indigo-500 focus:outline-none transition cursor-pointer">
+                      <option value="show">Show (Series)</option>
+                      <option value="movie">Movie</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">ID Type</label>
+                    <select id="rename-manual-id-type" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-2.5 text-zinc-300 text-xs focus:border-indigo-500 focus:outline-none transition cursor-pointer">
+                      <option value="tmdb">TMDB</option>
+                      <option value="tvdb">TVDB</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Show or Movie ID</label>
+                  <input type="text" id="rename-manual-id-input" placeholder="e.g. 85937" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
+                </div>
+                <div id="rename-manual-season-group" class="hidden grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Season Number</label>
+                    <input type="number" id="rename-manual-season-input" placeholder="e.g. 1" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
+                  </div>
+                  <div id="rename-manual-episode-group" class="hidden">
+                    <label class="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1.5">Episode Number</label>
+                    <input type="number" id="rename-manual-episode-input" placeholder="e.g. 5" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
+                  </div>
+                </div>
               </div>
             </div>
-            <button id="rename-change-show-btn" class="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded-lg text-[10px] font-bold transition cursor-pointer shrink-0">Change</button>
+
+            <!-- Rename Type Selection -->
+            <div id="rename-type-section" class="hidden space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
+              <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">2. Select Type</label>
+              <div class="flex gap-2">
+                <button id="rename-type-movie" class="hidden flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center">
+                  Movie
+                </button>
+                <button id="rename-type-show" class="flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center">
+                  Show
+                </button>
+                <button id="rename-type-season" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center">
+                  Season
+                </button>
+                <button id="rename-type-episode" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center">
+                  Episode
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <!-- Rename Type Selection -->
-        <div id="rename-type-section" class="hidden space-y-3">
-          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">2. Select Type</label>
-          <div class="flex gap-2">
-            <button id="rename-type-movie" class="hidden flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center">
-              Movie
-            </button>
-            <button id="rename-type-show" class="flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center">
-              Show
-            </button>
-            <button id="rename-type-season" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center">
-              Season
-            </button>
-            <button id="rename-type-episode" class="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900/40 text-zinc-400 font-bold text-xs transition cursor-pointer text-center">
-              Episode
-            </button>
+          <!-- Right Column: Coordinates & Override Input -->
+          <div class="space-y-4">
+            <!-- Select Season (Conditional) -->
+            <div id="rename-season-section" class="hidden space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
+              <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">3. Select Season</label>
+              <div id="rename-season-buttons" class="flex flex-wrap gap-2"></div>
+            </div>
+
+            <!-- Select Episode (Conditional) -->
+            <div id="rename-episode-section" class="hidden space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
+              <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">4. Select Episode</label>
+              <div id="rename-episode-container" class="max-h-48 overflow-y-auto space-y-2 pr-1 no-scrollbar">
+                <p class="text-[10px] text-zinc-500 italic">Select a season first</p>
+              </div>
+            </div>
+
+            <!-- Custom Name Input -->
+            <div class="space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
+              <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">Configure Title Override</label>
+              <input type="text" id="rename-custom-title-input" placeholder="Enter custom override name (e.g. Demon Slayer - Entertainment District Arc)..." class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
+            </div>
           </div>
-        </div>
 
-        <!-- Select Season (Conditional) -->
-        <div id="rename-season-section" class="hidden space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
-          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">3. Select Season</label>
-          <div id="rename-season-buttons" class="flex flex-wrap gap-2"></div>
         </div>
-
-        <!-- Select Episode (Conditional) -->
-        <div id="rename-episode-section" class="hidden space-y-3 bg-zinc-950/40 border border-zinc-850 p-4 rounded-2xl">
-          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">4. Select Episode</label>
-          <div id="rename-episode-container" class="max-h-48 overflow-y-auto space-y-2 pr-1 no-scrollbar">
-            <p class="text-[10px] text-zinc-500 italic">Select a season first</p>
-          </div>
-        </div>
-
-        <!-- Custom Name Input -->
-        <div class="space-y-3">
-          <label class="block text-xs font-black uppercase tracking-widest text-zinc-400">Configure Title Override</label>
-          <input type="text" id="rename-custom-title-input" placeholder="Enter custom override name (e.g. Demon Slayer - Entertainment District Arc)..." class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-zinc-200 text-xs focus:border-indigo-500 focus:outline-none transition" />
-        </div>
-
       </div>
 
       <!-- Modal Footer -->
@@ -1010,6 +1058,24 @@ try {
       }
     }
 
+    // Fetch movies in user's collection
+    async function fetchLocalMovies() {
+      if (localMoviesList && localMoviesList.length > 0) {
+        return;
+      }
+      try {
+        const res = await fetch("/api/proxy/sync/source-movies", {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          localMoviesList = Array.isArray(data) ? data : data.results || [];
+        }
+      } catch (err) {
+        console.error("Error loading local movies", err);
+      }
+    }
+
     // Season Remap Search
     const performSourceShowSearch = () => {
       const q = sourceShowSearch.value.trim().toLowerCase();
@@ -1019,7 +1085,7 @@ try {
       }
       const filtered = localShowsList.filter(show => 
         show.title.toLowerCase().includes(q) || 
-        show.tmdb_id.toString().includes(q)
+        show.tmdb_id?.toString().includes(q)
       );
       renderSourceShowResults(filtered);
     };
@@ -1356,11 +1422,23 @@ try {
     
     const renameCustomTitleInput = document.getElementById("rename-custom-title-input") as HTMLInputElement;
 
+    // Manual Rename Elements
+    const renameShowManualBtn = document.getElementById("rename-show-manual-btn")!;
+    const renameManualFields = document.getElementById("rename-manual-fields")!;
+    const renameManualMediaType = document.getElementById("rename-manual-media-type") as HTMLSelectElement;
+    const renameManualIdType = document.getElementById("rename-manual-id-type") as HTMLSelectElement;
+    const renameManualIdInput = document.getElementById("rename-manual-id-input") as HTMLInputElement;
+    const renameManualSeasonGroup = document.getElementById("rename-manual-season-group")!;
+    const renameManualSeasonInput = document.getElementById("rename-manual-season-input") as HTMLInputElement;
+    const renameManualEpisodeGroup = document.getElementById("rename-manual-episode-group")!;
+    const renameManualEpisodeInput = document.getElementById("rename-manual-episode-input") as HTMLInputElement;
+
     // Custom Rename State
     let renameType: "show" | "season" | "episode" | "movie" = "show";
     let renameSelectedShow: any = null;
     let renameSelectedSeason: number | null = null;
     let renameSelectedEpisode: any = null;
+    let isManualRename = false;
 
     // Open Custom Rename Modal
     addRenameBtn.addEventListener("click", () => {
@@ -1391,21 +1469,36 @@ try {
       const activeBtn = type === "movie" ? renameTypeMovie : type === "show" ? renameTypeShow : type === "season" ? renameTypeSeason : renameTypeEpisode;
       activeBtn.className = "flex-1 px-4 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-600/10 text-zinc-100 font-bold text-xs transition cursor-pointer text-center";
 
-      // Show/Hide Sections
-      if (type === "show" || type === "movie") {
-        renameSeasonSection.classList.add("hidden");
-        renameEpisodeSection.classList.add("hidden");
-      } else if (type === "season") {
-        renameSeasonSection.classList.remove("hidden");
-        renameEpisodeSection.classList.add("hidden");
-        if (renameSelectedShow) {
-          renderRenameSeasonButtons(renameSelectedShow.seasons_meta || []);
+      if (isManualRename) {
+        if (type === "show" || type === "movie") {
+          renameManualSeasonGroup.classList.add("hidden");
+        } else if (type === "season") {
+          renameManualSeasonGroup.classList.remove("hidden");
+          renameManualEpisodeGroup.classList.add("hidden");
+        } else if (type === "episode") {
+          renameManualSeasonGroup.classList.remove("hidden");
+          renameManualEpisodeGroup.classList.remove("hidden");
         }
-      } else if (type === "episode") {
-        renameSeasonSection.classList.remove("hidden");
-        renameEpisodeSection.classList.remove("hidden");
-        if (renameSelectedShow) {
-          renderRenameSeasonButtons(renameSelectedShow.seasons_meta || []);
+      } else {
+        renameManualSeasonGroup.classList.add("hidden");
+        renameManualEpisodeGroup.classList.add("hidden");
+
+        // Show/Hide Sections
+        if (type === "show" || type === "movie") {
+          renameSeasonSection.classList.add("hidden");
+          renameEpisodeSection.classList.add("hidden");
+        } else if (type === "season") {
+          renameSeasonSection.classList.remove("hidden");
+          renameEpisodeSection.classList.add("hidden");
+          if (renameSelectedShow) {
+            renderRenameSeasonButtons(renameSelectedShow.seasons_meta || []);
+          }
+        } else if (type === "episode") {
+          renameSeasonSection.classList.remove("hidden");
+          renameEpisodeSection.classList.remove("hidden");
+          if (renameSelectedShow) {
+            renderRenameSeasonButtons(renameSelectedShow.seasons_meta || []);
+          }
         }
       }
 
@@ -1431,12 +1524,12 @@ try {
       const filteredShows = localShowsList.filter(show => 
         show.title.toLowerCase().includes(q) || 
         (show.original_title && show.original_title.toLowerCase().includes(q)) || 
-        show.tmdb_id.toString().includes(q)
+        show.tmdb_id?.toString().includes(q)
       );
       const filteredMovies = localMoviesList.filter(movie => 
         movie.title.toLowerCase().includes(q) || 
         (movie.tmdb_title && movie.tmdb_title.toLowerCase().includes(q)) || 
-        movie.tmdb_id.toString().includes(q)
+        movie.tmdb_id?.toString().includes(q)
       );
       renderRenameShowResults([...filteredShows, ...filteredMovies]);
     };
@@ -1637,22 +1730,101 @@ try {
 
     renameCustomTitleInput.addEventListener("input", validateRenameForm);
 
+    // Manual Entry Toggle Listeners
+    renameShowManualBtn.addEventListener("click", () => {
+      isManualRename = !isManualRename;
+      if (isManualRename) {
+        renameShowManualBtn.textContent = "Or Search Library";
+        renameManualFields.classList.remove("hidden");
+        
+        renameShowSearch.classList.add("hidden");
+        renameShowSearchBtn.classList.add("hidden");
+        renameShowResults.classList.add("hidden");
+        renameSelectedShowCard.classList.add("hidden");
+        
+        renameSeasonSection.classList.add("hidden");
+        renameEpisodeSection.classList.add("hidden");
+        
+        renameTypeSection.classList.remove("hidden");
+        updateManualRenameType();
+      } else {
+        renameShowManualBtn.textContent = "Or Enter ID Manually";
+        renameManualFields.classList.add("hidden");
+        
+        renameShowSearch.classList.remove("hidden");
+        renameShowSearchBtn.classList.remove("hidden");
+        
+        resetRenameModal();
+      }
+      validateRenameForm();
+    });
+
+    function updateManualRenameType() {
+      const type = renameManualMediaType.value;
+      if (type === "movie") {
+        renameTypeMovie.classList.remove("hidden");
+        renameTypeShow.classList.add("hidden");
+        renameTypeSeason.classList.add("hidden");
+        renameTypeEpisode.classList.add("hidden");
+        selectRenameType("movie");
+      } else {
+        renameTypeMovie.classList.add("hidden");
+        renameTypeShow.classList.remove("hidden");
+        renameTypeSeason.classList.remove("hidden");
+        renameTypeEpisode.classList.remove("hidden");
+        selectRenameType("show");
+      }
+    }
+
+    renameManualMediaType.addEventListener("change", () => {
+      updateManualRenameType();
+      validateRenameForm();
+    });
+
+    renameManualIdType.addEventListener("change", validateRenameForm);
+    renameManualIdInput.addEventListener("input", validateRenameForm);
+    renameManualSeasonInput.addEventListener("input", validateRenameForm);
+    renameManualEpisodeInput.addEventListener("input", validateRenameForm);
+
     function validateRenameForm() {
       let isValid = false;
       const hasTitle = renameCustomTitleInput.value.trim().length > 0;
       
-      if (renameType === "show" || renameType === "movie") {
-        isValid = !!renameSelectedShow && hasTitle;
-      } else if (renameType === "season") {
-        isValid = !!renameSelectedShow && renameSelectedSeason !== null && hasTitle;
-      } else if (renameType === "episode") {
-        isValid = !!renameSelectedShow && renameSelectedSeason !== null && !!renameSelectedEpisode && hasTitle;
+      if (isManualRename) {
+        const hasId = renameManualIdInput.value.trim().length > 0;
+        if (renameType === "show" || renameType === "movie") {
+          isValid = hasId && hasTitle;
+        } else if (renameType === "season") {
+          const hasSeason = renameManualSeasonInput.value.trim().length > 0;
+          isValid = hasId && hasSeason && hasTitle;
+        } else if (renameType === "episode") {
+          const hasSeason = renameManualSeasonInput.value.trim().length > 0;
+          const hasEpisode = renameManualEpisodeInput.value.trim().length > 0;
+          isValid = hasId && hasSeason && hasEpisode && hasTitle;
+        }
+      } else {
+        if (renameType === "show" || renameType === "movie") {
+          isValid = !!renameSelectedShow && hasTitle;
+        } else if (renameType === "season") {
+          isValid = !!renameSelectedShow && renameSelectedSeason !== null && hasTitle;
+        } else if (renameType === "episode") {
+          isValid = !!renameSelectedShow && renameSelectedSeason !== null && !!renameSelectedEpisode && hasTitle;
+        }
       }
 
       saveRenameBtn.disabled = !isValid;
     }
 
     function resetRenameModal() {
+      isManualRename = false;
+      if (renameShowManualBtn) renameShowManualBtn.textContent = "Or Enter ID Manually";
+      if (renameManualFields) renameManualFields.classList.add("hidden");
+      if (renameManualIdInput) renameManualIdInput.value = "";
+      if (renameManualSeasonInput) renameManualSeasonInput.value = "";
+      if (renameManualEpisodeInput) renameManualEpisodeInput.value = "";
+      if (renameManualMediaType) renameManualMediaType.value = "show";
+      if (renameManualIdType) renameManualIdType.value = "tmdb";
+
       renameType = "show";
       renameSelectedShow = null;
       renameSelectedSeason = null;
@@ -1684,24 +1856,80 @@ try {
       saveRenameBtn.disabled = true;
     }
 
+    async function resolveManualEpisodeMediaId(showUri: string, seasonNumber: number, episodeNumber: number) {
+      try {
+        const res = await fetch(`/api/proxy/shows/${encodeURIComponent(showUri)}/season/${seasonNumber}`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const episodes = data.episodes || [];
+          const ep = episodes.find((e: any) => e.episode_number === episodeNumber);
+          return ep ? ep.id : null;
+        }
+      } catch (err) {
+        console.error("Error resolving manual episode media ID", err);
+      }
+      return null;
+    }
+
     // Save Custom Rename Action
     saveRenameBtn.addEventListener("click", async () => {
       const customTitle = renameCustomTitleInput.value.trim();
       const body: any = {};
 
-      if (renameType === "show") {
-        body.show_uri_id = renameSelectedShow.uri_id ?? (renameSelectedShow.tvdb_id ? `tvdb:s:${renameSelectedShow.tvdb_id}` : `tmdb:s:${renameSelectedShow.tmdb_id}`);
-        body.custom_title = customTitle;
-      } else if (renameType === "movie") {
-        body.media_id = renameSelectedShow.id;
-        body.custom_title = customTitle;
-      } else if (renameType === "season") {
-        body.show_uri_id = renameSelectedShow.uri_id ?? (renameSelectedShow.tvdb_id ? `tvdb:s:${renameSelectedShow.tvdb_id}` : `tmdb:s:${renameSelectedShow.tmdb_id}`);
-        body.season_number = renameSelectedSeason;
-        body.season_custom_name = customTitle;
-      } else if (renameType === "episode") {
-        body.media_id = renameSelectedEpisode.id;
-        body.custom_title = customTitle;
+      if (isManualRename) {
+        const idType = renameManualIdType.value;
+        const idVal = renameManualIdInput.value.trim();
+        const showUri = `${idType}:s:${idVal}`;
+
+        if (renameType === "show") {
+          body.show_uri_id = showUri;
+          body.custom_title = customTitle;
+        } else if (renameType === "movie") {
+          const matchedMovie = localMoviesList.find(m => m.tmdb_id?.toString() === idVal);
+          if (!matchedMovie) {
+            window.showToast?.("Movie not found in collection. Ensure it is synced first.", "error");
+            return;
+          }
+          body.media_id = matchedMovie.id;
+          body.custom_title = customTitle;
+        } else if (renameType === "season") {
+          body.show_uri_id = showUri;
+          body.season_number = parseInt(renameManualSeasonInput.value);
+          body.season_custom_name = customTitle;
+        } else if (renameType === "episode") {
+          const seasonNum = parseInt(renameManualSeasonInput.value);
+          const episodeNum = parseInt(renameManualEpisodeInput.value);
+          
+          saveRenameBtn.disabled = true;
+          saveRenameBtn.textContent = "Resolving Episode...";
+          
+          const resolvedMediaId = await resolveManualEpisodeMediaId(showUri, seasonNum, episodeNum);
+          if (!resolvedMediaId) {
+            window.showToast?.("Episode not found in collection. Ensure it is synced first.", "error");
+            saveRenameBtn.disabled = false;
+            saveRenameBtn.textContent = "Save Custom Rename";
+            return;
+          }
+          body.media_id = resolvedMediaId;
+          body.custom_title = customTitle;
+        }
+      } else {
+        if (renameType === "show") {
+          body.show_uri_id = renameSelectedShow.uri_id ?? (renameSelectedShow.tvdb_id ? `tvdb:s:${renameSelectedShow.tvdb_id}` : `tmdb:s:${renameSelectedShow.tmdb_id}`);
+          body.custom_title = customTitle;
+        } else if (renameType === "movie") {
+          body.media_id = renameSelectedShow.id;
+          body.custom_title = customTitle;
+        } else if (renameType === "season") {
+          body.show_uri_id = renameSelectedShow.uri_id ?? (renameSelectedShow.tvdb_id ? `tvdb:s:${renameSelectedShow.tvdb_id}` : `tmdb:s:${renameSelectedShow.tmdb_id}`);
+          body.season_number = renameSelectedSeason;
+          body.season_custom_name = customTitle;
+        } else if (renameType === "episode") {
+          body.media_id = renameSelectedEpisode.id;
+          body.custom_title = customTitle;
+        }
       }
 
       saveRenameBtn.disabled = true;

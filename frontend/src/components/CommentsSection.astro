@@ -190,7 +190,14 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
 </div>
 
 <script define:vars={{ token, currentUserId: user?.id, isAdmin: user?.role === 'admin' }}>
-  const esc = window.esc;
+  const esc = window.esc || function(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
 
   const SPOILER_OVERLAY_HTML = `<span class="text-amber-400 font-bold text-sm">Click to reveal</span>`;
 

@@ -81,31 +81,74 @@ const showProgress = progressPct > 0 && !watched;
         {showActionBar && !hideBlock && !isPerson && !isCollection && !isSeason && (!isEpisode || (isEpisode && (item.show_tmdb_id || item.show_tvdb_id))) && (() => {
           const isBlocked = item.is_blocked ?? false;
           const isDropped = item.is_dropped ?? false;
-          const alreadyActive = isBlocked || isDropped;
           // Drop (amber) for series that are in collection or have any watch progress
           const showDrop = (isSeries || isEpisode) && (inLibrary || isPartialWatched || watched || isEpisode);
-          const btnBase = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
-          const btnInactiveDrop = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
-          const btnInactiveBlock = `${btnBase} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
-          const btnActiveDrop  = `${btnBase} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
-          const btnActiveBlock = `${btnBase} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
-          const cls = isDropped ? btnActiveDrop : isBlocked ? btnActiveBlock : showDrop ? btnInactiveDrop : btnInactiveBlock;
-          const titleStr = isDropped ? 'Resume tracking' : isBlocked ? 'Unblock' : showDrop ? 'Drop show' : 'Block';
-          return (
-            <button
-              data-action="unified-block"
-              data-is-blocked={String(isBlocked)}
-              data-is-dropped={String(isDropped)}
-              title={titleStr}
-              class={cls}
-            >
-              {(isDropped || (showDrop && !isBlocked)) ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
-              ) : (
+          const btnBase = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+          const btnBaseRight = `${btnBase} right-1.5`;
+          const btnBaseOffset = `${btnBase} right-[38px]`;
+
+          const btnInactiveDrop = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+          const btnInactiveBlock = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+          const btnActiveDrop  = `${btnBaseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+          const btnActiveBlock = `${btnBaseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+          const btnInactiveBlockOffset = `${btnBaseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
+          if (isDropped) {
+            return (
+              <>
+                <button
+                  data-action="unified-block"
+                  data-is-blocked="false"
+                  data-is-dropped="true"
+                  title="Resume tracking"
+                  class={btnActiveDrop}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+                </button>
+                <button
+                  data-action="unified-block"
+                  data-is-blocked="false"
+                  data-is-dropped="false"
+                  data-force-block="true"
+                  data-action-intent="block"
+                  title="Block"
+                  class={btnInactiveBlockOffset}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                </button>
+              </>
+            );
+          } else if (isBlocked) {
+            return (
+              <button
+                data-action="unified-block"
+                data-is-blocked="true"
+                data-is-dropped="false"
+                title="Unblock"
+                class={btnActiveBlock}
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
-              )}
-            </button>
-          );
+              </button>
+            );
+          } else {
+            return (
+              <button
+                data-action="unified-block"
+                data-is-blocked="false"
+                data-is-dropped="false"
+                data-action-intent={showDrop ? 'drop' : 'block'}
+                title={showDrop ? 'Drop show' : 'Block'}
+                class={showDrop ? btnInactiveDrop : btnInactiveBlock}
+              >
+                {showDrop ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                )}
+              </button>
+            );
+          }
         })()}
 
         {posterPath ? (

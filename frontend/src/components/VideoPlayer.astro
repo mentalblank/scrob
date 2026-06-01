@@ -56,7 +56,14 @@ const mediaRef = uriId ?? (tmdbId != null ? String(tmdbId) : "0");
 )}
 
 <script>
-  const esc = window.esc;
+  const esc = (window as any).esc || function(str: any) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
 
   const dialog = document.getElementById('player-dialog');
   if (dialog) {

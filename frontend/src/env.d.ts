@@ -9,6 +9,8 @@ declare namespace App {
       display_name: string;
       email: string;
       role: string;
+      is_admin?: boolean;
+      avatar_url?: string | null;
     } | null;
     token: string | undefined;
   }

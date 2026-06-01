@@ -51,7 +51,14 @@ const { token } = Astro.locals;
       });
     }
 
-    const esc = window.esc;
+    const esc = (window as any).esc || function(str: any) {
+      if (str == null) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    };
 
     async function updateStatus() {
       try {

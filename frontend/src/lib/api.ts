@@ -319,6 +319,7 @@ export interface UserProfile {
   display_name: string;
   role: string;
   is_admin: boolean;
+  avatar_url: string | null;
   api_key: string;
   totp_enabled: boolean;
   created_at: string;

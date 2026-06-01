@@ -375,19 +375,30 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
                   const isBlocked = item.is_blocked ?? false;
                   const isDropped = item.is_dropped ?? false;
                   const showDrop = isSeries && (inLibrary || watched || progressPct > 0);
-                  const base = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer';
-                  const cls = isDropped
-                    ? `${base} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`
-                    : isBlocked
-                    ? `${base} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`
-                    : showDrop
-                    ? `${base} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`
-                    : `${base} opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
-                  const titleStr = isDropped ? 'Resume tracking' : isBlocked ? 'Unblock' : showDrop ? 'Drop show' : 'Block';
+                  const base = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+                  const baseRight = `${base} right-1.5`;
+                  const baseOffset = `${base} right-[38px]`;
+
+                  const btnInactiveDrop = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+                  const btnInactiveBlock = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+                  const btnActiveDrop  = `${baseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+                  const btnActiveBlock = `${baseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+                  const btnInactiveBlockOffset = `${baseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
                   const ICON_DROP = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
                   const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
-                  const icon = (isDropped || (showDrop && !isBlocked)) ? ICON_DROP : ICON_BLOCK;
-                  return `<button data-action="unified-block" data-is-blocked="${isBlocked}" data-is-dropped="${isDropped}" title="${esc(titleStr)}" class="${esc(cls)}">${icon}</button>`;
+
+                  if (isDropped) {
+                    return `
+                      <button data-action="unified-block" data-is-blocked="false" data-is-dropped="true" title="Resume tracking" class="${esc(btnActiveDrop)}">${ICON_DROP}</button>
+                      <button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-force-block="true" data-action-intent="block" title="Block" class="${esc(btnInactiveBlockOffset)}">${ICON_BLOCK}</button>
+                    `;
+                  } else if (isBlocked) {
+                    return `<button data-action="unified-block" data-is-blocked="true" data-is-dropped="false" title="Unblock" class="${esc(btnActiveBlock)}">${ICON_BLOCK}</button>`;
+                  } else {
+                    return `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="${showDrop ? 'drop' : 'block'}" title="${showDrop ? 'Drop show' : 'Block'}" class="${showDrop ? esc(btnInactiveDrop) : esc(btnInactiveBlock)}">${showDrop ? ICON_DROP : ICON_BLOCK}</button>`;
+                  }
                 })()}
                 ${rating ? `<div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
                 ${showProgress ? `
@@ -487,6 +498,9 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
             data-season="${item.season_number != null ? esc(String(item.season_number)) : ""}"
             data-watched="${watched}"
             data-collected="${inLibrary}"
+            data-in-library="${inLibrary}"
+            data-is-blocked="${item.is_blocked ?? false}"
+            data-is-dropped="${item.is_dropped ?? false}"
             data-listed="${inLists.length > 0}"
           >
             <a href="${esc(href)}" class="block">
@@ -496,7 +510,36 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
                   : `<div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-zinc-900/40"><span class="text-3xl mb-2 opacity-30">📺</span><span class="text-xs font-bold uppercase tracking-widest text-zinc-500">${esc(item.show_title ?? item.title)}</span></div>`
                 }
                 <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-                ${item.library?.resolution ? `<div class="absolute top-1.5 right-1.5 bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-zinc-800/80 shadow-lg tracking-tighter">${esc(item.library.resolution)}</div>` : ''}
+                ${item.library?.resolution ? `<div class="absolute top-1.5 left-1.5 bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-zinc-800/80 shadow-lg tracking-tighter">${esc(item.library.resolution)}</div>` : ''}
+                ${(() => {
+                  const isBlocked = item.is_blocked ?? false;
+                  const isDropped = item.is_dropped ?? false;
+                  const showDrop = true;
+                  const base = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+                  const baseRight = `${base} right-1.5`;
+                  const baseOffset = `${base} right-[38px]`;
+
+                  const btnInactiveDrop = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+                  const btnInactiveBlock = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+                  const btnActiveDrop  = `${baseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+                  const btnActiveBlock = `${baseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+                  const btnInactiveBlockOffset = `${baseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
+                  const ICON_DROP = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
+                  const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
+
+                  if (isDropped) {
+                    return `
+                      <button data-action="unified-block" data-is-blocked="false" data-is-dropped="true" title="Resume tracking" class="${esc(btnActiveDrop)}">${ICON_DROP}</button>
+                      <button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-force-block="true" data-action-intent="block" title="Block" class="${esc(btnInactiveBlockOffset)}">${ICON_BLOCK}</button>
+                    `;
+                  } else if (isBlocked) {
+                    return `<button data-action="unified-block" data-is-blocked="true" data-is-dropped="false" title="Unblock" class="${esc(btnActiveBlock)}">${ICON_BLOCK}</button>`;
+                  } else {
+                    return `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="${showDrop ? 'drop' : 'block'}" title="${showDrop ? 'Drop show' : 'Block'}" class="${showDrop ? esc(btnInactiveDrop) : esc(btnInactiveBlock)}">${showDrop ? ICON_DROP : ICON_BLOCK}</button>`;
+                  }
+                })()}
                 ${showProgress ? `
                   <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
                     <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
@@ -588,8 +631,8 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
         loadSection(`/api/proxy/media/airing-today/collected?timezone=${encodeURIComponent(userTimezone)}`, 'grid-airing-today', episodeCardHtml, 12);
 
         window.addEventListener('unified-block-changed', (e) => {
-          const { uriId, tmdbId, mediaType, isDropped } = e.detail;
-          if (mediaType !== 'series' || !isDropped) return;
+          const { uriId, tmdbId, mediaType, isDropped, isBlocked } = e.detail;
+          if (mediaType !== 'series' || (!isDropped && !isBlocked)) return;
 
           const section = document.getElementById('dashboard-next-up');
           if (!section) return;

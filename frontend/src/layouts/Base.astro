@@ -61,6 +61,15 @@ const bottomNavItem = (active: boolean) =>
     html.light #moon-icon { display: none; }
   </style>
   <script is:inline>
+    window.esc = function(str) {
+      if (str == null) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    };
+
     // Pre-flight: migrate localStorage integer IDs to URI format (Phase 4 URI migration)
     (function () {
       var keys = ['last_watched_id', 'last_show_id', 'last_movie_id'];
@@ -190,13 +199,17 @@ const bottomNavItem = (active: boolean) =>
           <!-- User menu (click-toggled) -->
           {user ? (
             <div class="relative">
-              <button id="user-menu-btn" class="relative flex items-center gap-1.5 text-zinc-400 hover:text-zinc-100 transition-colors p-3 rounded-xl bg-zinc-900 border border-zinc-800 cursor-pointer sm:p-1 sm:bg-transparent sm:border-transparent">
-                <span class="hidden sm:inline font-medium text-zinc-100 text-sm">{user.display_name}</span>
-                {pendingRequestCount > 0 && (
-                  <span class="absolute -top-1 -right-1 sm:top-0 sm:right-0 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-zinc-950"></span>
+              <button id="user-menu-btn" class="w-11 h-11 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-all hover:scale-110 active:scale-95 cursor-pointer flex items-center justify-center overflow-hidden p-0" aria-label="User Menu">
+                {user.avatar_url ? (
+                  <img src={`/api/proxy${user.avatar_url}`} alt={user.display_name} class="w-full h-full object-cover shrink-0" />
+                ) : (
+                  <span class="w-full h-full bg-zinc-800 text-sm font-black text-zinc-300 flex items-center justify-center select-none shrink-0">
+                    {user.display_name ? user.display_name.substring(0, 1).toUpperCase() : "M"}
+                  </span>
                 )}
-                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sm:hidden text-zinc-400"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-                <svg id="user-chevron" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="opacity-50 hidden sm:block transition-transform duration-200"><path d="m6 9 6 6 6-6"/></svg>
+                {pendingRequestCount > 0 && (
+                  <span class="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-zinc-950"></span>
+                )}
               </button>
               <div id="user-menu" class="hidden absolute top-full right-0 mt-2 w-48 z-50">
                 <div class="bg-zinc-950/70 backdrop-blur-2xl border border-[var(--color-nav-border)] rounded-xl shadow-2xl p-2">
@@ -296,7 +309,7 @@ const bottomNavItem = (active: boolean) =>
   )}
 
   <!-- Rating popover (shared, repositioned on use) -->
-  <div id="rating-popover" class="hidden absolute z-50 w-72 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+  <div id="rating-popover" class="hidden absolute z-50 w-72 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/85 rounded-2xl shadow-2xl overflow-hidden">
     <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
       <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Your rating</span>
       <button id="rating-popover-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer" aria-label="Close">
@@ -315,7 +328,7 @@ const bottomNavItem = (active: boolean) =>
   </div>
 
   <!-- List popover (shared, repositioned on use) -->
-  <div id="list-popover" class="hidden absolute z-50 w-64 bg-zinc-900/90 backdrop-blur-xl border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+  <div id="list-popover" class="hidden absolute z-50 w-64 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/85 rounded-2xl shadow-2xl overflow-hidden">
     <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
       <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Add to list</span>
       <button id="list-popover-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer" aria-label="Close">
@@ -381,7 +394,7 @@ const bottomNavItem = (active: boolean) =>
 
   <!-- PWA install banner -->
   <div id="pwa-banner" class="hidden fixed bottom-14 left-0 right-0 z-[60] p-4 md:bottom-6 md:left-auto md:right-6 md:max-w-sm">
-    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-4 flex items-start gap-3">
+    <div class="bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/85 rounded-2xl shadow-2xl p-4 flex items-start gap-3">
       <img src="/web-app-manifest-192x192.png" alt="" aria-hidden="true" class="w-12 h-12 rounded-xl shrink-0" />
       <div class="flex-1 min-w-0">
         <p class="text-sm font-bold text-zinc-100">Install Scrob</p>
@@ -678,15 +691,6 @@ const bottomNavItem = (active: boolean) =>
     window.__AUTH_TOKEN__ = __layoutAuthToken;
     window.__USE_24H__ = __use24h;
 
-    // ── Now Playing poller (Global) ──────────────────────────────────────────
-    window.esc = function(str) {
-      if (str == null) return '';
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    };
     const esc = window.esc;
 
     window.showMessage = function(text, type = 'success') {
@@ -1580,15 +1584,57 @@ const bottomNavItem = (active: boolean) =>
         const partialWatched = card.dataset.partialWatched === 'true';
         const isWatched  = card.dataset.watched   === 'true';
         const isSeries   = mediaType === 'series';
+        const forceBlock = btn.dataset.forceBlock === 'true';
 
         // Determine intent: undo if already active, else decide drop vs block
-        const alreadyActive = isDropped || isBlocked;
-        const shouldDrop    = isSeries && (inLibrary || isWatched || partialWatched || card.closest('#dashboard-next-up') !== null || card.closest('#next-up-grid') !== null || window.location.pathname.startsWith('/next-up'));
+        const defaultShouldDrop = isSeries && (inLibrary || isWatched || partialWatched || card.closest('#dashboard-next-up') !== null || card.closest('#next-up-grid') !== null || window.location.pathname.startsWith('/next-up'));
+        const alreadyActive = !forceBlock && (isDropped || isBlocked);
+        const shouldDrop    = !forceBlock && (btn.dataset.actionIntent ? (btn.dataset.actionIntent === 'drop') : defaultShouldDrop);
 
         // SVG icons
         const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
         const ICON_DROP  = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
         const ICON_SPIN  = `<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>`;
+
+        // Helper to update all buttons on the card client-side
+        const updateCardButtons = () => {
+          const cardIsDropped = card.dataset.isDropped === 'true';
+          const cardIsBlocked = card.dataset.isBlocked === 'true';
+          
+          const container = card.querySelector('[class*="aspect-"]');
+          if (!container) return;
+          
+          container.querySelectorAll('[data-action="unified-block"]').forEach(el => el.remove());
+          
+          const btnBase = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+          const btnBaseRight = `${btnBase} right-1.5`;
+          const btnBaseOffset = `${btnBase} right-[38px]`;
+
+          const btnInactiveDrop = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+          const btnInactiveBlock = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+          const btnActiveDrop  = `${btnBaseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+          const btnActiveBlock = `${btnBaseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+          const btnInactiveBlockOffset = `${btnBaseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
+          if (cardIsBlocked) {
+            const btnHtml = `<button data-action="unified-block" data-is-blocked="true" data-is-dropped="false" data-action-intent="block" title="Unblock" class="${btnActiveBlock}">${ICON_BLOCK}</button>`;
+            container.insertAdjacentHTML('beforeend', btnHtml);
+          } else if (cardIsDropped) {
+            const btn1Html = `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="true" data-action-intent="drop" title="Resume tracking" class="${btnActiveDrop}">${ICON_DROP}</button>`;
+            const btn2Html = `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-force-block="true" data-action-intent="block" title="Block" class="${btnInactiveBlockOffset}">${ICON_BLOCK}</button>`;
+            container.insertAdjacentHTML('beforeend', btn1Html);
+            container.insertAdjacentHTML('beforeend', btn2Html);
+          } else {
+            if (defaultShouldDrop) {
+              const btnHtml = `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="drop" title="Drop show" class="${btnInactiveDrop}">${ICON_DROP}</button>`;
+              container.insertAdjacentHTML('beforeend', btnHtml);
+            } else {
+              const btnHtml = `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="block" title="Block" class="${btnInactiveBlock}">${ICON_BLOCK}</button>`;
+              container.insertAdjacentHTML('beforeend', btnHtml);
+            }
+          }
+        };
 
         btn.innerHTML = ICON_SPIN;
         (btn as HTMLButtonElement).disabled = true;
@@ -1597,24 +1643,9 @@ const bottomNavItem = (active: boolean) =>
           if (alreadyActive) {
             // Undo: remove from blocklist entirely
             await apiFetch(`/media/blocklist?${blockDeleteQuery(uriId, mediaType)}`, 'DELETE');
-            btn.dataset.isDropped = 'false';
-            btn.dataset.isBlocked = 'false';
             card.dataset.isDropped = 'false';
             card.dataset.isBlocked = 'false';
-            const nowDrop = shouldDrop; // button mode reverts to what it would show
-            // Style: back to inactive state
-            btn.className = btn.className
-              .replace(/bg-amber-900\/60|bg-red-900\/60|border-amber-600|border-red-600|text-amber-300|text-red-300/g, '')
-              .trim();
-            if (nowDrop) {
-              btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950';
-              btn.title = 'Drop show';
-              btn.innerHTML = ICON_DROP;
-            } else {
-              btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950';
-              btn.title = 'Block';
-              btn.innerHTML = ICON_BLOCK;
-            }
+            updateCardButtons();
             window["showToast"](isDropped ? 'Tracking resumed' : 'Unblocked', 'success');
             window.dispatchEvent(new CustomEvent('unified-block-changed', {
               detail: { uriId, tmdbId, mediaType, isBlocked: false, isDropped: false }
@@ -1624,11 +1655,9 @@ const bottomNavItem = (active: boolean) =>
             // Apply: drop or block
             if (shouldDrop) {
               await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, true));
-              btn.dataset.isDropped = 'true';
               card.dataset.isDropped = 'true';
-              btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white';
-              btn.title = 'Resume tracking';
-              btn.innerHTML = ICON_DROP;
+              card.dataset.isBlocked = 'false';
+              updateCardButtons();
               window["showToast"]('Show dropped', 'success');
               window.dispatchEvent(new CustomEvent('unified-block-changed', {
                 detail: { uriId, tmdbId, mediaType, isBlocked: false, isDropped: true }
@@ -1636,20 +1665,18 @@ const bottomNavItem = (active: boolean) =>
               triggerDashboardRefresh(card);
             } else {
               await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, false));
-              btn.dataset.isBlocked = 'true';
+              card.dataset.isDropped = 'false';
               card.dataset.isBlocked = 'true';
               // For discovery cards: fade the card out (like old 'block' behaviour)
               const isDiscoveryCard = !isSeries || !inLibrary;
-              if (!alreadyActive && isDiscoveryCard) {
+              if (isDiscoveryCard) {
                 card.style.transition = 'all 0.3s ease';
                 card.style.opacity = '0';
                 card.style.transform = 'scale(0.9)';
                 card.style.pointerEvents = 'none';
                 setTimeout(() => card.remove(), 300);
               } else {
-                btn.className = 'nextup-unified-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white';
-                btn.title = 'Unblock';
-                btn.innerHTML = ICON_BLOCK;
+                updateCardButtons();
               }
               window["showToast"]('Blocked', 'success');
               window.dispatchEvent(new CustomEvent('unified-block-changed', {
@@ -1658,9 +1685,10 @@ const bottomNavItem = (active: boolean) =>
               triggerDashboardRefresh(card);
             }
           }
-        } catch {
-          // Restore icon on error
-          btn.innerHTML = (shouldDrop && !alreadyActive) ? ICON_DROP : ICON_BLOCK;
+        } catch (err) {
+          console.error(err);
+          window["showToast"]('Operation failed', 'error');
+          updateCardButtons();
         } finally {
           (btn as HTMLButtonElement).disabled = false;
         }
