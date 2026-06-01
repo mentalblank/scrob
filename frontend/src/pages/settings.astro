@@ -2,14 +2,29 @@
 import Base from "../layouts/Base.astro";
 import PasswordToggle from "../components/PasswordToggle.astro";
 import { api } from "../lib/api";
-import type { TotpBackupCode } from "../lib/api";
+import type { TotpBackupCode, UserPreferences, PrivacyLevel } from "../lib/api";
 
 const { token } = Astro.locals;
-const [settings, me, connections, scrobbleConnections] = await Promise.all([
+const [
+  settings,
+  me,
+  connections,
+  scrobbleConnections,
+  profileData,
+  countriesRes,
+  languagesRes,
+  movieGenresRes,
+  showGenresRes,
+] = await Promise.all([
   api.auth.getSettings(token!),
   api.auth.me(token!),
   api.auth.getConnections(token!),
   api.auth.getScrobbleConnections(token!),
+  api.profile.get(token!).catch(() => null),
+  api.media.getCountries(token!).catch(() => []),
+  api.media.getLanguages(token!).catch(() => []),
+  api.media.getGenres("movie", token!).catch(() => ({ genres: [] })),
+  api.media.getGenres("tv", token!).catch(() => ({ genres: [] })),
 ]);
 const hasTmdbKey = settings.has_effective_tmdb_key;
 const traktConfigured    = !!(settings.trakt_connected || settings.trakt_client_id);
@@ -26,6 +41,43 @@ if (me.totp_enabled) {
     // non-fatal — codes panel will just be empty
   }
 }
+
+const prefs: UserPreferences = {
+  display_name: null,
+  bio: null,
+  country: null,
+  liked_genres: [],
+  disliked_genres: [],
+  streaming_services: [],
+  content_language: null,
+  privacy_level: "private",
+  pagination_type: "infinite_scroll",
+  ...(profileData ?? {}),
+  unified_filters: settings.preferences?.unified_filters !== false,
+};
+
+const PRIVACY_LEVELS: [PrivacyLevel, string, string][] = [
+  ["private", "Private", "Only you can see your profile and activity."],
+  ["friends_only", "Friends Only", "Only people you follow (and who follow you back) can see your activity."],
+  ["public", "Public", "Anyone on this instance can see your profile and activity."],
+];
+
+const CONTENT_LANGUAGES = (languagesRes || [])
+  .filter(l => l.iso_639_1 && l.english_name)
+  .map(l => [l.iso_639_1, l.english_name] as [string, string])
+  .sort((a, b) => a[1].localeCompare(b[1]));
+
+const MOVIE_GENRES = (movieGenresRes?.genres || []).map(g => g.name).sort();
+const SHOW_GENRES = (showGenresRes?.genres || []).map(g => g.name).sort();
+const ALL_GENRES = [...new Set([...MOVIE_GENRES, ...SHOW_GENRES])].sort();
+
+const watchRegion = prefs.country || "US";
+const providersRes = await api.media.getWatchProviders("movie", watchRegion, token).catch(() => ({ results: [] }));
+const allProviders = providersRes.results || [];
+
+const COUNTRIES = (countriesRes || [])
+  .map(c => [c.iso_3166_1, c.english_name] as [string, string])
+  .sort((a, b) => a[1].localeCompare(b[1]));
 ---
 
 <Base title="Settings">
@@ -37,111 +89,231 @@ if (me.totp_enabled) {
 
     <!-- Tabs Header Navigation -->
     <div class="flex flex-nowrap gap-2 mb-8 border-b border-zinc-800/80 pb-4 w-full overflow-x-auto no-scrollbar">
-      <button type="button" data-settings-tab-btn="general" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">General</button>
+      <button type="button" data-settings-tab-btn="profile" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Profile</button>
+      <button type="button" data-settings-tab-btn="preferences" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Preferences</button>
       <button type="button" data-settings-tab-btn="media-servers" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Media Servers</button>
       <button type="button" data-settings-tab-btn="trackers" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Trackers</button>
       <button type="button" data-settings-tab-btn="integrations" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Integrations</button>
-      <button type="button" data-settings-tab-btn="advanced" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Security & Advanced</button>
+      <button type="button" data-settings-tab-btn="security" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Security & API Keys</button>
     </div>
 
     <div class="space-y-12">
       <form id="settings-form" class="space-y-6">
-        <!-- Tab Panel: General -->
-        <div data-settings-tab="general" class="space-y-12">
-          <!-- General Settings Section -->
-          <section>
+        <!-- Tab Panel: Profile -->
+        <div data-settings-tab="profile" class="space-y-12">
+          <!-- Identity Section -->
+          <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
             <div class="mb-4 border-b border-zinc-800 pb-2">
-              <h2 class="section-headline">General</h2>
+              <h2 class="section-headline">Identity</h2>
             </div>
+
+            <!-- Avatar -->
+            <div class="flex items-center gap-6 mb-8">
+              <div id="avatar-preview" class="w-20 h-20 rounded-2xl overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                {prefs.avatar_url ? (
+                  <img id="avatar-img" src={`/api/proxy${prefs.avatar_url}`} alt="Avatar" class="w-full h-full object-cover" />
+                ) : (
+                  <span id="avatar-initials" class="text-2xl font-black text-zinc-400 select-none">
+                    {(prefs.display_name ?? me.username)[0].toUpperCase()}
+                  </span>
+                )}
+              </div>
+              <div class="space-y-2">
+                <p class="text-sm font-medium text-zinc-300">Profile Picture</p>
+                <p class="text-xs text-zinc-500">JPEG, PNG or WebP · Max 5 MB</p>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <label class="cursor-pointer px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-zinc-200 text-sm font-medium rounded-xl transition-all">
+                    <span id="upload-label">Choose file</span>
+                    <input id="avatar-input" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only" />
+                  </label>
+                  <button id="remove-avatar-btn" type="button" class={`px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium rounded-xl transition-all ${!prefs.avatar_url ? 'hidden' : ''}`}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <!-- TMDB API Key -->
               <div class="space-y-2">
-                <label for="tmdb_api_key" class="block text-sm font-medium text-zinc-400">TMDB API Key</label>
-                <div class="flex gap-2">
-                  <div class="relative flex-1 group/field">
-                    <input
-                      type="password"
-                      name="tmdb_api_key"
-                      id="tmdb_api_key"
-                      value={settings.tmdb_api_key || ""}
-                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                    />
-                    <PasswordToggle />
-                  </div>
-                  <button
-                    type="button"
-                    data-action="test_tmdb"
-                    title="Test TMDB key"
-                    class="js-action-btn px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
-                    </svg>
-                  </button>
-                </div>
-                {settings.has_global_tmdb_key && !settings.tmdb_api_key ? (
-                  <p class="text-xs text-blue-400">A server-wide TMDB key is configured by your admin. You can leave this blank to use it, or enter your own key to override it.</p>
-                ) : settings.has_global_tmdb_key && settings.tmdb_api_key ? (
-                  <p class="text-xs text-blue-400">A server-wide TMDB key is configured, but you are using your own key. Clear this field to fall back to the server key.</p>
-                ) : (
-                  <p class="text-xs text-zinc-500">Required for fetching metadata and posters. Will be validated before saving.</p>
-                )}
+                <label for="display_name" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Display Name</label>
+                <input
+                  type="text"
+                  id="display_name"
+                  name="display_name"
+                  value={prefs.display_name ?? ""}
+                  placeholder={me.username}
+                  maxlength={64}
+                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                />
+                <p class="text-xs text-zinc-500">Shown instead of your username where your name appears.</p>
               </div>
-
-              <!-- TVDB API Key -->
               <div class="space-y-2">
-                <label for="tvdb_api_key" class="block text-sm font-medium text-zinc-400">TVDB API Key</label>
-                <div class="flex gap-2">
-                  <div class="relative flex-1 group/field">
-                    <input
-                      type="password"
-                      name="tvdb_api_key"
-                      id="tvdb_api_key"
-                      value={settings.tvdb_api_key || ""}
-                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                    />
-                    <PasswordToggle />
-                  </div>
-                  <button
-                    type="button"
-                    data-action="test_tvdb"
-                    title="Test TVDB key"
-                    class="js-action-btn px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
-                    </svg>
-                  </button>
-                </div>
-                {settings.has_global_tvdb_key && !settings.tvdb_api_key ? (
-                  <p class="text-xs text-blue-400">A server-wide TVDB key is configured by your admin. You can leave this blank to use it, or enter your own key to override it.</p>
-                ) : settings.has_global_tvdb_key && settings.tvdb_api_key ? (
-                  <p class="text-xs text-blue-400">A server-wide TVDB key is configured, but you are using your own key. Clear this field to fall back to the server key.</p>
-                ) : (
-                  <p class="text-xs text-zinc-500">Required for TVDB-sourced shows. Get your key at thetvdb.com.</p>
-                )}
-              </div>
-
-              <!-- Primary Metadata Source -->
-              <div class="space-y-2 col-span-1 md:col-span-2">
-                <label for="primary_metadata_source" class="block text-sm font-medium text-zinc-400">Primary Metadata Source</label>
-                <select
-                  name="primary_metadata_source"
-                  id="primary_metadata_source"
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
-                >
-                  <option value="tmdb" selected={settings.preferences?.primary_metadata_source !== "tvdb"}>TheMovieDB (TMDB) - Default</option>
-                  <option value="tvdb" selected={settings.preferences?.primary_metadata_source === "tvdb"}>TheTVDB (TVDB)</option>
-                </select>
-                <p class="text-xs text-zinc-500">Choose which provider to use as the primary metadata source for TV shows. Movies will continue to use TMDB.</p>
+                <label for="bio" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Bio</label>
+                <textarea
+                  id="bio"
+                  name="bio"
+                  maxlength={280}
+                  placeholder="A few words about yourself…"
+                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all resize-none h-[94px]"
+                >{prefs.bio ?? ""}</textarea>
               </div>
             </div>
           </section>
 
+          <!-- Privacy -->
+          <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+            <div class="mb-4 border-b border-zinc-800 pb-2">
+              <h2 class="section-headline">Privacy</h2>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {PRIVACY_LEVELS.map(([value, label, desc]) => (
+                <label class={`relative flex flex-col p-4 rounded-2xl border cursor-pointer transition-all hover:bg-zinc-900/50 group ${prefs.privacy_level === value ? 'bg-blue-500/5 border-blue-500/50' : 'bg-zinc-950/40 border-zinc-800'}`}>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class={`font-semibold ${prefs.privacy_level === value ? 'text-blue-400' : 'text-zinc-100 group-hover:text-zinc-200'}`}>{label}</span>
+                    <input
+                      type="radio"
+                      name="privacy_level"
+                      value={value}
+                      checked={prefs.privacy_level === value}
+                      class="w-4 h-4 text-blue-500 bg-zinc-800 border-zinc-700 focus:ring-blue-500 focus:ring-offset-zinc-900"
+                    />
+                  </div>
+                  <span class="text-xs text-zinc-500 leading-relaxed">{desc}</span>
+                </label>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <!-- Tab Panel: Preferences -->
+        <div data-settings-tab="preferences" class="space-y-12 hidden">
+          <!-- Discovery Preferences -->
+          <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+            <div class="mb-4 border-b border-zinc-800 pb-2">
+              <h2 class="section-headline">Discovery Preferences</h2>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div class="space-y-2">
+                <label for="country" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Region</label>
+                <select
+                  id="country"
+                  name="country"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-300 text-xs focus:border-blue-500 focus:outline-none transition cursor-pointer appearance-none"
+                >
+                  <option value="">— Not set —</option>
+                  {COUNTRIES.map(([code, name]) => (
+                    <option value={code} selected={prefs.country === code}>{name}</option>
+                  ))}
+                </select>
+                <p class="text-[10px] text-zinc-500 font-medium leading-relaxed">
+                  Used to fetch relevant streaming availability and filter content for your region. Changing this will refresh the service list below.
+                </p>
+              </div>
+
+              <div class="space-y-2">
+                <label for="content_language" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Content Language</label>
+                <select
+                  id="content_language"
+                  name="content_language"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-300 text-xs focus:border-blue-500 focus:outline-none transition cursor-pointer appearance-none"
+                >
+                  <option value="">— Any language —</option>
+                  {CONTENT_LANGUAGES.map(([code, name]) => (
+                    <option value={code} selected={prefs.content_language === code}>{name}</option>
+                  ))}
+                </select>
+                <p class="text-[10px] text-zinc-500 font-medium leading-relaxed">
+                  Prioritize recommendations in your preferred original language.
+                </p>
+              </div>
+            </div>
+
+            <div class="space-y-4 pt-4">
+              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Streaming Services</label>
+              <p class="text-xs text-zinc-500 leading-relaxed">
+                Select the services you subscribe to. The Discover page will highlight content available on your services.
+              </p>
+              <div id="streaming-services-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.streaming_services)}>
+                {allProviders.map((p: any) => {
+                  const active = prefs.streaming_services.includes(String(p.provider_id));
+                  return (
+                    <button
+                      type="button"
+                      data-provider-id={String(p.provider_id)}
+                      class={`provider-toggle group relative flex flex-col items-center gap-3 p-4 rounded-2xl border transition-all hover:bg-zinc-800/50 ${active ? 'bg-blue-600/10 border-blue-500/40 text-blue-400 ring-2 ring-blue-500/20' : 'bg-zinc-950 border-zinc-800 text-zinc-500'}`}
+                    >
+                      <div class="relative w-12 h-12 rounded-xl overflow-hidden shadow-lg group-hover:scale-110 transition-transform">
+                        <img src={p.logo_path} alt={p.provider_name} class="w-full h-full object-cover" />
+                        {active && (
+                          <div class="absolute inset-0 bg-blue-500/20 flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-6 h-6 text-white drop-shadow-md">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                      <span class="text-[10px] font-black uppercase tracking-widest text-center leading-tight truncate w-full">{p.provider_name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {allProviders.length === 0 && (
+                <div class="p-8 rounded-2xl border border-dashed border-zinc-800 text-center bg-zinc-950/20">
+                  <p class="text-sm text-zinc-500">No providers found for this region. Please select a country first.</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <!-- Favourite Genres -->
+          <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+            <div class="mb-4 border-b border-zinc-800 pb-2">
+              <h2 class="section-headline">Favourite Genres</h2>
+              <p class="text-xs text-zinc-500 mt-1">Pick the genres you enjoy most. The Discover page will show dedicated rows for your favourites.</p>
+            </div>
+            <div id="liked-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.liked_genres)}>
+              {ALL_GENRES.map((genre) => {
+                const active = (prefs.liked_genres || []).includes(genre);
+                return (
+                  <button
+                    type="button"
+                    data-genre-type="liked"
+                    data-value={genre}
+                    class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-800/50 ${active ? "bg-blue-600/10 border-blue-500/40 text-blue-400 ring-2 ring-blue-500/20" : "bg-zinc-950 border-zinc-800 text-zinc-500"}`}
+                  >
+                    {genre}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <!-- Disliked Genres -->
+          <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+            <div class="mb-4 border-b border-zinc-800 pb-2">
+              <h2 class="section-headline">Disliked Genres</h2>
+              <p class="text-xs text-zinc-500 mt-1">Genres you want to avoid. Items that only have disliked genres are filtered out of recommendations. A genre can't be in both lists.</p>
+            </div>
+            <div id="disliked-genre-list" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-selected={JSON.stringify(prefs.disliked_genres || [])}>
+              {ALL_GENRES.map((genre) => {
+                const active = (prefs.disliked_genres || []).includes(genre);
+                return (
+                  <button
+                    type="button"
+                    data-genre-type="disliked"
+                    data-value={genre}
+                    class={`genre-toggle flex items-center justify-center p-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-800/50 ${active ? "bg-red-600/10 border-red-500/40 text-red-400 ring-2 ring-red-500/20" : "bg-zinc-950 border-zinc-800 text-zinc-500"}`}
+                  >
+                    {genre}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
           <!-- Explore Visibility -->
-          <section class="mt-12">
+          <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
             <div class="flex flex-col gap-4 mb-6 border-b border-zinc-800 pb-4">
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
@@ -162,15 +334,15 @@ if (me.totp_enabled) {
 
               <!-- Content filter summary chips -->
               <div class="flex flex-wrap gap-2 mt-2">
-                <a href="/blocklist?tab=genres" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_genres.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+                <a href="/blocklist?tab=genres" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_genres.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-950/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17"/></svg>
                   {contentFilters.blocked_genres.length > 0 ? `${contentFilters.blocked_genres.length} genre filter${contentFilters.blocked_genres.length !== 1 ? 's' : ''}` : 'No genre filters'}
                 </a>
-                <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_keywords.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+                <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_keywords.length > 0 ? 'bg-rose-900/30 border-rose-700/50 text-rose-300 hover:bg-rose-900/50' : 'bg-zinc-950/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/></svg>
                   {contentFilters.blocked_keywords.length > 0 ? `${contentFilters.blocked_keywords.length} keyword filter${contentFilters.blocked_keywords.length !== 1 ? 's' : ''}` : 'No keyword filters'}
                 </a>
-                <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_regexes.length > 0 ? 'bg-violet-900/30 border-violet-700/50 text-violet-300 hover:bg-violet-900/50' : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+                <a href="/blocklist?tab=keywords" class={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${contentFilters.blocked_regexes.length > 0 ? 'bg-violet-900/30 border-violet-700/50 text-violet-300 hover:bg-violet-900/50' : 'bg-zinc-950/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="m9 9 6 6m0-6-6 6"/></svg>
                   {contentFilters.blocked_regexes.length > 0 ? `${contentFilters.blocked_regexes.length} regex filter${contentFilters.blocked_regexes.length !== 1 ? 's' : ''}` : 'No regex filters'}
                 </a>
@@ -186,7 +358,7 @@ if (me.totp_enabled) {
                 { key: 'listed', label: 'Listed' },
                 { key: 'unlisted', label: 'Not Listed' },
               ].map(({ key, label }) => (
-                <div class="flex items-center justify-between p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                <div class="flex items-center justify-between p-4 bg-zinc-950/40 rounded-2xl border border-zinc-800">
                   <div>
                     <p class="text-sm font-semibold text-zinc-100">{label}</p>
                   </div>
@@ -207,132 +379,134 @@ if (me.totp_enabled) {
             </div>
           </section>
 
-          <!-- Appearance -->
-          <section class="mt-12">
-            <h2 class="section-headline mb-4 border-b border-zinc-800 pb-2">Appearance</h2>
-            <div class="space-y-6">
-              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-                <div>
-                  <p class="text-sm font-semibold text-zinc-100 mb-1">Blur explicit content</p>
-                  <p class="text-xs text-zinc-400">Blur posters flagged as adult content by TMDB. Click a blurred poster to reveal it.</p>
-                </div>
-                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-                  <input
-                    type="checkbox"
-                    name="blur_explicit"
-                    id="blur-explicit-toggle"
-                    class="sr-only peer"
-                    checked={settings.blur_explicit !== false}
-                  />
-                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-                </label>
-              </div>
-              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-                <div>
-                  <p class="text-sm font-semibold text-zinc-100 mb-1">24-hour time format</p>
-                  <p class="text-xs text-zinc-400">Display watch times in 24-hour format (e.g. 23:31) instead of 12-hour (e.g. 11:31 PM).</p>
-                </div>
-                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-                  <input
-                    type="checkbox"
-                    name="time_format_24h"
-                    id="time-format-24h-toggle"
-                    class="sr-only peer"
-                    checked={settings.time_format_24h !== false}
-                  />
-                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-                </label>
-              </div>
+          <!-- Interface Preferences -->
+          <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+            <div class="mb-4 border-b border-zinc-800 pb-2">
+              <h2 class="section-headline">Interface Preferences</h2>
+            </div>
 
-              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-                <div>
-                  <p class="text-sm font-semibold text-zinc-100 mb-1">Show comments</p>
-                  <p class="text-xs text-zinc-400">Show user comments on media detail pages site-wide.</p>
-                </div>
-                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-                  <input
-                    type="checkbox"
-                    name="show_comments"
-                    id="show-comments-toggle"
-                    class="sr-only peer"
-                    checked={settings.show_comments !== false}
-                  />
-                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-                </label>
+            <!-- Accent Color -->
+            <div class="space-y-3">
+              <p class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Accent Color</p>
+              <div class="flex flex-wrap gap-3" id="accent-swatches">
+                {[
+                  { id: 'blue',   label: 'Blue',   color: '#3b82f6' },
+                  { id: 'purple', label: 'Purple', color: '#a855f7' },
+                  { id: 'pink',   label: 'Pink',   color: '#ec4899' },
+                  { id: 'red',    label: 'Red',    color: '#ef4444' },
+                  { id: 'green',  label: 'Green',  color: '#22c55e' },
+                  { id: 'yellow', label: 'Yellow', color: '#eab308' },
+                  { id: 'orange', label: 'Orange', color: '#f97316' },
+                ].map(({ id, label, color }) => (
+                  <button
+                    type="button"
+                    data-accent-id={id}
+                    class="accent-swatch flex items-center gap-2.5 px-5 py-3 rounded-xl border border-zinc-800 bg-zinc-950/40 hover:border-zinc-600 transition-all cursor-pointer text-sm text-zinc-400 hover:text-zinc-100"
+                  >
+                    <span class="w-5 h-5 rounded-full shrink-0" style={`background-color: ${color}`}></span>
+                    {label}
+                  </button>
+                ))}
               </div>
+            </div>
 
-              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-                <div>
-                  <p class="text-sm font-semibold text-zinc-100 mb-1">Show user ratings</p>
-                  <p class="text-xs text-zinc-400">Show ratings from users of this app. TMDB ratings will still be visible.</p>
-                </div>
-                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-                  <input
-                    type="checkbox"
-                    name="show_user_ratings"
-                    id="show-user-ratings-toggle"
-                    class="sr-only peer"
-                    checked={settings.show_user_ratings !== false}
-                  />
-                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            <!-- Pagination Style -->
+            <div class="space-y-4 pt-2">
+              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Pagination Style</label>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label class={`relative flex flex-col p-4 rounded-xl border cursor-pointer transition-all hover:bg-zinc-900/50 group ${prefs.pagination_type === 'infinite_scroll' ? 'bg-blue-500/5 border-blue-500/50' : 'bg-zinc-950/40 border-zinc-800'}`}>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class={`font-semibold ${prefs.pagination_type === 'infinite_scroll' ? 'text-blue-400' : 'text-zinc-100 group-hover:text-zinc-200'}`}>Infinite Scroll</span>
+                    <input
+                      type="radio"
+                      name="pagination_type"
+                      value="infinite_scroll"
+                      checked={prefs.pagination_type === 'infinite_scroll'}
+                      class="w-4 h-4 text-blue-500 bg-zinc-800 border-zinc-700 focus:ring-blue-500 focus:ring-offset-zinc-900"
+                    />
+                  </div>
+                  <span class="text-xs text-zinc-500 leading-relaxed">Automatically load more items as you scroll down.</span>
                 </label>
-              </div>
 
-              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-                <div>
-                  <p class="text-sm font-semibold text-zinc-100 mb-1">Media server enrichment</p>
-                  <p class="text-xs text-zinc-400">Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.</p>
-                </div>
-                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-                  <input
-                    type="checkbox"
-                    name="media_server_enrichment"
-                    id="media-server-enrichment-toggle"
-                    class="sr-only peer"
-                    checked={settings.preferences?.media_server_enrichment !== false}
-                  />
-                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                <label class={`relative flex flex-col p-4 rounded-xl border cursor-pointer transition-all hover:bg-zinc-900/50 group ${prefs.pagination_type === 'pagination' ? 'bg-blue-500/5 border-blue-500/50' : 'bg-zinc-950/40 border-zinc-800'}`}>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class={`font-semibold ${prefs.pagination_type === 'pagination' ? 'text-blue-400' : 'text-zinc-100 group-hover:text-zinc-200'}`}>Classic Pagination</span>
+                    <input
+                      type="radio"
+                      name="pagination_type"
+                      value="pagination"
+                      checked={prefs.pagination_type === 'pagination'}
+                      class="w-4 h-4 text-blue-500 bg-zinc-800 border-zinc-700 focus:ring-blue-500 focus:ring-offset-zinc-900"
+                    />
+                  </div>
+                  <span class="text-xs text-zinc-500 leading-relaxed">Traditional page numbers for deliberate navigation.</span>
                 </label>
               </div>
+            </div>
 
-              <div class="flex items-start justify-between gap-6 p-4 bg-zinc-900/60 rounded-xl border border-zinc-800">
-                <div>
-                  <p class="text-sm font-semibold text-zinc-100 mb-1">Include specials in counts</p>
-                  <p class="text-xs text-zinc-400">Include Specials (Season 0) when calculating show and season watch/collection progress.</p>
-                </div>
-                <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
-                  <input
-                    type="checkbox"
-                    name="include_specials"
-                    id="include-specials-toggle"
-                    class="sr-only peer"
-                    checked={settings.preferences?.include_specials === true}
-                  />
-                  <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            <!-- Visibility Filters Behavior -->
+            <div class="space-y-4 pt-2">
+              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Visibility Filters Behavior</label>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label class={`relative flex flex-col p-4 rounded-xl border cursor-pointer transition-all hover:bg-zinc-900/50 group ${prefs.unified_filters !== false ? 'bg-blue-500/5 border-blue-500/50' : 'bg-zinc-950/40 border-zinc-800'}`}>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class={`font-semibold ${prefs.unified_filters !== false ? 'text-blue-400' : 'text-zinc-100 group-hover:text-zinc-200'}`}>Unified Filters</span>
+                    <input
+                      type="radio"
+                      name="unified_filters"
+                      value="true"
+                      checked={prefs.unified_filters !== false}
+                      class="w-4 h-4 text-blue-500 bg-zinc-800 border-zinc-700 focus:ring-blue-500 focus:ring-offset-zinc-900"
+                    />
+                  </div>
+                  <span class="text-xs text-zinc-500 leading-relaxed">Apply the same visibility filters across all pages.</span>
+                </label>
+
+                <label class={`relative flex flex-col p-4 rounded-xl border cursor-pointer transition-all hover:bg-zinc-900/50 group ${prefs.unified_filters === false ? 'bg-blue-500/5 border-blue-500/50' : 'bg-zinc-950/40 border-zinc-800'}`}>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class={`font-semibold ${prefs.unified_filters === false ? 'text-blue-400' : 'text-zinc-100 group-hover:text-zinc-200'}`}>Independent per Page</span>
+                    <input
+                      type="radio"
+                      name="unified_filters"
+                      value="false"
+                      checked={prefs.unified_filters === false}
+                      class="w-4 h-4 text-blue-500 bg-zinc-800 border-zinc-700 focus:ring-blue-500 focus:ring-offset-zinc-900"
+                    />
+                  </div>
+                  <span class="text-xs text-zinc-500 leading-relaxed">Each page (Explore, Trending, Lists, etc.) remembers its own filters.</span>
                 </label>
               </div>
-              <div>
-                <p class="text-sm text-zinc-400 font-semibold mb-3">Accent color</p>
-                <div class="flex flex-wrap gap-3" id="accent-swatches">
-                  {[
-                    { id: 'blue',   label: 'Blue',   color: '#3b82f6' },
-                    { id: 'purple', label: 'Purple', color: '#a855f7' },
-                    { id: 'pink',   label: 'Pink',   color: '#ec4899' },
-                    { id: 'red',    label: 'Red',    color: '#ef4444' },
-                    { id: 'green',  label: 'Green',  color: '#22c55e' },
-                    { id: 'yellow', label: 'Yellow', color: '#eab308' },
-                    { id: 'orange', label: 'Orange', color: '#f97316' },
-                  ].map(({ id, label, color }) => (
-                    <button
-                      type="button"
-                      data-accent-id={id}
-                      class="accent-swatch flex items-center gap-2.5 px-5 py-3 rounded-xl border border-zinc-800 bg-zinc-900 hover:border-zinc-600 transition-all cursor-pointer text-sm text-zinc-400 hover:text-zinc-100"
-                    >
-                      <span class="w-5 h-5 rounded-full shrink-0" style={`background-color: ${color}`}></span>
-                      {label}
-                    </button>
-                  ))}
-                </div>
+            </div>
+
+            <!-- UI Feature Toggles -->
+            <div class="space-y-4 pt-2">
+              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Interface Options</label>
+              <div class="space-y-4">
+                {[
+                  { id: 'blur-explicit-toggle', name: 'blur_explicit', label: 'Blur explicit content', desc: 'Blur posters flagged as adult content by TMDB. Click a blurred poster to reveal it.', checked: settings.blur_explicit !== false },
+                  { id: 'time-format-24h-toggle', name: 'time_format_24h', label: '24-hour time format', desc: 'Display watch times in 24-hour format (e.g. 23:31) instead of 12-hour (e.g. 11:31 PM).', checked: settings.time_format_24h !== false },
+                  { id: 'show-comments-toggle', name: 'show_comments', label: 'Show comments', desc: 'Show user comments on media detail pages site-wide.', checked: settings.show_comments !== false },
+                  { id: 'show-user-ratings-toggle', name: 'show_user_ratings', label: 'Show user ratings', desc: 'Show ratings from users of this app. TMDB ratings will still be visible.', checked: settings.show_user_ratings !== false },
+                  { id: 'media-server-enrichment-toggle', name: 'media_server_enrichment', label: 'Media server enrichment', desc: 'Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.', checked: settings.preferences?.media_server_enrichment !== false },
+                  { id: 'include-specials-toggle', name: 'include_specials', label: 'Include specials in counts', desc: 'Include Specials (Season 0) when calculating show and season watch/collection progress.', checked: settings.preferences?.include_specials === true }
+                ].map(({ id, name, label, desc, checked }) => (
+                  <div class="flex items-start justify-between gap-6 p-4 bg-zinc-950/40 rounded-2xl border border-zinc-800">
+                    <div>
+                      <p class="text-sm font-semibold text-zinc-100 mb-1">{label}</p>
+                      <p class="text-xs text-zinc-400">{desc}</p>
+                    </div>
+                    <label class="relative inline-flex items-center shrink-0 cursor-pointer mt-0.5">
+                      <input
+                        type="checkbox"
+                        name={name}
+                        id={id}
+                        class="sr-only peer"
+                        checked={checked}
+                      />
+                      <div class="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                    </label>
+                  </div>
+                ))}
               </div>
             </div>
           </section>
@@ -1293,10 +1467,102 @@ if (me.totp_enabled) {
         </form>
 
 
-      <!-- Tab Panel: Advanced -->
-      <div data-settings-tab="advanced" class="space-y-12 hidden">
-      <!-- Maintenance -->
-      <section>
+      <!-- Tab Panel: Security & API Keys -->
+      <div data-settings-tab="security" class="space-y-12 hidden">
+        <!-- API & Metadata Keys -->
+        <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-zinc-800 pb-2">
+            <h2 class="section-headline">API & Metadata Keys</h2>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- TMDB API Key -->
+            <div class="space-y-2">
+              <label for="tmdb_api_key" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">TMDB API Key</label>
+              <div class="flex gap-2">
+                <div class="relative flex-1 group/field">
+                  <input
+                    type="password"
+                    name="tmdb_api_key"
+                    id="tmdb_api_key"
+                    value={settings.tmdb_api_key || ""}
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                  <PasswordToggle />
+                </div>
+                <button
+                  type="button"
+                  data-action="test_tmdb"
+                  title="Test TMDB key"
+                  class="js-action-btn px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
+                  </svg>
+                </button>
+              </div>
+              {settings.has_global_tmdb_key && !settings.tmdb_api_key ? (
+                <p class="text-xs text-blue-400">A server-wide TMDB key is configured by your admin. You can leave this blank to use it, or enter your own key to override it.</p>
+              ) : settings.has_global_tmdb_key && settings.tmdb_api_key ? (
+                <p class="text-xs text-blue-400">A server-wide TMDB key is configured, but you are using your own key. Clear this field to fall back to the server key.</p>
+              ) : (
+                <p class="text-xs text-zinc-500">Required for fetching metadata and posters. Will be validated before saving.</p>
+              )}
+            </div>
+
+            <!-- TVDB API Key -->
+            <div class="space-y-2">
+              <label for="tvdb_api_key" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">TVDB API Key</label>
+              <div class="flex gap-2">
+                <div class="relative flex-1 group/field">
+                  <input
+                    type="password"
+                    name="tvdb_api_key"
+                    id="tvdb_api_key"
+                    value={settings.tvdb_api_key || ""}
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                  />
+                  <PasswordToggle />
+                </div>
+                <button
+                  type="button"
+                  data-action="test_tvdb"
+                  title="Test TVDB key"
+                  class="js-action-btn px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
+                  </svg>
+                </button>
+              </div>
+              {settings.has_global_tvdb_key && !settings.tvdb_api_key ? (
+                <p class="text-xs text-blue-400">A server-wide TVDB key is configured by your admin. You can leave this blank to use it, or enter your own key to override it.</p>
+              ) : settings.has_global_tvdb_key && settings.tvdb_api_key ? (
+                <p class="text-xs text-blue-400">A server-wide TVDB key is configured, but you are using your own key. Clear this field to fall back to the server key.</p>
+              ) : (
+                <p class="text-xs text-zinc-500">Required for TVDB-sourced shows. Get your key at thetvdb.com.</p>
+              )}
+            </div>
+
+            <!-- Primary Metadata Source -->
+            <div class="space-y-2 col-span-1 md:col-span-2">
+              <label for="primary_metadata_source" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Primary Metadata Source</label>
+              <select
+                name="primary_metadata_source"
+                id="primary_metadata_source"
+                class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-300 text-xs focus:border-blue-500 focus:outline-none transition cursor-pointer appearance-none"
+              >
+                <option value="tmdb" selected={settings.preferences?.primary_metadata_source !== "tvdb"}>TheMovieDB (TMDB) - Default</option>
+                <option value="tvdb" selected={settings.preferences?.primary_metadata_source === "tvdb"}>TheTVDB (TVDB)</option>
+              </select>
+              <p class="text-xs text-zinc-500">Choose which provider to use as the primary metadata source for TV shows. Movies will continue to use TMDB.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Maintenance -->
+        <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
         <h2 class="section-headline mb-4 border-b border-zinc-800 pb-2">Maintenance</h2>
         <div class="space-y-3 max-w-xl">
           <div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
@@ -1342,18 +1608,15 @@ if (me.totp_enabled) {
               >
                 Clear
               </button>
-            </div>
-          </div>
+            </div>      <!-- API Key -->
+      <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+        <div class="mb-4 border-b border-zinc-800 pb-2">
+          <h2 class="section-headline">API Key</h2>
         </div>
-      </section>
-
-      <!-- API Key -->
-      <section>
-        <h2 class="section-headline mb-4 border-b border-zinc-800 pb-2">API Key</h2>
         <div class="space-y-4 max-w-xl">
           <p class="text-sm text-zinc-400">Use this key to authenticate requests to the Scrob API. Keep it secret — if it leaks, regenerate it immediately.</p>
           <div class="space-y-2">
-            <label for="scrob_api_key" class="block text-sm font-medium text-zinc-400">Your API Key</label>
+            <label for="scrob_api_key" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Your API Key</label>
             <div class="flex gap-2">
               <div class="relative flex-1 group/field">
                 <input
@@ -1361,7 +1624,7 @@ if (me.totp_enabled) {
                   id="scrob_api_key"
                   readonly
                   value={me.api_key}
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
+                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 font-mono text-sm focus:outline-none cursor-default select-all"
                 />
                 <PasswordToggle />
               </div>
@@ -1388,13 +1651,14 @@ if (me.totp_enabled) {
       </section>
 
       <!-- Security -->
-      <section id="2fa-section">
-        <h2 class="section-headline mb-4 border-b border-zinc-800 pb-2">Security</h2>
-        <h3 class="text-base font-semibold text-zinc-300 mb-3">Two-Factor Authentication</h3>
+      <section id="2fa-section" class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+        <div class="mb-4 border-b border-zinc-800 pb-2">
+          <h2 class="section-headline">Two-Factor Authentication</h2>
+        </div>
 
         {!me.totp_enabled ? (
           <div class="space-y-4">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6">
               <div>
                 <h3 class="font-semibold text-zinc-100 mb-1">Authenticator App</h3>
                 <p class="text-sm text-zinc-400">Protect your account with a time-based one-time password (TOTP) from any authenticator app.</p>
@@ -1409,7 +1673,7 @@ if (me.totp_enabled) {
             </div>
 
             <!-- Setup panel (hidden until "Enable 2FA" is clicked) -->
-            <div id="2fa-setup-panel" class="hidden border border-zinc-700 rounded-2xl p-6 space-y-5 bg-zinc-900/30">
+            <div id="2fa-setup-panel" class="hidden border border-zinc-800 rounded-2xl p-6 space-y-5 bg-zinc-950/40">
               <div class="text-sm text-zinc-400">
                 Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.), then enter the 6-digit code to confirm.
               </div>
@@ -1424,7 +1688,7 @@ if (me.totp_enabled) {
                     <code id="totp-secret-display" class="block bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-300 font-mono text-sm tracking-widest break-all select-all"></code>
                   </div>
                   <div class="space-y-2">
-                    <label for="totp-verify-code" class="block text-sm font-medium text-zinc-400">Verification Code</label>
+                    <label for="totp-verify-code" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Verification Code</label>
                     <input
                       type="text"
                       id="totp-verify-code"
@@ -1432,7 +1696,7 @@ if (me.totp_enabled) {
                       inputmode="numeric"
                       maxlength="6"
                       placeholder="000000"
-                      class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
                     />
                   </div>
                   <div class="flex gap-3">
@@ -1477,7 +1741,7 @@ if (me.totp_enabled) {
           </div>
         ) : (
           <div class="space-y-4">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6">
               <div class="flex items-center gap-3">
                 <span class="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0"></span>
                 <div>
@@ -1495,17 +1759,17 @@ if (me.totp_enabled) {
             </div>
 
             <!-- Disable confirmation (hidden initially) -->
-            <div id="2fa-disable-panel" class="hidden border border-zinc-700 rounded-2xl p-6 space-y-4 bg-zinc-900/30">
+            <div id="2fa-disable-panel" class="hidden border border-zinc-800 rounded-2xl p-6 space-y-4 bg-zinc-950/40">
               <p class="text-sm text-zinc-400">Enter your authenticator code or a backup code to disable 2FA.</p>
               <div class="flex gap-3 items-end">
                 <div class="space-y-2 flex-1">
-                  <label for="totp-disable-code" class="block text-sm font-medium text-zinc-400">Code</label>
+                  <label for="totp-disable-code" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Code</label>
                   <input
                     type="text"
                     id="totp-disable-code"
                     autocomplete="one-time-code"
                     placeholder="000000 or XXXX-XXXX"
-                    class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
                   />
                 </div>
                 <button
@@ -1527,8 +1791,8 @@ if (me.totp_enabled) {
             </div>
 
             <!-- Backup codes -->
-            <details class="group border border-zinc-800 rounded-2xl bg-zinc-900/20 overflow-hidden">
-              <summary class="flex items-center justify-between px-6 py-4 cursor-pointer list-none select-none hover:bg-zinc-900/40 transition-colors">
+            <details class="group border border-zinc-800 rounded-2xl bg-zinc-950/20 overflow-hidden">
+              <summary class="flex items-center justify-between px-6 py-4 cursor-pointer list-none select-none hover:bg-zinc-950/40 transition-colors">
                 <span class="font-medium text-zinc-300">Backup Codes</span>
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-zinc-500 transition-transform group-open:rotate-180">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
@@ -1538,7 +1802,7 @@ if (me.totp_enabled) {
                 <p class="text-sm text-zinc-500">Used codes are shown with strikethrough and cannot be reused. Keep these somewhere safe.</p>
                 <div class="grid grid-cols-2 gap-2">
                   {backupCodes.map((bc) => (
-                    <span class={`font-mono text-sm px-3 py-1.5 rounded-xl border ${bc.used ? "text-zinc-400 border-zinc-800 line-through" : "text-zinc-300 border-zinc-700 bg-zinc-900"}`}>
+                    <span class={`font-mono text-sm px-3 py-1.5 rounded-xl border ${bc.used ? "text-zinc-400 border-zinc-850 line-through" : "text-zinc-300 border-zinc-750 bg-zinc-950/40"}`}>
                       {bc.code}
                     </span>
                   ))}
@@ -1547,45 +1811,50 @@ if (me.totp_enabled) {
             </details>
           </div>
         )}
+      </section>
 
-        <h3 class="text-base font-semibold text-zinc-300 mt-8 mb-3">Change Password</h3>
-        <form id="password-form" class="space-y-6 max-w-md">
+      <!-- Change Password -->
+      <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+        <div class="mb-4 border-b border-zinc-800 pb-2">
+          <h2 class="section-headline">Change Password</h2>
+        </div>
+        <div id="password-form" class="space-y-6 max-w-md">
           <div class="space-y-4">
             {me.has_password && <div class="space-y-2">
-              <label for="current_password" class="block text-sm font-medium text-zinc-400">Current Password</label>
+              <label for="current_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Current Password</label>
               <div class="relative group/field">
                 <input
                   type="password"
                   name="current_password"
                   id="current_password"
                   required
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
                 />
                 <PasswordToggle />
               </div>
             </div>}
             <div class="space-y-2">
-              <label for="new_password" class="block text-sm font-medium text-zinc-400">New Password</label>
+              <label for="new_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">New Password</label>
               <div class="relative group/field">
                 <input
                   type="password"
                   name="new_password"
                   id="new_password"
                   required
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
                 />
                 <PasswordToggle />
               </div>
             </div>
             <div class="space-y-2">
-              <label for="confirm_password" class="block text-sm font-medium text-zinc-400">Confirm New Password</label>
+              <label for="confirm_password" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Confirm New Password</label>
               <div class="relative group/field">
                 <input
                   type="password"
                   name="confirm_password"
                   id="confirm_password"
                   required
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
                 />
                 <PasswordToggle />
               </div>
@@ -1594,20 +1863,22 @@ if (me.totp_enabled) {
           <div class="pt-2">
             <button
               id="update-password-btn"
-              type="submit"
-              class="bg-zinc-800 text-zinc-100 font-bold px-8 py-2 rounded-xl hover:bg-zinc-700 transition-colors cursor-pointer border border-zinc-700 disabled:opacity-50"
+              type="button"
+              class="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold px-8 py-2 rounded-xl transition-colors cursor-pointer border border-zinc-700 disabled:opacity-50"
             >
               Update Password
             </button>
           </div>
-        </form>
+        </div>
       </section>
 
       <!-- Data Management -->
-      <section>
-        <h2 class="section-headline mb-4 border-b border-zinc-800 pb-2">Data Management</h2>
+      <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+        <div class="mb-4 border-b border-zinc-800 pb-2">
+          <h2 class="section-headline">Data Management</h2>
+        </div>
         <div class="space-y-4">
-          <div class="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
             <div>
               <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Watch History</h3>
               <p class="text-zinc-400 text-sm">This will permanently delete all your watch history and progress. Your collection and ratings will not be affected.</p>
@@ -1621,8 +1892,7 @@ if (me.totp_enabled) {
             </button>
           </div>
 
-
-          <div class="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
             <div>
               <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Collection</h3>
               <p class="text-zinc-400 text-sm">This will permanently remove all items from your collection. Your watch history and ratings will not be affected.</p>
@@ -1635,14 +1905,15 @@ if (me.totp_enabled) {
               Clear Collection
             </button>
           </div>
-
         </div>
       </section>
 
       <!-- Danger Zone -->
-      <section>
-        <h2 class="text-2xl font-black text-red-500 tracking-tight mb-4 border-b border-red-500/20 pb-2">Danger Zone</h2>
-        <div class="bg-red-500/5 border border-red-500/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+      <section class="bg-red-950/20 border border-red-500/20 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+        <div class="mb-4 border-b border-red-500/20 pb-2">
+          <h2 class="text-2xl font-black text-red-500 tracking-tight">Danger Zone</h2>
+        </div>
+        <div class="bg-red-950/30 border border-red-500/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
             <h3 class="text-lg font-bold text-zinc-100 mb-1">Delete Account</h3>
             <p class="text-zinc-400 text-sm">Once you delete your account, there is no going back. All your data will be permanently removed.</p>
@@ -1653,6 +1924,9 @@ if (me.totp_enabled) {
             class="px-6 py-3 bg-red-600 hover:bg-red-500 text-zinc-100 font-bold rounded-xl transition-all shadow-lg shadow-red-600/20 active:scale-95 whitespace-nowrap cursor-pointer"
           >
             Delete Account
+          </button>
+        </div>
+      </section>Account
           </button>
         </div>
       </section>
@@ -1767,6 +2041,10 @@ if (me.totp_enabled) {
   const appData = document.getElementById('app-data');
   const token = appData?.dataset.token ?? '';
 
+  let selectedStreaming = new Set<string>();
+  let selectedLikedGenres = new Set<string>();
+  let selectedDislikedGenres = new Set<string>();
+
   // ── Tab Management ────────────────────────────────────────────────────────
   function setupTabs() {
     const buttons = document.querySelectorAll('[data-settings-tab-btn]');
@@ -1792,7 +2070,7 @@ if (me.totp_enabled) {
 
       const saveFooter = document.getElementById('save-settings-footer');
       if (saveFooter) {
-        if (tabId === 'advanced') {
+        if (tabId === 'security') {
           saveFooter.classList.add('hidden');
         } else {
           saveFooter.classList.remove('hidden');
@@ -1810,7 +2088,7 @@ if (me.totp_enabled) {
       });
     });
 
-    let initialTab = 'general';
+    let initialTab = 'profile';
     const hash = window.location.hash;
     if (hash && hash.startsWith('#tab-')) {
       initialTab = hash.substring(5);
@@ -1820,12 +2098,10 @@ if (me.totp_enabled) {
     }
 
     if (!document.querySelector(`[data-settings-tab-btn="${initialTab}"]`)) {
-      initialTab = 'general';
+      initialTab = 'profile';
     }
 
     switchTab(initialTab);
-
-
   }
 
   setupTabs();
@@ -3501,21 +3777,23 @@ if (me.totp_enabled) {
 
         // Gather general settings
         const formData = new FormData(form);
+        const tmdbApiEl = document.getElementById('tmdb_api_key') as HTMLInputElement | null;
+        const tvdbApiEl = document.getElementById('tvdb_api_key') as HTMLInputElement | null;
         const settings = {
-          tmdb_api_key: formData.get('tmdb_api_key') || null,
-          tvdb_api_key: formData.get('tvdb_api_key') || null,
+          tmdb_api_key: tmdbApiEl ? tmdbApiEl.value.trim() || null : null,
+          tvdb_api_key: tvdbApiEl ? tvdbApiEl.value.trim() || null : null,
 
           radarr_url: formData.get('radarr_url') || null,
           radarr_token: formData.get('radarr_token') || null,
           radarr_root_folder: formData.get('radarr_root_folder') || null,
-          radarr_quality_profile: formData.get('radarr_quality_profile') ? parseInt(formData.get('radarr_quality_profile')) : null,
-          radarr_tags: formData.getAll('radarr_tags').map(id => parseInt(id)),
+          radarr_quality_profile: formData.get('radarr_quality_profile') ? parseInt(formData.get('radarr_quality_profile') as string) : null,
+          radarr_tags: formData.getAll('radarr_tags').map(id => parseInt(id as string)),
 
           sonarr_url: formData.get('sonarr_url') || null,
           sonarr_token: formData.get('sonarr_token') || null,
           sonarr_root_folder: formData.get('sonarr_root_folder') || null,
-          sonarr_quality_profile: formData.get('sonarr_quality_profile') ? parseInt(formData.get('sonarr_quality_profile')) : null,
-          sonarr_tags: formData.getAll('sonarr_tags').map(id => parseInt(id)),
+          sonarr_quality_profile: formData.get('sonarr_quality_profile') ? parseInt(formData.get('sonarr_quality_profile') as string) : null,
+          sonarr_tags: formData.getAll('sonarr_tags').map(id => parseInt(id as string)),
           sonarr_season_folder: formData.get('sonarr_season_folder') === 'true',
 
           trakt_client_id: formData.get('trakt_client_id') || null,
@@ -3595,10 +3873,31 @@ if (me.totp_enabled) {
           document.cookie = `time_format_24h=${timeFormatEl.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
         }
 
+        // Save auth settings
         saves.push(fetch(`/api/proxy/auth/settings`, {
           method: 'PATCH',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...settings, ...syncPrefs, preferences: updatedPreferences }),
+        }));
+
+        // Save profile preferences
+        saves.push(fetch('/api/proxy/profile/me', {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            display_name: formData.get('display_name')?.toString().trim() || null,
+            bio: formData.get('bio')?.toString().trim() || null,
+            country: formData.get('country') || null,
+            content_language: formData.get('content_language') || null,
+            privacy_level: (document.querySelector('input[name="privacy_level"]:checked') as HTMLInputElement | null)?.value || 'private',
+            pagination_type: (document.querySelector('input[name="pagination_type"]:checked') as HTMLInputElement | null)?.value || 'infinite_scroll',
+            streaming_services: Array.from(selectedStreaming),
+            liked_genres: Array.from(selectedLikedGenres),
+            disliked_genres: Array.from(selectedDislikedGenres),
+          }),
         }));
 
         const results = await Promise.all(saves);
@@ -3610,7 +3909,7 @@ if (me.totp_enabled) {
         }
 
         showMessage('Settings updated successfully!');
-      } catch (e) {
+      } catch (e: any) {
         showMessage(e.message, 'error');
       } finally {
         saveBtn.disabled = false;
@@ -3624,13 +3923,16 @@ if (me.totp_enabled) {
     const updateBtn = document.getElementById('update-password-btn');
     if (!form || !updateBtn) return;
 
-    form.addEventListener('submit', async (e) => {
+    updateBtn.addEventListener('click', async (e) => {
       e.preventDefault();
 
-      const formData = new FormData(form);
-      const current_password = formData.get('current_password') || null;
-      const new_password = formData.get('new_password');
-      const confirm_password = formData.get('confirm_password');
+      const current_password_el = document.getElementById('current_password') as HTMLInputElement | null;
+      const new_password_el = document.getElementById('new_password') as HTMLInputElement | null;
+      const confirm_password_el = document.getElementById('confirm_password') as HTMLInputElement | null;
+
+      const current_password = current_password_el ? current_password_el.value : null;
+      const new_password = new_password_el ? new_password_el.value : '';
+      const confirm_password = confirm_password_el ? confirm_password_el.value : '';
 
       if (new_password !== confirm_password) {
         showMessage('New passwords do not match', 'error');
@@ -3650,17 +3952,226 @@ if (me.totp_enabled) {
 
         if (res.ok) {
           showMessage('Password updated successfully!');
-          form.reset();
+          if (current_password_el) current_password_el.value = '';
+          if (new_password_el) new_password_el.value = '';
+          if (confirm_password_el) confirm_password_el.value = '';
         } else {
           const data = await res.json();
           throw new Error(data.detail || 'Failed to update password');
         }
-      } catch (e) {
+      } catch (e: any) {
         showMessage(e.message, 'error');
       } finally {
         updateBtn.disabled = false;
         updateBtn.textContent = originalText;
       }
+    });
+  }
+
+  function setupProfileAndPreferences() {
+    const avatarInput = document.getElementById('avatar-input') as HTMLInputElement | null;
+    const uploadLabel = document.getElementById('upload-label');
+    const removeBtn = document.getElementById('remove-avatar-btn') as HTMLButtonElement | null;
+
+    function setAvatarPreview(src: string | null) {
+      const preview = document.getElementById('avatar-preview');
+      if (!preview) return;
+      if (src) {
+        preview.innerHTML = `<img id="avatar-img" src="${esc(src)}" alt="Avatar" class="w-full h-full object-cover" />`;
+      } else {
+        const displayNameInput = document.getElementById('display_name') as HTMLInputElement | null;
+        const initial = displayNameInput?.value.trim()[0] || '?';
+        preview.innerHTML = `<span id="avatar-initials" class="text-2xl font-black text-zinc-400 select-none">${esc(initial.toUpperCase())}</span>`;
+      }
+    }
+
+    avatarInput?.addEventListener('change', async () => {
+      const file = avatarInput.files?.[0];
+      if (!file) return;
+      if (uploadLabel) uploadLabel.textContent = 'Uploading…';
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const res = await fetch('/api/proxy/profile/me/avatar', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: form,
+        });
+        if (!res.ok) {
+          const data = await res.json() as { detail?: string };
+          throw new Error(data.detail ?? 'Upload failed');
+        }
+        const data = await res.json() as { avatar_url: string };
+        setAvatarPreview(`/api/proxy${data.avatar_url}?t=${Date.now()}`);
+        if (removeBtn) removeBtn.classList.remove('hidden');
+        showMessage('Avatar updated.');
+      } catch (e: unknown) {
+        showMessage(e instanceof Error ? e.message : 'Upload failed.', 'error');
+      } finally {
+        if (uploadLabel) uploadLabel.textContent = 'Choose file';
+        avatarInput.value = '';
+      }
+    });
+
+    removeBtn?.addEventListener('click', async () => {
+      removeBtn.disabled = true;
+      try {
+        const res = await fetch('/api/proxy/profile/me/avatar', {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Failed to remove avatar');
+        setAvatarPreview(null);
+        removeBtn.classList.add('hidden');
+        showMessage('Avatar removed.');
+      } catch (e: unknown) {
+        showMessage(e instanceof Error ? e.message : 'Failed to remove avatar.', 'error');
+      } finally {
+        removeBtn.disabled = false;
+      }
+    });
+
+    const streamingList = document.getElementById('streaming-services-list');
+    const likedGenreList = document.getElementById('liked-genre-list');
+    const dislikedGenreList = document.getElementById('disliked-genre-list');
+
+    selectedStreaming = new Set(JSON.parse(streamingList?.dataset.selected || '[]'));
+    selectedLikedGenres = new Set(JSON.parse(likedGenreList?.dataset.selected || '[]'));
+    selectedDislikedGenres = new Set(JSON.parse(dislikedGenreList?.dataset.selected || '[]'));
+
+    function refreshButton(btn: HTMLElement, active: boolean, isDislike = false) {
+      if (active) {
+        const activeClasses = isDislike 
+          ? ['bg-red-600/10', 'border-red-500/40', 'text-red-400', 'ring-2', 'ring-red-500/20']
+          : ['bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20'];
+        btn.classList.add(...activeClasses);
+        btn.classList.remove('bg-zinc-950', 'border-zinc-800', 'text-zinc-500');
+        const check = btn.querySelector('.absolute');
+        if (check) check.classList.remove('hidden');
+      } else {
+        const activeClasses = isDislike
+          ? ['bg-red-600/10', 'border-red-500/40', 'text-red-400', 'ring-2', 'ring-red-500/20']
+          : ['bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20'];
+        btn.classList.remove(...activeClasses);
+        btn.classList.add('bg-zinc-950', 'border-zinc-800', 'text-zinc-500');
+        const check = btn.querySelector('.absolute');
+        if (check) check.classList.add('hidden');
+      }
+    }
+
+    streamingList?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.provider-toggle') as HTMLElement;
+      if (!btn) return;
+      const id = btn.dataset.providerId!;
+      if (selectedStreaming.has(id)) {
+        selectedStreaming.delete(id);
+      } else {
+        selectedStreaming.add(id);
+      }
+      refreshButton(btn, selectedStreaming.has(id));
+    });
+
+    likedGenreList?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
+      if (!btn) return;
+      const val = btn.dataset.value!;
+      if (selectedLikedGenres.has(val)) {
+        selectedLikedGenres.delete(val);
+      } else {
+        selectedLikedGenres.add(val);
+        if (selectedDislikedGenres.has(val)) {
+          selectedDislikedGenres.delete(val);
+          const dislikedBtn = dislikedGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
+          if (dislikedBtn) refreshButton(dislikedBtn, false, true);
+        }
+      }
+      refreshButton(btn, selectedLikedGenres.has(val));
+    });
+
+    dislikedGenreList?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('.genre-toggle') as HTMLElement;
+      if (!btn) return;
+      const val = btn.dataset.value!;
+      if (selectedDislikedGenres.has(val)) {
+        selectedDislikedGenres.delete(val);
+      } else {
+        selectedDislikedGenres.add(val);
+        if (selectedLikedGenres.has(val)) {
+          selectedLikedGenres.delete(val);
+          const likedBtn = likedGenreList?.querySelector(`[data-value="${val}"]`) as HTMLElement | null;
+          if (likedBtn) refreshButton(likedBtn, false);
+        }
+      }
+      refreshButton(btn, selectedDislikedGenres.has(val), true);
+    });
+
+    const countrySelect = document.getElementById('country') as HTMLSelectElement | null;
+    countrySelect?.addEventListener('change', async () => {
+      const saveBtn = document.getElementById('save-settings-btn') as HTMLButtonElement | null;
+      if (saveBtn) {
+        saveBtn.click();
+        setTimeout(() => window.location.reload(), 500);
+      }
+    });
+
+    document.querySelectorAll<HTMLInputElement>('input[name="privacy_level"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        document.querySelectorAll<HTMLInputElement>('input[name="privacy_level"]').forEach(r => {
+          const label = r.closest('label');
+          const span = label?.querySelector('.font-semibold');
+          if (r.checked) {
+            label?.classList.add('bg-blue-500/5', 'border-blue-500/50');
+            label?.classList.remove('bg-zinc-950', 'border-zinc-800');
+            span?.classList.add('text-blue-400');
+            span?.classList.remove('text-zinc-100');
+          } else {
+            label?.classList.remove('bg-blue-500/5', 'border-blue-500/50');
+            label?.classList.add('bg-zinc-950', 'border-zinc-800');
+            span?.classList.remove('text-blue-400');
+            span?.classList.add('text-zinc-100');
+          }
+        });
+      });
+    });
+
+    document.querySelectorAll<HTMLInputElement>('input[name="pagination_type"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        document.querySelectorAll<HTMLInputElement>('input[name="pagination_type"]').forEach(r => {
+          const label = r.closest('label');
+          const span = label?.querySelector('.font-semibold');
+          if (r.checked) {
+            label?.classList.add('bg-blue-500/5', 'border-blue-500/50');
+            label?.classList.remove('bg-zinc-950', 'border-zinc-800');
+            span?.classList.add('text-blue-400');
+            span?.classList.remove('text-zinc-100');
+          } else {
+            label?.classList.remove('bg-blue-500/5', 'border-blue-500/50');
+            label?.classList.add('bg-zinc-950', 'border-zinc-800');
+            span?.classList.remove('text-blue-400');
+            span?.classList.add('text-zinc-100');
+          }
+        });
+      });
+    });
+
+    document.querySelectorAll<HTMLInputElement>('input[name="unified_filters"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        document.querySelectorAll<HTMLInputElement>('input[name="unified_filters"]').forEach(r => {
+          const label = r.closest('label');
+          const span = label?.querySelector('.font-semibold');
+          if (r.checked) {
+            label?.classList.add('bg-blue-500/5', 'border-blue-500/50');
+            label?.classList.remove('bg-zinc-950', 'border-zinc-800');
+            span?.classList.add('text-blue-400');
+            span?.classList.remove('text-zinc-100');
+          } else {
+            label?.classList.remove('bg-blue-500/5', 'border-blue-500/50');
+            label?.classList.add('bg-zinc-950', 'border-zinc-800');
+            span?.classList.remove('text-blue-400');
+            span?.classList.add('text-zinc-100');
+          }
+        });
+      });
     });
   }
 
@@ -3832,6 +4343,7 @@ if (me.totp_enabled) {
   setupScrobbleConnections();
   setupSettingsForm();
   setupPasswordForm();
+  setupProfileAndPreferences();
 
   // Sync blur_explicit cookie from the server-rendered value on page load.
   // Picks up changes made on another device/browser.
@@ -3976,6 +4488,7 @@ if (me.totp_enabled) {
     setupVisibilityToggles();
     setupSettingsForm();
     setupPasswordForm();
+    setupProfileAndPreferences();
     setupApiKey();
     setupHealButton();
     setupClearSessionsButton();

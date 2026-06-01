@@ -41,7 +41,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       <form id="global-settings-form" class="space-y-3">
 
         <!-- TMDB -->
-        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl overflow-hidden">
           <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="tmdb-body">
             <div class="flex items-center gap-3 pointer-events-none">
               <span class="w-2 h-2 bg-blue-500 rounded-full shrink-0"></span>
@@ -76,7 +76,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </div>
 
         <!-- TVDB -->
-        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl overflow-hidden">
           <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="tvdb-body">
             <div class="flex items-center gap-3 pointer-events-none">
               <span class="w-2 h-2 bg-teal-500 rounded-full shrink-0"></span>
@@ -111,7 +111,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </div>
 
         <!-- Radarr -->
-        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl overflow-hidden">
           <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="radarr-body">
             <div class="flex items-center gap-3 pointer-events-none">
               <span class="w-2 h-2 bg-yellow-500 rounded-full shrink-0"></span>
@@ -184,7 +184,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </div>
 
         <!-- Sonarr -->
-        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl overflow-hidden">
           <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="sonarr-body">
             <div class="flex items-center gap-3 pointer-events-none">
               <span class="w-2 h-2 bg-sky-500 rounded-full shrink-0"></span>
@@ -274,7 +274,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
     <section>
       <h2 class="section-headline border-b border-zinc-800 pb-2 mb-6">Users</h2>
 
-      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+      <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl overflow-hidden">
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-zinc-800 text-left">
@@ -367,7 +367,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       <h2 class="section-headline border-b border-zinc-800 pb-2 mb-6">Maintenance</h2>
       <p class="text-zinc-400 text-sm mb-6">Server-wide operations that run across all users' collections.</p>
 
-      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+      <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl overflow-hidden">
         <div class="p-6 flex flex-col sm:flex-row sm:items-center gap-4">
           <div class="flex-1">
             <h3 class="font-semibold text-zinc-100 mb-1">Heal missing metadata</h3>
@@ -392,7 +392,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </div>
       </div>
 
-      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center gap-4 mt-4">
+      <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 flex flex-col sm:flex-row sm:items-center gap-4 mt-4">
         <div class="flex-1">
           <h3 class="font-semibold text-zinc-100 mb-1">Clear Database</h3>
           <p class="text-sm text-zinc-400">Deletes all media, history, collections, and lists. Your user and server settings will be preserved.</p>
@@ -410,7 +410,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
 
       <div class="grid md:grid-cols-2 gap-6">
         <!-- Backup -->
-        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-3">
+        <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 flex flex-col gap-3">
           <div>
             <h3 class="font-semibold text-zinc-100 mb-1">Backup</h3>
             <p class="text-sm text-zinc-400">Download a full SQL dump of the database. Keep it somewhere safe.</p>
@@ -422,7 +422,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </div>
 
         <!-- Restore -->
-        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-3">
+        <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 flex flex-col gap-3">
           <div>
             <h3 class="font-semibold text-zinc-100 mb-1">Restore</h3>
             <p class="text-sm text-zinc-400">Upload a <code class="text-zinc-300">.pgdump</code> backup file to restore. <span class="text-red-400 font-medium">All existing data will be overwritten.</span></p>
