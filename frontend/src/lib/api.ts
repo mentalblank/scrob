@@ -1201,6 +1201,44 @@ export const api = {
       put<{ saved: number }>(`/sync/connection/${connectionId}/libraries`, body, token),
     scanLibraries: (connectionId: number, token: string) =>
       post<{ status: string; message: string }>(`/sync/connection/${connectionId}/scan`, undefined, token),
+    
+    // Remaps (Overrides)
+    getSeasonOverrides: (token: string) =>
+      get<ShowSeasonOverride[]>("/sync/season-overrides", undefined, token),
+    createSeasonOverride: (body: any, token: string) =>
+      post<ShowSeasonOverride>("/sync/season-overrides", body, token),
+    deleteSeasonOverride: (id: number, token: string) =>
+      del<{ status: string }>(`/sync/season-overrides/${id}`, undefined, token),
+    bulkDeleteSeasonOverrides: (ids: number[], token: string) =>
+      post<{ status: string; deleted_count: number }>("/sync/season-overrides/bulk-delete", { ids }, token),
+    applySeasonOverride: (id: number, token: string) =>
+      post<{ status: string; remapped: number }>(`/sync/season-overrides/${id}/apply`, undefined, token),
+    
+    getEpisodeOverrides: (token: string) =>
+      get<{ overrides: any[] }>("/sync/episode-overrides", undefined, token),
+    createEpisodeOverride: (body: any, token: string) =>
+      post<{ id: number; status: string }>("/sync/episode-overrides", body, token),
+    deleteEpisodeOverride: (id: number, token: string) =>
+      del<{ status: string }>(`/sync/episode-overrides/${id}`, undefined, token),
+    bulkDeleteEpisodeOverrides: (ids: number[], token: string) =>
+      post<{ status: string; deleted_count: number }>("/sync/episode-overrides/bulk-delete", { ids }, token),
+    applyEpisodeOverride: (id: number, token: string) =>
+      post<{ status: string; remapped: number }>(`/sync/episode-overrides/${id}/apply`, undefined, token),
+
+    getCustomTitles: (token: string) =>
+      get<{ results: any[] }>("/sync/custom-titles", undefined, token),
+    saveCustomTitle: (body: any, token: string) =>
+      patch<{ status: string }>("/sync/custom-title", body, token),
+    deleteCustomTitle: (showUriId: string, token: string) =>
+      del<{ status: string }>("/sync/custom-title", { show_uri_id: showUriId }, token),
+
+    // Source show/movie lookups for remaps
+    getSourceShows: (token: string) =>
+      get<any[]>("/sync/source-shows", undefined, token),
+    getSourceMovies: (token: string) =>
+      get<any[]>("/sync/source-movies", undefined, token),
+    getTmdbShowPreview: (uriId: string, token: string) =>
+      get<any>(`/sync/tmdb-show-preview/${uriId}`, undefined, token),
   },
 
   profile: {

@@ -66,11 +66,11 @@ frontend/frontend.log
 
 # --- Common AI files ---
 backend/data/avatars/
-GEMINI.md
-CLAUDE.md
-AGENTS.md
-copilot-instructions.md
-.claude/
+GEMINI*.md
+CLAUDE*.md
+AGENTS*.md
+copilot-instructions*.md
+.claude*/
 
 # --- Project Specific ---
 test.http

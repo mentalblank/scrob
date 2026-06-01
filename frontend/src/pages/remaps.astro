@@ -15,20 +15,15 @@ let groupedCustomTitlesList = [];
 let error = "";
 
 try {
-  const BACKEND_PORT = (import.meta.env.BACKEND_PORT as string | undefined) ?? "7331";
-  
-  const [resSeason, resEp, resTitles, settings] = await Promise.all([
-    fetch(`http://localhost:${BACKEND_PORT}/sync/season-overrides`, { headers: { 'Authorization': `Bearer ${token}` } }),
-    fetch(`http://localhost:${BACKEND_PORT}/sync/episode-overrides`, { headers: { 'Authorization': `Bearer ${token}` } }),
-    fetch(`http://localhost:${BACKEND_PORT}/sync/custom-titles`, { headers: { 'Authorization': `Bearer ${token}` } }),
+  const [dataSeason, dataEp, dataTitles, settings] = await Promise.all([
+    api.sync.getSeasonOverrides(token),
+    api.sync.getEpisodeOverrides(token),
+    api.sync.getCustomTitles(token),
     api.auth.getSettings(token)
   ]);
   
-  if (resSeason.ok) seasonOverrides = await resSeason.json();
-  else error += "Failed to load season overrides. ";
-  
-  if (resEp.ok) episodeOverrides = (await resEp.json()).overrides || [];
-  else error += "Failed to load episode overrides. ";
+  seasonOverrides = dataSeason;
+  episodeOverrides = dataEp.overrides || [];
   
   // Group episode overrides by show URI
   const groupedEpisodeOverrides: Record<string, any> = {};
@@ -55,45 +50,41 @@ try {
   });
   groupedShowsList = Object.values(groupedEpisodeOverrides);
   
-  if (resTitles.ok) {
-    customTitles = (await resTitles.json()).results || [];
-    
-    // Group custom titles by show ID
-    const groupedCustomTitles: Record<string, any> = {};
-    customTitles.forEach((item: any) => {
-      let groupId = item.show_uri_id ?? String(item.show_tmdb_id ?? 0);
-      let groupTitle = item.show_title || "Global / Unlinked";
-      let groupPoster = item.show_poster_path || null;
+  customTitles = dataTitles.results || [];
+  
+  // Group custom titles by show ID
+  const groupedCustomTitles: Record<string, any> = {};
+  customTitles.forEach((item: any) => {
+    let groupId = item.show_uri_id ?? String(item.show_tmdb_id ?? 0);
+    let groupTitle = item.show_title || "Global / Unlinked";
+    let groupPoster = item.show_poster_path || null;
 
-      if (item.type === 'movie') {
-        groupId = "movies";
-        groupTitle = "Movies";
-        groupPoster = null;
-      }
+    if (item.type === 'movie') {
+      groupId = "movies";
+      groupTitle = "Movies";
+      groupPoster = null;
+    }
 
-      if (!groupedCustomTitles[groupId]) {
-        groupedCustomTitles[groupId] = {
-          show_title: groupTitle,
-          show_uri_id: item.show_uri_id ?? null,
-          show_tmdb_id: item.show_tmdb_id || 0,
-          show_poster_path: groupPoster,
-          items: [],
-          isMovies: item.type === 'movie'
-        };
-      }
-      groupedCustomTitles[groupId].items.push(item);
-    });
-    // Sort groups: movies first, then shows alphabetically, unlinked last
-    groupedCustomTitlesList = Object.values(groupedCustomTitles).sort((a: any, b: any) => {
-      if (a.isMovies) return -1;
-      if (b.isMovies) return 1;
-      if (!a.show_uri_id && !a.show_tmdb_id) return 1;
-      if (!b.show_uri_id && !b.show_tmdb_id) return -1;
-      return a.show_title.localeCompare(b.show_title);
-    });
-  } else {
-    error += "Failed to load custom titles. ";
-  }
+    if (!groupedCustomTitles[groupId]) {
+      groupedCustomTitles[groupId] = {
+        show_title: groupTitle,
+        show_uri_id: item.show_uri_id ?? null,
+        show_tmdb_id: item.show_tmdb_id || 0,
+        show_poster_path: groupPoster,
+        items: [],
+        isMovies: item.type === 'movie'
+      };
+    }
+    groupedCustomTitles[groupId].items.push(item);
+  });
+  // Sort groups: movies first, then shows alphabetically, unlinked last
+  groupedCustomTitlesList = Object.values(groupedCustomTitles).sort((a: any, b: any) => {
+    if (a.isMovies) return -1;
+    if (b.isMovies) return 1;
+    if (!a.show_uri_id && !a.show_tmdb_id) return 1;
+    if (!b.show_uri_id && !b.show_tmdb_id) return -1;
+    return a.show_title.localeCompare(b.show_title);
+  });
   
 } catch (e: any) {
   error = e.message;
@@ -601,7 +592,43 @@ try {
             Source Season (From Library)
           </h3>
 
-          <div id="source-manual-group" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Source Show Search -->
+          <div class="space-y-2">
+            <div class="flex gap-2">
+              <input 
+                type="text" 
+                id="source-show-search" 
+                placeholder="Search show in your collection..." 
+                class="flex-1 px-4 py-2.5 bg-zinc-950/50 border border-zinc-800 focus:border-indigo-500 rounded-xl text-sm text-zinc-200 focus:outline-none placeholder-zinc-700"
+              />
+              <button id="source-show-search-btn" class="px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition cursor-pointer">Search</button>
+            </div>
+            <div id="source-show-results" class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto hidden no-scrollbar">
+              <!-- Search results will appear here -->
+            </div>
+          </div>
+
+          <!-- Selected Source Show Card -->
+          <div id="source-selected-show-card" class="flex items-center justify-between p-3 bg-indigo-600/10 border border-indigo-500/30 rounded-2xl hidden">
+            <div class="flex items-center gap-4 min-w-0">
+              <img id="source-selected-show-poster" src="" class="w-10 h-14 rounded object-cover shadow-lg border border-indigo-500/20" />
+              <div class="min-w-0">
+                <h4 id="source-selected-show-title" class="text-sm font-bold text-zinc-100 truncate"></h4>
+                <p id="source-selected-show-meta" class="text-[10px] text-zinc-500 font-bold mt-0.5"></p>
+              </div>
+            </div>
+            <button id="source-change-show-btn" class="p-2 text-zinc-500 hover:text-zinc-300 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <div id="source-manual-toggle" class="pt-2">
+            <button id="source-show-manual-btn" class="text-[10px] font-bold text-zinc-500 hover:text-zinc-400 uppercase tracking-widest transition">
+              Or Enter ID Manually
+            </button>
+          </div>
+
+          <div id="source-manual-group" class="grid grid-cols-1 sm:grid-cols-2 gap-4 hidden">
             <div>
               <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Source Show ID</label>
               <div class="flex gap-2">
@@ -609,7 +636,7 @@ try {
                   <option value="tmdb">TMDB</option>
                   <option value="tvdb">TVDB</option>
                 </select>
-                <input type="number" id="source-show-tmdb-input" placeholder="e.g. 85937" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
+                <input type="text" id="source-show-tmdb-input" placeholder="e.g. 85937" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
                 <button id="source-show-lookup-btn" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer">Lookup</button>
               </div>
             </div>
@@ -618,6 +645,12 @@ try {
               <input type="number" id="source-season-input" placeholder="e.g. 2" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
             </div>
           </div>
+          
+          <div id="source-season-select-group" class="hidden space-y-3">
+             <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Select Source Season</label>
+             <div id="source-season-buttons" class="flex flex-wrap gap-2"></div>
+          </div>
+
           <!-- Manual Preview Card -->
           <div id="source-manual-preview" class="flex items-center gap-4 p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl hidden mt-3">
             <img id="source-manual-poster" src="" class="w-8 h-12 rounded object-cover hidden" />
@@ -905,10 +938,23 @@ try {
     const saveRemapBtn = document.getElementById("save-remap-btn") as HTMLButtonElement;
 
     // Wizard Step 1 Elements (Source)
+    const sourceShowSearch = document.getElementById("source-show-search") as HTMLInputElement;
+    const sourceShowSearchBtn = document.getElementById("source-show-search-btn")!;
+    const sourceShowResults = document.getElementById("source-show-results")!;
+    const sourceSelectedShowCard = document.getElementById("source-selected-show-card")!;
+    const sourceSelectedShowPoster = document.getElementById("source-selected-show-poster") as HTMLImageElement;
+    const sourceSelectedShowTitle = document.getElementById("source-selected-show-title")!;
+    const sourceSelectedShowMeta = document.getElementById("source-selected-show-meta")!;
+    const sourceChangeShowBtn = document.getElementById("source-change-show-btn")!;
+    const sourceManualToggle = document.getElementById("source-manual-toggle")!;
+    const sourceShowManualBtn = document.getElementById("source-show-manual-btn")!;
     const sourceManualGroup = document.getElementById("source-manual-group")!;
     const sourceShowTmdbInput = document.getElementById("source-show-tmdb-input") as HTMLInputElement;
     const sourceSeasonInput = document.getElementById("source-season-input") as HTMLInputElement;
     const sourceShowLookupBtn = document.getElementById("source-show-lookup-btn")!;
+    const sourceSeasonSelectGroup = document.getElementById("source-season-select-group")!;
+    const sourceSeasonButtons = document.getElementById("source-season-buttons")!;
+
     const sourceManualPreview = document.getElementById("source-manual-preview")!;
     const sourceManualPoster = document.getElementById("source-manual-poster") as HTMLImageElement;
     const sourceManualNoPoster = document.getElementById("source-manual-no-poster")!;
@@ -929,11 +975,14 @@ try {
     // State Variables
     let localShowsList: any[] = [];
     let localMoviesList: any[] = [];
+    let remapSelectedSourceShow: any = null;
+    let remapSelectedSourceSeason: number | null = null;
 
     // Open Modal Action
     addRemapBtn.addEventListener("click", () => {
       resetModalState();
       remapModal.classList.remove("opacity-0", "pointer-events-none");
+      fetchLocalShows();
     });
 
     // Close Modal Action
@@ -961,22 +1010,134 @@ try {
       }
     }
 
-    // Fetch movies in user's collection
-    async function fetchLocalMovies() {
-      if (localMoviesList && localMoviesList.length > 0) {
+    // Season Remap Search
+    const performSourceShowSearch = () => {
+      const q = sourceShowSearch.value.trim().toLowerCase();
+      if (!q) {
+        renderSourceShowResults(localShowsList);
         return;
       }
-      try {
-        const res = await fetch("/api/proxy/sync/source-movies", {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          localMoviesList = Array.isArray(data) ? data : data.results || [];
-        }
-      } catch (err) {
-        console.error("Error loading local movies", err);
+      const filtered = localShowsList.filter(show => 
+        show.title.toLowerCase().includes(q) || 
+        show.tmdb_id.toString().includes(q)
+      );
+      renderSourceShowResults(filtered);
+    };
+
+    sourceShowSearchBtn.addEventListener("click", performSourceShowSearch);
+    sourceShowSearch.addEventListener("input", performSourceShowSearch);
+
+    function renderSourceShowResults(results: any[]) {
+      sourceShowResults.innerHTML = "";
+      if (results.length === 0) {
+        sourceShowResults.innerHTML = '<div class="col-span-full text-center text-xs text-zinc-500 py-4">No matching local shows found.</div>';
+        sourceShowResults.classList.remove("hidden");
+        return;
       }
+
+      results.forEach(show => {
+        const card = document.createElement("div");
+        card.className = "flex items-center gap-3 p-2 bg-zinc-950/40 border border-zinc-800 rounded-xl hover:border-zinc-700 cursor-pointer transition text-left group";
+        
+        let posterHtml = `<div class="w-8 h-12 rounded bg-zinc-900 flex items-center justify-center text-[7px] text-zinc-750 font-bold shrink-0">NO ART</div>`;
+        if (show.poster_path) {
+          posterHtml = `<img src="${show.poster_path}" class="w-8 h-12 rounded object-cover shrink-0" />`;
+        }
+
+        const year = show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A";
+        const idLabel = (show.uri_id?.startsWith('tvdb:') || (show.tvdb_id && !show.tmdb_id)) ? `TVDB: ${show.tvdb_id ?? show.uri_id?.split(':')[2]}` : `TMDB: ${show.tmdb_id}`;
+        
+        card.innerHTML = `
+          ${posterHtml}
+          <div class="min-w-0">
+            <h4 class="text-zinc-200 font-bold truncate text-xs" title="${show.title}">${show.title}</h4>
+            <span class="text-[9px] text-zinc-500">${year} • ${idLabel}</span>
+          </div>
+        `;
+
+        card.addEventListener("click", () => selectSourceShow(show));
+        sourceShowResults.appendChild(card);
+      });
+      sourceShowResults.classList.remove("hidden");
+    }
+
+    function selectSourceShow(show: any) {
+      remapSelectedSourceShow = show;
+      remapSelectedSourceSeason = null;
+
+      sourceSelectedShowTitle.textContent = show.title;
+      const year = show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A";
+      const idLabel = (show.uri_id?.startsWith('tvdb:') || (show.tvdb_id && !show.tmdb_id)) ? `TVDB ID: ${show.tvdb_id ?? show.uri_id?.split(':')[2]}` : `TMDB ID: ${show.tmdb_id}`;
+      sourceSelectedShowMeta.textContent = `${year} • ${idLabel}`;
+      if (show.poster_path) {
+        sourceSelectedShowPoster.src = show.poster_path;
+        sourceSelectedShowPoster.classList.remove("hidden");
+      } else {
+        sourceSelectedShowPoster.classList.add("hidden");
+      }
+
+      sourceShowSearch.parentElement!.classList.add("hidden");
+      sourceShowResults.classList.add("hidden");
+      sourceSelectedShowCard.classList.remove("hidden");
+      sourceManualToggle.classList.add("hidden");
+      sourceManualGroup.classList.add("hidden");
+      
+      sourceSeasonSelectGroup.classList.remove("hidden");
+      renderSourceSeasonButtons(show.seasons_meta || []);
+      
+      sourceShowTmdbInput.value = show.uri_id ?? (show.tvdb_id ? `tvdb:s:${show.tvdb_id}` : `tmdb:s:${show.tmdb_id}`);
+
+      validateForm();
+    }
+
+    sourceChangeShowBtn.addEventListener("click", () => {
+      remapSelectedSourceShow = null;
+      remapSelectedSourceSeason = null;
+
+      sourceSelectedShowCard.classList.add("hidden");
+      sourceShowSearch.parentElement!.classList.remove("hidden");
+      sourceShowResults.classList.remove("hidden");
+      sourceManualToggle.classList.remove("hidden");
+      sourceSeasonSelectGroup.classList.add("hidden");
+      
+      sourceShowTmdbInput.value = "";
+      sourceSeasonInput.value = "";
+      
+      validateForm();
+    });
+
+    sourceShowManualBtn.addEventListener("click", () => {
+      sourceShowSearch.parentElement!.classList.add("hidden");
+      sourceShowResults.classList.add("hidden");
+      sourceManualToggle.classList.add("hidden");
+      sourceManualGroup.classList.remove("hidden");
+    });
+
+    function renderSourceSeasonButtons(seasons: any[]) {
+      sourceSeasonButtons.innerHTML = "";
+      if (seasons.length === 0) {
+        sourceSeasonButtons.innerHTML = '<span class="text-xs text-zinc-500">No seasons found.</span>';
+        return;
+      }
+
+      seasons.forEach(season => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "px-3 py-1.5 border border-zinc-800 bg-zinc-900/40 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95";
+        btn.textContent = season.season_number === 0 ? "Specials" : `Season ${season.season_number}`;
+        
+        btn.addEventListener("click", () => {
+          sourceSeasonButtons.querySelectorAll("button").forEach(b => {
+            b.className = "px-3 py-1.5 border border-zinc-800 bg-zinc-900/40 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition active:scale-95";
+          });
+          btn.className = "px-3 py-1.5 border border-indigo-500/40 bg-indigo-600/10 text-indigo-300 font-bold text-xs rounded-xl cursor-pointer transition shadow-md";
+          remapSelectedSourceSeason = season.season_number;
+          sourceSeasonInput.value = season.season_number.toString();
+          validateForm();
+        });
+
+        sourceSeasonButtons.appendChild(btn);
+      });
     }
 
     sourceShowTmdbInput.addEventListener("input", validateForm);
@@ -1075,6 +1236,19 @@ try {
       const tgtTypeSelect = document.getElementById("target-show-id-type") as HTMLSelectElement;
       if (srcTypeSelect) srcTypeSelect.value = "tmdb";
       if (tgtTypeSelect) tgtTypeSelect.value = "tmdb";
+      
+      remapSelectedSourceShow = null;
+      remapSelectedSourceSeason = null;
+      sourceShowSearch.value = "";
+      sourceShowSearch.parentElement!.classList.remove("hidden");
+      sourceShowResults.innerHTML = "";
+      sourceShowResults.classList.add("hidden");
+      sourceSelectedShowCard.classList.add("hidden");
+      sourceManualToggle.classList.remove("hidden");
+      sourceManualGroup.classList.add("hidden");
+      sourceSeasonSelectGroup.classList.add("hidden");
+      sourceSeasonButtons.innerHTML = "";
+
       sourceShowTmdbInput.value = "";
       sourceSeasonInput.value = "";
       sourceManualPreview.classList.add("hidden");
@@ -2097,17 +2271,20 @@ try {
 
         if (!confirm(`Are you sure you want to remove the custom title for ${item.context}? It will revert to '${item.original_title}'.`)) return;
 
-        const body: any = { custom_title: null };
-
+        const body: any = {};
         if (item.type === 'show') {
           body.show_uri_id = item.show_uri_id;
+          body.custom_title = null;
         } else if (item.type === 'season') {
           body.show_uri_id = item.show_uri_id;
           body.season_number = item.season_number;
           body.season_custom_name = null;
-          delete body.custom_title;
         } else if (item.type === 'episode') {
           body.media_id = item.media_id;
+          body.custom_title = null;
+        } else if (item.type === 'movie') {
+          body.media_id = item.media_id;
+          body.custom_title = null;
         }
 
         try {
@@ -2209,31 +2386,28 @@ try {
         return;
       }
 
-      const hasRange = !isNaN(srcEpEndVal) && srcEpEndVal > srcEpStart;
       if (!isNaN(srcEpEndVal) && srcEpEndVal < srcEpStart) {
         window.showToast?.("Source Episode End must be greater than or equal to Episode Start.", "error");
         return;
       }
 
-      const count = hasRange ? (srcEpEndVal - srcEpStart + 1) : 1;
-      const overridesToSave = [];
-      for (let i = 0; i < count; i++) {
-        overridesToSave.push({
-          source_show_uri_id: srcUri,
-          source_season_number: srcSeason,
-          source_episode_number: srcEpStart + i,
-          target_show_uri_id: tgtUri,
-          target_season_number: tgtSeason,
-          target_episode_number: tgtEpStart + i
-        });
-      }
-
+      const count = !isNaN(srcEpEndVal) ? (srcEpEndVal - srcEpStart + 1) : 1;
       saveEpRemapBtn.disabled = true;
       saveEpRemapBtn.textContent = count > 1 ? `Saving (${count} overrides)...` : "Saving...";
 
       try {
-        // Save all overrides in parallel
-        const savePromises = overridesToSave.map(async (bodyData) => {
+        const savedIds = [];
+        // Save sequentially to avoid DB lock issues on large ranges
+        for (let i = 0; i < count; i++) {
+          const bodyData = {
+            source_show_uri_id: srcUri,
+            source_season_number: srcSeason,
+            source_episode_number: srcEpStart + i,
+            target_show_uri_id: tgtUri,
+            target_season_number: tgtSeason,
+            target_episode_number: tgtEpStart + i
+          };
+          
           const res = await fetch('/api/proxy/sync/episode-overrides', {
             method: 'POST',
             headers: {
@@ -2242,30 +2416,34 @@ try {
             },
             body: JSON.stringify(bodyData)
           });
-          if (!res.ok) throw new Error("Failed to save episode override");
-          return res.json();
-        });
-
-        const savedOverrides = await Promise.all(savePromises);
+          if (!res.ok) throw new Error(`Failed to save override ${i+1}`);
+          const data = await res.json();
+          savedIds.push(data.id);
+          
+          if (count > 1) {
+            saveEpRemapBtn.textContent = `Saved ${i + 1}/${count}...`;
+          }
+        }
 
         // Apply all overrides
-        saveEpRemapBtn.textContent = "Applying...";
-        const applyPromises = savedOverrides.map(async (data) => {
-          const applyRes = await fetch(`/api/proxy/sync/episode-overrides/${data.id}/apply`, {
+        saveEpRemapBtn.textContent = "Applying Changes...";
+        for (let i = 0; i < savedIds.length; i++) {
+          const id = savedIds[i];
+          if (count > 1) {
+            saveEpRemapBtn.textContent = `Applying ${i + 1}/${count}...`;
+          }
+          const applyRes = await fetch(`/api/proxy/sync/episode-overrides/${id}/apply`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` }
           });
-          if (!applyRes.ok) throw new Error("Failed to apply episode override");
-          return applyRes.json();
-        });
-
-        await Promise.all(applyPromises);
+          if (!applyRes.ok) console.warn(`Failed to apply episode override ${id}`);
+        }
 
         window.showToast?.(count > 1 ? `Successfully saved and applied ${count} episode overrides!` : "Successfully applied episode remap!", "success");
         closeEpModal();
         setTimeout(() => window.location.reload(), 800);
-      } catch (e) {
-        window.showToast?.("Error communicating with server or applying override", "error");
+      } catch (e: any) {
+        window.showToast?.(e.message || "Error communicating with server", "error");
         saveEpRemapBtn.disabled = false;
         saveEpRemapBtn.textContent = "Save Episode Remap";
       }
