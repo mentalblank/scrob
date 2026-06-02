@@ -608,6 +608,29 @@ textarea:focus {
   outline: none !important;
 }
 
+/* Premium styling for selects and option items */
+select {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23a1a1aa' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e") !important;
+  background-position: right 0.75rem center !important;
+  background-repeat: no-repeat !important;
+  background-size: 1.25rem !important;
+  padding-right: 2.5rem !important;
+  cursor: pointer !important;
+}
+
+select option {
+  background-color: #18181b !important;
+  color: #f4f4f5 !important;
+}
+
+html.light select option {
+  background-color: #ffffff !important;
+  color: #18181b !important;
+}
+
 /* 4. Action button glows */
 button.bg-blue-600,
 button.bg-blue-500,
