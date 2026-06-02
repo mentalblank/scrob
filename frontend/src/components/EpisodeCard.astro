@@ -6,9 +6,10 @@ import { mediaUrl } from "../lib/urls";
 interface Props {
   item: MediaItem;
   showDismiss?: boolean;
+  hideActionBar?: boolean;
 }
 
-const { item, showDismiss = false } = Astro.props;
+const { item, showDismiss = false, hideActionBar = false } = Astro.props;
 
 const sxe =
   item.season_number != null && item.episode_number != null
@@ -243,7 +244,7 @@ const cardUriId = item.uri_id
   )}
 
   <!-- Action bar (below image, above info) -->
-  {!showDismiss && (
+  {!showDismiss && !hideActionBar && (
     <CardActionBar
       watched={watched}
       inLists={inLists}

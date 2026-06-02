@@ -1,7 +1,9 @@
 ---
 import Base from "../../layouts/Base.astro";
 import ListCard from "../../components/ListCard.astro";
-import { api, type PublicProfile, type ProfileListItem, type ProfileFollowEntry } from "../../lib/api";
+import MediaCard from "../../components/MediaCard.astro";
+import EpisodeCard from "../../components/EpisodeCard.astro";
+import { api, type PublicProfile, type ProfileListItem, type ProfileFollowEntry, type MediaItem } from "../../lib/api";
 
 export const prerender = false;
 
@@ -222,7 +224,7 @@ const isSidebarEmpty = !showBio &&
         </div>
 
         <!-- ── Stats row ───────────────────────────────────── -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class={`grid gap-3 ${showUserRatings ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'}`}>
           <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-5 text-center backdrop-blur-md">
             <p class="text-3xl font-black text-zinc-100 tracking-tight">{profile.movies_watched}</p>
             <p class="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">Movies Watched</p>
@@ -231,7 +233,7 @@ const isSidebarEmpty = !showBio &&
             <p class="text-3xl font-black text-zinc-100 tracking-tight">{profile.shows_watched}</p>
             <p class="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">Shows Watched</p>
           </div>
-          <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-5 text-center backdrop-blur-md">
+          <div class={`bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-5 text-center backdrop-blur-md ${!showUserRatings ? 'col-span-2 sm:col-span-1' : ''}`}>
             <p class="text-3xl font-black text-zinc-100 tracking-tight">{profile.total_collected}</p>
             <p class="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">Items Collected</p>
           </div>
@@ -281,24 +283,24 @@ const isSidebarEmpty = !showBio &&
             {profile.recently_watched_movies.length > 0 && (
               <section>
                 <h2 class="section-headline mb-4">
-Recently Watched Movies
+                  Recently Watched Movies
                 </h2>
                 <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
                   {profile.recently_watched_movies.map((item) => {
-                    const thumb = posterUrl(item.poster_path);
-                    const href = mediaUrl(item.media_type, item.tmdb_id, null, item.uri_id);
+                    const mediaItem: MediaItem = {
+                      id: null,
+                      tmdb_id: item.tmdb_id,
+                      uri_id: item.uri_id,
+                      type: "movie",
+                      title: item.title,
+                      poster_path: item.poster_path,
+                      backdrop_path: item.backdrop_path || undefined,
+                      watched: true,
+                    };
                     return (
-                      <a href={href} class="flex-shrink-0 w-32 group active:scale-95 active:opacity-70 transition-all duration-150">
-                        <div class="relative aspect-[2/3] rounded-2xl overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
-                          {thumb ? (
-                            <img src={thumb} alt={item.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
-                          ) : (
-                            <div class="w-full h-full flex items-center justify-center text-zinc-400 text-xs text-center px-2">{item.title}</div>
-                          )}
-                          <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                        </div>
-                        <p class="text-sm font-bold text-zinc-300 truncate group-hover:text-zinc-100 transition-colors leading-snug">{item.title}</p>
-                      </a>
+                      <div class="flex-shrink-0 w-40">
+                        <MediaCard item={mediaItem} hideActionBar={true} />
+                      </div>
                     );
                   })}
                 </div>
@@ -309,35 +311,35 @@ Recently Watched Movies
             {profile.recently_watched_shows.length > 0 && (
               <section>
                 <h2 class="section-headline mb-4">
-Recently Watched Shows
+                  Recently Watched Shows
                 </h2>
                 <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
                   {profile.recently_watched_shows.map((item) => {
-                    const thumb = posterUrl(item.backdrop_path ?? item.poster_path, "w500");
-                    const href = item.show_uri_id ? `/show/${item.show_uri_id}`
-                      : primaryMetadataSource === "tvdb" && item.show_tvdb_id ? `/show/tvdb:s:${item.show_tvdb_id}`
-                      : item.show_tmdb_id ? `/show/tmdb:s:${item.show_tmdb_id}`
-                      : item.show_tvdb_id ? `/show/tvdb:s:${item.show_tvdb_id}`
-                      : mediaUrl(item.media_type, item.tmdb_id, item.tvdb_id, item.uri_id);
-                    const label = item.show_title ?? item.title;
-                    const sxe = item.season_number != null
-                      ? `S${String(item.season_number).padStart(2, "0")}E${String(item.episode_number ?? 0).padStart(2, "0")}`
-                      : null;
-                    return (
-                      <a href={href} class="flex-shrink-0 w-48 group active:scale-95 active:opacity-70 transition-all duration-150">
-                        <div class="relative aspect-[3/2] rounded-xl overflow-hidden bg-zinc-800 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
-                          {thumb ? (
-                            <img src={thumb} alt={label} class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                          ) : (
-                            <div class="w-full h-full bg-zinc-800"></div>
-                          )}
-                          <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
-                          <div class="absolute bottom-0 left-0 right-0 p-3">
-                            <p class="text-sm font-bold text-white leading-snug line-clamp-2">{label}</p>
-                            {sxe && <p class="text-xs text-white/60 mt-0.5">{sxe}</p>}
-                          </div>
-                        </div>
-                      </a>
+                    const isEpisode = item.media_type === "episode" || item.season_number != null;
+                    const mediaItem: MediaItem = {
+                      id: null,
+                      tmdb_id: isEpisode ? (item.show_tmdb_id || item.tmdb_id) : item.tmdb_id,
+                      uri_id: isEpisode ? (item.show_uri_id || item.uri_id) : item.uri_id,
+                      type: isEpisode ? "episode" : "series",
+                      title: item.title,
+                      poster_path: item.poster_path || item.backdrop_path,
+                      backdrop_path: item.backdrop_path || undefined,
+                      show_title: isEpisode ? item.show_title : undefined,
+                      show_tmdb_id: isEpisode ? (item.show_tmdb_id || undefined) : undefined,
+                      show_uri_id: isEpisode ? (item.show_uri_id || undefined) : undefined,
+                      show_poster_path: isEpisode ? (item.show_poster_path || undefined) : undefined,
+                      season_number: item.season_number,
+                      episode_number: item.episode_number,
+                      watched: true,
+                    };
+                    return isEpisode ? (
+                      <div class="flex-shrink-0 w-56">
+                        <EpisodeCard item={mediaItem} hideActionBar={true} />
+                      </div>
+                    ) : (
+                      <div class="flex-shrink-0 w-40">
+                        <MediaCard item={mediaItem} hideActionBar={true} />
+                      </div>
                     );
                   })}
                 </div>
@@ -348,27 +350,25 @@ Recently Watched Shows
             {showUserRatings && profile.top_rated_movies.length > 0 && (
               <section>
                 <h2 class="section-headline mb-4">
-Top Rated Movies
+                  Top Rated Movies
                 </h2>
                 <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
                   {profile.top_rated_movies.map((item) => {
-                    const thumb = posterUrl(item.poster_path);
-                    const href = mediaUrl(item.media_type, item.tmdb_id, item.tvdb_id, item.uri_id);
+                    const mediaItem: MediaItem = {
+                      id: null,
+                      tmdb_id: item.tmdb_id,
+                      uri_id: item.uri_id,
+                      type: "movie",
+                      title: item.title,
+                      poster_path: item.poster_path,
+                      backdrop_path: item.backdrop_path || undefined,
+                      tmdb_rating: item.user_rating,
+                      watched: true,
+                    };
                     return (
-                      <a href={href} class="flex-shrink-0 w-32 group active:scale-95 active:opacity-70 transition-all duration-150">
-                        <div class="relative aspect-[2/3] rounded-2xl overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
-                          {thumb ? (
-                            <img src={thumb} alt={item.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
-                          ) : (
-                            <div class="w-full h-full flex items-center justify-center text-zinc-400 text-xs text-center px-2">{item.title}</div>
-                          )}
-                          <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                          <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full border border-zinc-800 flex items-center gap-0.5">
-                            <span class="text-[10px] leading-none">★</span> {item.user_rating}
-                          </div>
-                        </div>
-                        <p class="text-sm font-bold text-zinc-300 truncate group-hover:text-zinc-100 transition-colors leading-snug">{item.title}</p>
-                      </a>
+                      <div class="flex-shrink-0 w-40">
+                        <MediaCard item={mediaItem} hideActionBar={true} />
+                      </div>
                     );
                   })}
                 </div>
@@ -379,27 +379,25 @@ Top Rated Movies
             {showUserRatings && profile.top_rated_shows.length > 0 && (
               <section>
                 <h2 class="section-headline mb-4">
-Top Rated Shows
+                  Top Rated Shows
                 </h2>
                 <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none">
                   {profile.top_rated_shows.map((item) => {
-                    const thumb = posterUrl(item.poster_path);
-                    const href = mediaUrl(item.media_type, item.tmdb_id, item.tvdb_id, item.uri_id);
+                    const mediaItem: MediaItem = {
+                      id: null,
+                      tmdb_id: item.tmdb_id,
+                      uri_id: item.uri_id,
+                      type: "series",
+                      title: item.title,
+                      poster_path: item.poster_path,
+                      backdrop_path: item.backdrop_path || undefined,
+                      tmdb_rating: item.user_rating,
+                      watched: true,
+                    };
                     return (
-                      <a href={href} class="flex-shrink-0 w-32 group active:scale-95 active:opacity-70 transition-all duration-150">
-                        <div class="relative aspect-[2/3] rounded-2xl overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
-                          {thumb ? (
-                            <img src={thumb} alt={item.title} class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
-                          ) : (
-                            <div class="w-full h-full flex items-center justify-center text-zinc-400 text-xs text-center px-2">{item.title}</div>
-                          )}
-                          <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                          <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full border border-zinc-800 flex items-center gap-0.5">
-                            <span class="text-[10px] leading-none">★</span> {item.user_rating}
-                          </div>
-                        </div>
-                        <p class="text-sm font-bold text-zinc-300 truncate group-hover:text-zinc-100 transition-colors leading-snug">{item.title}</p>
-                      </a>
+                      <div class="flex-shrink-0 w-40">
+                        <MediaCard item={mediaItem} hideActionBar={true} />
+                      </div>
                     );
                   })}
                 </div>
