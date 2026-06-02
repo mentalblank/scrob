@@ -1599,6 +1599,8 @@ async def get_episode_detail(
             "progress_percent": ep_state.get("progress_percent"),
             "is_blocked": ep_state.get("is_blocked", False),
             "is_dropped": ep_state.get("is_dropped", False),
+            "request_status": ep_state.get("request_status"),
+            "request_enabled": ep_state.get("request_enabled", False),
             "episode_number": episode_number,
             "season_number": season_number,
             "title": local_ep.custom_title or ep_data.get("name") if local_ep else ep_data.get("name"),

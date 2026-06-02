@@ -248,7 +248,14 @@ async def enrich_with_state(
             lookup_tid = item.get("show_tmdb_id")
             lookup_type = "series"
 
-        _req_uri = item.get("uri_id")
+        _req_uri = None
+        if t == "episode":
+            _req_uri = item.get("show_uri_id")
+            if not _req_uri and item.get("show_tvdb_id"):
+                _req_uri = f"tvdb:s:{item.get('show_tvdb_id')}"
+        else:
+            _req_uri = item.get("uri_id")
+
         if not _req_uri and lookup_type in ("movie", "series") and lookup_tid:
             _req_uri = f"tmdb:{'m' if lookup_type == 'movie' else 's'}:{lookup_tid}"
         if lookup_type in ("movie", "series") and _req_uri:
