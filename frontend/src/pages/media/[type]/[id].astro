@@ -171,38 +171,40 @@ const activeButtonsCount = [
               </div>
             </div>
 
-            <!-- ActionBar -->
-            <ActionBar
-              tmdbId={item.tmdb_id}
-              mediaType={item.type}
-              watched={item.watched ?? false}
-              inLists={item.in_lists ?? []}
-              inLibrary={item.in_library ?? false}
-              collectionPct={item.collection_pct ?? 0}
-              showUriId={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : undefined)}
-              showTmdbId={item.show_tmdb_id ?? undefined}
-              seasonNumber={item.season_number}
-              episodeNumber={item.episode_number}
-              isMonitored={item.is_monitored ?? false}
-              requestEnabled={item.request_enabled ?? false}
-              requestStatus={item.request_status ?? null}
-              mediaId={item.id}
-              userRating={item.user_rating ?? null}
-              isBlocked={item.is_blocked ?? false}
-              isDropped={item.is_dropped ?? false}
-            />
+            <!-- ActionBar & Progress -->
+            <div class="bg-zinc-900/20 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-2xl space-y-4">
+              <ActionBar
+                tmdbId={item.tmdb_id}
+                mediaType={item.type}
+                watched={item.watched ?? false}
+                inLists={item.in_lists ?? []}
+                inLibrary={item.in_library ?? false}
+                collectionPct={item.collection_pct ?? 0}
+                showUriId={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : undefined)}
+                showTmdbId={item.show_tmdb_id ?? undefined}
+                seasonNumber={item.season_number}
+                episodeNumber={item.episode_number}
+                isMonitored={item.is_monitored ?? false}
+                requestEnabled={item.request_enabled ?? false}
+                requestStatus={item.request_status ?? null}
+                mediaId={item.id}
+                userRating={item.user_rating ?? null}
+                isBlocked={item.is_blocked ?? false}
+                isDropped={item.is_dropped ?? false}
+              />
 
-            {item && item.progress_percent !== undefined && item.progress_percent !== null && item.progress_percent > 0 && (
-              <div class="pt-2 border-t border-zinc-800/60">
-                <ProgressStrip
-                  progressPct={item.progress_percent}
-                  title="Playback Progress"
-                  currentDuration={item.runtime ? item.runtime * (item.progress_percent / 100) : undefined}
-                  totalDuration={item.runtime ?? undefined}
-                  className="mt-0"
-                />
-              </div>
-            )}
+              {item && item.progress_percent !== undefined && item.progress_percent !== null && item.progress_percent > 0 && (
+                <div class="pt-2 border-t border-zinc-800/60">
+                  <ProgressStrip
+                    progressPct={item.progress_percent}
+                    title="Playback Progress"
+                    currentDuration={item.runtime ? item.runtime * (item.progress_percent / 100) : undefined}
+                    totalDuration={item.runtime ?? undefined}
+                    className="mt-0"
+                  />
+                </div>
+              )}
+            </div>
 
             <!-- Action Buttons Container (Play, Session, Refresh, Trailer) -->
             {activeButtonsCount > 0 && (
