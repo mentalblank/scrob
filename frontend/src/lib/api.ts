@@ -427,6 +427,7 @@ export interface UserPreferences {
   pagination_type?: "infinite_scroll" | "pagination";
   explore_filters?: ExploreFilters;
   unified_filters?: boolean;
+  show_bio?: boolean;
 }
 
 export interface UserSettings {

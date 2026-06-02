@@ -111,6 +111,12 @@ function starFill(rating: number, star: number): "full" | "half" | "empty" {
 const showComments = Astro.cookies.get("show_comments")?.value !== "false";
 const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false";
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+const showBio = Astro.cookies.get("show_bio")?.value !== "false";
+
+const isSidebarEmpty = !showBio &&
+  (!profile || !profile.liked_genres || profile.liked_genres.length === 0) &&
+  (!profile || !profile.following || profile.following.length === 0) &&
+  (!profile || !profile.followers || profile.followers.length === 0);
 ---
 
 <Base title={profile ? `${profile.display_name}'s Profile` : "Profile"}>
@@ -266,10 +272,10 @@ const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.valu
         )}
 
         <!-- ── Main content + sidebar ─────────────────────── -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div class={isSidebarEmpty ? "grid grid-cols-1 gap-8" : "grid grid-cols-1 lg:grid-cols-3 gap-8"}>
 
           <!-- Left column (2/3) -->
-          <div class="lg:col-span-2 space-y-8">
+          <div class={isSidebarEmpty ? "space-y-8" : "lg:col-span-2 space-y-8"}>
 
             <!-- Recently Watched Movies -->
             {profile.recently_watched_movies.length > 0 && (
@@ -467,94 +473,98 @@ Lists
           </div>
 
           <!-- Sidebar (1/3) -->
-          <div class="space-y-6">
+          {!isSidebarEmpty && (
+            <div class="space-y-6">
 
-            <!-- Bio -->
-            <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
-              <h3 class="group-label mb-4">
-                About
-              </h3>
-              {profile.bio ? (
-                <p class="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{profile.bio}</p>
-              ) : (
-                <p class="text-sm text-zinc-400 italic">No bio yet.</p>
-              )}
-            </div>
-
-            <!-- Favorite Genres -->
-            {profile.liked_genres.length > 0 && (
-              <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
-                <h3 class="group-label mb-4">
-                  Favorite Genres
-                </h3>
-                <div class="flex flex-wrap gap-1.5">
-                  {profile.liked_genres.map((g) => (
-                    <span class="px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold uppercase rounded-full tracking-wide">
-                      {g}
-                    </span>
-                  ))}
+              <!-- Bio -->
+              {showBio && (
+                <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
+                  <h3 class="group-label mb-4">
+                    About
+                  </h3>
+                  {profile.bio ? (
+                    <p class="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{profile.bio}</p>
+                  ) : (
+                    <p class="text-sm text-zinc-400 italic">No bio yet.</p>
+                  )}
                 </div>
-              </div>
-            )}
+              )}
 
-            <!-- Following -->
-            {(profile.following_count > 0 || profile.follower_count > 0) && (
-              <>
-                {profile.following.length > 0 && (
-                  <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
-                    <h3 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center justify-between">
-                      <span class="flex items-center gap-2">
-                        <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
-                        Following
+              <!-- Favorite Genres -->
+              {profile.liked_genres.length > 0 && (
+                <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
+                  <h3 class="group-label mb-4">
+                    Favorite Genres
+                  </h3>
+                  <div class="flex flex-wrap gap-1.5">
+                    {profile.liked_genres.map((g) => (
+                      <span class="px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold uppercase rounded-full tracking-wide">
+                        {g}
                       </span>
-                      <span class="text-zinc-400 font-bold">{profile.following_count}</span>
-                    </h3>
-                    <div class="flex flex-wrap gap-2">
-                      {profile.following.map((entry) => (
-                        <a href={`/profile/${entry.id}`} title={entry.display_name} class="group flex flex-col items-center gap-1 w-12">
-                          <div class="w-10 h-10 rounded-xl overflow-hidden bg-zinc-900/40 border border-zinc-800/80 group-hover:border-zinc-500 transition-all flex items-center justify-center shrink-0">
-                            {entry.avatar_url ? (
-                              <img src={`/api/proxy${entry.avatar_url}`} alt={entry.display_name} class="w-full h-full object-cover" loading="lazy" />
-                            ) : (
-                              <span class="text-sm font-black text-zinc-400">{entry.display_name[0].toUpperCase()}</span>
-                            )}
-                          </div>
-                          <span class="text-[9px] text-zinc-500 font-medium truncate w-full text-center leading-tight">{entry.display_name}</span>
-                        </a>
-                      ))}
-                    </div>
+                    ))}
                   </div>
-                )}
+                </div>
+              )}
 
-                {profile.followers.length > 0 && (
-                  <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
-                    <h3 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center justify-between">
-                      <span class="flex items-center gap-2">
-                        <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
-                        Followers
-                      </span>
-                      <span class="text-zinc-400 font-bold">{profile.follower_count}</span>
-                    </h3>
-                    <div class="flex flex-wrap gap-2">
-                      {profile.followers.map((entry) => (
-                        <a href={`/profile/${entry.id}`} title={entry.display_name} class="group flex flex-col items-center gap-1 w-12">
-                          <div class="w-10 h-10 rounded-xl overflow-hidden bg-zinc-900/40 border border-zinc-800/80 group-hover:border-zinc-500 transition-all flex items-center justify-center shrink-0">
-                            {entry.avatar_url ? (
-                              <img src={`/api/proxy${entry.avatar_url}`} alt={entry.display_name} class="w-full h-full object-cover" loading="lazy" />
-                            ) : (
-                              <span class="text-sm font-black text-zinc-400">{entry.display_name[0].toUpperCase()}</span>
-                            )}
-                          </div>
-                          <span class="text-[9px] text-zinc-500 font-medium truncate w-full text-center leading-tight">{entry.display_name}</span>
-                        </a>
-                      ))}
+              <!-- Following -->
+              {(profile.following_count > 0 || profile.follower_count > 0) && (
+                <>
+                  {profile.following.length > 0 && (
+                    <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
+                      <h3 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center justify-between">
+                        <span class="flex items-center gap-2">
+                          <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
+                          Following
+                        </span>
+                        <span class="text-zinc-400 font-bold">{profile.following_count}</span>
+                      </h3>
+                      <div class="flex flex-wrap gap-2">
+                        {profile.following.map((entry) => (
+                          <a href={`/profile/${entry.id}`} title={entry.display_name} class="group flex flex-col items-center gap-1 w-12">
+                            <div class="w-10 h-10 rounded-xl overflow-hidden bg-zinc-900/40 border border-zinc-800/80 group-hover:border-zinc-500 transition-all flex items-center justify-center shrink-0">
+                              {entry.avatar_url ? (
+                                <img src={`/api/proxy${entry.avatar_url}`} alt={entry.display_name} class="w-full h-full object-cover" loading="lazy" />
+                              ) : (
+                                <span class="text-sm font-black text-zinc-400">{entry.display_name[0].toUpperCase()}</span>
+                              )}
+                            </div>
+                            <span class="text-[9px] text-zinc-500 font-medium truncate w-full text-center leading-tight">{entry.display_name}</span>
+                          </a>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </>
-            )}
+                  )}
 
-          </div>
+                  {profile.followers.length > 0 && (
+                    <div class="bg-zinc-950/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-md">
+                      <h3 class="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 flex items-center justify-between">
+                        <span class="flex items-center gap-2">
+                          <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
+                          Followers
+                        </span>
+                        <span class="text-zinc-400 font-bold">{profile.follower_count}</span>
+                      </h3>
+                      <div class="flex flex-wrap gap-2">
+                        {profile.followers.map((entry) => (
+                          <a href={`/profile/${entry.id}`} title={entry.display_name} class="group flex flex-col items-center gap-1 w-12">
+                            <div class="w-10 h-10 rounded-xl overflow-hidden bg-zinc-900/40 border border-zinc-800/80 group-hover:border-zinc-500 transition-all flex items-center justify-center shrink-0">
+                              {entry.avatar_url ? (
+                                <img src={`/api/proxy${entry.avatar_url}`} alt={entry.display_name} class="w-full h-full object-cover" loading="lazy" />
+                              ) : (
+                                <span class="text-sm font-black text-zinc-400">{entry.display_name[0].toUpperCase()}</span>
+                              )}
+                            </div>
+                            <span class="text-[9px] text-zinc-500 font-medium truncate w-full text-center leading-tight">{entry.display_name}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+            </div>
+          )}
         </div>
       </>
     )}

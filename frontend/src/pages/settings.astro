@@ -147,7 +147,7 @@ const COUNTRIES = (countriesRes || [])
                 />
                 <p class="text-xs text-zinc-500">Shown instead of your username where your name appears.</p>
               </div>
-              <div class="space-y-2">
+              <div class={`space-y-2 ${settings.preferences?.show_bio === false ? 'hidden' : ''}`} id="settings-bio-container">
                 <label for="bio" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Bio</label>
                 <textarea
                   id="bio"
@@ -487,6 +487,7 @@ const COUNTRIES = (countriesRes || [])
                   { id: 'time-format-24h-toggle', name: 'time_format_24h', label: '24-hour time format', desc: 'Display watch times in 24-hour format (e.g. 23:31) instead of 12-hour (e.g. 11:31 PM).', checked: settings.time_format_24h !== false },
                   { id: 'show-comments-toggle', name: 'show_comments', label: 'Show comments', desc: 'Show user comments on media detail pages site-wide.', checked: settings.show_comments !== false },
                   { id: 'show-user-ratings-toggle', name: 'show_user_ratings', label: 'Show user ratings', desc: 'Show ratings from users of this app. TMDB ratings will still be visible.', checked: settings.show_user_ratings !== false },
+                  { id: 'show-bio-toggle', name: 'show_bio', label: 'Show bios / about', desc: 'Show user bios and about sections on profile pages site-wide.', checked: settings.preferences?.show_bio !== false },
                   { id: 'media-server-enrichment-toggle', name: 'media_server_enrichment', label: 'Media server enrichment', desc: 'Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.', checked: settings.preferences?.media_server_enrichment !== false },
                   { id: 'include-specials-toggle', name: 'include_specials', label: 'Include specials in counts', desc: 'Include Specials (Season 0) when calculating show and season watch/collection progress.', checked: settings.preferences?.include_specials === true },
                 ].map(({ id, name, label, desc, checked }) => (
@@ -3856,16 +3857,22 @@ const COUNTRIES = (countriesRes || [])
         const specialsEl = document.getElementById('include-specials-toggle') as HTMLInputElement | null;
         const enrichmentEl = document.getElementById('media-server-enrichment-toggle') as HTMLInputElement | null;
         const primarySourceEl = document.getElementById('primary_metadata_source') as HTMLSelectElement | null;
+        const showBioEl = document.getElementById('show-bio-toggle') as HTMLInputElement | null;
         const updatedPreferences = {
           ...existingPrefs,
           explore_filters: visibilityFilters,
           include_specials: specialsEl ? specialsEl.checked : (existingPrefs.include_specials ?? false),
           media_server_enrichment: enrichmentEl ? enrichmentEl.checked : (existingPrefs.media_server_enrichment ?? true),
-          primary_metadata_source: primarySourceEl ? primarySourceEl.value : (existingPrefs.primary_metadata_source ?? 'tmdb')
+          primary_metadata_source: primarySourceEl ? primarySourceEl.value : (existingPrefs.primary_metadata_source ?? 'tmdb'),
+          show_bio: showBioEl ? showBioEl.checked : (existingPrefs.show_bio ?? true)
         };
 
         if (appData) {
           appData.dataset.preferences = JSON.stringify(updatedPreferences);
+        }
+
+        if (showBioEl) {
+          document.cookie = `show_bio=${showBioEl.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
         }
 
         if (primarySourceEl) {
@@ -4419,6 +4426,35 @@ const COUNTRIES = (countriesRes || [])
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ show_user_ratings: ratingsToggle.checked }),
+      });
+    });
+  }
+
+  const showBioToggle = document.getElementById('show-bio-toggle') as HTMLInputElement | null;
+  const bioContainer = document.getElementById('settings-bio-container');
+  if (showBioToggle) {
+    const val = showBioToggle.checked ? 'true' : 'false';
+    document.cookie = `show_bio=${val}; path=/; SameSite=Lax; Max-Age=31536000`;
+    if (bioContainer) {
+      bioContainer.classList.toggle('hidden', !showBioToggle.checked);
+    }
+
+    showBioToggle.addEventListener('change', async () => {
+      const v = showBioToggle.checked ? 'true' : 'false';
+      document.cookie = `show_bio=${v}; path=/; SameSite=Lax; Max-Age=31536000`;
+      if (bioContainer) {
+        bioContainer.classList.toggle('hidden', !showBioToggle.checked);
+      }
+      const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+      const existingPrefs = JSON.parse((document.getElementById('app-data') as HTMLElement | null)?.dataset.preferences || '{}');
+      const updatedPrefs = { ...existingPrefs, show_bio: showBioToggle.checked };
+      if (document.getElementById('app-data')) {
+        document.getElementById('app-data')!.dataset.preferences = JSON.stringify(updatedPrefs);
+      }
+      await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: updatedPrefs }),
       });
     });
   }
