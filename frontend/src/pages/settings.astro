@@ -15,6 +15,7 @@ const [
   languagesRes,
   movieGenresRes,
   showGenresRes,
+  seasonOverrides,
 ] = await Promise.all([
   api.auth.getSettings(token!),
   api.auth.me(token!),
@@ -24,6 +25,8 @@ const [
   api.media.getCountries(token!).catch(() => []),
   api.media.getLanguages(token!).catch(() => []),
   api.media.getGenres("movie", token!).catch(() => ({ genres: [] })),
+  api.media.getGenres("series", token!).catch(() => ({ genres: [] })),
+  api.sync.getSeasonOverrides(token!).catch(() => []),
 ]);
 const hasTmdbKey = settings.has_effective_tmdb_key;
 const traktConfigured    = !!(settings.trakt_connected || settings.trakt_client_id);
