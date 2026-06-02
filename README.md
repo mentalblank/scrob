@@ -21,6 +21,7 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 - [Screenshots](#screenshots)
 - [Getting Started](#getting-started)
   - [Docker Compose](#docker-compose)
+  - [Omnibus (single container)](#omnibus-single-container)
   - [Docker Run](#docker-run)
   - [First Setup](#first-setup)
   - [Updating](#updating)
@@ -172,7 +173,39 @@ volumes:
 docker compose up -d
 ```
 
+### Omnibus (single container)
+
+The omnibus image bundles PostgreSQL inside the container — no separate database service needed. It's the simplest way to get started, especially on platforms like Unraid or Portainer where managing multiple containers is cumbersome.
+
+> **Image tags:** `bellamy/scrob:latest-omnibus` / `ghcr.io/ellite/scrob:latest-omnibus`
+
+1. Download the omnibus compose file:
+
+```bash
+curl -o docker-compose.yml https://raw.githubusercontent.com/ellite/scrob/main/docker-compose.omnibus.yml
+```
+
+2. Edit it and set your `SECRET_KEY`:
+
+```yaml
+SECRET_KEY: changeme   # ← generate with: openssl rand -hex 32
+```
+
+3. Start:
+
+```bash
+docker compose up -d
+```
+
+That's it — no database container, no `DATABASE_URL` to configure. PostgreSQL is initialised automatically on first run and persisted in the `scrob_db` volume.
+
+**Switching to an external database later:** set `DATABASE_URL` in the environment and the embedded PostgreSQL will be skipped entirely. The omnibus image behaves identically to the standard image when `DATABASE_URL` is provided.
+
+> **Note:** The embedded PostgreSQL version is tied to the image's base OS (Debian Bookworm ships PostgreSQL 15). Major version upgrades of the bundled database require a manual data migration. If you anticipate needing to control the database version independently, use the standard two-container setup instead.
+
 ### Docker Run
+
+**Standard image** (requires a separate PostgreSQL container):
 
 ```bash
 # Create a dedicated network
@@ -198,7 +231,22 @@ docker run -d \
   -e DATABASE_URL="postgresql+asyncpg://scrob:changeme@scrob-db:5432/scrob" \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
   -e TZ=UTC \
+  -v scrob_data:/app/backend/data \
   bellamy/scrob:latest
+```
+
+**Omnibus image** (PostgreSQL included — no separate container needed):
+
+```bash
+docker run -d \
+  --name scrob \
+  --restart unless-stopped \
+  -p 7330:7330 \
+  -e SECRET_KEY="$(openssl rand -hex 32)" \
+  -e TZ=UTC \
+  -v scrob_data:/app/backend/data \
+  -v scrob_db:/app/postgres/data \
+  bellamy/scrob:latest-omnibus
 ```
 
 ### First Setup
@@ -220,7 +268,7 @@ Database migrations run automatically on startup - no manual steps required.
 | Variable | Default | Description |
 |---|---|---|
 | `SECRET_KEY` | - | **Required.** JWT signing key. Generate with `openssl rand -hex 32`. |
-| `DATABASE_URL` | - | **Required.** PostgreSQL connection string (`postgresql+asyncpg://...`). |
+| `DATABASE_URL` | - | **Required** (standard image). PostgreSQL connection string (`postgresql+asyncpg://...`). Optional on the omnibus image — if omitted, the embedded database is used. |
 | `ENABLE_REGISTRATIONS` | `true` | Allow new users to register. The first user can always register regardless of this setting. |
 | `REGISTRATION_MAX_ALLOWED_USERS` | `0` | Maximum number of registered users. `0` = unlimited. |
 | `TZ` | `UTC` | Container timezone (e.g. `Europe/Lisbon`). |

@@ -13,7 +13,7 @@ from sqlalchemy import select, or_, and_, func, cast as sa_cast, Text, delete
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.attributes import flag_modified
 
-from db import get_db
+from db import get_db, AsyncSessionLocal
 from models.media import Media
 from models.collection import Collection, CollectionFile
 from models.connections import MediaServerConnection
@@ -42,6 +42,8 @@ class SessionReportRequest(BaseModel):
     state: str  # "playing" | "progress" | "paused" | "stopped"
     position_ms: int = 0
     duration_ms: int = 0
+    file_id: int | None = None
+    plex_session_id: str | None = None  # Plex Universal Transcoder session ID for keepalive pings
 
 
 # Simple TTL cache for the /for-you endpoint — keyed by user_id
@@ -5363,15 +5365,19 @@ async def report_session(
     if not media:
         return {"ok": False}
 
+    session_cf_filters = [
+        Collection.media_id == media.id,
+        Collection.user_id == current_user.id,
+        CollectionFile.connection_id == body.connection_id,
+    ]
+    if body.file_id is not None:
+        session_cf_filters.append(CollectionFile.id == body.file_id)
+
     cf_q = await db.execute(
         select(CollectionFile, MediaServerConnection)
         .join(Collection, Collection.id == CollectionFile.collection_id)
         .outerjoin(MediaServerConnection, MediaServerConnection.id == CollectionFile.connection_id)
-        .where(
-            Collection.media_id == media.id,
-            Collection.user_id == current_user.id,
-            CollectionFile.connection_id == body.connection_id,
-        )
+        .where(*session_cf_filters)
     )
     row = cf_q.first()
     if not row:
@@ -5430,6 +5436,15 @@ async def report_session(
                     )
             elif cf.source.value == "plex":
                 plex_state = "stopped" if body.state == "stopped" else ("paused" if body.state == "paused" else "playing")
+                if body.plex_session_id:
+                    try:
+                        await client.get(
+                            f"{conn.url.rstrip('/')}/video/:/transcode/universal/ping",
+                            params={"session": body.plex_session_id},
+                            headers={"X-Plex-Token": conn.token},
+                        )
+                    except Exception:
+                        pass
                 await client.get(
                     f"{conn.url.rstrip('/')}/:/timeline",
                     params={
@@ -5832,6 +5847,11 @@ async def get_media_details(
                 "show_tmdb_id": show.tmdb_id,
                 "show_poster_path": show.poster_path,
                 "show_backdrop_path": ep_backdrop,
+                "directors": [
+                    {"tmdb_id": c.get("id"), "name": c.get("name")}
+                    for c in (ep_data.get("credits") or {}).get("crew", [])
+                    if c.get("job") == "Director"
+                ],
                 "cast": [
                     {
                         "tmdb_id": c.get("id"),
@@ -5974,6 +5994,11 @@ async def get_media_details(
             "adult": data.get("adult", False),
             "collection": collection,
             "production_companies": production_companies,
+            "directors": [
+                {"tmdb_id": c["id"], "name": c["name"]}
+                for c in data.get("credits", {}).get("crew", [])
+                if c.get("job") == "Director"
+            ],
             "cast": [
                 {
                     "tmdb_id": c["id"],

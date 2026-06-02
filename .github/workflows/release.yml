@@ -153,3 +153,22 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/scrob:${{ github.ref_name }}
           cache-from: type=gha,scope=scrob-release
           cache-to: type=gha,mode=max,scope=scrob-release
+
+      - name: Build and push omnibus image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.omnibus
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            APP_VERSION=${{ needs.release.outputs.new_release_version }}
+          tags: |
+            bellamy/scrob:latest-omnibus
+            bellamy/scrob:main-omnibus
+            bellamy/scrob:${{ needs.release.outputs.new_release_version }}-omnibus
+            ghcr.io/ellite/scrob:latest-omnibus
+            ghcr.io/ellite/scrob:main-omnibus
+            ghcr.io/ellite/scrob:${{ needs.release.outputs.new_release_version }}-omnibus
+          cache-from: type=gha,scope=scrob-omnibus-release
+          cache-to: type=gha,mode=max,scope=scrob-omnibus-release

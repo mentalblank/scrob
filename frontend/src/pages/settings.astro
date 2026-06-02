@@ -24,7 +24,6 @@ const [
   api.media.getCountries(token!).catch(() => []),
   api.media.getLanguages(token!).catch(() => []),
   api.media.getGenres("movie", token!).catch(() => ({ genres: [] })),
-  api.media.getGenres("tv", token!).catch(() => ({ genres: [] })),
 ]);
 const hasTmdbKey = settings.has_effective_tmdb_key;
 const traktConfigured    = !!(settings.trakt_connected || settings.trakt_client_id);
@@ -490,6 +489,7 @@ const COUNTRIES = (countriesRes || [])
                   { id: 'show-bio-toggle', name: 'show_bio', label: 'Show bios / about', desc: 'Show user bios and about sections on profile pages site-wide.', checked: settings.preferences?.show_bio !== false },
                   { id: 'media-server-enrichment-toggle', name: 'media_server_enrichment', label: 'Media server enrichment', desc: 'Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.', checked: settings.preferences?.media_server_enrichment !== false },
                   { id: 'include-specials-toggle', name: 'include_specials', label: 'Include specials in counts', desc: 'Include Specials (Season 0) when calculating show and season watch/collection progress.', checked: settings.preferences?.include_specials === true },
+                  { id: 'use-hls-player-toggle', name: 'use_hls_player', label: 'HLS player (Experimental)', desc: 'Use the HLS-based player for Plex and Jellyfin/Emby sources. Enables transcoding if your browser doesn\'t natively support the file\'s codecs. Disable this if playback is broken.', checked: settings.use_hls_player === true },
                 ].map(({ id, name, label, desc, checked }) => (
                   <div class="flex items-start justify-between gap-6 p-4 bg-zinc-950/40 rounded-2xl border border-zinc-800">
                     <div>
@@ -857,6 +857,48 @@ const COUNTRIES = (countriesRes || [])
             </div>
 
           </div>
+
+          {seasonOverrides.length > 0 && (
+            <details id="season-remaps-panel" class="group mt-4 border border-zinc-800 rounded-2xl bg-zinc-900/20 overflow-hidden">
+              <summary class="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none hover:bg-zinc-900/40 transition-colors">
+                <div>
+                  <span class="text-sm font-semibold text-zinc-300">Active Season Remaps</span>
+                  <span class="ml-2 text-xs text-zinc-500">{seasonOverrides.length} remap{seasonOverrides.length !== 1 ? 's' : ''}</span>
+                </div>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-zinc-500 transition-transform group-open:rotate-180 shrink-0">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </summary>
+              <div class="px-5 pb-4 pt-1 space-y-2">
+                <p class="text-xs text-zinc-500">These seasons are successfully remapped. Episodes sync correctly — you can edit or remove the mapping if needed.</p>
+                <div id="season-remaps-list" class="space-y-1">
+                  {seasonOverrides.map(o => (
+                    <div class="flex items-center gap-3 py-2 px-3 bg-zinc-900 border border-zinc-800 rounded-xl" data-override-id={o.id}>
+                      <div class="flex-1 min-w-0 text-sm">
+                        <span class="text-zinc-200 font-medium">{o.source_show_title ?? `TMDB #${o.source_show_tmdb_id}`}</span>
+                        <span class="ml-1.5 text-zinc-500">Season {o.source_season_number}</span>
+                        <span class="mx-1.5 text-zinc-600">→</span>
+                        <span class="text-zinc-300">{o.target_show_title ?? `TMDB #${o.target_show_tmdb_id}`}</span>
+                        <span class="ml-1.5 text-zinc-500">Season {o.target_season_number}</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="remap-season-btn text-xs px-2.5 py-1 rounded-lg border border-green-700/50 text-green-400 hover:bg-green-900/20 cursor-pointer transition-colors shrink-0"
+                        data-src-tmdb={o.source_show_tmdb_id}
+                        data-src-season={o.source_season_number}
+                        data-src-title={o.source_show_title ?? `TMDB #${o.source_show_tmdb_id}`}
+                      >Edit remap</button>
+                      <button
+                        type="button"
+                        class="delete-override-btn text-xs px-2.5 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 cursor-pointer transition-colors shrink-0"
+                        data-override-id={o.id}
+                      >Remove</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </details>
+          )}
 
           <!-- ======== SCROBBLE-ONLY CONNECTIONS SECTION ======== -->
           <div class="space-y-3 mt-8">
@@ -1456,7 +1498,6 @@ const COUNTRIES = (countriesRes || [])
           </div>
         </div>
 
-
       <!-- Tab Panel: Security & API Keys -->
       <div data-settings-tab="security" class="space-y-12 hidden">
         <!-- Change Password -->
@@ -1852,6 +1893,21 @@ const COUNTRIES = (countriesRes || [])
               </div>
             </div>
 
+            <!-- Heal unmatched show titles -->
+            <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <h3 class="text-lg font-bold text-zinc-100 mb-1">Heal unmatched show titles</h3>
+                <p class="text-zinc-400 text-sm">Fixes episodes stuck as "unmatched" where the show title was lost — usually affects items synced before the title-preservation fix. Restores the title from sync history so the Match button works.</p>
+              </div>
+              <button
+                id="heal-stub-titles-btn"
+                type="button"
+                class="w-full md:w-auto md:shrink-0 px-6 py-3 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-center"
+              >
+                Heal
+              </button>
+            </div>
+
             <!-- Clear now playing -->
             <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div>
@@ -1886,6 +1942,20 @@ const COUNTRIES = (countriesRes || [])
                 class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap text-center"
               >
                 Clear History
+              </button>
+            </div>
+
+            <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div>
+                <h3 class="text-lg font-bold text-zinc-100 mb-1">Clear Ratings</h3>
+                <p class="text-zinc-400 text-sm">Permanently deletes all your ratings. Your watch history and collection will not be affected.</p>
+              </div>
+              <button
+                type="button"
+                id="clear-ratings-btn"
+                class="px-6 py-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/30 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap text-center"
+              >
+                Clear Ratings
               </button>
             </div>
 
@@ -1936,7 +2006,7 @@ const COUNTRIES = (countriesRes || [])
         </button>
       </div>
     </form>
-    </div>
+  </div>
   </div>
 
   <!-- Delete Confirmation Modal -->
@@ -1998,6 +2068,11 @@ const COUNTRIES = (countriesRes || [])
         </button>
       </div>
       <div class="px-6 py-5 overflow-y-auto flex-1 space-y-5">
+        <!-- Tab bar (match mode only) -->
+        <div id="match-tab-bar" class="hidden flex gap-1 p-1 bg-zinc-950 rounded-xl">
+          <button type="button" id="match-tab-tvdb" class="flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer bg-zinc-800 text-zinc-100">TVDB</button>
+          <button type="button" id="match-tab-tmdb" class="flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer text-zinc-400 hover:text-zinc-200">TMDB</button>
+        </div>
         <!-- TMDB title search (remap mode) -->
         <div id="remap-tmdb-section">
           <label id="remap-tmdb-label" class="block text-sm font-medium text-zinc-400 mb-2">Search for the correct TMDB show</label>
@@ -3335,14 +3410,38 @@ const COUNTRIES = (countriesRes || [])
       };
     }
 
-    const clearCollectionBtn = document.getElementById('clear-collection-btn');
+    const clearRatingsBtn = document.getElementById('clear-ratings-btn') as HTMLButtonElement | null;
+    if (clearRatingsBtn) {
+      clearRatingsBtn.onclick = async () => {
+        if (!confirm('Are you sure you want to clear all your ratings? This cannot be undone.')) return;
+        clearRatingsBtn.disabled = true;
+        clearRatingsBtn.textContent = 'Clearing...';
+        try {
+          const res = await fetch(`/api/proxy/ratings/all`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            showMessage('Ratings cleared successfully!');
+          } else {
+            const data = await res.json();
+            throw new Error(data.detail || 'Failed to clear ratings');
+          }
+        } catch (e: any) {
+          showMessage(e.message, 'error');
+        } finally {
+          clearRatingsBtn.disabled = false;
+          clearRatingsBtn.textContent = 'Clear Ratings';
+        }
+      };
+    }
+
+    const clearCollectionBtn = document.getElementById('clear-collection-btn') as HTMLButtonElement | null;
     if (clearCollectionBtn) {
       clearCollectionBtn.onclick = async () => {
         if (!confirm('Are you sure you want to clear your entire collection? Your watch history will be preserved, but all collection links will be removed.')) return;
-        
         clearCollectionBtn.disabled = true;
         clearCollectionBtn.textContent = 'Clearing...';
-        
         try {
           const res = await fetch(`/api/proxy/sync/collection`, {
             method: 'DELETE',
@@ -3354,7 +3453,7 @@ const COUNTRIES = (countriesRes || [])
             const data = await res.json();
             throw new Error(data.detail || 'Failed to clear collection');
           }
-        } catch (e) {
+        } catch (e: any) {
           showMessage(e.message, 'error');
         } finally {
           clearCollectionBtn.disabled = false;
@@ -3817,7 +3916,8 @@ const COUNTRIES = (countriesRes || [])
           'blur_explicit',
           'time_format_24h',
           'show_comments',
-          'show_user_ratings'
+          'show_user_ratings',
+          'use_hls_player',
         ] as const;
         const syncPrefs: Record<string, boolean> = {};
         for (const key of syncKeys) {
@@ -4327,6 +4427,29 @@ const COUNTRIES = (countriesRes || [])
         setTimeout(() => { btn.textContent = original; (btn as HTMLButtonElement).disabled = false; }, 2000);
       }
     });
+
+    const healStubBtn = document.getElementById('heal-stub-titles-btn');
+    if (healStubBtn) {
+      healStubBtn.addEventListener('click', async () => {
+        const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+        const original = healStubBtn.textContent;
+        healStubBtn.textContent = 'Healing…';
+        (healStubBtn as HTMLButtonElement).disabled = true;
+        try {
+          const res = await fetch('/api/proxy/sync/heal-stub-show-titles', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${tok}` },
+          });
+          if (!res.ok) throw new Error('Failed');
+          const data = await res.json();
+          healStubBtn.textContent = data.healed > 0 ? `Healed ${data.healed}` : 'Nothing to heal';
+          setTimeout(() => { healStubBtn.textContent = original; (healStubBtn as HTMLButtonElement).disabled = false; }, 3000);
+        } catch {
+          healStubBtn.textContent = 'Error';
+          setTimeout(() => { healStubBtn.textContent = original; (healStubBtn as HTMLButtonElement).disabled = false; }, 2000);
+        }
+      });
+    }
   }
 
   function setupCollapsibleRows() {
@@ -4407,6 +4530,22 @@ const COUNTRIES = (countriesRes || [])
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ show_comments: showCommentsToggle.checked }),
+      });
+    });
+  }
+
+  // Sync use_hls_player cookie from the server-rendered value on page load.
+  const hlsPlayerToggle = document.getElementById('use-hls-player-toggle') as HTMLInputElement | null;
+  if (hlsPlayerToggle) {
+    document.cookie = `use_hls_player=${hlsPlayerToggle.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
+
+    hlsPlayerToggle.addEventListener('change', async () => {
+      document.cookie = `use_hls_player=${hlsPlayerToggle.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
+      const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+      await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ use_hls_player: hlsPlayerToggle.checked }),
       });
     });
   }
@@ -4512,6 +4651,7 @@ const COUNTRIES = (countriesRes || [])
       }
     });
   }
+
   setupApiKey();
   setupHealButton();
   setupClearSessionsButton();
@@ -4552,8 +4692,11 @@ const COUNTRIES = (countriesRes || [])
       if (!res.ok) return;
       const jobs: any[] = await res.json();
 
+      function parseUTC(dateStr: string): Date {
+        return new Date(dateStr.endsWith('Z') || dateStr.includes('+') ? dateStr : dateStr + 'Z');
+      }
       function timeAgo(dateStr: string): string {
-        const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+        const diff = Math.floor((Date.now() - parseUTC(dateStr).getTime()) / 1000);
         if (diff < 60) return 'just now';
         if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
         if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -4588,13 +4731,22 @@ const COUNTRIES = (countriesRes || [])
         if (!el.classList.contains('hidden')) expandedDetails.add(el.id);
       });
 
-      const [statusRes, overridesRes] = await Promise.all([
+      const [statusRes, overridesRes, matchedRes] = await Promise.all([
         fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } }),
         fetch('/api/proxy/sync/season-overrides', { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch('/api/proxy/sync/matched-shows', { headers: { 'Authorization': `Bearer ${token}` } }),
       ]);
       if (!statusRes.ok) return;
       const jobs: any[] = await statusRes.json();
       const overrides: any[] = overridesRes.ok ? await overridesRes.json() : [];
+      const matchedShows: any[] = matchedRes.ok ? await matchedRes.json() : [];
+
+      // Build a lookup: lowercase show_title → matched show info
+      // Used to overlay matched state onto SyncJob warnings that lack matched:true stamps
+      const matchedShowMap = new Map<string, any>();
+      for (const m of matchedShows) {
+        if (m.show_title) matchedShowMap.set(m.show_title.toLowerCase(), m);
+      }
 
       const overrideMap = new Map<string, any>();
       for (const o of overrides) {
@@ -4609,7 +4761,8 @@ const COUNTRIES = (countriesRes || [])
         if (!job) { container.classList.add('hidden'); container.innerHTML = ''; return; }
 
         const warnings: any[] = job.warnings;
-        const date = new Date(job.updated_at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+        const _updatedAt = job.updated_at.endsWith('Z') || job.updated_at.includes('+') ? job.updated_at : job.updated_at + 'Z';
+        const date = new Date(_updatedAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
         const detailsId = `conn-warnings-details-${connId}`;
 
         const enrichmentWarnings = warnings.filter((w: any) => w.tmdb_id !== undefined && w.season !== undefined);
@@ -4644,35 +4797,48 @@ const COUNTRIES = (countriesRes || [])
             }).join('')}
           </div>
         ` : '';
-
         // Group episode warnings by series_name to avoid N identical rows for the same show.
         // Series-level warnings for the same show are merged in (to carry their GUIDs) rather
-        // than rendered as a separate row. Matched state is read directly from warning entries.
-        type GroupEntry = {count: number, reason: string, plex_guids: string[], matched: boolean, matched_tvdb_id?: number, matched_show_id?: number, matched_show_uri_id?: string, matched_show_title?: string};
+        // than rendered as a separate row. Matched state is read directly from warning entries,
+        // with a fallback to matchedShowMap for warnings created before auto-stamping existed.
+        type GroupEntry = {
+          count: number;
+          reason: string;
+          plex_guids: string[];
+          matched: boolean;
+          matched_tvdb_id?: number;
+          matched_show_id?: number;
+          matched_show_uri_id?: string;
+          matched_show_title?: string;
+        };
         const groupedEpisodeWarnings: Map<string, GroupEntry> = new Map();
         const standaloneUnmatched: any[] = [];
         for (const w of unmatchedWarnings) {
           if (w.media_type === 'episode' && w.series_name) {
+            // Always overlay DB state — it reflects the current show linkage regardless of stamp age
+            const dbMatch = matchedShowMap.get((w.series_name ?? '').toLowerCase());
+            const isMatched = !!w.matched || !!dbMatch;
             const existing = groupedEpisodeWarnings.get(w.series_name);
             if (existing) {
               existing.count++;
-              if (w.matched && !existing.matched) {
+              if (isMatched) {
                 existing.matched = true;
-                existing.matched_tvdb_id = w.matched_tvdb_id;
-                existing.matched_show_id = w.matched_show_id;
-                existing.matched_show_uri_id = w.matched_show_uri_id;
-                existing.matched_show_title = w.matched_show_title;
+                // Prefer tvdb_id: DB > stamp (stamps from old `already_linked` runs may have null tvdb_id)
+                existing.matched_tvdb_id = dbMatch?.tvdb_id ?? w.matched_tvdb_id ?? existing.matched_tvdb_id;
+                existing.matched_show_id = dbMatch?.show_id ?? w.matched_show_id ?? existing.matched_show_id;
+                existing.matched_show_uri_id = dbMatch?.show_uri_id ?? w.matched_show_uri_id ?? existing.matched_show_uri_id;
+                existing.matched_show_title = dbMatch?.show_title_matched ?? w.matched_show_title ?? existing.matched_show_title;
               }
             } else {
               groupedEpisodeWarnings.set(w.series_name, {
                 count: 1,
                 reason: w.reason ?? 'unknown reason',
                 plex_guids: w.plex_guids ?? [],
-                matched: !!w.matched,
-                matched_tvdb_id: w.matched_tvdb_id,
-                matched_show_id: w.matched_show_id,
-                matched_show_uri_id: w.matched_show_uri_id,
-                matched_show_title: w.matched_show_title,
+                matched: isMatched,
+                matched_tvdb_id: dbMatch?.tvdb_id ?? w.matched_tvdb_id,
+                matched_show_id: dbMatch?.show_id ?? w.matched_show_id,
+                matched_show_uri_id: dbMatch?.show_uri_id ?? w.matched_show_uri_id,
+                matched_show_title: dbMatch?.show_title_matched ?? w.matched_show_title,
               });
             }
           } else {
@@ -4682,6 +4848,7 @@ const COUNTRIES = (countriesRes || [])
 
         // Merge series-level standalone warnings into grouped episode entries where the title
         // matches, absorbing their GUIDs. Suppress the standalone row to avoid duplication.
+        // Also apply matchedShowMap overlay to standalone series-level warnings.
         const trueStandaloneUnmatched = standaloneUnmatched.filter((w: any) => {
           const grouped = groupedEpisodeWarnings.get(w.title);
           if (grouped) {
@@ -4689,6 +4856,16 @@ const COUNTRIES = (countriesRes || [])
               grouped.plex_guids = w.plex_guids;
             }
             return false; // suppress — already shown in grouped section
+          }
+          // Apply matchedShowMap overlay for series-type standalone warnings
+          if (!w.matched && (w.media_type === 'series' || w.media_type === 'episode')) {
+            const dbMatch = matchedShowMap.get((w.title ?? '').toLowerCase());
+            if (dbMatch) {
+              w.matched = true;
+              w.matched_tvdb_id = dbMatch.tvdb_id;
+              w.matched_show_id = dbMatch.show_id;
+              w.matched_show_title = dbMatch.show_title_matched;
+            }
           }
           return true;
         });
@@ -4833,6 +5010,44 @@ const COUNTRIES = (countriesRes || [])
           });
         });
       });
+
+      // Wire up static (SSR-rendered) season remap rows in the active remaps panel
+      document.querySelectorAll<HTMLElement>('#season-remaps-list .remap-season-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          (window as any).openRemapModal(
+            parseInt(btn.dataset.srcTmdb ?? '0'),
+            parseInt(btn.dataset.srcSeason ?? '0'),
+            btn.dataset.srcTitle ?? '',
+          );
+        });
+      });
+      document.querySelectorAll<HTMLButtonElement>('#season-remaps-list .delete-override-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const overrideId = btn.dataset.overrideId;
+          if (!overrideId || !confirm('Remove this season remap?')) return;
+          btn.disabled = true;
+          btn.textContent = 'Removing…';
+          try {
+            const res = await fetch(`/api/proxy/sync/season-overrides/${overrideId}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (res.ok) {
+              btn.closest('[data-override-id]')?.remove();
+              const list = document.getElementById('season-remaps-list');
+              if (list && list.children.length === 0) {
+                document.getElementById('season-remaps-panel')?.remove();
+              }
+            } else {
+              btn.disabled = false;
+              btn.textContent = 'Remove';
+            }
+          } catch (_) {
+            btn.disabled = false;
+            btn.textContent = 'Remove';
+          }
+        });
+      });
     } catch (_) { /* non-critical */ }
   }
 
@@ -4863,6 +5078,7 @@ const COUNTRIES = (countriesRes || [])
       (document.getElementById('remap-tvdb-results') as HTMLElement).innerHTML = '';
       (document.getElementById('remap-seasons-list') as HTMLElement).innerHTML = '';
       (document.getElementById('remap-selected-area') as HTMLElement).classList.add('hidden');
+      (document.getElementById('match-tab-bar') as HTMLElement).classList.add('hidden');
       (document.getElementById('remap-save') as HTMLButtonElement).disabled = true;
       (document.getElementById('remap-error') as HTMLElement).classList.add('hidden');
       targetTmdbId = 0;
@@ -4872,6 +5088,42 @@ const COUNTRIES = (countriesRes || [])
       matchSeriesName = '';
       matchMovieTitle = '';
     };
+
+    const setMatchTab = (tab: 'tvdb' | 'tmdb') => {
+      const tvdbBtn = document.getElementById('match-tab-tvdb') as HTMLElement;
+      const tmdbBtn = document.getElementById('match-tab-tmdb') as HTMLElement;
+      const tvdbSection = document.getElementById('remap-tvdb-section') as HTMLElement;
+      const tmdbSection = document.getElementById('remap-tmdb-section') as HTMLElement;
+      const selectedArea = document.getElementById('remap-selected-area') as HTMLElement;
+      const saveBtn = document.getElementById('remap-save') as HTMLButtonElement;
+      // Reset selection
+      selectedArea.classList.add('hidden');
+      saveBtn.disabled = true;
+      targetTmdbId = 0;
+      targetTvdbId = 0;
+      if (tab === 'tvdb') {
+        tvdbBtn.className = 'flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer bg-zinc-800 text-zinc-100';
+        tmdbBtn.className = 'flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer text-zinc-400 hover:text-zinc-200';
+        tvdbSection.classList.remove('hidden');
+        tmdbSection.classList.add('hidden');
+        (document.getElementById('remap-tvdb-results') as HTMLElement).innerHTML = '';
+        const tvdbInput = document.getElementById('remap-tvdb-input') as HTMLInputElement;
+        tvdbInput.focus();
+        if (tvdbInput.value.trim()) doTvdbSearch();
+      } else {
+        tmdbBtn.className = 'flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer bg-zinc-800 text-zinc-100';
+        tvdbBtn.className = 'flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer text-zinc-400 hover:text-zinc-200';
+        tmdbSection.classList.remove('hidden');
+        tvdbSection.classList.add('hidden');
+        (document.getElementById('remap-search-results') as HTMLElement).innerHTML = '';
+        const tmdbInput = document.getElementById('remap-search-input') as HTMLInputElement;
+        tmdbInput.focus();
+        if (tmdbInput.value.trim()) doSearch();
+      }
+    };
+
+    document.getElementById('match-tab-tvdb')?.addEventListener('click', () => setMatchTab('tvdb'));
+    document.getElementById('match-tab-tmdb')?.addEventListener('click', () => setMatchTab('tmdb'));
 
     document.getElementById('remap-close')?.addEventListener('click', closeModal);
     document.getElementById('remap-cancel')?.addEventListener('click', closeModal);
@@ -5175,18 +5427,19 @@ const COUNTRIES = (countriesRes || [])
     window["openMatchModal"] = (seriesName: string) => {
       modalMode = 'match';
       matchSeriesName = seriesName;
-      (document.getElementById('remap-modal-title') as HTMLElement).textContent = 'Match Show on TVDB';
+      (document.getElementById('remap-modal-title') as HTMLElement).textContent = 'Match Show';
       (document.getElementById('remap-source-label') as HTMLElement).textContent = `"${seriesName}"`;
-      (document.getElementById('remap-tmdb-section') as HTMLElement).classList.add('hidden');
-      (document.getElementById('remap-tvdb-section') as HTMLElement).classList.remove('hidden');
       (document.getElementById('remap-seasons-area') as HTMLElement).classList.add('hidden');
       (document.getElementById('remap-save') as HTMLButtonElement).textContent = 'Match & Apply';
+      (document.getElementById('remap-tmdb-label') as HTMLElement).textContent = 'Search for the correct TMDB show';
+      (document.getElementById('match-tab-bar') as HTMLElement).classList.remove('hidden');
       const tvdbInput = document.getElementById('remap-tvdb-input') as HTMLInputElement;
       tvdbInput.value = seriesName;
+      (document.getElementById('remap-search-input') as HTMLInputElement).value = seriesName;
       modal.classList.remove('hidden');
       modal.classList.add('flex');
-      tvdbInput.focus();
-      // Auto-search so the user sees results (or the no-key message) immediately
+      // Default to TVDB tab and auto-search
+      setMatchTab('tvdb');
       doTvdbSearch();
     };
 

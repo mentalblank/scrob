@@ -98,7 +98,7 @@ def format_show(show: ShowModel) -> dict:
         "tagline": show.tagline,
         "first_air_date": show.first_air_date,
         "last_air_date": show.last_air_date,
-        "genres": (show.tmdb_data or {}).get("genres", []),
+        "genres": [g["name"] if isinstance(g, dict) else g for g in (show.tmdb_data or {}).get("genres", [])],
         "seasons_meta": seasons_meta,
         "custom_season_names": custom_season_names,
         "original_language": (show.tmdb_data or {}).get("original_language"),
@@ -684,6 +684,10 @@ async def get_show(
             "user_rating": state_item.get("user_rating"),
             "season_states": season_states,
             "seasons": {f"season_{k}": v for k, v in sorted(seasons.items())},
+            "created_by": [
+                {"tmdb_id": c["id"], "name": c["name"]}
+                for c in (tmdb_extra or show.tmdb_data or {}).get("created_by", [])
+            ],
             "cast": cast,
             "networks": networks,
             "where_to_watch": where_to_watch,
@@ -808,6 +812,10 @@ async def get_show(
             "is_dropped": state_item_tmdb.get("is_dropped", False),
             "request_status": state_item_tmdb.get("request_status"),
             "user_rating": state_item_tmdb.get("user_rating"),
+            "created_by": [
+                {"tmdb_id": c["id"], "name": c["name"]}
+                for c in data.get("created_by", [])
+            ],
             "cast": cast,
             "networks": networks,
             "seasons_meta": [

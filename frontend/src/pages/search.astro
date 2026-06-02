@@ -109,7 +109,12 @@ const tabs: [string | undefined, string][] = [
   <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
     {showYearFilter ? (
       <div class="flex items-center gap-3">
-        <select id="filter-year" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+        <select
+          id="filter-year"
+          data-q={q}
+          data-type={type ?? ""}
+          class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+        >
           <option value="">All Years</option>
           {years.map(y => (
             <option value={y} selected={year === y}>{y}</option>
@@ -236,6 +241,19 @@ const tabs: [string | undefined, string][] = [
   function setup() {
     const token = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
 
+    const yearSel = document.getElementById('filter-year') as HTMLSelectElement | null;
+    if (yearSel) {
+      yearSel.addEventListener('change', () => {
+        const params = new URLSearchParams();
+        const q = yearSel.dataset.q ?? '';
+        const type = yearSel.dataset.type ?? '';
+        if (q) params.set('q', q);
+        if (type) params.set('type', type);
+        if (yearSel.value) params.set('year', yearSel.value);
+        window.location.href = `/search?${params.toString()}`;
+      });
+    }
+
     document.querySelectorAll<HTMLButtonElement>('.follow-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const userId = Number(btn.dataset.userId);
@@ -273,15 +291,3 @@ const tabs: [string | undefined, string][] = [
   document.addEventListener('astro:after-swap', setup);
 </script>
 
-{showYearFilter && (
-  <script define:vars={{ q, type, year }}>
-    document.getElementById("filter-year")?.addEventListener("change", (e) => {
-      const y = (e.target as HTMLSelectElement).value;
-      const params = new URLSearchParams();
-      params.set("q", q);
-      if (type) params.set("type", type);
-      if (y) params.set("year", y);
-      window.location.href = `/search?${params.toString()}`;
-    });
-  </script>
-)}

@@ -687,6 +687,7 @@ function skeletonWide() {
       resultEl.classList.add('hidden');
       errorEl.classList.remove('flex');
       errorEl.classList.add('hidden');
+      document.getElementById('pick-backdrop-img').src = '';
 
       let idx = Math.floor(Math.random() * PHRASES.length);
       emojiEl.textContent = PHRASES[idx].emoji;
@@ -733,61 +734,71 @@ function skeletonWide() {
     }
 
     function showResult(data) {
-      if (phraseInterval) { clearInterval(phraseInterval); phraseInterval = null; }
-      loadingEl.classList.add('hidden');
-      loadingEl.classList.remove('flex');
-      errorEl.classList.add('hidden');
-      errorEl.classList.remove('flex');
-      resultEl.classList.remove('hidden');
-      resultEl.classList.add('flex');
+      const imgSrc = data.backdrop_path || data.poster_path || null;
 
-      const backdropImg = document.getElementById('pick-backdrop-img');
-      const backdropWrap = document.getElementById('pick-backdrop-wrap');
-      if (data.backdrop_path) {
-        backdropImg.src = data.backdrop_path;
-        backdropImg.alt = data.title || '';
-        backdropWrap.classList.remove('hidden');
-      } else if (data.poster_path) {
-        backdropImg.src = data.poster_path;
-        backdropImg.alt = data.title || '';
-        backdropWrap.classList.remove('hidden');
+      function render() {
+        if (phraseInterval) { clearInterval(phraseInterval); phraseInterval = null; }
+        loadingEl.classList.add('hidden');
+        loadingEl.classList.remove('flex');
+        errorEl.classList.add('hidden');
+        errorEl.classList.remove('flex');
+        resultEl.classList.remove('hidden');
+        resultEl.classList.add('flex');
+
+        const backdropImg = document.getElementById('pick-backdrop-img');
+        const backdropWrap = document.getElementById('pick-backdrop-wrap');
+        if (imgSrc) {
+          backdropImg.src = imgSrc;
+          backdropImg.alt = data.title || '';
+          backdropWrap.classList.remove('hidden');
+        } else {
+          backdropWrap.classList.add('hidden');
+        }
+
+        document.getElementById('pick-title').textContent = data.title || '';
+
+        const year = data.release_date ? data.release_date.slice(0, 4) : '';
+        const rating = data.tmdb_rating ? '★ ' + Number(data.tmdb_rating).toFixed(1) : '';
+        const metaParts = [year, rating].filter(Boolean);
+        document.getElementById('pick-meta').textContent = metaParts.join(' · ');
+
+        document.getElementById('pick-overview').textContent = data.overview || '';
+
+        const genresEl = document.getElementById('pick-genres');
+        const genres = data.genres || [];
+        genresEl.innerHTML = genres.map(g => `<span class="px-3 py-1 bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs font-bold rounded-full uppercase tracking-wider">${esc(g)}</span>`).join('');
+
+        const sourcesEl = document.getElementById('pick-sources');
+        const sources = data.sources || [];
+        const subscribed = sources.filter(s => s.is_subscribed);
+        const others = sources.filter(s => !s.is_subscribed);
+        
+        let html = '';
+        if (subscribed.length > 0) {
+          html += `<div class="w-full mb-1"><p class="text-[10px] font-black text-blue-400 uppercase tracking-[0.1em] mb-2">Available on your services</p><div class="flex flex-wrap gap-2">${subscribed.map(sourceLabel).join('')}</div></div>`;
+        }
+        if (others.length > 0) {
+          html += `<div class="w-full mt-2"><p class="text-[10px] font-black text-zinc-600 uppercase tracking-[0.1em] mb-2">${subscribed.length > 0 ? 'Other options' : 'Available on'}</p><div class="flex flex-wrap gap-2">${others.map(sourceLabel).join('')}</div></div>`;
+        }
+        
+        sourcesEl.innerHTML = html || '<span class="text-sm text-zinc-500">No streaming source found</span>';
+
+        const viewLink = document.getElementById('pick-view-link');
+        if (data.type === 'series') {
+          viewLink.href = data.uri_id ? `/show/${data.uri_id}` : data.tvdb_id ? `/show/tvdb:s:${data.tvdb_id}` : `/show/tmdb:s:${data.tmdb_id}`;
+        } else {
+          viewLink.href = data.uri_id ? `/media/movie/${data.uri_id}` : `/media/movie/tmdb:m:${data.tmdb_id}`;
+        }
+      }
+
+      if (imgSrc) {
+        const img = new Image();
+        img.onload = render;
+        img.onerror = render;
+        img.src = imgSrc;
       } else {
-        backdropWrap.classList.add('hidden');
-      }
-
-      document.getElementById('pick-title').textContent = data.title || '';
-
-      const year = data.release_date ? data.release_date.slice(0, 4) : '';
-      const rating = data.tmdb_rating ? '★ ' + Number(data.tmdb_rating).toFixed(1) : '';
-      const metaParts = [year, rating].filter(Boolean);
-      document.getElementById('pick-meta').textContent = metaParts.join(' · ');
-
-      document.getElementById('pick-overview').textContent = data.overview || '';
-
-      const genresEl = document.getElementById('pick-genres');
-      const genres = data.genres || [];
-      genresEl.innerHTML = genres.map(g => `<span class="px-3 py-1 bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs font-bold rounded-full uppercase tracking-wider">${esc(g)}</span>`).join('');
-
-      const sourcesEl = document.getElementById('pick-sources');
-      const sources = data.sources || [];
-      const subscribed = sources.filter(s => s.is_subscribed);
-      const others = sources.filter(s => !s.is_subscribed);
-      
-      let html = '';
-      if (subscribed.length > 0) {
-        html += `<div class="w-full mb-1"><p class="text-[10px] font-black text-blue-400 uppercase tracking-[0.1em] mb-2">Available on your services</p><div class="flex flex-wrap gap-2">${subscribed.map(sourceLabel).join('')}</div></div>`;
-      }
-      if (others.length > 0) {
-        html += `<div class="w-full mt-2"><p class="text-[10px] font-black text-zinc-600 uppercase tracking-[0.1em] mb-2">${subscribed.length > 0 ? 'Other options' : 'Available on'}</p><div class="flex flex-wrap gap-2">${others.map(sourceLabel).join('')}</div></div>`;
-      }
-      
-      sourcesEl.innerHTML = html || '<span class="text-sm text-zinc-500">No streaming source found</span>';
-
-      const viewLink = document.getElementById('pick-view-link');
-      if (data.type === 'series') {
-        viewLink.href = data.uri_id ? `/show/${data.uri_id}` : data.tvdb_id ? `/show/tvdb:s:${data.tvdb_id}` : `/show/tmdb:s:${data.tmdb_id}`;
-      } else {
-        viewLink.href = data.uri_id ? `/media/movie/${data.uri_id}` : `/media/movie/tmdb:m:${data.tmdb_id}`;
+        render();
+>>>>>>> upstream/main
       }
     }
 

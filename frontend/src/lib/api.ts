@@ -256,12 +256,13 @@ export interface ShowSeasonOverride {
   source_show_id: number;
   source_show_uri_id: string | null;
   source_season_number: number;
-  source_show_title?: string;
+  source_show_title?: string | null;
   source_show_poster_path?: string | null;
   target_show_id: number | null;
   target_show_uri_id: string | null;
+  target_show_tmdb_id?: number | null;
   target_season_number: number;
-  target_show_title?: string;
+  target_show_title?: string | null;
   target_show_poster_path?: string | null;
 }
 
@@ -477,6 +478,7 @@ export interface UserSettings {
   show_comments: boolean;
   show_user_ratings: boolean;
   time_format_24h: boolean;
+  use_hls_player: boolean;
 }
 
 export interface MediaServerConnection {

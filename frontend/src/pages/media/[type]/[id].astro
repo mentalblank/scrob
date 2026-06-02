@@ -547,6 +547,16 @@ const activeButtonsCount = [
                     {originalLanguage}
                   </span>
                 )}
+                {item.directors?.length > 0 && (
+                  <span class="flex items-center gap-1.5 font-medium text-zinc-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 text-zinc-500">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75.125v-.125A1.125 1.125 0 0 1 3.375 18H21m-18 0v-1.5A1.125 1.125 0 0 1 3.375 15h17.25M3.375 15v-1.5m0 1.5h17.25M3.375 15a1.125 1.125 0 0 1-1.125-1.125v-1.5M21 13.5V18a1.125 1.125 0 0 1-1.125 1.125H21m0-7.5v1.5m0-1.5a1.125 1.125 0 0 0-1.125-1.125H4.125A1.125 1.125 0 0 0 3 13.5m18 0v-7.5A1.125 1.125 0 0 0 19.875 4.5H4.125A1.125 1.125 0 0 0 3 5.625v7.875" />
+                    </svg>
+                    {item.directors.map((d: any) => (
+                      <a href={`/person/${d.tmdb_id}`} class="hover:text-zinc-100 transition-colors">{d.name}</a>
+                    )).reduce((acc: any[], el: any, i: number) => i === 0 ? [el] : [...acc, ', ', el], [])}
+                  </span>
+                )}
                 {!!item.play_count && (
                   <span id="play-count-badge" class="inline-flex items-center px-2.5 py-1 bg-zinc-950 hover:bg-zinc-900 border border-zinc-850 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 text-xs font-bold rounded-lg cursor-pointer transition-all duration-200" title="Click to view/remove specific plays" data-uri-id={item.uri_id ?? (item.type === "movie" ? `tmdb:m:${item.tmdb_id}` : `tmdb:s:${item.tmdb_id}`)} data-media-type={item.type} data-media-id={item.id ?? ""} data-show-uri={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : "")} data-season={item.season_number ?? ""} data-episode={item.episode_number ?? ""}>
                     {item.play_count} {item.play_count === 1 ? 'Play' : 'Plays'}
@@ -556,6 +566,39 @@ const activeButtonsCount = [
             )}
 
             {!isEpisode && (() => { const c = item.production_companies?.find(c => c.logo_path); return c ? <div class="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm flex items-center w-fit mt-3"><img src={c.logo_path!} alt={c.name} title={c.name} class="h-5 max-w-[80px] object-contain" loading="lazy" /></div> : null; })()}
+
+            <div class="mb-4">
+              <ActionBar
+                tmdbId={item.tmdb_id}
+                mediaType={item.type}
+                watched={item.watched ?? false}
+                inLists={item.in_lists ?? []}
+                inLibrary={item.in_library ?? false}
+                collectionPct={item.collection_pct ?? 0}
+                showTmdbId={item.show_tmdb_id}
+                seasonNumber={item.season_number}
+                episodeNumber={item.episode_number}
+                isMonitored={item.is_monitored ?? false}
+                requestEnabled={item.request_enabled ?? false}
+                requestStatus={item.request_status ?? null}
+                mediaId={item.id}
+                userRating={item.user_rating ?? null}
+              />
+            </div>
+
+            {(item.type === 'movie' || item.type === 'episode') && (
+              <ManualScrobble
+                tmdbId={item.tmdb_id}
+                mediaType={item.type}
+                runtime={item.runtime}
+                title={item.title}
+                showTmdbId={item.show_tmdb_id}
+                seasonNumber={item.season_number}
+                episodeNumber={item.episode_number}
+              />
+            )}
+
+
 
 
             <!-- Overview -->

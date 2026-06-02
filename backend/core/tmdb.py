@@ -132,7 +132,7 @@ async def search_multi(q: str, page: int = 1, api_key: str = None) -> dict:
 async def search_movies(q: str, page: int = 1, year: int | None = None, api_key: str = None) -> dict:
     params: dict = {"query": q, "include_adult": "false", "page": page}
     if year:
-        params["year"] = year
+        params["primary_release_year"] = year
     return await _get(f"{TMDB_BASE}/search/movie", headers=get_headers(api_key), params=params)
 
 

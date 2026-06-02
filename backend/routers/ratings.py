@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete
 
 from db import get_db
 from models.media import Media
@@ -50,6 +50,16 @@ def format_rating(rating: Rating, media: Media) -> dict:
         "review": rating.review,
         "rated_at": rating.rated_at.isoformat(),
     }
+
+
+@router.delete("/all")
+async def clear_all_ratings(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await db.execute(delete(Rating).where(Rating.user_id == current_user.id))
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.post("")
