@@ -1,5 +1,6 @@
 ---
 import Base from "../../layouts/Base.astro";
+import { api } from "../../lib/api";
 export const prerender = false;
 
 const { id } = Astro.params;
@@ -10,15 +11,15 @@ const { token, user: currentUser } = Astro.locals;
 let accessError = "";
 
 try {
-  const res = await fetch(
-    `http://localhost:${import.meta.env.BACKEND_PORT ?? "7331"}/profile/${id}`,
-    token ? { headers: { Authorization: `Bearer ${token}` } } : {}
-  );
-  if (res.status === 404) accessError = "User not found.";
-  else if (res.status === 403) accessError = "This profile is private.";
-  else if (!res.ok) accessError = "Failed to load profile.";
-} catch {
-  accessError = "Failed to load profile.";
+  await api.profile.getPublic(Number(id), token);
+} catch (e: any) {
+  if (e.message.includes("404")) {
+    accessError = "User not found.";
+  } else if (e.message.includes("403")) {
+    accessError = "This profile is private.";
+  } else {
+    accessError = "Failed to load profile.";
+  }
 }
 
 const isOwnStats = currentUser && String(currentUser.id) === String(id);

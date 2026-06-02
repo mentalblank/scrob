@@ -56,13 +56,9 @@ const showProgress = progressPct > 0;
 
 let hasExternalPlayback = false;
 try {
-  const backendPort = (import.meta.env.BACKEND_PORT as string | undefined) ?? "7331";
-  const connRes = await fetch(`http://localhost:${backendPort}/connections`, {
-    headers: { 'Authorization': `Bearer ${token}` },
-  });
-  if (connRes.ok) {
-    const conns = await connRes.json();
-    hasExternalPlayback = conns.some((c: any) => c.external_server_url);
+  if (token) {
+    const conns = await api.auth.getConnections(token);
+    hasExternalPlayback = conns.some(c => c.external_server_url);
   }
 } catch {}
 ---
