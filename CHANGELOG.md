@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file. This projec
 ## [Unreleased]
 
 ### Added
+
 - **Language Filters**: Added a new content filter section allowing users to blacklist or whitelist specific languages to exclude/include them in discovery results.
 - **Media Server Enrichment Toggle**: Added a setting to enable/disable metadata enrichment (resolution, languages) from Plex, Jellyfin, and Emby.
 - **Watch History Features**: Added date range filtering, grouping options (Date, Media Type, Show/Movie, Season), and single-click history event deletion directly from the `/history` page.
@@ -27,9 +28,11 @@ All notable changes to this project will be documented in this file. This projec
 - **Media Integration**: Integrated video trailer dialogs and TMDB logo displays.
 - **Visual Progress**: Added watch progress bars to show and season cards.
 - **Streaming Providers**: Integrated with TMDB to fetch and display streaming service providers on media detail pages.
+
 ---
 
 ### Changed
+
 - **Detail Page Action Buttons**: Redesigned buttons across movie, show, and episode detail pages into a unified, dynamically scaling grid to eliminate empty margins.
 - **Discover and Airing Today Cards**: Aligned discover page grids and home page airing today cards to use the vertical 2:3 `MediaCard` poster layout.
 - **Single-Season Breadcrumbs**: Simplified breadcrumbs on episode detail pages to skip the intermediate season level for single-season shows.
@@ -54,5 +57,6 @@ All notable changes to this project will be documented in this file. This projec
 ---
 
 ### Fixed
+
 - **Favicon**: Replaced default Astro favicons across all asset formats with the custom Scrob logo.
 - **Plex Sync**: Chunked synchronization requests into 500-record pages to prevent OOM errors on large libraries.

@@ -3,9 +3,10 @@
   <h1>Scrob</h1>
   <p>Open-source, self-hosted media tracking - your personal Letterboxd + Trakt.</p>
 
-  [![Docker Pulls](https://img.shields.io/docker/pulls/mentalblank/scrob?style=flat-square)](https://hub.docker.com/r/mentalblank/scrob)
-  [![GitHub Contributors](https://img.shields.io/github/contributors/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/graphs/contributors)
-  [![Latest Release](https://img.shields.io/github/v/release/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/releases/latest)
+[![Docker Pulls](https://img.shields.io/docker/pulls/mentalblank/scrob?style=flat-square)](https://hub.docker.com/r/mentalblank/scrob)
+[![GitHub Contributors](https://img.shields.io/github/contributors/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/graphs/contributors)
+[![Latest Release](https://img.shields.io/github/v/release/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/releases/latest)
+
 </div>
 
 ---
@@ -69,45 +70,9 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 - **Progressive Web App**: Install Scrob on any device - Android, iOS, or desktop - for a native app feel.
 - **Single container**: Frontend and backend ship as one image on one port. No separate services to manage.
 
-## Screenshots
+## Screenshot
 
-<img src="docs/screenshots/scrobss.png" alt="Scrob" width="800">
-
-<details>
-<summary>View more screenshots</summary>
-
-**Dashboard**
-<img src="docs/screenshots/scrob-dashboard-dark.png" alt="Dashboard" width="800" />
-
-**Explore**
-<img src="docs/screenshots/scrob-explore-light.png" alt="Explore" width="800" />
-
-**Movie**
-<img src="docs/screenshots/scrob-movie-light.png" alt="Movie" width="800" />
-
-**Show**
-<img src="docs/screenshots/scrob-show-dark.png" alt="Show" width="800" />
-
-**Season**
-<img src="docs/screenshots/scrob-season-dark.png" alt="Season" width="800" />
-
-**Episode**
-<img src="docs/screenshots/scrob-episode-dark.png" alt="Episode" width="800" />
-
-**Search**
-<img src="docs/screenshots/scrob-search-light.png" alt="Search" width="800" />
-
-**History (mobile)**
-<img src="docs/screenshots/scrob-history-dark-mobile.png" alt="History mobile" width="800" />
-
-**Lists (mobile)**
-<img src="docs/screenshots/scrob-lists-light-mobile.png" alt="Lists mobile" width="800" />
-
-**Settings**
-<img src="docs/screenshots/scrob-settings-dark.png" alt="Settings" width="800" />
-
-
-</details>
+<img src="docs/screenshots/scrob-show.png" alt="Scrob" width="800">
 
 ## Getting Started
 
@@ -136,7 +101,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: scrob
-      POSTGRES_PASSWORD: changeme        # ← change this
+      POSTGRES_PASSWORD: changeme # ← change this
       POSTGRES_DB: scrob
     volumes:
       - db_data:/var/lib/postgresql/data
@@ -156,8 +121,8 @@ services:
     ports:
       - "7330:7330"
     environment:
-      DATABASE_URL: postgresql+asyncpg://scrob:changeme@scrob-db:5432/scrob   # ← match password above
-      SECRET_KEY: changeme               # ← generate with: openssl rand -hex 32
+      DATABASE_URL: postgresql+asyncpg://scrob:changeme@scrob-db:5432/scrob # ← match password above
+      SECRET_KEY: changeme # ← generate with: openssl rand -hex 32
       TZ: UTC
     volumes:
       - scrob_data:/app/backend/data
@@ -188,7 +153,7 @@ curl -o docker-compose.yml https://raw.githubusercontent.com/ellite/scrob/main/d
 2. Edit it and set your `SECRET_KEY`:
 
 ```yaml
-SECRET_KEY: changeme   # ← generate with: openssl rand -hex 32
+SECRET_KEY: changeme # ← generate with: openssl rand -hex 32
 ```
 
 3. Start:
@@ -265,18 +230,18 @@ Database migrations run automatically on startup - no manual steps required.
 
 ## Configuration
 
-| Variable | Default | Description |
-|---|---|---|
-| `SECRET_KEY` | - | **Required.** JWT signing key. Generate with `openssl rand -hex 32`. |
-| `DATABASE_URL` | - | **Required** (standard image). PostgreSQL connection string (`postgresql+asyncpg://...`). Optional on the omnibus image — if omitted, the embedded database is used. |
-| `ENABLE_REGISTRATIONS` | `true` | Allow new users to register. The first user can always register regardless of this setting. |
-| `REGISTRATION_MAX_ALLOWED_USERS` | `0` | Maximum number of registered users. `0` = unlimited. |
-| `TZ` | `UTC` | Container timezone (e.g. `Europe/Lisbon`). |
-| `PUID` | `1000` | User ID to run the process as. |
-| `PGID` | `1000` | Group ID to run the process as. |
-| `BACKEND_PORT` | `7331` | Internal port the backend binds to. Override only if `7331` conflicts on bare metal. |
-| `OIDC_ENABLED` | `false` | Enable OIDC login. |
-| `OIDC_DISABLE_PASSWORD_LOGIN` | `false` | Enforce OIDC-only login (disables username/password). |
+| Variable                         | Default | Description                                                                                                                                                          |
+| -------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SECRET_KEY`                     | -       | **Required.** JWT signing key. Generate with `openssl rand -hex 32`.                                                                                                 |
+| `DATABASE_URL`                   | -       | **Required** (standard image). PostgreSQL connection string (`postgresql+asyncpg://...`). Optional on the omnibus image — if omitted, the embedded database is used. |
+| `ENABLE_REGISTRATIONS`           | `true`  | Allow new users to register. The first user can always register regardless of this setting.                                                                          |
+| `REGISTRATION_MAX_ALLOWED_USERS` | `0`     | Maximum number of registered users. `0` = unlimited.                                                                                                                 |
+| `TZ`                             | `UTC`   | Container timezone (e.g. `Europe/Lisbon`).                                                                                                                           |
+| `PUID`                           | `1000`  | User ID to run the process as.                                                                                                                                       |
+| `PGID`                           | `1000`  | Group ID to run the process as.                                                                                                                                      |
+| `BACKEND_PORT`                   | `7331`  | Internal port the backend binds to. Override only if `7331` conflicts on bare metal.                                                                                 |
+| `OIDC_ENABLED`                   | `false` | Enable OIDC login.                                                                                                                                                   |
+| `OIDC_DISABLE_PASSWORD_LOGIN`    | `false` | Enforce OIDC-only login (disables username/password).                                                                                                                |
 
 See `docker-compose.yaml` for the full list of OIDC variables and other variables.
 
@@ -378,16 +343,16 @@ SMTP_PASSWORD: "your-app-password"
 FROM_EMAIL: "myemail@gmail.com"
 ```
 
-| Variable | Default | Description |
-|---|---|---|
-| `REQUIRE_EMAIL_VALIDATION` | `false` | Require new users to verify their email before logging in. |
-| `SERVER_URL` | - | Public URL of your Scrob instance, used to build the validation link in emails. |
-| `SMTP_ADDRESS` | - | SMTP server hostname. |
-| `SMTP_PORT` | `587` | SMTP server port. |
-| `SMTP_ENCRYPTION` | `tls` | Encryption method - `tls` or `ssl`. |
-| `SMTP_USERNAME` | - | SMTP login username. |
-| `SMTP_PASSWORD` | - | SMTP login password (use an app password if using Gmail). |
-| `FROM_EMAIL` | - | Address emails are sent from. |
+| Variable                   | Default | Description                                                                     |
+| -------------------------- | ------- | ------------------------------------------------------------------------------- |
+| `REQUIRE_EMAIL_VALIDATION` | `false` | Require new users to verify their email before logging in.                      |
+| `SERVER_URL`               | -       | Public URL of your Scrob instance, used to build the validation link in emails. |
+| `SMTP_ADDRESS`             | -       | SMTP server hostname.                                                           |
+| `SMTP_PORT`                | `587`   | SMTP server port.                                                               |
+| `SMTP_ENCRYPTION`          | `tls`   | Encryption method - `tls` or `ssl`.                                             |
+| `SMTP_USERNAME`            | -       | SMTP login username.                                                            |
+| `SMTP_PASSWORD`            | -       | SMTP login password (use an app password if using Gmail).                       |
+| `FROM_EMAIL`               | -       | Address emails are sent from.                                                   |
 
 ## Contributing
 
