@@ -1226,6 +1226,8 @@ export const api = {
       post<{ status: string; deleted_count: number }>("/sync/episode-overrides/bulk-delete", { ids }, token),
     applyEpisodeOverride: (id: number, token: string) =>
       post<{ status: string; remapped: number }>(`/sync/episode-overrides/${id}/apply`, undefined, token),
+    applyAllOverrides: (token: string) =>
+      post<{ status: string; remapped: number }>("/sync/overrides/apply-all", undefined, token),
 
     getCustomTitles: (token: string) =>
       get<{ results: any[] }>("/sync/custom-titles", undefined, token),

@@ -97,11 +97,19 @@ try {
   <div class="max-w-6xl mx-auto px-4 py-8">
     <!-- Header with Back Button -->
     <div class="mb-8">
-      <div class="flex items-center gap-4 mb-3">
-        <a href="/settings" class="p-2 hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-zinc-100 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-        </a>
-        <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">Metadata Overrides</h1>
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-3">
+        <div class="flex items-center gap-4">
+          <a href="/settings" class="p-2 hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-zinc-100 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </a>
+          <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">Metadata Overrides</h1>
+        </div>
+        {(seasonOverrides.length > 0 || (episodeOverrides && episodeOverrides.length > 0)) && (
+          <button id="apply-all-overrides-btn" class="flex items-center gap-2 px-4 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-sm font-bold rounded-xl transition-all shadow-lg active:scale-95 cursor-pointer shrink-0 ml-12 sm:ml-0" title="Apply all overrides and remap episodes">
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Apply All Remaps
+          </button>
+        )}
       </div>
       <p class="text-zinc-400 ml-12 text-sm sm:text-base">Point specific seasons, episodes, or titles of a TV show in your collection to different TMDB shows, seasons, or custom entries to resolve metadata mismatches and share progress states.</p>
     </div>
@@ -1961,6 +1969,37 @@ try {
         saveRenameBtn.textContent = "Save Custom Rename";
       }
     });
+
+    // Setup bulk apply action
+    const applyAllBtn = document.getElementById("apply-all-overrides-btn");
+    if (applyAllBtn) {
+      applyAllBtn.addEventListener("click", async () => {
+        if (!confirm("Are you sure you want to re-apply all overrides and update metadata? This may take some time.")) return;
+
+        const icon = applyAllBtn.querySelector("svg");
+        if (icon) icon.classList.add("animate-spin");
+        applyAllBtn.setAttribute("disabled", "true");
+
+        try {
+          const res = await fetch("/api/proxy/sync/overrides/apply-all", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            window.showToast?.(`Successfully applied all overrides! Remapped ${data.remapped} episodes.`, "success");
+            setTimeout(() => window.location.reload(), 1500);
+          } else {
+            window.showToast?.("Failed to apply all overrides.", "error");
+          }
+        } catch (err) {
+          window.showToast?.("Error applying all overrides.", "error");
+        } finally {
+          if (icon) icon.classList.remove("animate-spin");
+          applyAllBtn.removeAttribute("disabled");
+        }
+      });
+    }
 
     // Setup direct actions on existing items (Apply and Delete)
     document.querySelectorAll("[data-apply-id]").forEach(button => {
