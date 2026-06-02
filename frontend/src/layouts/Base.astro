@@ -1295,18 +1295,18 @@ const bottomNavItem = (active: boolean) =>
         targetBtn.title = watched ? 'Mark as unwatched' : 'Mark as watched';
       }
       if (watched) {
-        targetBtn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-400', 'hover:text-green-500');
+        targetBtn.classList.remove('bg-zinc-850', 'bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-400', 'hover:text-green-500');
         if (isCard) {
           targetBtn.classList.add('bg-green-500/20', 'text-green-400');
         } else {
-          targetBtn.classList.add('bg-green-500/50', 'text-green-300', 'hover:bg-green-400/50');
+          targetBtn.classList.add('bg-green-500/20', 'text-green-400', 'hover:bg-green-500/30');
         }
       } else {
-        targetBtn.classList.remove('bg-green-500/20', 'bg-green-500/50', 'text-green-400', 'text-green-300', 'hover:bg-green-500/40', 'hover:bg-green-400/50');
+        targetBtn.classList.remove('bg-green-500/20', 'bg-green-500/50', 'text-green-400', 'text-green-300', 'hover:bg-green-500/40', 'hover:bg-green-400/50', 'hover:bg-green-500/30');
         if (isCard) {
           targetBtn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-500');
         } else {
-          targetBtn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-green-500/10', 'hover:text-green-400');
+          targetBtn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-green-500/10', 'hover:text-green-400');
         }
       }
       targetBtn.querySelector('circle')?.setAttribute('fill', watched ? 'currentColor' : 'none');
@@ -2069,11 +2069,11 @@ const bottomNavItem = (active: boolean) =>
             btn.dataset.state = nowInLibrary ? 'active' : 'inactive';
             const isCard = btn.parentElement?.classList.contains('grid');
             if (nowInLibrary) {
-              btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
-              btn.classList.add(isCard ? 'bg-purple-500/20' : 'bg-purple-500/50', 'text-purple-400');
+              btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
+              btn.classList.add(isCard ? 'bg-purple-500/20' : 'bg-purple-500/20', 'text-purple-400', 'hover:bg-purple-500/30');
             } else {
-              btn.classList.remove('bg-purple-500/20', 'bg-purple-500/50', 'text-purple-400', 'text-purple-300', 'hover:bg-purple-500/40', 'hover:bg-purple-400/50');
-              btn.classList.add(isCard ? 'bg-zinc-900' : 'bg-zinc-800', isCard ? 'text-zinc-400' : 'text-zinc-500');
+              btn.classList.remove('bg-purple-500/20', 'bg-purple-500/50', 'text-purple-400', 'text-purple-300', 'hover:bg-purple-500/40', 'hover:bg-purple-400/50', 'hover:bg-purple-500/30');
+              btn.classList.add(isCard ? 'bg-zinc-900' : 'bg-zinc-950/25', isCard ? 'text-zinc-400' : 'text-zinc-500');
             }
             btn.title = nowInLibrary ? 'In collection' : 'Add to collection';
             return;
@@ -2100,12 +2100,12 @@ const bottomNavItem = (active: boolean) =>
           const res = await apiFetch(`/media/${mediaType}/${tmdbId}/request`, 'POST');
           if (res.status === 'added' || res.status === 'already_exists') {
             btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-500"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-green-500">' + (res.status === 'added' ? 'Added' : 'Exists') + '</span>';
-            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
+            btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
             btn.classList.add('bg-green-500/10', 'text-green-500');
             (btn as HTMLButtonElement).disabled = true;
           } else if (res.status === 'pending_approval') {
             btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-amber-400"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-amber-400">Pending</span>';
-            btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
+            btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
             btn.classList.add('bg-amber-500/10', 'text-amber-400');
             (btn as HTMLButtonElement).disabled = true;
           } else {
@@ -2151,8 +2151,8 @@ const bottomNavItem = (active: boolean) =>
         if (monitored) {
           btn.title = mediaType === 'series' ? 'Already in Sonarr' : 'Already in Radarr';
           btn.dataset.state = 'active';
-          btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-300/60', 'hover:text-orange-400');
-          btn.classList.add('bg-orange-500/50', 'text-orange-300', 'hover:bg-orange-400/50');
+          btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'hover:bg-orange-300/60', 'hover:text-orange-400');
+          btn.classList.add('bg-orange-500/20', 'text-orange-400', 'hover:bg-orange-500/30');
         } else {
           btn.disabled = false;
         }
