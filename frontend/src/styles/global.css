@@ -719,3 +719,9 @@ html.light .border-zinc-700\/60,
 html.light .border-zinc-800\/30 {
   border-color: var(--color-glass-border) !important;
 }
+
+html.light .rating-badge {
+  background-color: rgba(9, 9, 11, 0.85) !important;
+  color: #fbbf24 !important;
+  border-color: rgba(39, 39, 42, 0.5) !important;
+}
