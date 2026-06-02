@@ -350,12 +350,6 @@ const activeButtonsCount = [
               </div>
             )}
 
-            <CommentsSection
-              mediaType="series"
-              uriId={episode?.show?.uri_id ?? fetchKey}
-              seasonNumber={Number(season_number)}
-              episodeNumber={Number(episode_number)}
-            />
 
             <!-- Cast -->
             {episode.cast?.length > 0 && (
@@ -422,6 +416,13 @@ const activeButtonsCount = [
                 </div>
               </div>
             )}
+
+            <CommentsSection
+              mediaType="series"
+              uriId={episode?.show?.uri_id ?? fetchKey}
+              seasonNumber={Number(season_number)}
+              episodeNumber={Number(episode_number)}
+            />
           </div>
         </div>
       </div>

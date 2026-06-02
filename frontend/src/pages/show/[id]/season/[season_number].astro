@@ -249,11 +249,6 @@ try {
                 <p class="text-zinc-300 leading-relaxed text-lg opacity-90">{season.overview}</p>
               </div>
             )}
-      <CommentsSection
-              mediaType="series"
-              uriId={season?.show?.uri_id ?? fetchKey}
-              seasonNumber={Number(season_number)}
-            />
 
             <div class="space-y-6">
               <div class="border-b border-zinc-900 pb-4 mb-4 flex items-center justify-between">
@@ -282,6 +277,12 @@ try {
                 })}
               </div>
             </div>
+
+            <CommentsSection
+              mediaType="series"
+              uriId={season?.show?.uri_id ?? fetchKey}
+              seasonNumber={Number(season_number)}
+            />
           </div>
         </div>
       </div>
