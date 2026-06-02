@@ -639,6 +639,20 @@ async def get_show(
                 "air_date": s.get("air_date") or tmdb_season_map.get(s_num, {}).get("air_date"),
             })
 
+        active_seasons = [s for s in enhanced_seasons_meta if s.get("season_number", 0) > 0]
+        if len(active_seasons) == 1:
+            s_num = active_seasons[0]["season_number"]
+            try:
+                season_detail = await get_show_season(
+                    series_id=series_tmdb_id,
+                    season_number=s_num,
+                    db=db,
+                    current_user=current_user
+                )
+                seasons[s_num] = season_detail.get("episodes", [])
+            except Exception:
+                pass
+
         where_to_watch = await get_where_to_watch(
             db, current_user.id, series_tmdb_id, MediaType.series, show=show, tmdb_key=api_key
         )
@@ -2187,6 +2201,21 @@ async def get_tvdb_show(
         if s.get("episode_count", 0) > 0
     ]
 
+    seasons = {}
+    active_seasons = [s for s in filtered_seasons if s.get("season_number", 0) > 0]
+    if len(active_seasons) == 1:
+        s_num = active_seasons[0]["season_number"]
+        try:
+            season_detail = await get_tvdb_season(
+                tvdb_id=tvdb_id,
+                season_number=s_num,
+                db=db,
+                current_user=current_user
+            )
+            seasons[f"season_{s_num}"] = season_detail.get("episodes", [])
+        except Exception:
+            pass
+
     logo_path = None
     if tmdb_id_cross and valid_tmdb_key:
         try:
@@ -2221,14 +2250,12 @@ async def get_tvdb_show(
         "request_status": request_status,
         "user_rating": None,
         "season_states": season_states,
-        "seasons": {},
+        "seasons": seasons,
         "seasons_meta": filtered_seasons,
         "cast": cast,
         "networks": networks,
         "where_to_watch": where_to_watch,
         "include_specials": include_specials,
-        # Fields zeroed for TVDB so frontend renders unified shape
-        "seasons": {},
         "trailer_youtube_id": None,
         "logo_path": logo_path,
         "recommendations": [],
