@@ -67,6 +67,7 @@ try {
 
     if (!groupedCustomTitles[groupId]) {
       groupedCustomTitles[groupId] = {
+        show_key: groupId.replace(/[^a-zA-Z0-9_-]/g, '_'),
         show_title: groupTitle,
         show_uri_id: item.show_uri_id ?? null,
         show_tmdb_id: item.show_tmdb_id || 0,
@@ -314,14 +315,33 @@ try {
                     <span class="text-xs font-bold text-zinc-400">Select All in Show</span>
                   </div>
                   
-                  <button 
-                    class="bulk-delete-btn flex items-center justify-center gap-1.5 px-3 py-1.5 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/40 text-rose-400 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                    data-show-id={showGroup.show_key}
-                    disabled
-                  >
-                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
-                    Delete Selected (<span class="bulk-selected-count">0</span>)
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <button 
+                      class="bulk-apply-btn flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-950/20 hover:bg-emerald-900/30 border border-emerald-900/40 text-emerald-400 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                      data-show-id={showGroup.show_key}
+                      disabled
+                    >
+                      <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-4 4 4 4M5 15h11a4 4 0 0 0 4-4v-1"/></svg>
+                      Apply Selected (<span class="bulk-selected-count">0</span>)
+                    </button>
+
+                    <button 
+                      class="bulk-apply-all-show-btn flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-950/20 hover:bg-indigo-900/30 border border-indigo-900/40 text-indigo-400 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95"
+                      data-show-id={showGroup.show_key}
+                    >
+                      <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                      Apply All in Show
+                    </button>
+                    
+                    <button 
+                      class="bulk-delete-btn flex items-center justify-center gap-1.5 px-3 py-1.5 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/40 text-rose-400 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                      data-show-id={showGroup.show_key}
+                      disabled
+                    >
+                      <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>
+                      Delete Selected (<span class="bulk-selected-count">0</span>)
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Season Groups -->
@@ -490,7 +510,7 @@ try {
                   </svg>
                   
                   <!-- Show Poster Image -->
-                  {(showGroup.show_uri_id || showGroup.show_tmdb_id) && (
+                  {!!(showGroup.show_uri_id || showGroup.show_tmdb_id) && (
                     <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
                       {showGroup.show_poster_path ? (
                         <img src={showGroup.show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
@@ -504,7 +524,7 @@ try {
                     <h3 class="text-base font-bold text-zinc-100 truncate hover:text-indigo-400 transition-colors">
                       {showGroup.show_title}
                     </h3>
-                    {(showGroup.show_uri_id || showGroup.show_tmdb_id) && (
+                    {!!(showGroup.show_uri_id || showGroup.show_tmdb_id) && (
                       <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850 mt-1 inline-block">{showGroup.show_uri_id ?? ("TMDB ID: " + showGroup.show_tmdb_id)}</span>
                     )}
                   </div>
@@ -2160,14 +2180,19 @@ try {
       const totalBoxes = panel.querySelectorAll(".override-row-checkbox");
       const selectAllCheckbox = panel.querySelector(".bulk-show-select-all") as HTMLInputElement;
       const bulkDeleteBtn = panel.querySelector(".bulk-delete-btn") as HTMLButtonElement;
-      const countSpan = panel.querySelector(".bulk-selected-count")!;
+      const bulkApplyBtn = panel.querySelector(".bulk-apply-btn") as HTMLButtonElement;
+      const countSpans = panel.querySelectorAll(".bulk-selected-count");
 
-      countSpan.textContent = checkedBoxes.length.toString();
+      countSpans.forEach(span => {
+        span.textContent = checkedBoxes.length.toString();
+      });
 
       if (checkedBoxes.length > 0) {
-        bulkDeleteBtn.removeAttribute("disabled");
+        if (bulkDeleteBtn) bulkDeleteBtn.removeAttribute("disabled");
+        if (bulkApplyBtn) bulkApplyBtn.removeAttribute("disabled");
       } else {
-        bulkDeleteBtn.setAttribute("disabled", "true");
+        if (bulkDeleteBtn) bulkDeleteBtn.setAttribute("disabled", "true");
+        if (bulkApplyBtn) bulkApplyBtn.setAttribute("disabled", "true");
       }
 
       if (selectAllCheckbox && totalBoxes.length > 0) {
@@ -2485,6 +2510,96 @@ try {
       });
     });
 
+    // Bulk Apply Action
+    document.querySelectorAll(".bulk-apply-btn").forEach(button => {
+      button.addEventListener("click", async () => {
+        const showId = button.getAttribute("data-show-id")!;
+        const panel = document.getElementById(`panel-${showId}`);
+        if (!panel) return;
+
+        const checkedBoxes = panel.querySelectorAll(".override-row-checkbox:checked");
+        const ids = Array.from(checkedBoxes).map(box => parseInt(box.getAttribute("data-override-id")!));
+        
+        if (ids.length === 0) return;
+
+        if (!confirm(`Are you sure you want to apply the selected ${ids.length} episode overrides?`)) {
+          return;
+        }
+
+        button.setAttribute("disabled", "true");
+        const originalText = button.innerHTML;
+        button.innerHTML = "Applying...";
+
+        try {
+          const results = await Promise.all(ids.map(async id => {
+            const res = await fetch(`/api/proxy/sync/episode-overrides/${id}/apply`, {
+              method: "POST",
+              headers: { "Authorization": `Bearer ${token}` }
+            });
+            return res.ok;
+          }));
+
+          const successCount = results.filter(Boolean).length;
+          if (successCount === ids.length) {
+            window.showToast?.(`Successfully applied ${ids.length} episode overrides!`, "success");
+            setTimeout(() => window.location.reload(), 600);
+          } else {
+            window.showToast?.(`Applied ${successCount}/${ids.length} overrides. Some failed.`, "warning");
+            setTimeout(() => window.location.reload(), 1500);
+          }
+        } catch (err) {
+          window.showToast?.("Error applying episode overrides", "error");
+          button.removeAttribute("disabled");
+          button.innerHTML = originalText;
+        }
+      });
+    });
+
+    // Bulk Apply All in Show Action
+    document.querySelectorAll(".bulk-apply-all-show-btn").forEach(button => {
+      button.addEventListener("click", async () => {
+        const showId = button.getAttribute("data-show-id")!;
+        const panel = document.getElementById(`panel-${showId}`);
+        if (!panel) return;
+
+        const checkboxes = panel.querySelectorAll(".override-row-checkbox");
+        const ids = Array.from(checkboxes).map(box => parseInt(box.getAttribute("data-override-id")!));
+
+        if (ids.length === 0) return;
+
+        if (!confirm(`Are you sure you want to apply all ${ids.length} episode overrides for this show?`)) {
+          return;
+        }
+
+        button.setAttribute("disabled", "true");
+        const originalText = button.innerHTML;
+        button.innerHTML = "Applying All...";
+
+        try {
+          const results = await Promise.all(ids.map(async id => {
+            const res = await fetch(`/api/proxy/sync/episode-overrides/${id}/apply`, {
+              method: "POST",
+              headers: { "Authorization": `Bearer ${token}` }
+            });
+            return res.ok;
+          }));
+
+          const successCount = results.filter(Boolean).length;
+          if (successCount === ids.length) {
+            window.showToast?.(`Successfully applied all ${ids.length} episode overrides!`, "success");
+            setTimeout(() => window.location.reload(), 600);
+          } else {
+            window.showToast?.(`Applied ${successCount}/${ids.length} overrides. Some failed.`, "warning");
+            setTimeout(() => window.location.reload(), 1500);
+          }
+        } catch (err) {
+          window.showToast?.("Error applying all episode overrides", "error");
+          button.removeAttribute("disabled");
+          button.innerHTML = originalText;
+        }
+      });
+    });
+
     // Custom Renames Actions
     document.querySelectorAll(".custom-rename-edit-btn").forEach(button => {
       button.addEventListener("click", async () => {
@@ -2744,6 +2859,43 @@ try {
         epSrcEpisodeEndInput.value = "";
         epTgtSeasonInput.value = tgtSeason || "";
         epTgtEpisodeStartInput.value = tgtEp || "";
+      });
+    });
+
+    // Edit Season Override
+    document.querySelectorAll(".edit-season-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const srcUri = btn.getAttribute("data-source-uri") || "";
+        const srcSeason = btn.getAttribute("data-source-season") || "";
+        const tgtUri = btn.getAttribute("data-target-uri") || "";
+        const tgtSeason = btn.getAttribute("data-target-season") || "";
+
+        resetModalState();
+        remapModal.classList.remove("opacity-0", "pointer-events-none");
+
+        // Toggle to manual entry mode
+        sourceShowSearch.parentElement!.classList.add("hidden");
+        sourceShowResults.classList.add("hidden");
+        sourceManualToggle.classList.add("hidden");
+        sourceManualGroup.classList.remove("hidden");
+
+        const srcProvider = srcUri.split(":")[0] || "tmdb";
+        const tgtProvider = tgtUri.split(":")[0] || "tmdb";
+        const sourceShowIdType = document.getElementById("source-show-id-type") as HTMLSelectElement;
+        const targetShowIdType = document.getElementById("target-show-id-type") as HTMLSelectElement;
+        if (sourceShowIdType) sourceShowIdType.value = srcProvider;
+        if (targetShowIdType) targetShowIdType.value = tgtProvider;
+
+        sourceShowTmdbInput.value = srcUri;
+        sourceSeasonInput.value = srcSeason;
+        targetShowTmdbInput.value = tgtUri;
+        targetSeasonInput.value = tgtSeason;
+
+        // Trigger lookups
+        sourceShowLookupBtn.click();
+        targetShowLookupBtn.click();
+
+        validateForm();
       });
     });
 
