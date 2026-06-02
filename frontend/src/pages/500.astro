@@ -1,17 +1,24 @@
 ---
 import Base from "../layouts/Base.astro";
 import ErrorDisplay from "../components/ErrorDisplay.astro";
+import PickModal from "../components/PickModal.astro";
 
 Astro.response.headers.set("Cache-Control", "no-store");
+
+const { token } = Astro.locals;
 ---
 
 <Base title="500 - Server Error">
-  <ErrorDisplay
-    code={500}
-    title="Transmission Interrupted!"
-    message="The projector caught fire! An unexpected error interrupted the broadcast."
-    glowColor="red"
-    gradientClasses="from-red-500 via-orange-400 to-amber-500"
-    showReload={true}
-  />
+  <div class="flex flex-col items-center justify-center text-center">
+    <ErrorDisplay
+      code={500}
+      title="Transmission Interrupted!"
+      message="The projector caught fire! An unexpected error interrupted the broadcast."
+      glowColor="red"
+      gradientClasses="from-red-500 via-orange-400 to-amber-500"
+      showReload={true}
+    />
+
+    <PickModal token={token} />
+  </div>
 </Base>
