@@ -382,8 +382,8 @@ async def get_public_profile(
             "tmdb_id": media.tmdb_id,
             "media_type": "episode",
             "title": media.title,
-            "backdrop_path": show.backdrop_path if show else media.backdrop_path,
-            "poster_path": show.poster_path if show else media.poster_path,
+            "poster_path": media.poster_path or (show.poster_path if show else None),
+            "backdrop_path": media.backdrop_path or (show.backdrop_path if show else None),
             "watched_at": we.watched_at.isoformat(),
             "show_title": show.title if show else None,
             "show_uri_id": show.uri_id if show else None,
@@ -393,6 +393,8 @@ async def get_public_profile(
                 if (show.tmdb_data and show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
                 else None
             )) if show else None,
+            "show_poster_path": show.poster_path if show else None,
+            "show_backdrop_path": show.backdrop_path if show else None,
             "season_number": media.season_number,
             "episode_number": media.episode_number,
         }
