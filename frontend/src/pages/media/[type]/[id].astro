@@ -500,7 +500,7 @@ const activeButtonsCount = [
 
           <!-- RIGHT COLUMN: Main Content Details (8 cols on desktop) -->
           <div class="lg:col-span-8 space-y-8 lg:pt-0">
-            {(item.release_date || rating || item.runtime || !!item.play_count) && (
+            {(item.release_date || rating || item.runtime || !!item.play_count || productionCompany) && (
               <div class="flex flex-wrap items-center gap-2.5 md:gap-4 text-zinc-300 text-xs md:text-sm bg-zinc-900/40 p-2.5 md:p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm w-fit">
                 {item.release_date && (
                   <span class="font-bold">
@@ -564,29 +564,13 @@ const activeButtonsCount = [
                     {item.play_count} {item.play_count === 1 ? 'Play' : 'Plays'}
                   </span>
                 )}
+                {productionCompany && (
+                  <span class="flex items-center" title={productionCompany.name}>
+                    <img src={productionCompany.logo_path} alt={productionCompany.name} class="h-4 max-w-[80px] object-contain opacity-80" loading="lazy" />
+                  </span>
+                )}
               </div>
             )}
-
-            {!isEpisode && (() => { const c = item.production_companies?.find(c => c.logo_path); return c ? <div class="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm flex items-center w-fit mt-3"><img src={c.logo_path!} alt={c.name} title={c.name} class="h-5 max-w-[80px] object-contain" loading="lazy" /></div> : null; })()}
-
-            <div class="mb-4">
-              <ActionBar
-                tmdbId={item.tmdb_id}
-                mediaType={item.type}
-                watched={item.watched ?? false}
-                inLists={item.in_lists ?? []}
-                inLibrary={item.in_library ?? false}
-                collectionPct={item.collection_pct ?? 0}
-                showTmdbId={item.show_tmdb_id}
-                seasonNumber={item.season_number}
-                episodeNumber={item.episode_number}
-                isMonitored={item.is_monitored ?? false}
-                requestEnabled={item.request_enabled ?? false}
-                requestStatus={item.request_status ?? null}
-                mediaId={item.id}
-                userRating={item.user_rating ?? null}
-              />
-            </div>
 
             {(item.type === 'movie' || item.type === 'episode') && (
               <ManualScrobble
