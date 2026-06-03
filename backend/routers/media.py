@@ -2500,6 +2500,43 @@ async def get_person_details_tvdb(
         tmdb_key = await get_user_tmdb_key(db, current_user.id)
         has_tmdb = check_tmdb_key(tmdb_key)
 
+        # Pre-resolve movie→TMDB searches concurrently — avoids N sequential
+        # calls for prolific people. search_movies is also cached.
+        movie_match_cache: dict[tuple, dict | None] = {}
+        if has_tmdb:
+            queries: set[tuple] = set()
+            for c in characters:
+                if c.get("seriesId") or (c.get("series") or {}).get("id"):
+                    continue
+                m_info = c.get("movie")
+                if not (c.get("movieId") or (m_info.get("id") if m_info else None)):
+                    continue
+                m_title = m_info.get("name") if m_info else None
+                if not m_title:
+                    continue
+                m_year = m_info.get("year") if m_info else None
+                yv = None
+                if m_year:
+                    mt = re.search(r'\b\d{4}\b', str(m_year))
+                    if mt:
+                        yv = int(mt.group(0))
+                queries.add((m_title, yv))
+
+            sem = asyncio.Semaphore(10)
+
+            async def _search(title: str, yr: int | None):
+                async with sem:
+                    try:
+                        r = await tmdb.search_movies(title, year=yr, api_key=tmdb_key)
+                        res = r.get("results") or []
+                        return (title, yr), (res[0] if res else None)
+                    except Exception:
+                        return (title, yr), None
+
+            if queries:
+                pairs = await asyncio.gather(*[_search(t, y) for (t, y) in queries])
+                movie_match_cache = dict(pairs)
+
         for c in characters:
             series_info = c.get("series")
             movie_info = c.get("movie")
@@ -2556,17 +2593,12 @@ async def get_person_details_tvdb(
                 popularity = 0
                 
                 if has_tmdb and movie_title:
-                    try:
-                        search_res = await tmdb.search_movies(movie_title, year=year_val, api_key=tmdb_key)
-                        results = search_res.get("results") or []
-                        if results:
-                            best_match = results[0]
-                            tmdb_movie_id = best_match.get("id")
-                            poster_path = tmdb.poster_url(best_match.get("poster_path"))
-                            overview = best_match.get("overview")
-                            popularity = best_match.get("popularity") or 0
-                    except Exception as e:
-                        print(f"Failed to resolve TVDB movie {movie_id} to TMDB: {e}")
+                    best_match = movie_match_cache.get((movie_title, year_val))
+                    if best_match:
+                        tmdb_movie_id = best_match.get("id")
+                        poster_path = tmdb.poster_url(best_match.get("poster_path"))
+                        overview = best_match.get("overview")
+                        popularity = best_match.get("popularity") or 0
 
                 sort_order = c.get("sort") or 0
                 role_weight = max(0.05, 1.0 - sort_order * 0.05)

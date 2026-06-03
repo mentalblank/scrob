@@ -496,6 +496,11 @@ async def get_series_episodes_by_type(tvdb_id: int, api_key: str, season_type: s
 
 async def get_person(person_id: int, api_key: str) -> dict:
     """Fetch person details from TVDB."""
-    data = await _get(f"/people/{person_id}/extended", api_key)
-    return data.get("data") or {}
+    from core import provider_cache
+
+    async def _fetch() -> dict:
+        data = await _get(f"/people/{person_id}/extended", api_key)
+        return data.get("data") or {}
+
+    return await provider_cache.cached("tvdb", "person", {"id": person_id}, provider_cache.TTL_MOVIE, _fetch)
 

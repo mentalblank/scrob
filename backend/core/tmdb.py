@@ -134,7 +134,10 @@ async def search_movies(q: str, page: int = 1, year: int | None = None, api_key:
     params: dict = {"query": q, "include_adult": "false", "page": page}
     if year:
         params["primary_release_year"] = year
-    return await _get(f"{TMDB_BASE}/search/movie", headers=get_headers(api_key), params=params)
+    return await provider_cache.cached(
+        "tmdb", "search_movies", {"q": q, "year": year, "page": page}, provider_cache.TTL_MOVIE,
+        lambda: _get(f"{TMDB_BASE}/search/movie", headers=get_headers(api_key), params=params),
+    )
 
 
 async def search_shows(q: str, page: int = 1, year: int | None = None, api_key: str = None) -> dict:
@@ -159,7 +162,10 @@ def poster_url(path: str, size: str = "w500") -> str | None:
 
 
 async def get_person(person_id: int, api_key: str = None) -> dict:
-    return await _get(f"{TMDB_BASE}/person/{person_id}", headers=get_headers(api_key), params={"append_to_response": "combined_credits"})
+    return await provider_cache.cached(
+        "tmdb", "person", {"id": person_id}, provider_cache.TTL_MOVIE,
+        lambda: _get(f"{TMDB_BASE}/person/{person_id}", headers=get_headers(api_key), params={"append_to_response": "combined_credits"}),
+    )
 
 
 async def get_movie_credits(movie_id: int, api_key: str = None) -> dict:
