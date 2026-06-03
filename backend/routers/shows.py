@@ -1568,7 +1568,7 @@ async def get_episode_detail(
                 "seasons_meta": [
                     {
                         "season_number": s["season_number"],
-                        "name": s.get("name"),
+                        "name": sanitize_season_name(s.get("name"), s["season_number"], user_lang),
                         "overview": s.get("overview"),
                         "poster_path": tmdb.poster_url(s.get("poster_path")),
                         "episode_count": s.get("episode_count"),
@@ -2715,7 +2715,10 @@ async def get_tvdb_episode(
             "title": show_data["title"],
             "poster_path": show_data["poster_path"],
             "backdrop_path": show_data["backdrop_path"],
-            "seasons_meta": show_data["seasons"],
+            "seasons_meta": [
+                {**s, "name": sanitize_season_name(s.get("name"), s.get("season_number"), user_lang)}
+                for s in show_data["seasons"]
+            ],
             "adult": False,
         },
         "season": {

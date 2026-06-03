@@ -122,6 +122,18 @@ html.light {
   --color-nav-border: rgba(0, 0, 0, 0.06);
 }
 
+/* Season/episode accent pills — darken text + strengthen bg for light theme */
+html.light .season-pill {
+  color: var(--color-blue-600);
+  background-color: color-mix(in srgb, var(--color-blue-500) 18%, transparent);
+  border-color: color-mix(in srgb, var(--color-blue-500) 55%, transparent);
+}
+
+/* Accent text labels (e.g. show title above season/episode) — darken on light */
+html.light .accent-label {
+  color: var(--color-blue-600);
+}
+
 /* ── App-like feel ─────────────────────────────────────────────────────────── */
 html {
   /* Fill notch/rounded-corner areas */

@@ -142,7 +142,7 @@ const activeButtonsCount = [
                   </a>
                 ) : null}
 
-                <span class="px-3 py-2 bg-blue-600/20 backdrop-blur-xl border border-blue-500/30 rounded-xl text-blue-400 text-sm font-black">
+                <span class="season-pill px-3 py-2 bg-blue-600/20 backdrop-blur-xl border border-blue-500/30 rounded-xl text-blue-400 text-sm font-black">
                   E{currentEpisode}
                 </span>
 
@@ -269,8 +269,8 @@ const activeButtonsCount = [
           <!-- RIGHT COLUMN: Details & Cast -->
           <div class="lg:col-span-8 space-y-8">
             <div class="flex flex-wrap items-center gap-3">
-              <p class="text-lg text-blue-400 font-bold tracking-wide uppercase">{show?.title}</p>
-              <span class="px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
+              <p class="accent-label text-lg text-blue-400 font-bold tracking-wide uppercase">{show?.title}</p>
+              <span class="season-pill px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
                 S{String(season_number).padStart(2, '0')}E{String(episode_number).padStart(2, '0')}
               </span>
             </div>
