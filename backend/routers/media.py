@@ -2238,7 +2238,7 @@ async def airing_today_collected(
         if episode:
             return {
                 "id": None,
-                "tmdb_id": show["id"],
+                "tmdb_id": episode.get("id") or show["id"],
                 "uri_id": f"tmdb:e:{episode.get('id')}" if episode.get("id") else None,
                 "type": "episode",
                 "title": episode.get("name") or show_name,

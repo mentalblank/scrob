@@ -37,6 +37,7 @@ const watchStyle = isSeries && watchPct > 0
       <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
       <circle cx="12" cy="12" r="3" fill={watchActive ? "currentColor" : "none"}/>
     </svg>
+    <span class="text-[8px] font-bold uppercase tracking-wider leading-none">{isSeries ? `${watchPct}%` : 'Watched'}</span>
   </button>
 
   <!-- Lists (sky) -->
@@ -55,6 +56,7 @@ const watchStyle = isSeries && watchPct > 0
       <line x1="3" y1="12" x2="3.01" y2="12"/>
       <line x1="3" y1="18" x2="3.01" y2="18"/>
     </svg>
+    <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Lists</span>
   </button>
 
   <!-- Collected (purple) -->
@@ -73,5 +75,6 @@ const watchStyle = isSeries && watchPct > 0
       <path d="M15 22v-4a3 3 0 0 0-6 0v4"/>
       <path d="M2 7h20"/>
     </svg>
+    <span class="text-[8px] font-bold uppercase tracking-wider leading-none">{isSeries ? `${collectionPct}%` : 'Collected'}</span>
   </button>
 </div>

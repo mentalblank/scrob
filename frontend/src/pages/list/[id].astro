@@ -409,7 +409,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
           <div id="items-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
             {list.items.map((entry) => (
               <div data-item-id={entry.id}>
-                <MediaCard item={entry.media}>
+                <MediaCard item={entry.media} hideShowTitle={true}>
                   {list.is_owner && (
                     <button
                       class="remove-item-btn absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-lg flex items-center justify-center bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-rose-200 hover:border-rose-700 hover:bg-rose-900 transition-all duration-200 cursor-pointer"

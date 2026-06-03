@@ -8,9 +8,10 @@ interface Props {
   hideBlock?: boolean;
   hideRating?: boolean;
   hideActionBar?: boolean;
+  hideShowTitle?: boolean;
 }
 
-const { item, hideBlock = false, hideRating = false, hideActionBar = false } = Astro.props;
+const { item, hideBlock = false, hideRating = false, hideActionBar = false, hideShowTitle = false } = Astro.props;
 
 const isPerson = item.type === "person";
 const isCollection = item.type === "collection";
@@ -236,7 +237,7 @@ const showProgress = progressPct > 0 && !watched;
   <!-- Info -->
   {href ? (
     <a href={href} class="block p-3 bg-transparent flex-1">
-      {isEpisode && item.show_title ? (
+      {isEpisode && item.show_title && !hideShowTitle ? (
         <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</h3>
       ) : null}
       <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">{item.title}</h3>
@@ -261,7 +262,7 @@ const showProgress = progressPct > 0 && !watched;
     </a>
   ) : (
     <div class="block p-3 bg-transparent flex-1">
-      {isEpisode && item.show_title ? (
+      {isEpisode && item.show_title && !hideShowTitle ? (
         <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</h3>
       ) : null}
       <h3 class="text-sm font-bold text-zinc-500 truncate leading-tight mb-1">{item.title}</h3>
