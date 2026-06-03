@@ -694,23 +694,7 @@ const bottomNavItem = (active: boolean) =>
     const esc = window.esc;
 
     window.showMessage = function(text, type = 'success') {
-      const msg = document.getElementById('js-message');
-      if (!msg) return;
-      msg.textContent = text;
-      msg.className = `p-4 rounded-xl mb-8 ${
-        type === 'success'
-          ? 'bg-green-500/10 border border-green-500 text-green-500'
-          : 'bg-red-500/10 border border-red-500 text-red-500'
-      }`;
-      msg.classList.remove('hidden');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      
-      const w = window;
-      if (w._messageTimeout) clearTimeout(w._messageTimeout);
-      if (w._msgTimeout) clearTimeout(w._msgTimeout);
-      const timer = setTimeout(() => msg.classList.add('hidden'), 4000);
-      w._messageTimeout = timer;
-      w._msgTimeout = timer;
+      window["showToast"](text, type === 'error' ? 'error' : 'success');
     };
 
     function calcLivePct(progressSeconds, updatedAt, runtime, playing) {
