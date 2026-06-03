@@ -4158,7 +4158,7 @@ const COUNTRIES = (countriesRes || [])
           ? ['bg-red-600/10', 'border-red-500/40', 'text-red-400', 'ring-2', 'ring-red-500/20']
           : ['bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20'];
         btn.classList.add(...activeClasses);
-        btn.classList.remove('bg-zinc-950', 'border-zinc-800', 'text-zinc-500');
+        btn.classList.remove('bg-zinc-950/40', 'border-zinc-800', 'text-zinc-500');
         const check = btn.querySelector('.absolute');
         if (check) check.classList.remove('hidden');
       } else {
@@ -4166,7 +4166,7 @@ const COUNTRIES = (countriesRes || [])
           ? ['bg-red-600/10', 'border-red-500/40', 'text-red-400', 'ring-2', 'ring-red-500/20']
           : ['bg-blue-600/10', 'border-blue-500/40', 'text-blue-400', 'ring-2', 'ring-blue-500/20'];
         btn.classList.remove(...activeClasses);
-        btn.classList.add('bg-zinc-950', 'border-zinc-800', 'text-zinc-500');
+        btn.classList.add('bg-zinc-950/40', 'border-zinc-800', 'text-zinc-500');
         const check = btn.querySelector('.absolute');
         if (check) check.classList.add('hidden');
       }
@@ -4234,12 +4234,12 @@ const COUNTRIES = (countriesRes || [])
           const span = label?.querySelector('.font-semibold');
           if (r.checked) {
             label?.classList.add('bg-blue-500/5', 'border-blue-500/50');
-            label?.classList.remove('bg-zinc-950', 'border-zinc-800');
+            label?.classList.remove('bg-zinc-950/40', 'border-zinc-800');
             span?.classList.add('text-blue-400');
             span?.classList.remove('text-zinc-100');
           } else {
             label?.classList.remove('bg-blue-500/5', 'border-blue-500/50');
-            label?.classList.add('bg-zinc-950', 'border-zinc-800');
+            label?.classList.add('bg-zinc-950/40', 'border-zinc-800');
             span?.classList.remove('text-blue-400');
             span?.classList.add('text-zinc-100');
           }
@@ -4254,12 +4254,12 @@ const COUNTRIES = (countriesRes || [])
           const span = label?.querySelector('.font-semibold');
           if (r.checked) {
             label?.classList.add('bg-blue-500/5', 'border-blue-500/50');
-            label?.classList.remove('bg-zinc-950', 'border-zinc-800');
+            label?.classList.remove('bg-zinc-950/40', 'border-zinc-800');
             span?.classList.add('text-blue-400');
             span?.classList.remove('text-zinc-100');
           } else {
             label?.classList.remove('bg-blue-500/5', 'border-blue-500/50');
-            label?.classList.add('bg-zinc-950', 'border-zinc-800');
+            label?.classList.add('bg-zinc-950/40', 'border-zinc-800');
             span?.classList.remove('text-blue-400');
             span?.classList.add('text-zinc-100');
           }
@@ -4274,12 +4274,12 @@ const COUNTRIES = (countriesRes || [])
           const span = label?.querySelector('.font-semibold');
           if (r.checked) {
             label?.classList.add('bg-blue-500/5', 'border-blue-500/50');
-            label?.classList.remove('bg-zinc-950', 'border-zinc-800');
+            label?.classList.remove('bg-zinc-950/40', 'border-zinc-800');
             span?.classList.add('text-blue-400');
             span?.classList.remove('text-zinc-100');
           } else {
             label?.classList.remove('bg-blue-500/5', 'border-blue-500/50');
-            label?.classList.add('bg-zinc-950', 'border-zinc-800');
+            label?.classList.add('bg-zinc-950/40', 'border-zinc-800');
             span?.classList.remove('text-blue-400');
             span?.classList.add('text-zinc-100');
           }

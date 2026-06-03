@@ -2098,9 +2098,73 @@ async def trending_shows(
     }
 
 
+def _today_in_tz(timezone: str) -> str:
+    """Today's date (ISO) in the user's timezone, falling back to UTC."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        user_tz = ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, KeyError):
+        user_tz = ZoneInfo("UTC")
+    return datetime.now(user_tz).date().isoformat()
+
+
+async def _build_airing_item(show: dict, today: str, tmdb_key: str, semaphore: asyncio.Semaphore) -> dict:
+    """Resolve the episode of `show` airing on `today`; fall back to a series card."""
+    async with semaphore:
+        try:
+            detail = await tmdb.get_show_light(show["id"], api_key=tmdb_key)
+        except Exception:
+            detail = {}
+
+    episode: dict | None = None
+    for candidate in (detail.get("last_episode_to_air"), detail.get("next_episode_to_air")):
+        if candidate and candidate.get("air_date") == today:
+            episode = candidate
+            break
+    # No exact today-match (timezone skew, or TMDB's airing window): still surface the
+    # show's current episode so the card carries SxE/title/still instead of a bare series card.
+    if episode is None:
+        episode = detail.get("next_episode_to_air") or detail.get("last_episode_to_air")
+
+    show_name = show.get("name")
+    if episode:
+        return {
+            "id": None,
+            "tmdb_id": episode.get("id") or show["id"],
+            "uri_id": f"tmdb:e:{episode.get('id')}" if episode.get("id") else None,
+            "type": "episode",
+            "title": episode.get("name") or show_name,
+            "show_title": show_name,
+            "show_uri_id": f"tmdb:s:{show['id']}",
+            "show_tmdb_id": show["id"],
+            "season_number": episode.get("season_number"),
+            "episode_number": episode.get("episode_number"),
+            "poster_path": tmdb.poster_url(episode.get("still_path"), size="w780")
+                or tmdb.poster_url(show.get("backdrop_path"), size="w780"),
+            "show_poster_path": tmdb.poster_url(show.get("poster_path")),
+            "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
+            "tmdb_rating": show.get("vote_average"),
+            "release_date": episode.get("air_date"),
+            "adult": show.get("adult", False),
+        }
+    return {
+        "id": None,
+        "tmdb_id": show["id"],
+        "type": "series",
+        "title": show_name,
+        "poster_path": tmdb.poster_url(show.get("poster_path")),
+        "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
+        "tmdb_rating": show.get("vote_average"),
+        "release_date": show.get("first_air_date"),
+        "adult": show.get("adult", False),
+    }
+
+
 @router.get("/on-air-today")
 async def on_air_today(
     page: int = Query(default=1, ge=1),
+    timezone: str = Query(default="UTC"),
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
@@ -2113,20 +2177,12 @@ async def on_air_today(
     cf = await _get_content_filters(db, current_user.id)
     tmdb_results = [res for res in tmdb_results if res.get("id") not in blocked_ids and not _is_content_filtered(res, *cf)]
 
-    results = [
-        {
-            "id": None,
-            "tmdb_id": s.get("id"),
-            "type": "series",
-            "title": s.get("name"),
-            "poster_path": tmdb.poster_url(s.get("poster_path")),
-            "backdrop_path": tmdb.poster_url(s.get("backdrop_path"), size="w780"),
-            "tmdb_rating": s.get("vote_average"),
-            "release_date": s.get("first_air_date"),
-        }
-        for s in tmdb_results
-    ]
-    await enrich_with_state(db, current_user.id, results)
+    today = _today_in_tz(timezone)
+    semaphore = asyncio.Semaphore(10)
+    results = list(await asyncio.gather(
+        *[_build_airing_item(s, today, tmdb_key, semaphore) for s in tmdb_results]
+    ))
+    await enrich_with_state(db, current_user.id, results, apply_tvdb_metadata=False)
     return {
         "results": results,
         "page": data.get("page", page),
@@ -2147,15 +2203,7 @@ async def airing_today_collected(
     if not check_tmdb_key(tmdb_key):
         return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
 
-    from datetime import datetime
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-    try:
-        user_tz = ZoneInfo(timezone)
-    except (ZoneInfoNotFoundError, KeyError):
-        user_tz = ZoneInfo("UTC")
-
-    today = datetime.now(user_tz).date().isoformat()
+    today = _today_in_tz(timezone)
 
     # Collect the user's show TMDB IDs in one query
     collected_q = await db.execute(
@@ -2220,53 +2268,7 @@ async def airing_today_collected(
         return {"results": [], "page": page, "total_pages": total_pages, "total_results": total_results}
 
     semaphore = asyncio.Semaphore(10)
-
-    async def fetch_episode(show: dict) -> dict | None:
-        async with semaphore:
-            try:
-                detail = await tmdb.get_show_light(show["id"], api_key=tmdb_key)
-            except Exception:
-                detail = {}
-
-        episode: dict | None = None
-        for candidate in (detail.get("last_episode_to_air"), detail.get("next_episode_to_air")):
-            if candidate and candidate.get("air_date") == today:
-                episode = candidate
-                break
-
-        show_name = show.get("name")
-        if episode:
-            return {
-                "id": None,
-                "tmdb_id": episode.get("id") or show["id"],
-                "uri_id": f"tmdb:e:{episode.get('id')}" if episode.get("id") else None,
-                "type": "episode",
-                "title": episode.get("name") or show_name,
-                "show_title": show_name,
-                "show_uri_id": f"tmdb:s:{show['id']}",
-                "show_tmdb_id": show["id"],
-                "season_number": episode.get("season_number"),
-                "episode_number": episode.get("episode_number"),
-                "poster_path": tmdb.poster_url(episode.get("still_path"), size="w780")
-                    or tmdb.poster_url(show.get("backdrop_path"), size="w780"),
-                "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
-                "tmdb_rating": show.get("vote_average"),
-                "release_date": episode.get("air_date"),
-                "adult": show.get("adult", False),
-            }
-        return {
-            "id": None,
-            "tmdb_id": show["id"],
-            "type": "series",
-            "title": show_name,
-            "poster_path": tmdb.poster_url(show.get("poster_path")),
-            "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
-            "tmdb_rating": show.get("vote_average"),
-            "release_date": show.get("first_air_date"),
-            "adult": show.get("adult", False),
-        }
-
-    results = list(await asyncio.gather(*[fetch_episode(s) for s in page_shows]))
+    results = list(await asyncio.gather(*[_build_airing_item(s, today, tmdb_key, semaphore) for s in page_shows]))
     await enrich_with_state(db, current_user.id, results, apply_tvdb_metadata=False)
     
     # Filter out dropped shows

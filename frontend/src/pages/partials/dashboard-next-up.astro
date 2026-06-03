@@ -61,8 +61,8 @@ const heroBackdrop = rawBackdrop
     </div>
 
     <div class="flex-1 flex flex-col justify-end pb-6 sm:pb-8 pt-8">
-      <div class="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 sm:gap-6 w-full">
-        <a href={heroHref} class="block flex-1 min-w-0 group">
+      <div class="flex flex-col items-start gap-4 w-full">
+        <a href={heroHref} class="block w-full min-w-0 group">
           {episodeLabel && (
             <span class="inline-block text-xs font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full mb-3">
               {episodeLabel}
@@ -76,7 +76,7 @@ const heroBackdrop = rawBackdrop
           )}
         </a>
 
-        <div class="w-fit shrink-0 scale-90 sm:scale-100 origin-left sm:origin-center self-start sm:self-end" data-next-up-hero>
+        <div class="w-fit shrink-0 scale-90 sm:scale-100 origin-left self-start" data-next-up-hero>
           <ActionBar
             tmdbId={hero.tmdb_id}
             mediaType={hero.type}

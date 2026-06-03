@@ -10,7 +10,7 @@ const token = Astro.locals.token;
 {showRefreshBtn && (
   <button
     id="refresh-metadata-btn"
-    class="w-full h-11 flex items-center justify-center gap-2 px-5 text-sm font-bold leading-none text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
+    class="w-full h-11 flex items-center justify-center gap-2 px-4 text-sm font-bold leading-none whitespace-nowrap text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
     data-refresh-url={refreshUrl}
     data-token={token}
   >

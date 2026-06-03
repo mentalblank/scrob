@@ -121,39 +121,37 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
           </div>
 
           <div class="flex-1 flex flex-col justify-end pb-6 sm:pb-8">
-            <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
-              <a href={heroHref} class="block max-w-2xl group">
-                {episodeLabel && (
-                  <span class="inline-block text-xs font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full mb-3">
-                    {episodeLabel}
-                  </span>
-                )}
-                <h3 class="text-2xl sm:text-4xl font-black text-zinc-100 leading-tight mb-1 drop-shadow-lg group-hover:text-blue-200 transition-colors">
-                  {hero.show_title ?? hero.title}
-                </h3>
-                {hero.show_title && (
-                  <p class="text-sm sm:text-base text-zinc-300 font-medium truncate">{hero.title}</p>
-                )}
-              </a>
+            <a href={heroHref} class="block max-w-2xl group">
+              {episodeLabel && (
+                <span class="inline-block text-xs font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full mb-3">
+                  {episodeLabel}
+                </span>
+              )}
+              <h3 class="text-2xl sm:text-4xl font-black text-zinc-100 leading-tight mb-1 drop-shadow-lg group-hover:text-blue-200 transition-colors">
+                {hero.show_title ?? hero.title}
+              </h3>
+              {hero.show_title && (
+                <p class="text-sm sm:text-base text-zinc-300 font-medium truncate">{hero.title}</p>
+              )}
+            </a>
 
-              <div class="shrink-0 scale-90 md:scale-100 origin-left" data-next-up-hero>
-                <ActionBar
-                  tmdbId={hero.tmdb_id}
-                  mediaType={hero.type}
-                  watched={hero.watched ?? false}
-                  inLists={hero.in_lists ?? []}
-                  inLibrary={hero.in_library ?? false}
-                  collectionPct={hero.collection_pct ?? (hero.in_library ? 100 : 0)}
-                  showUriId={hero.show_uri_id ?? (hero.show_tmdb_id ? `tmdb:s:${hero.show_tmdb_id}` : undefined)}
-                  showTmdbId={hero.show_tmdb_id ?? undefined}
-                  seasonNumber={hero.season_number ?? undefined}
-                  episodeNumber={hero.episode_number ?? undefined}
-                  isMonitored={hero.is_monitored}
-                  requestEnabled={hero.request_enabled}
-                  userRating={hero.user_rating}
-                  mediaId={hero.id}
-                />
-              </div>
+            <div class="shrink-0 scale-90 md:scale-100 origin-left mt-4" data-next-up-hero>
+              <ActionBar
+                tmdbId={hero.tmdb_id}
+                mediaType={hero.type}
+                watched={hero.watched ?? false}
+                inLists={hero.in_lists ?? []}
+                inLibrary={hero.in_library ?? false}
+                collectionPct={hero.collection_pct ?? (hero.in_library ? 100 : 0)}
+                showUriId={hero.show_uri_id ?? (hero.show_tmdb_id ? `tmdb:s:${hero.show_tmdb_id}` : undefined)}
+                showTmdbId={hero.show_tmdb_id ?? undefined}
+                seasonNumber={hero.season_number ?? undefined}
+                episodeNumber={hero.episode_number ?? undefined}
+                isMonitored={hero.is_monitored}
+                requestEnabled={hero.request_enabled}
+                userRating={hero.user_rating}
+                mediaId={hero.id}
+              />
             </div>
           </div>
         </div>
@@ -254,7 +252,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
         </div>
-        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0" id="grid-trending-movies">
+        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0 [&>*]:w-40 [&>*]:shrink-0" id="grid-trending-movies">
           {Array.from({ length: 10 }).map(() => (
             <div class="flex-shrink-0 w-40 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
               <div class="aspect-[2/3] bg-zinc-800"></div>
@@ -275,7 +273,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
         </div>
-        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0" id="grid-trending-shows">
+        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0 [&>*]:w-40 [&>*]:shrink-0" id="grid-trending-shows">
           {Array.from({ length: 10 }).map(() => (
             <div class="flex-shrink-0 w-40 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
               <div class="aspect-[2/3] bg-zinc-800"></div>
@@ -296,11 +294,10 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
             See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
           </a>
         </div>
-        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0" id="grid-airing-today">
+        <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0 [&>*]:w-40 [&>*]:shrink-0" id="grid-airing-today">
           {Array.from({ length: 10 }).map(() => (
-            <div class="flex-shrink-0 w-56 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 glass-card">
-              <div class="aspect-[3/2] bg-zinc-800"></div>
-              <div class="card-action-bar bg-zinc-800/50"></div>
+            <div class="flex-shrink-0 w-40 animate-pulse rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800">
+              <div class="aspect-[2/3] bg-zinc-800"></div>
               <div class="p-3 space-y-2">
                 <div class="h-3 bg-zinc-800 rounded w-3/4"></div>
                 <div class="h-2 bg-zinc-800 rounded w-1/4"></div>
@@ -314,321 +311,27 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
   )}
 </Base>
 
-<script define:vars={{ token }}>
-
-  const esc = window.esc;
-
-  // ─────────────────────────────────────────────────────────────────────────
-
-        function mediaCardHtml(item) {
-          const isSeries = item.type === 'series';
-          const primarySource = document.cookie.split('; ').find(row => row.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
-          const href = window.buildItemUrl(item, primarySource === 'tvdb') || '/';
-          const year = item.release_date ? item.release_date.slice(0, 4) : null;
-          const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : null;
-          const raw = item.poster_path;
-          const posterUrl = raw
-            ? (raw.startsWith('http') ? raw : `https://image.tmdb.org/t/p/w500${raw}`)
-            : null;
-          const typeLabel = isSeries ? 'Show' : 'Movie';
-          const watched = item.watched ?? false;
-          const inLists = item.in_lists ?? [];
-          const inLibrary = item.in_library ?? false;
-          const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
-          const watchPct = item.watch_pct ?? (watched ? 100 : 0);
-          const watchActive = isSeries ? watchPct > 0 : watched;
-          const progressPct = isSeries ? watchPct : (item.progress_percent ?? 0);
-          const showProgress = progressPct > 0;
-          const watchStyle = isSeries && watchPct > 0
-            ? `background: linear-gradient(to right, rgba(34,197,94,0.2) ${watchPct}%, transparent ${watchPct}%)`
-            : '';
-          const collectStyle = isSeries && collectionPct > 0
-            ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
-            : '';
-          const watchedFill = watched ? 'currentColor' : 'none';
-          const collectedFill = 'none';
-
-          return `<div
-            class="flex-shrink-0 w-40 group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
-            data-card
-            data-tmdb-id="${esc(String(item.tmdb_id ?? ''))}"
-            data-uri-id="${esc(String(item.uri_id || (item.tmdb_id ? `tmdb:${item.type === 'series' || item.type === 'season' || item.type === 'episode' ? 's' : 'm'}:${item.tmdb_id}` : (item.tvdb_id ? `tvdb:s:${item.tvdb_id}` : ""))))}"
-            data-media-type="${esc(item.type)}"
-            data-show-tmdb-id=""
-            data-show-uri-id=""
-            data-season=""
-            data-in-library="${inLibrary}"
-            data-partial-watched="${progressPct > 0}"
-            data-watched="${watched}"
-            data-is-blocked="${item.is_blocked ?? false}"
-            data-is-dropped="${item.is_dropped ?? false}"
-          >
-            <a href="${esc(href)}" class="block">
-              <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
-                ${posterUrl
-                  ? `<img src="${esc(posterUrl)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" decoding="async" />`
-                  : `<div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center"><span class="text-3xl mb-2 opacity-30">🎬</span><span class="text-xs font-bold uppercase tracking-widest">${esc(item.title)}</span></div>`
-                }
-                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                ${(() => {
-                  const isBlocked = item.is_blocked ?? false;
-                  const isDropped = item.is_dropped ?? false;
-                  const showDrop = isSeries && (inLibrary || watched || progressPct > 0);
-                  const base = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
-                  const baseRight = `${base} right-1.5`;
-                  const baseOffset = `${base} right-[38px]`;
-
-                  const btnInactiveDrop = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
-                  const btnInactiveBlock = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
-                  const btnActiveDrop  = `${baseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
-                  const btnActiveBlock = `${baseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
-
-                  const btnInactiveBlockOffset = `${baseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
-
-                  const ICON_DROP = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
-                  const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
-
-                  if (isDropped) {
-                    return `
-                      <button data-action="unified-block" data-is-blocked="false" data-is-dropped="true" title="Resume tracking" class="${esc(btnActiveDrop)}">${ICON_DROP}</button>
-                      <button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-force-block="true" data-action-intent="block" title="Block" class="${esc(btnInactiveBlockOffset)}">${ICON_BLOCK}</button>
-                    `;
-                  } else if (isBlocked) {
-                    return `<button data-action="unified-block" data-is-blocked="true" data-is-dropped="false" title="Unblock" class="${esc(btnActiveBlock)}">${ICON_BLOCK}</button>`;
-                  } else {
-                    return `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="${showDrop ? 'drop' : 'block'}" title="${showDrop ? 'Drop show' : 'Block'}" class="${showDrop ? esc(btnInactiveDrop) : esc(btnInactiveBlock)}">${showDrop ? ICON_DROP : ICON_BLOCK}</button>`;
-                  }
-                })()}
-                ${rating ? `<div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
-                ${showProgress ? `
-                  <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
-                    <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
-                  </div>
-                ` : ''}
-              </div>
-            </a>
-            <div class="card-action-bar">
-              <button data-action="watched" data-watched="${watched}" data-watch-pct="${watchPct}" data-state="${watchActive ? 'active' : 'inactive'}"
-                title="${isSeries ? `${watchPct}% watched` : (watched ? 'Mark as unwatched' : 'Mark as watched')}"
-                style="${esc(watchStyle)}"
-                class="card-action-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3" fill="${watchActive ? 'currentColor' : 'none'}"/>
-                </svg>
-                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${watchPct}%` : 'Watched'}</span>
-              </button>
-              <button data-action="list" data-in-lists="${esc(JSON.stringify(inLists))}" data-state="${inLists.length > 0 ? 'active' : 'inactive'}" title="Add to list"
-                class="card-action-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-                  <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-                </svg>
-                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Lists</span>
-              </button>
-              <button data-action="collected" data-in-library="${inLibrary}" data-collection-pct="${collectionPct}" data-state="${(inLibrary || collectionPct > 0) ? 'active' : 'inactive'}"
-                title="${isSeries ? `${collectionPct}% in library` : (inLibrary ? 'In collection' : 'Add to collection')}"
-                style="${esc(collectStyle)}"
-                class="card-action-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                  <path d="M15 22v-4a3 3 0 0 0-6 0v4"/>
-                  <path d="M2 7h20"/>
-                </svg>
-                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${collectionPct}%` : 'Collected'}</span>
-              </button>
-            </div>
-            <a href="${esc(href)}" class="block p-3 bg-transparent flex-1">
-              <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">${esc(item.title)}</h3>
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  ${year ? `<span class="text-[11px] font-medium text-zinc-500 tracking-wide">${esc(year)}</span>` : ''}
-                </div>
-                <div class="flex items-center gap-2">
-                  ${showProgress ? `<span class="text-[10px] font-bold text-zinc-500 tabular-nums">${Math.round(progressPct)}%</span>` : ''}
-                  <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">${typeLabel}</span>
-                </div>
-              </div>
-            </a>
-          </div>`;
-        }
-
-        function episodeCardHtml(item) {
-          const isSeries = item.type === 'series';
-          const primarySource = document.cookie.split('; ').find(row => row.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
-          const href = window.buildItemUrl(item, primarySource === 'tvdb') || '/';
-          const rawImage = isSeries
-            ? (item.backdrop_path ?? item.poster_path)
-            : item.type === "movie"
-              ? (item.backdrop_path ?? item.poster_path)
-              : (item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
-          const imageUrl = rawImage
-            ? (rawImage.startsWith('http') ? rawImage : `https://image.tmdb.org/t/p/w780${rawImage}`)
-            : null;
-          const sxe = item.season_number != null && item.episode_number != null
-            ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
-            : null;
-          
-          const watched = item.watched ?? false;
-          const inLists = item.in_lists ?? [];
-          const inLibrary = item.in_library ?? false;
-          const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
-          const watchPct = watched ? 100 : 0;
-          const watchActive = isSeries ? watchPct > 0 : watched;
-          
-          const progressPct = item.progress_percent ?? 0;
-          const showProgress = progressPct > 0;
-          
-          const watchStyle = isSeries && watchPct > 0
-            ? `background: linear-gradient(to right, rgba(34,197,94,0.2) ${watchPct}%, transparent ${watchPct}%)`
-            : '';
-          const collectStyle = isSeries && collectionPct > 0
-            ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
-            : '';
-
-          return `<div
-            class="flex-shrink-0 w-56 group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
-            data-card
-            data-tmdb-id="${item.tmdb_id != null ? esc(String(item.tmdb_id)) : ""}"
-            data-uri-id="${esc(item.uri_id ?? "")}"
-            data-media-type="${esc(item.type)}"
-            data-show-tmdb-id="${item.show_tmdb_id ? esc(String(item.show_tmdb_id)) : ""}"
-            data-show-uri-id="${esc(item.show_uri_id ?? (item.show_tvdb_id && !item.show_tmdb_id ? `tvdb:s:${item.show_tvdb_id}` : item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : ""))}"
-            data-season="${item.season_number != null ? esc(String(item.season_number)) : ""}"
-            data-watched="${watched}"
-            data-collected="${inLibrary}"
-            data-in-library="${inLibrary}"
-            data-is-blocked="${item.is_blocked ?? false}"
-            data-is-dropped="${item.is_dropped ?? false}"
-            data-listed="${inLists.length > 0}"
-          >
-            <a href="${esc(href)}" class="block">
-              <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
-                ${imageUrl
-                  ? `<img src="${esc(imageUrl)}" alt="${esc(item.show_title ?? item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />`
-                  : `<div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-zinc-900/40"><span class="text-3xl mb-2 opacity-30">📺</span><span class="text-xs font-bold uppercase tracking-widest text-zinc-500">${esc(item.show_title ?? item.title)}</span></div>`
-                }
-                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-                ${item.library?.resolution ? `<div class="absolute top-1.5 left-1.5 bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-zinc-800/80 shadow-lg tracking-tighter">${esc(item.library.resolution)}</div>` : ''}
-                ${(() => {
-                  const isBlocked = item.is_blocked ?? false;
-                  const isDropped = item.is_dropped ?? false;
-                  const showDrop = true;
-                  const base = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
-                  const baseRight = `${base} right-1.5`;
-                  const baseOffset = `${base} right-[38px]`;
-
-                  const btnInactiveDrop = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
-                  const btnInactiveBlock = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
-                  const btnActiveDrop  = `${baseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
-                  const btnActiveBlock = `${baseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
-
-                  const btnInactiveBlockOffset = `${baseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
-
-                  const ICON_DROP = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
-                  const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
-
-                  if (isDropped) {
-                    return `
-                      <button data-action="unified-block" data-is-blocked="false" data-is-dropped="true" title="Resume tracking" class="${esc(btnActiveDrop)}">${ICON_DROP}</button>
-                      <button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-force-block="true" data-action-intent="block" title="Block" class="${esc(btnInactiveBlockOffset)}">${ICON_BLOCK}</button>
-                    `;
-                  } else if (isBlocked) {
-                    return `<button data-action="unified-block" data-is-blocked="true" data-is-dropped="false" title="Unblock" class="${esc(btnActiveBlock)}">${ICON_BLOCK}</button>`;
-                  } else {
-                    return `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="${showDrop ? 'drop' : 'block'}" title="${showDrop ? 'Drop show' : 'Block'}" class="${showDrop ? esc(btnInactiveDrop) : esc(btnInactiveBlock)}">${showDrop ? ICON_DROP : ICON_BLOCK}</button>`;
-                  }
-                })()}
-                ${showProgress ? `
-                  <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
-                    <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
-                  </div>
-                ` : ''}
-              </div>
-            </a>
-            
-            <div class="card-action-bar">
-              <button data-action="watched" data-watched="${watched}" data-watch-pct="${watchPct}" data-state="${watchActive ? 'active' : 'inactive'}"
-                title="${isSeries ? `${watchPct}% watched` : (watched ? 'Mark as unwatched' : 'Mark as watched')}"
-                style="${esc(watchStyle)}"
-                class="card-action-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3" fill="${watchActive ? 'currentColor' : 'none'}"/>
-                </svg>
-                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${watchPct}%` : 'Watched'}</span>
-              </button>
-              <button data-action="list" data-in-lists="${esc(JSON.stringify(inLists))}" data-state="${inLists.length > 0 ? 'active' : 'inactive'}" title="Add to list"
-                class="card-action-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-                  <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-                </svg>
-                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Lists</span>
-              </button>
-              <button data-action="collected" data-in-library="${inLibrary}" data-collection-pct="${collectionPct}" data-state="${(inLibrary || collectionPct > 0) ? 'active' : 'inactive'}"
-                title="${isSeries ? `${collectionPct}% in library` : (inLibrary ? 'In collection' : 'Add to collection')}"
-                style="${esc(collectStyle)}"
-                class="card-action-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                  <path d="M15 22v-4a3 3 0 0 0-6 0v4"/>
-                  <path d="M2 7h20"/>
-                </svg>
-                <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${collectionPct}%` : 'Collected'}</span>
-              </button>
-            </div>
-            
-            <a href="${esc(href)}" class="block p-3 bg-transparent flex-1">
-              ${item.show_title ? `<p class="text-xs font-medium text-zinc-400 truncate mb-0.5">${esc(item.show_title)}</p>` : ''}
-              <div class="flex items-start justify-between gap-2">
-                <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors leading-tight">
-                  ${esc(item.title)}
-                </h3>
-              </div>
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  ${sxe ? `<span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">${esc(sxe)}</span>` : ''}
-                </div>
-                <div class="flex items-center gap-2">
-                  ${showProgress ? `<span class="text-[10px] font-bold text-zinc-500 tabular-nums">${Math.round(progressPct)}%</span>` : ''}
-                  <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
-                    ${item.type === "movie" ? "MOVIE" : "EPISODE"}
-                  </span>
-                </div>
-              </div>
-            </a>
-          </div>`;
-        }
-
-        async function loadSection(url, gridId, renderFn, limit) {
+<script is:inline>
+        // Lazy sections render a server-side skeleton, then swap in the shared
+        // MediaCard markup via the /partials/media-grid route — single card source.
+        function loadPartial(gridId, type, extra) {
           const grid = document.getElementById(gridId);
           if (!grid) return;
-          try {
-            const res = await fetch(url, {
-              headers: { 'Authorization': `Bearer ${token}` },
-            });
-            if (!res.ok) {
-              grid.closest('section').remove();
-              return;
-            }
-            const data = await res.json();
-            const items = (data.results ?? []).slice(0, limit);
-            if (items.length === 0) {
-              grid.closest('section').remove();
-              return;
-            }
-            grid.innerHTML = items.map(renderFn).join('');
-          } catch {
-            grid.closest('section').remove();
-          }
+          const params = new URLSearchParams({ type, page: '1', ...(extra || {}) });
+          fetch(`/partials/media-grid?${params.toString()}`, { credentials: 'same-origin' })
+            .then((res) => (res.ok ? res.text() : Promise.reject(new Error('fetch failed'))))
+            .then((html) => {
+              if (!html.trim()) { grid.closest('section')?.remove(); return; }
+              grid.innerHTML = html;
+            })
+            .catch(() => grid.closest('section')?.remove());
         }
 
-        loadSection('/api/proxy/media/trending/movies', 'grid-trending-movies', mediaCardHtml, 12);
-        loadSection('/api/proxy/media/trending/shows', 'grid-trending-shows', mediaCardHtml, 12);
-        const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        loadSection(`/api/proxy/media/airing-today/collected?timezone=${encodeURIComponent(userTimezone)}`, 'grid-airing-today', episodeCardHtml, 12);
-
+        loadPartial('grid-trending-movies', 'trending_movies');
+        loadPartial('grid-trending-shows', 'trending_shows');
+        loadPartial('grid-airing-today', 'airing_today_collected', {
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        });
         window.addEventListener('unified-block-changed', (e) => {
           const { uriId, tmdbId, mediaType, isDropped, isBlocked } = e.detail;
           if (mediaType !== 'series' || (!isDropped && !isBlocked)) return;

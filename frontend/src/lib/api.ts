@@ -1039,11 +1039,11 @@ export const api = {
     recentlyAdded: (type?: string, token?: string) =>
       get<{ results: MediaItem[] }>("/media/recently-added", type ? { type } : {}, token),
 
-    onAirToday: (page: number = 1, token?: string) =>
-      get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/on-air-today", { page }, token),
+    onAirToday: (page: number = 1, token?: string, timezone?: string) =>
+      get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/on-air-today", { page, ...(timezone ? { timezone } : {}) }, token),
 
-    airingTodayCollected: (page: number = 1, token?: string) =>
-      get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/airing-today/collected", { page }, token),
+    airingTodayCollected: (page: number = 1, token?: string, timezone?: string) =>
+      get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/airing-today/collected", { page, ...(timezone ? { timezone } : {}) }, token),
 
     trendingMovies: (page: number = 1, token?: string) =>
       get<{ results: MediaItem[]; page: number; total_pages: number; total_results: number }>("/media/trending/movies", { page }, token),

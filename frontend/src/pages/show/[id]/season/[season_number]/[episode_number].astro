@@ -239,7 +239,7 @@ const activeButtonsCount = [
 
             <!-- Action Buttons Container (Play, Session, Refresh) -->
             {activeButtonsCount > 0 && (
-              <div class={`grid gap-2 w-full grid-cols-${activeButtonsCount}`}>
+              <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
                 {episode.in_library && (
                   <VideoPlayer
                     uriId={(episode as any).uri_id ?? (episode.tmdb_id ? `tmdb:e:${episode.tmdb_id}` : undefined)}
@@ -303,37 +303,43 @@ const activeButtonsCount = [
 
             <!-- Library info -->
             {(() => {
-              const hasLibraryTags = episode.library && (
+              const hasLibraryTags = !!(episode.library && (
                 episode.library.resolution ||
                 episode.library.video_codec ||
                 episode.library.audio_codec ||
                 episode.library.audio_channels ||
                 episode.library.audio_languages?.length ||
                 episode.library.subtitle_languages?.length
-              );
+              ));
               return hasLibraryTags && (
-                <div class="flex flex-wrap gap-2">
-                  {[
-                    episode.library?.resolution,
-                    episode.library?.video_codec,
-                    episode.library?.audio_codec,
-                    episode.library?.audio_channels,
-                  ].filter(Boolean).map(tag => (
-                    <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold">
-                      {tag}
-                    </span>
-                  ))}
-                  {episode.library?.audio_languages?.map((lang: string) => (
-                    <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
-                      <span class="opacity-50">🔊</span> {lang}
-                    </span>
-                  ))}
-                  {episode.library?.subtitle_languages?.map((lang: string) => (
-                    <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
-                      <span class="opacity-50">💬</span> {lang}
-                    </span>
-                  ))}
-                </div>
+                <details class="group/specs" open>
+                  <summary class="list-none flex items-center gap-2 cursor-pointer select-none text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">
+                    <span>Technical Specs</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="transition-transform duration-200 group-open/specs:rotate-180"><polyline points="6 9 12 15 18 9"/></svg>
+                  </summary>
+                  <div class="flex flex-wrap gap-2">
+                    {[
+                      episode.library?.resolution,
+                      episode.library?.video_codec,
+                      episode.library?.audio_codec,
+                      episode.library?.audio_channels,
+                    ].filter(Boolean).map(tag => (
+                      <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold">
+                        {tag}
+                      </span>
+                    ))}
+                    {episode.library?.audio_languages?.map((lang: string) => (
+                      <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
+                        <span class="opacity-50">🔊</span> {lang}
+                      </span>
+                    ))}
+                    {episode.library?.subtitle_languages?.map((lang: string) => (
+                      <span class="px-3 py-1 md:py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-[10px] md:text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
+                        <span class="opacity-50">💬</span> {lang}
+                      </span>
+                    ))}
+                  </div>
+                </details>
               );
             })()}
 

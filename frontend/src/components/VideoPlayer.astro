@@ -22,7 +22,7 @@ const useHls = Astro.cookies.get("use_hls_player")?.value === "true";
       id="play-btn"
       class={secondary
         ? "w-full h-11 flex items-center justify-center gap-2 px-4 text-sm font-bold leading-none text-zinc-300 bg-zinc-900/40 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900/60 rounded-xl transition-all duration-300 active:scale-95 cursor-pointer"
-        : "w-full h-11 flex items-center justify-center gap-2 px-5 text-sm font-bold leading-none text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 active:scale-95 cursor-pointer shadow-lg shadow-blue-900/20"}
+        : "w-full h-11 flex items-center justify-center gap-2 px-4 text-sm font-bold leading-none whitespace-nowrap text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 active:scale-95 cursor-pointer shadow-lg shadow-blue-900/20"}
     >
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 shrink-0">
         <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />

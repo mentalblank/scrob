@@ -208,7 +208,7 @@ const activeButtonsCount = [
 
             <!-- Action Buttons Container (Play, Session, Refresh, Trailer) -->
             {activeButtonsCount > 0 && (
-              <div class={`grid gap-2.5 w-full grid-cols-${activeButtonsCount}`}>
+              <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
                 {((item.type === 'movie' || item.type === 'episode')) && item.in_library && (
                   <VideoPlayer
                     uriId={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : item.type === 'episode' ? `tmdb:e:${item.tmdb_id}` : undefined)}
@@ -235,7 +235,7 @@ const activeButtonsCount = [
                 {trailerYoutubeId && (
                   <button
                     id="trailer-btn"
-                    class="w-full h-11 flex items-center justify-center gap-2 px-5 text-sm font-bold leading-none text-white bg-red-600/85 hover:bg-red-500/90 border border-red-500/30 hover:border-red-400/60 rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-red-900/20"
+                    class="w-full h-11 flex items-center justify-center gap-2 px-4 text-sm font-bold leading-none whitespace-nowrap text-white bg-red-600/85 hover:bg-red-500/90 border border-red-500/30 hover:border-red-400/60 rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-red-900/20"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M21.543 6.498C22 8.28 22 12 22 12s0 3.72-.457 5.502c-.254.985-.997 1.76-1.938 2.022C17.896 20 12 20 12 20s-5.893 0-7.605-.476c-.945-.266-1.687-1.04-1.938-2.022C2 15.72 2 12 2 12s0-3.72.457-5.502c.254-.985.997-1.76 1.938-2.022C6.107 4 12 4 12 4s5.896 0 7.605.476c.945.266 1.687 1.04 1.938 2.022ZM10 15.5l6-3.5-6-3.5v7Z"/>
@@ -285,17 +285,21 @@ const activeButtonsCount = [
 
             <!-- Technical Specs Badge -->
             {(() => {
-              const hasLibraryTags = item.library && (
+              const hasLibraryTags = !!(item.library && (
                 item.library.resolution ||
                 item.library.video_codec ||
                 item.library.audio_codec ||
                 item.library.audio_channels ||
                 item.library.audio_languages?.length ||
                 item.library.subtitle_languages?.length
-              );
+              ));
               return hasLibraryTags && (
-                <div class="bg-zinc-900/40 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-xl">
-                  <div class="flex flex-wrap gap-1.5">
+                <details class="bg-zinc-900/40 border border-zinc-800/50 backdrop-blur-sm rounded-xl group/specs" open>
+                  <summary class="list-none flex items-center justify-between cursor-pointer select-none p-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">
+                    <span>Technical Specs</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="transition-transform duration-200 group-open/specs:rotate-180"><polyline points="6 9 12 15 18 9"/></svg>
+                  </summary>
+                  <div class="flex flex-wrap gap-1.5 px-4 pb-4">
                     {[
                       item.library.resolution,
                       item.library.video_codec,
@@ -317,7 +321,7 @@ const activeButtonsCount = [
                       </span>
                     ))}
                   </div>
-                </div>
+                </details>
               );
             })()}
 

@@ -200,7 +200,7 @@ try {
 
             <!-- Refresh Metadata Button -->
             {season.show_in_library && (
-              <div class={`grid gap-2 ${hasExternalPlayback ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
                 {hasExternalPlayback && (
                   <VideoPlayer
                     uriId={(show as any)?.uri_id ?? fetchKey}

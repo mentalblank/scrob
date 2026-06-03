@@ -203,6 +203,44 @@ def format_event(event: WatchEvent | PlaybackProgress, media: Media) -> dict:
     return data
 
 
+async def _apply_preferred_provider(db: AsyncSession, user_id: int, media_list: list[Media]) -> None:
+    episodes = [m for m in media_list if m.media_type == MediaType.episode and m.show and m.show.tvdb_id]
+    if not episodes:
+        return
+
+    from models.users import UserSettings
+    settings = (await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))).scalar_one_or_none()
+    prefs = settings.preferences if settings and settings.preferences else {}
+    if prefs.get("primary_metadata_source", "tmdb") != "tvdb":
+        return
+
+    from core.enrichment import enrich_media
+    from routers.media import get_user_tmdb_key, get_user_content_language
+    from routers.shows import get_user_tvdb_key
+    from core import tvdb as tvdb_client
+
+    tvdb_api_key = await get_user_tvdb_key(db, user_id)
+    if not tvdb_api_key:
+        return
+    api_key = await get_user_tmdb_key(db, user_id)
+    tvdb_lang = tvdb_client.to_three_letter_lang(await get_user_content_language(db, user_id))
+
+    for m in episodes:
+        try:
+            await enrich_media(
+                m,
+                api_key=api_key,
+                series_tmdb_id=m.show.tmdb_id,
+                is_tvdb=True,
+                tvdb_api_key=tvdb_api_key,
+                tvdb_lang=tvdb_lang,
+                series_tvdb_id=m.show.tvdb_id,
+                db=db,
+            )
+        except Exception:
+            pass
+
+
 @router.get("")
 async def get_history(
     page: int = Query(1, ge=1),
@@ -262,7 +300,9 @@ async def get_history(
 
     result = await db.execute(query)
     rows = result.all()
-    
+
+    await _apply_preferred_provider(db, current_user.id, [m for _, m in rows])
+
     events = [format_event(e, m) for e, m in rows]
     if events:
         await enrich_with_state(db, current_user.id, [e["media"] for e in events], False)

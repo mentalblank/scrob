@@ -58,10 +58,12 @@ try {
     const data = await api.media.trendingMovies(page, token);
     items = data.results;
   } else if (type === "airing_today") {
-    const data = await api.media.onAirToday(page, token);
+    const timezone = Astro.url.searchParams.get("timezone") || undefined;
+    const data = await api.media.onAirToday(page, token, timezone);
     items = data.results;
   } else if (type === "airing_today_collected") {
-    const data = await api.media.airingTodayCollected(page, token);
+    const timezone = Astro.url.searchParams.get("timezone") || undefined;
+    const data = await api.media.airingTodayCollected(page, token, timezone);
     items = data.results;
   } else if (type === "search") {
     const q = Astro.url.searchParams.get("q") || "";

@@ -246,7 +246,7 @@ const activeButtonsCount = [
 
             <!-- Header Buttons (Trailer, Refresh) -->
             {activeButtonsCount > 0 && (
-              <div class={`grid gap-2 grid-cols-${activeButtonsCount}`}>
+              <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
                 {show.in_library && hasExternalPlayback && (
                   <VideoPlayer
                     uriId={show.uri_id ?? (show.tmdb_id ? `tmdb:s:${show.tmdb_id}` : undefined)}
@@ -262,7 +262,7 @@ const activeButtonsCount = [
                 {trailerYoutubeId && (
                   <button
                     id="trailer-btn"
-                    class="w-full h-11 flex items-center justify-center gap-2 px-5 text-sm font-bold leading-none text-white bg-red-600/85 hover:bg-red-500/90 border border-red-500/30 hover:border-red-400/60 rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-red-900/20"
+                    class="w-full h-11 flex items-center justify-center gap-2 px-4 text-sm font-bold leading-none whitespace-nowrap text-white bg-red-600/85 hover:bg-red-500/90 border border-red-500/30 hover:border-red-400/60 rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-red-900/20"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M21.543 6.498C22 8.28 22 12 22 12s0 3.72-.457 5.502c-.254.985-.997 1.76-1.938 2.022C17.896 20 12 20 12 20s-5.893 0-7.605-.476c-.945-.266-1.687-1.04-1.938-2.022C2 15.72 2 12 2 12s0-3.72.457-5.502c.254-.985.997-1.76 1.938-2.022C6.107 4 12 4 12 4s5.896 0 7.605.476c.945.266 1.687 1.04 1.938 2.022ZM10 15.5l6-3.5-6-3.5v7Z"/>
