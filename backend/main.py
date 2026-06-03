@@ -296,6 +296,7 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+
     # Clean up stuck sync jobs and orphaned playback sessions on startup
     from db import async_sessionmaker
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)

@@ -70,7 +70,7 @@ class ListUpdate(BaseModel):
 
 class ListItemAdd(BaseModel):
     uri_id: str
-    media_type: MediaType
+    media_type: str
     show_uri_id: Optional[str] = None
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
@@ -121,6 +121,9 @@ def _format_list(lst: ListModel) -> dict:
 
 def _format_item(item: ListItem) -> dict:
     media = item.media
+    media_type_str = media.media_type.value
+    if media.media_type == MediaType.series and media.season_number is not None:
+        media_type_str = "season"
     data: dict = {
         "id": item.id,
         "list_id": item.list_id,
@@ -131,7 +134,7 @@ def _format_item(item: ListItem) -> dict:
             "id": media.id,
             "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
-            "type": media.media_type,
+            "type": media_type_str,
             "title": media.title,
             "poster_path": media.poster_path,
             "backdrop_path": media.backdrop_path,
@@ -506,11 +509,41 @@ async def add_list_item(
         raise HTTPException(status_code=400, detail=f"Invalid uri_id: {body.uri_id!r}")
         
 
-    media_result = await db.execute(
-        select(Media)
-        .options(selectinload(Media.show))
-        .where(Media.uri_id == body.uri_id, Media.media_type == body.media_type)
-    )
+    target_media_type = body.media_type
+    if target_media_type == "season":
+        target_media_type = "series"
+
+    try:
+        db_media_type = MediaType(target_media_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid media_type: {body.media_type!r}")
+
+    if body.media_type == "season":
+        media_result = await db.execute(
+            select(Media)
+            .options(selectinload(Media.show))
+            .where(
+                Media.uri_id == body.uri_id,
+                Media.media_type == MediaType.series,
+                Media.season_number == body.season_number,
+            )
+        )
+    elif db_media_type == MediaType.series:
+        media_result = await db.execute(
+            select(Media)
+            .options(selectinload(Media.show))
+            .where(
+                Media.uri_id == body.uri_id,
+                Media.media_type == MediaType.series,
+                Media.season_number.is_(None),
+            )
+        )
+    else:
+        media_result = await db.execute(
+            select(Media)
+            .options(selectinload(Media.show))
+            .where(Media.uri_id == body.uri_id, Media.media_type == db_media_type)
+        )
     media = media_result.scalar_one_or_none()
 
     from routers.media import get_user_tmdb_key
@@ -522,28 +555,51 @@ async def add_list_item(
         from routers.shows import get_show_by_uri
         from routers.media import get_media_details
         try:
-            if body.media_type == MediaType.series:
+            if body.media_type in ("season", "series"):
                 show_data = await get_show_by_uri(body.uri_id, db=db, current_user=current_user)
-                # Ensure a Media row exists for this series
-                media_result = await db.execute(
-                    select(Media).where(Media.uri_id == body.uri_id, Media.media_type == MediaType.series)
-                )
+                # Check again to avoid duplicate creation
+                if body.media_type == "season":
+                    media_result = await db.execute(
+                        select(Media).where(
+                            Media.uri_id == body.uri_id,
+                            Media.media_type == MediaType.series,
+                            Media.season_number == body.season_number,
+                        )
+                    )
+                else:
+                    media_result = await db.execute(
+                        select(Media).where(
+                            Media.uri_id == body.uri_id,
+                            Media.media_type == MediaType.series,
+                            Media.season_number.is_(None),
+                        )
+                    )
                 media = media_result.scalar_one_or_none()
                 if not media:
-                    # Create a dummy Media row for the series so lists can reference it
+                    title = show_data.get("title") or show_data.get("name") or "Unknown Series"
+                    poster_path = show_data.get("poster_path")
+                    if body.media_type == "season" and body.season_number is not None:
+                        title = f"{title} - Season {body.season_number}"
+                        seasons = show_data.get("seasons_meta") or []
+                        for s in seasons:
+                            if s.get("season_number") == body.season_number:
+                                if s.get("poster_path"):
+                                    poster_path = s.get("poster_path")
+                                break
                     media = Media(
                         uri_id=body.uri_id,
                         tmdb_id=show_data.get("tmdb_id_cross") or show_data.get("tmdb_id"),
                         media_type=MediaType.series,
-                        title=show_data.get("title") or show_data.get("name") or "Unknown Series",
-                        poster_path=show_data.get("poster_path"),
+                        title=title,
+                        poster_path=poster_path,
                         release_date=show_data.get("first_air_date"),
+                        season_number=body.season_number if body.media_type == "season" else None,
                     )
                     db.add(media)
                     await db.commit()
                     await db.refresh(media)
-            elif body.media_type == MediaType.movie:
-                movie_data = await get_media_details(body.media_type, body.uri_id, db=db, current_user=current_user)
+            elif db_media_type == MediaType.movie:
+                movie_data = await get_media_details(db_media_type, body.uri_id, db=db, current_user=current_user)
                 media_result = await db.execute(
                     select(Media).where(Media.uri_id == body.uri_id, Media.media_type == MediaType.movie)
                 )
@@ -561,7 +617,7 @@ async def add_list_item(
                     db.add(media)
                     await db.commit()
                     await db.refresh(media)
-            elif body.media_type == MediaType.episode:
+            elif db_media_type == MediaType.episode:
                 media = await _resolve_or_create_episode(db, current_user, body)
                 if media is None:
                     raise Exception(
@@ -574,7 +630,7 @@ async def add_list_item(
             raise
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to sync media item to lists: {e}")
-    elif not media.adult and body.media_type in (MediaType.movie, MediaType.series) and media.tmdb_id:
+    elif not media.adult and body.media_type in (MediaType.movie, MediaType.series, "season") and media.tmdb_id:
         try:
             if body.media_type == MediaType.movie:
                 data = await tmdb.get_movie(media.tmdb_id, api_key=api_key)
@@ -603,7 +659,8 @@ async def add_list_item(
         from utils.alias_lookup import get_provider_id_for_uri as _get_provider_id
         _alias = await _get_provider_id(db, media.uri_id, "tmdb")
         tmdb_id_int = int(_alias) if _alias else None
-    if body.media_type in (MediaType.movie, MediaType.series):
+    is_show_related = body.media_type in (MediaType.series, "season", MediaType.episode)
+    if body.media_type == MediaType.movie or is_show_related:
         from models.users import UserSettings
         from models.global_settings import GlobalSettings
         from routers.media import _effective_radarr, _effective_sonarr, _get_global_settings
@@ -658,18 +715,41 @@ async def add_list_item(
                     except Exception as e:
                         print(f"Radarr auto-add failed: {e}")
 
-        elif body.media_type == MediaType.series and list_obj.sonarr_auto_add:
+        elif is_show_related and list_obj.sonarr_auto_add:
+            series_uri = None
+            show_title = None
+            show_poster = None
+            show_tmdb_id = None
+
+            if body.media_type == MediaType.series:
+                series_uri = media.uri_id
+                show_title = media.title
+                show_poster = media.poster_path
+                show_tmdb_id = tmdb_id_int
+            elif body.media_type == "season":
+                series_uri = media.uri_id
+                show_title = media.show.title if media.show else media.title
+                show_poster = media.show.poster_path if media.show else media.poster_path
+                show_tmdb_id = tmdb_id_int
+            elif body.media_type == MediaType.episode:
+                series_uri = media.show.uri_id if media.show else (body.show_uri_id or media.uri_id)
+                show_title = media.show.title if media.show else "Unknown Show"
+                show_poster = media.show.poster_path if media.show else media.poster_path
+                show_tmdb_id = media.show.tmdb_id if media.show else None
+
             sonarr_cfg = _effective_sonarr(settings, gs)
-            if sonarr_cfg:
+            if sonarr_cfg and series_uri:
                 uses_global = gs and sonarr_cfg is gs and not current_user.is_admin
                 if uses_global and gs.sonarr_require_approval:
                     approval_enqueued = True
                     from models.media_request import MediaRequest, RequestStatus
-                    series_uri = body.uri_id
+                    req_uri_id = media.uri_id if body.media_type == MediaType.episode else series_uri
                     existing_q = await db.execute(
                         select(MediaRequest).where(
                             MediaRequest.user_id == current_user.id,
-                            MediaRequest.uri_id == series_uri,
+                            MediaRequest.uri_id == req_uri_id,
+                            MediaRequest.season_number == (body.season_number if body.media_type in ("season", MediaType.episode) else None),
+                            MediaRequest.episode_number == (body.episode_number if body.media_type == MediaType.episode else None),
                         )
                     )
                     existing = existing_q.scalar_one_or_none()
@@ -680,23 +760,30 @@ async def add_list_item(
                     else:
                         db.add(MediaRequest(
                             user_id=current_user.id,
-                            uri_id=series_uri,
-                            media_type="series",
-                            title=media.title or "",
-                            poster_path=media.poster_path,
+                            uri_id=req_uri_id,
+                            media_type=body.media_type,
+                            title=media.title if body.media_type == MediaType.episode else (show_title or ""),
+                            poster_path=media.poster_path if body.media_type == MediaType.episode else show_poster,
                             status=RequestStatus.pending,
+                            season_number=body.season_number if body.media_type in ("season", MediaType.episode) else None,
+                            episode_number=body.episode_number if body.media_type == MediaType.episode else None,
                         ))
                     await db.commit()
                 else:
                     from core import sonarr
                     try:
-                        tvdb_id = (media.tmdb_data or {}).get("external_ids", {}).get("tvdb_id")
-                        if not tvdb_id and media.uri_id:
+                        tvdb_id = None
+                        if media.show and media.show.tvdb_id:
+                            tvdb_id = media.show.tvdb_id
+                        elif not media.show and (media.tmdb_data or {}).get("external_ids", {}).get("tvdb_id"):
+                            tvdb_id = (media.tmdb_data or {}).get("external_ids", {}).get("tvdb_id")
+
+                        if not tvdb_id:
                             from utils.alias_lookup import get_provider_id_for_uri as _get_tvdb
-                            tvdb_id = await _get_tvdb(db, media.uri_id, "tvdb")
-                        if not tvdb_id and tmdb_id_int:
+                            tvdb_id = await _get_tvdb(db, series_uri, "tvdb")
+                        if not tvdb_id and show_tmdb_id:
                             from core import tmdb as tmdb_core
-                            ext_ids = await tmdb_core.get_external_ids(tmdb_id_int, "tv", api_key=api_key)
+                            ext_ids = await tmdb_core.get_external_ids(show_tmdb_id, "tv", api_key=api_key)
                             tvdb_id = ext_ids.get("tvdb_id")
 
                         if tvdb_id:

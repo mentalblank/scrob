@@ -359,6 +359,9 @@ export interface MediaRequestItem {
   title: string;
   poster_path: string | null;
   status: "pending" | "approved" | "rejected";
+  season_number: number | null;
+  episode_number: number | null;
+  show_uri_id?: string | null;
   reviewed_by: number | null;
   created_at: string;
   updated_at: string;

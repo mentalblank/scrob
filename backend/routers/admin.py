@@ -304,6 +304,19 @@ async def list_requests(
         .order_by(MediaRequest.updated_at.desc())
     )
     rows = result.all()
+    episode_uris = [req.uri_id for req, _ in rows if req.media_type == "episode"]
+    ep_to_show_uri = {}
+    if episode_uris:
+        from sqlalchemy.orm import selectinload
+        ep_media_q = await db.execute(
+            select(Media)
+            .options(selectinload(Media.show))
+            .where(Media.uri_id.in_(episode_uris), Media.media_type == MediaType.episode)
+        )
+        for ep in ep_media_q.scalars().all():
+            if ep.show and ep.show.uri_id:
+                ep_to_show_uri[ep.uri_id] = ep.show.uri_id
+
     return [
         {
             "id":          req.id,
@@ -312,6 +325,9 @@ async def list_requests(
             "title":       req.title,
             "poster_path": req.poster_path,
             "status":      req.status.value,
+            "season_number": req.season_number,
+            "episode_number": req.episode_number,
+            "show_uri_id": ep_to_show_uri.get(req.uri_id) if req.media_type == "episode" else None,
             "reviewed_by": req.reviewed_by,
             "created_at":  req.created_at,
             "updated_at":  req.updated_at,
@@ -369,26 +385,40 @@ async def approve_request(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Radarr error: {e}")
 
-    elif req.media_type == "series":
+    elif req.media_type in ("series", "season", "episode"):
         from routers.media import _effective_sonarr, get_user_tmdb_key
         from core import sonarr as sonarr_core, tmdb as tmdb_core
+        from sqlalchemy.orm import selectinload
         sonarr_cfg = _effective_sonarr(settings, gs)
         if not sonarr_cfg:
             raise HTTPException(status_code=400, detail="Sonarr not configured")
         try:
             tmdb_key = await get_user_tmdb_key(db, current_user.id)
-            # If URI is TVDB-based, use that ID directly. Otherwise try alias table then TMDB API.
-            if _uri.provider == "tvdb":
-                tvdb_id = int(_uri.id)
-            else:
-                tvdb_id = None
-                if req.uri_id:
-                    from utils.alias_lookup import get_provider_id_for_uri as _get_tvdb_admin
-                    _tvdb_str = await _get_tvdb_admin(db, req.uri_id, "tvdb")
-                    tvdb_id = int(_tvdb_str) if _tvdb_str else None
-                if not tvdb_id and _req_tmdb_id:
-                    ext_ids = await tmdb_core.get_external_ids(_req_tmdb_id, "tv", api_key=tmdb_key)
-                    tvdb_id = ext_ids.get("tvdb_id")
+            tvdb_id = None
+            
+            # If the request is for an episode, resolve its parent show first
+            if _uri.type_prefix == "e":
+                ep_media_q = await db.execute(
+                    select(Media)
+                    .options(selectinload(Media.show))
+                    .where(Media.uri_id == req.uri_id, Media.media_type == MediaType.episode)
+                )
+                ep_media = ep_media_q.scalar_one_or_none()
+                if ep_media and ep_media.show:
+                    tvdb_id = ep_media.show.tvdb_id
+                    _req_tmdb_id = ep_media.show.tmdb_id
+
+            if not tvdb_id:
+                if _uri.provider == "tvdb":
+                    tvdb_id = int(_uri.id)
+                else:
+                    if req.uri_id:
+                        from utils.alias_lookup import get_provider_id_for_uri as _get_tvdb_admin
+                        _tvdb_str = await _get_tvdb_admin(db, req.uri_id, "tvdb")
+                        tvdb_id = int(_tvdb_str) if _tvdb_str else None
+                    if not tvdb_id and _req_tmdb_id:
+                        ext_ids = await tmdb_core.get_external_ids(_req_tmdb_id, "tv", api_key=tmdb_key)
+                        tvdb_id = ext_ids.get("tvdb_id")
             if not tvdb_id:
                 raise HTTPException(status_code=400, detail="Could not find TVDB ID")
             await sonarr_core.add_series(

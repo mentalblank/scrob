@@ -171,7 +171,7 @@ try {
                 tmdbId={season?.show?.tmdb_id || (provider === "tmdb" ? resolvedShowId : undefined)}
                 mediaType="series"
                 watched={season.season_watched ?? false}
-                inLists={season.show_in_lists ?? []}
+                inLists={season.season_in_lists ?? []}
                 inLibrary={season.season_in_library ?? season.show_in_library ?? false}
                 collectionPct={season.season_collection_pct ?? season.show_collection_pct ?? 0}
                 watchPct={season.season_watch_pct ?? 0}
@@ -181,7 +181,6 @@ try {
                 isMonitored={season.show_is_monitored ?? false}
                 requestEnabled={season.show_request_enabled ?? false}
                 requestStatus={season.show_request_status ?? null}
-                hideLists={true}
                 userRating={season.season_user_rating ?? null}
                 hideBlock={false}
                 isBlocked={season.is_blocked ?? false}

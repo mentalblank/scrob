@@ -497,6 +497,7 @@ async def get_show(
             show_media.adult = True
             await db.commit()
         season_ratings: dict = {}
+        season_lists: dict[int, list[int]] = {}
         if show_media:
             ratings_q = await db.execute(
                 select(Rating.season_number, func.max(Rating.rating))
@@ -508,6 +509,25 @@ async def get_show(
                 .group_by(Rating.season_number)
             )
             season_ratings = dict(ratings_q.all())
+
+            # Load list membership for seasons of this show
+            user_lists_q = await db.execute(
+                select(UserList.id).where(UserList.user_id == current_user.id)
+            )
+            user_list_ids = [r[0] for r in user_lists_q.all()]
+            if user_list_ids:
+                season_lists_q = await db.execute(
+                    select(ListItem.list_id, Media.season_number)
+                    .join(Media, Media.id == ListItem.media_id)
+                    .where(
+                        Media.uri_id == show.uri_id,
+                        Media.media_type == MediaType.series,
+                        Media.season_number.isnot(None),
+                        ListItem.list_id.in_(user_list_ids),
+                    )
+                )
+                for list_id, sn in season_lists_q.all():
+                    season_lists.setdefault(sn, []).append(list_id)
 
         # Episode counts per season from stored TMDB metadata
         season_ep_counts: dict = {
@@ -565,6 +585,7 @@ async def get_show(
                 "user_rating": season_ratings.get(sn),
                 "watched_episodes_count": watched,
                 "total_episodes_count": total,
+                "in_lists": season_lists.get(sn, []),
             }
 
         # Enhance seasons_meta with live TMDB data (id, rating, overview, air_date)
@@ -1057,6 +1078,27 @@ async def get_show_season(
                 ep.get("id") for ep in tmdb_episodes if ep.get("id")
             ]
 
+            # Fetch user's list IDs
+            user_lists_q = await db.execute(
+                select(UserList.id).where(UserList.user_id == current_user.id)
+            )
+            user_list_ids = [r[0] for r in user_lists_q.all()]
+
+            # Fetch list membership for the season
+            season_in_lists = []
+            if show and user_list_ids:
+                season_lists_q = await db.execute(
+                    select(ListItem.list_id)
+                    .join(Media, Media.id == ListItem.media_id)
+                    .where(
+                        Media.uri_id == show.uri_id,
+                        Media.media_type == MediaType.series,
+                        Media.season_number == season_number,
+                        ListItem.list_id.in_(user_list_ids),
+                    )
+                )
+                season_in_lists = [r[0] for r in season_lists_q.all()]
+
             # Fetch all local episodes for both shows and seasons
             show_ids = []
             if show:
@@ -1149,25 +1191,20 @@ async def get_show_season(
                 )
                 collected_media_ids = {r[0] for r in coll_q.all()}
 
-            # Fetch list membership per episode
+            # Fetch list membership per episode (map by Media.id)
             episode_in_lists: dict[int, list[int]] = {}
-            if local_media_ids:
-                user_lists_q = await db.execute(
-                    select(UserList.id).where(UserList.user_id == current_user.id)
-                )
-                user_list_ids = [r[0] for r in user_lists_q.all()]
-                if user_list_ids:
-                    ep_lists_q = await db.execute(
-                        select(Media.tmdb_id, ListItem.list_id)
-                        .join(ListItem, ListItem.media_id == Media.id)
-                        .where(
-                            Media.id.in_(local_media_ids),
-                            ListItem.list_id.in_(user_list_ids),
-                        )
-                        .distinct()
+            if local_media_ids and user_list_ids:
+                ep_lists_q = await db.execute(
+                    select(Media.id, ListItem.list_id)
+                    .join(ListItem, ListItem.media_id == Media.id)
+                    .where(
+                        Media.id.in_(local_media_ids),
+                        ListItem.list_id.in_(user_list_ids),
                     )
-                    for ep_tmdb_id, list_id in ep_lists_q.all():
-                        episode_in_lists.setdefault(ep_tmdb_id, []).append(list_id)
+                    .distinct()
+                )
+                for ep_media_id, list_id in ep_lists_q.all():
+                    episode_in_lists.setdefault(ep_media_id, []).append(list_id)
 
             # Fetch active playback progress per episode
             episode_progress: dict[int, float] = {}
@@ -1228,7 +1265,7 @@ async def get_show_season(
                         "runtime": ep.get("runtime"),
                         "watched": is_watched,
                         "user_rating": user_rating,
-                        "in_lists": episode_in_lists.get(ep_tmdb_id, []) if ep_tmdb_id else [],
+                        "in_lists": episode_in_lists.get(local_media_id, []) if local_media_id else [],
                         "progress_percent": user_progress,
                     }
                 )
@@ -1270,7 +1307,7 @@ async def get_show_season(
                         "runtime": local_ep.runtime,
                         "watched": is_watched,
                         "user_rating": user_rating,
-                        "in_lists": [],
+                        "in_lists": episode_in_lists.get(local_media_id, []) if local_media_id else [],
                         "progress_percent": user_progress,
                     }
                 )
@@ -1325,6 +1362,7 @@ async def get_show_season(
                 "season_in_library": season_in_library,
                 "season_collection_pct": season_collection_pct,
                 "season_user_rating": season_user_rating,
+                "season_in_lists": season_in_lists,
                 "show_in_lists": show_state.get("in_lists", []),
                 "show_in_library": show_state.get("collection_pct", 0) > 0,
                 "show_collection_pct": show_state.get("collection_pct", 0),
@@ -1334,11 +1372,51 @@ async def get_show_season(
             }
         elif show:
             # Fallback to local only if no TMDB key
+            user_lists_q = await db.execute(
+                select(UserList.id).where(UserList.user_id == current_user.id)
+            )
+            user_list_ids = [r[0] for r in user_lists_q.all()]
+            season_in_lists = []
+            if user_list_ids:
+                season_lists_q = await db.execute(
+                    select(ListItem.list_id)
+                    .join(Media, Media.id == ListItem.media_id)
+                    .where(
+                        Media.uri_id == show.uri_id,
+                        Media.media_type == MediaType.series,
+                        Media.season_number == season_number,
+                        ListItem.list_id.in_(user_list_ids),
+                    )
+                )
+                season_in_lists = [r[0] for r in season_lists_q.all()]
+            
+            episode_in_lists = {}
+            local_ep_ids = [ep.id for ep in local_episodes]
+            if local_ep_ids and user_list_ids:
+                ep_lists_q = await db.execute(
+                    select(Media.id, ListItem.list_id)
+                    .join(ListItem, ListItem.media_id == Media.id)
+                    .where(
+                        Media.id.in_(local_ep_ids),
+                        ListItem.list_id.in_(user_list_ids),
+                    )
+                    .distinct()
+                )
+                for ep_media_id, list_id in ep_lists_q.all():
+                    episode_in_lists.setdefault(ep_media_id, []).append(list_id)
+
+            formatted_eps = []
+            for ep in local_episodes:
+                fmt = format_media(ep)
+                fmt["in_lists"] = episode_in_lists.get(ep.id, [])
+                formatted_eps.append(fmt)
+
             return {
                 "season_number": season_number,
                 "name": f"Season {season_number}",
-                "episodes": [format_media(ep) for ep in local_episodes],
+                "episodes": formatted_eps,
                 "show": format_show(show),
+                "season_in_lists": season_in_lists,
             }
         else:
             raise HTTPException(status_code=404, detail="Show not found")

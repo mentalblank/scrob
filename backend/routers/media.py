@@ -177,6 +177,61 @@ async def enrich_with_state(
     callers. Pass False for callers that serve local DB items (history, library, lists) whose
     metadata is already correct.
     """
+    # 0. Preliminaries & inputs lookup for TVDB/TMDB shows
+    show_tmdb_ids_for_lookup = []
+    show_tvdb_only_ids_for_lookup = []
+    for i in items:
+        t = i.get("type")
+        tid = i.get("tmdb_id")
+        if t in ("series", "season") and tid:
+            show_tmdb_ids_for_lookup.append(tid)
+        elif t == "episode":
+            s_tmdb = i.get("show_tmdb_id")
+            if s_tmdb:
+                show_tmdb_ids_for_lookup.append(s_tmdb)
+            elif i.get("show_tvdb_id"):
+                show_tvdb_only_ids_for_lookup.append(int(i["show_tvdb_id"]))
+
+    # Load local shows for URI backfilling
+    input_tmdb_to_local_show_pre = {}
+    tvdb_only_show_map_pre = {}
+    if show_tmdb_ids_for_lookup:
+        _int_ids = [k for k in show_tmdb_ids_for_lookup if isinstance(k, int)]
+        if _int_ids:
+            local_shows_q = await db.execute(select(ShowModel).where(ShowModel.tmdb_id.in_(_int_ids)))
+            input_tmdb_to_local_show_pre = {s.tmdb_id: s for s in local_shows_q.scalars().all()}
+    if show_tvdb_only_ids_for_lookup:
+        tvdb_only_q = await db.execute(select(ShowModel).where(ShowModel.tvdb_id.in_(show_tvdb_only_ids_for_lookup)))
+        tvdb_only_show_map_pre = {s.tvdb_id: s for s in tvdb_only_q.scalars().all()}
+
+    # Backfill uri_id and show_uri_id on all items first
+    for item in items:
+        tid = item.get("tmdb_id")
+        t = item.get("type")
+        if not item.get("uri_id"):
+            tvdb_id = item.get("tvdb_id")
+            if tid:
+                if t == "movie":
+                    item["uri_id"] = f"tmdb:m:{tid}"
+                elif t in ("series", "season"):
+                    local_s = input_tmdb_to_local_show_pre.get(tid)
+                    item["uri_id"] = (local_s.uri_id if local_s else None) or f"tmdb:s:{tid}"
+                elif t == "episode":
+                    item["uri_id"] = f"tmdb:e:{tid}"
+                elif t == "person":
+                    item["uri_id"] = f"tmdb:p:{tid}"
+            elif tvdb_id and t in ("series", "season"):
+                local_s = tvdb_only_show_map_pre.get(tvdb_id)
+                item["uri_id"] = (local_s.uri_id if local_s else None) or f"tvdb:s:{tvdb_id}"
+
+        if t == "episode" and not item.get("show_uri_id"):
+            s_tmdb = item.get("show_tmdb_id")
+            local_s = input_tmdb_to_local_show_pre.get(s_tmdb)
+            if local_s and local_s.uri_id:
+                item["show_uri_id"] = local_s.uri_id
+            elif s_tmdb:
+                item["show_uri_id"] = f"tmdb:s:{s_tmdb}"
+
     # --- URI resolution (hybrid mode) ---
     # When items carry uri_id fields, resolve them to internal DB PKs via media_aliases.
     # Resolved internal_id is stored as _internal_id on each item for downstream use.
@@ -238,44 +293,59 @@ async def enrich_with_state(
                 request_enabled_map[key] = sonarr_ready
 
     # --- Pending/rejected request state ---
-    request_status_map: dict[int, str] = {}
-    if len(items) == 1:
-        item = items[0]
+    request_status_map: dict[int | str, str] = {}
+    lookup_keys: dict[tuple[str, str], list[int | str]] = {}
+    
+    for item in items:
         tid = item.get("tmdb_id")
-        t   = item.get("type")
-        
+        t = item.get("type")
+        if not t:
+            continue
+            
         lookup_tid = tid
         lookup_type = t
-        if t == "episode":
+        if t in ("episode", "season"):
             lookup_tid = item.get("show_tmdb_id")
             lookup_type = "series"
 
         _req_uri = None
-        if t == "episode":
+        if t in ("episode", "season"):
             _req_uri = item.get("show_uri_id")
             if not _req_uri and item.get("show_tvdb_id"):
                 _req_uri = f"tvdb:s:{item.get('show_tvdb_id')}"
+            if not _req_uri and t == "season":
+                _req_uri = item.get("uri_id")
         else:
             _req_uri = item.get("uri_id")
 
         if not _req_uri and lookup_type in ("movie", "series") and lookup_tid:
             _req_uri = f"tmdb:{'m' if lookup_type == 'movie' else 's'}:{lookup_tid}"
+
         if lookup_type in ("movie", "series") and _req_uri:
-            req_q = await db.execute(
-                select(MediaRequest)
-                .where(
-                    MediaRequest.user_id == user_id,
-                    MediaRequest.uri_id == _req_uri,
-                    MediaRequest.media_type == lookup_type,
-                    MediaRequest.status.in_([RequestStatus.pending, RequestStatus.rejected]),
-                )
-                .order_by(MediaRequest.updated_at.desc())
-                .limit(1)
+            item_key = tid if tid is not None else item.get("uri_id")
+            if item_key is not None:
+                lookup_keys.setdefault((_req_uri, lookup_type), []).append(item_key)
+
+    if lookup_keys:
+        uri_ids = [uri for uri, _ in lookup_keys.keys()]
+        req_q = await db.execute(
+            select(MediaRequest)
+            .where(
+                MediaRequest.user_id == user_id,
+                MediaRequest.uri_id.in_(uri_ids),
+                MediaRequest.status.in_([RequestStatus.pending, RequestStatus.rejected]),
             )
-            req = req_q.scalar_one_or_none()
-            if req:
-                key = tid if tid is not None else _req_uri
-                request_status_map[key] = req.status.value
+            .order_by(MediaRequest.updated_at.desc())
+        )
+        seen_requests = {}
+        for req in req_q.scalars().all():
+            key_pair = (req.uri_id, req.media_type)
+            if key_pair not in seen_requests:
+                seen_requests[key_pair] = req
+                
+        for (uri_id, media_type), req in seen_requests.items():
+            for item_key in lookup_keys.get((uri_id, media_type), []):
+                request_status_map[item_key] = req.status.value
 
     # --- Watched state ---
     watched_movies: set[int] = set()
@@ -570,28 +640,18 @@ async def enrich_with_state(
     user_list_ids_q = await db.execute(select(UserList.id).where(UserList.user_id == user_id))
     user_list_ids = [r[0] for r in user_list_ids_q.all()]
 
-    list_membership: dict[int, list[int]] = {}
-    list_membership_by_uri: dict[str, list[int]] = {}
-    if user_list_ids and all_tmdb_ids:
-        q = await db.execute(
-            select(Media.tmdb_id, ListItem.list_id)
+    list_membership_by_key: dict[tuple[str, Optional[int], Optional[int]], list[int]] = {}
+    all_uris = [i["uri_id"] for i in items if i.get("uri_id")]
+    if user_list_ids and all_uris:
+        q_lists = await db.execute(
+            select(Media.uri_id, Media.season_number, Media.episode_number, ListItem.list_id)
             .join(ListItem, ListItem.media_id == Media.id)
-            .where(ListItem.list_id.in_(user_list_ids), Media.tmdb_id.in_(all_tmdb_ids))
+            .where(ListItem.list_id.in_(user_list_ids), Media.uri_id.in_(all_uris))
             .distinct()
         )
-        for row_tmdb_id, list_id in q.all():
-            list_membership.setdefault(row_tmdb_id, []).append(list_id)
-    # Supplement: list membership for TVDB-only items (no tmdb_id, have uri_id)
-    _uri_no_tmdb = [i["uri_id"] for i in items if i.get("uri_id") and not i.get("tmdb_id")]
-    if user_list_ids and _uri_no_tmdb:
-        q2 = await db.execute(
-            select(Media.uri_id, ListItem.list_id)
-            .join(ListItem, ListItem.media_id == Media.id)
-            .where(ListItem.list_id.in_(user_list_ids), Media.uri_id.in_(_uri_no_tmdb))
-            .distinct()
-        )
-        for row_uri, list_id in q2.all():
-            list_membership_by_uri.setdefault(row_uri, []).append(list_id)
+        for uri, sn, en, list_id in q_lists.all():
+            if uri:
+                list_membership_by_key.setdefault((uri, sn, en), []).append(list_id)
 
     # --- Collection pct and watched status for shows ---
     show_pct: dict[int, int] = {}
@@ -805,6 +865,7 @@ async def enrich_with_state(
         for tmdb_id, media_type, rating_val in ratings_q.all():
             user_ratings[(tmdb_id, media_type.value)] = rating_val
     # Supplement: ratings for TVDB-only items (no tmdb_id, have uri_id)
+    _uri_no_tmdb = [i["uri_id"] for i in items if i.get("uri_id") and not i.get("tmdb_id")]
     if _uri_no_tmdb:
         ratings_q2 = await db.execute(
             select(Media.uri_id, func.max(Rating.rating))
@@ -973,7 +1034,13 @@ async def enrich_with_state(
             item["collection_pct"] = 0
             item["in_library"] = False
 
-        item["in_lists"] = list_membership.get(tid, [])
+        # Lookup list membership
+        sn_key = item.get("season_number") if t in ("season", "episode") else None
+        en_key = item.get("episode_number") if t == "episode" else None
+        item["in_lists"] = []
+        if item.get("uri_id"):
+            item["in_lists"] = list_membership_by_key.get((item["uri_id"], sn_key, en_key), [])
+
         item["is_monitored"] = monitored_status.get(tid, False)
         _req_key = tid if tid is not None else item.get("uri_id")
         item["request_enabled"] = request_enabled_map.get(_req_key, False)
@@ -985,8 +1052,6 @@ async def enrich_with_state(
         # URI-based fallbacks for TVDB-only items (tid is None)
         if tid is None and item.get("uri_id"):
             _uri = item["uri_id"]
-            if not item["in_lists"]:
-                item["in_lists"] = list_membership_by_uri.get(_uri, [])
             if item["user_rating"] is None:
                 item["user_rating"] = user_ratings_by_uri.get(_uri)
 

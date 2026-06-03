@@ -587,6 +587,7 @@ const activeButtonsCount = [
                     watched: seasonState.watched,
                     in_library: seasonState.in_library,
                     collection_pct: seasonState.collection_pct,
+                    in_lists: seasonState.in_lists ?? [],
                     library: null,
                   };
 
@@ -616,7 +617,7 @@ const activeButtonsCount = [
                       data-show-uri-id={resolvedUriId}
                       data-watched={String(seasonState.watched)}
                       data-collected={String(seasonState.in_library)}
-                      data-listed="false"
+                      data-listed={String((seasonState.in_lists ?? []).length > 0)}
                       data-dvr="false"
                       data-partial-watched={String(!seasonState.watched && watchedCount > 0)}
                       data-partial-collected={String(seasonState.collection_pct > 0 && seasonState.collection_pct < 100)}
@@ -657,13 +658,12 @@ const activeButtonsCount = [
                         tmdbId={resolvedTmdbId ?? undefined}
                         mediaType="series"
                         watched={seasonState.watched}
-                        inLists={[]}
+                        inLists={seasonState.in_lists ?? []}
                         inLibrary={seasonState.in_library}
                         collectionPct={seasonState.collection_pct}
                         watchPct={seasonState.watch_pct ?? 0}
                         seasonNumber={seasonNum}
                         hideRequest={true}
-                        hideLists={true}
                         userRating={seasonState.user_rating ?? null}
                       />
                     </div>

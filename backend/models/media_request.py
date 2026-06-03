@@ -24,6 +24,8 @@ class MediaRequest(Base):
     title       : Mapped[str]            = mapped_column(String(500), nullable=False, server_default="")
     poster_path : Mapped[Optional[str]]  = mapped_column(String(500))
     status      : Mapped[RequestStatus]  = mapped_column(Enum(RequestStatus), nullable=False, default=RequestStatus.pending)
+    season_number: Mapped[Optional[int]]  = mapped_column(Integer, nullable=True)
+    episode_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     reviewed_by : Mapped[Optional[int]]  = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at  : Mapped[datetime]       = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at  : Mapped[datetime]       = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
