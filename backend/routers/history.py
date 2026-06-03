@@ -667,7 +667,8 @@ async def mark_as_watched(
             )
             db.add(media)
             await db.flush()
-            await enrich_media(media, api_key=api_key)
+            from core.enrichment import enrich_for_user
+            await enrich_for_user(db, current_user.id, media)
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
 

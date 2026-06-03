@@ -221,7 +221,7 @@ async def _get_or_create_movie_media(db: AsyncSession, tmdb_id: int, title: str,
     return media
 
 
-async def _get_or_create_series_media(db: AsyncSession, tmdb_id: int, title: str, api_key: str | None) -> Media | None:
+async def _get_or_create_series_media(db: AsyncSession, tmdb_id: int, title: str, api_key: str | None, user_id: int | None = None) -> Media | None:
     result = await db.execute(
         select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
     )
@@ -245,6 +245,9 @@ async def _get_or_create_series_media(db: AsyncSession, tmdb_id: int, title: str
         )
         db.add(media)
         await db.flush()
+        if user_id is not None:
+            from core.enrichment import enrich_for_user
+            await enrich_for_user(db, user_id, media)
         return media
     except Exception as exc:
         logger.warning("Could not fetch show tmdb=%s: %s", tmdb_id, exc)
@@ -851,7 +854,8 @@ async def _sync_trakt_ratings(db: AsyncSession, user_id: int, client_id: str, ac
                     media = Media(tmdb_id=tmdb_id, uri_id=f"tmdb:s:{tmdb_id}", media_type=MediaType.series, title=d.get("name") or show_data.get("title", ""))
                     db.add(media)
                     await db.flush()
-                    await enrich_media(media, api_key=api_key)
+                    from core.enrichment import enrich_for_user
+                    await enrich_for_user(db, user_id, media)
                 if media.id not in existing_rated:
                     db.add(Rating(
                         user_id=user_id,
@@ -960,7 +964,7 @@ async def _sync_trakt_lists(db: AsyncSession, user_id: int, client_id: str, acce
                     if not tmdb_id_item:
                         continue
                     async with db.begin_nested():
-                        media = await _get_or_create_series_media(db, tmdb_id_item, show_data.get("title", ""), api_key)
+                        media = await _get_or_create_series_media(db, tmdb_id_item, show_data.get("title", ""), api_key, user_id=user_id)
                     if media and media.id not in shows_existing:
                         db.add(ListItem(list_id=shows_list.id, media_id=media.id))
                         shows_existing.add(media.id)
@@ -1006,7 +1010,7 @@ async def _sync_trakt_lists(db: AsyncSession, user_id: int, client_id: str, acce
                     if not tmdb_id_item:
                         continue
                     async with db.begin_nested():
-                        media = await _get_or_create_series_media(db, tmdb_id_item, show_data.get("title", ""), api_key)
+                        media = await _get_or_create_series_media(db, tmdb_id_item, show_data.get("title", ""), api_key, user_id=user_id)
                 else:
                     continue
 

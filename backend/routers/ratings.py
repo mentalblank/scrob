@@ -19,7 +19,6 @@ import core.plex as plex_client
 import core.jellyfin as jellyfin_client
 import core.emby as emby_client
 import core.trakt as trakt_client
-from core.enrichment import enrich_media
 
 router = APIRouter()
 
@@ -107,7 +106,8 @@ async def submit_rating(
             )
             db.add(media)
             await db.flush()
-            await enrich_media(media, api_key=api_key)
+            from core.enrichment import enrich_for_user
+            await enrich_for_user(db, current_user.id, media)
         except HTTPException:
             raise
         except Exception as e:

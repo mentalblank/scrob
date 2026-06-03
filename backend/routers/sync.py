@@ -2912,8 +2912,26 @@ async def run_heal(user_id: int, api_key: str, job_id: int | None = None):
                 to_enrich = [(m, None) for m in movies] + [
                     (m, show_tmdb_map[m.show_id]) for m in episodes if m.show_id in show_tmdb_map
                 ]
+
+                heal_settings = (await db.execute(
+                    select(UserSettings).where(UserSettings.user_id == user_id)
+                )).scalar_one_or_none()
+                _prefs = heal_settings.preferences if heal_settings else None
+                is_tvdb = (_prefs.get("primary_metadata_source") if _prefs else "tmdb") == "tvdb"
+                tvdb_api_key = None
+                tvdb_lang = "eng"
+                if is_tvdb:
+                    from routers.shows import get_user_tvdb_key
+                    from routers.media import get_user_content_language
+                    from core import tvdb as tvdb_client
+                    tvdb_api_key = await get_user_tvdb_key(db, user_id)
+                    tvdb_lang = tvdb_client.to_three_letter_lang(await get_user_content_language(db, user_id))
+
                 await _update_job(total_items=len(to_enrich), processed_items=0)
-                await batch_enrich_items(to_enrich, api_key=api_key)
+                await batch_enrich_items(
+                    to_enrich, api_key=api_key,
+                    is_tvdb=is_tvdb, tvdb_api_key=tvdb_api_key, tvdb_lang=tvdb_lang,
+                )
                 await db.commit()
                 await _update_job(processed_items=len(to_enrich))
                 print(f"Heal: re-enriched {len(to_enrich)} items for user {user_id}")

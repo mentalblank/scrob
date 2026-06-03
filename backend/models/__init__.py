@@ -23,6 +23,7 @@ from .blocklist import BlocklistItem
 from .media_alias import MediaAlias
 from .season_override import ShowSeasonOverride, ShowEpisodeOverride
 from .media_request import MediaRequest
+from .provider_cache import ProviderCache
 
 __all__ = [
     "Base",
@@ -51,4 +52,5 @@ __all__ = [
     "ShowSeasonOverride",
     "ShowEpisodeOverride",
     "MediaRequest",
+    "ProviderCache",
 ]

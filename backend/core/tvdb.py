@@ -250,12 +250,27 @@ async def search_series(query: str, api_key: str, lang: str | None = None) -> li
 
 async def get_series(tvdb_id: int, api_key: str, lang: str | None = None) -> dict:
     """Fetch series extended info including episodes for accurate per-season counts."""
-    data = await _get(f"/series/{tvdb_id}/extended", api_key, params={"meta": "translations,episodes"}, lang=lang)
-    return data.get("data") or {}
+    from core import provider_cache
+
+    async def _fetch() -> dict:
+        data = await _get(f"/series/{tvdb_id}/extended", api_key, params={"meta": "translations,episodes"}, lang=lang)
+        return data.get("data") or {}
+
+    return await provider_cache.cached(
+        "tvdb", "series", {"id": tvdb_id, "lang": lang}, provider_cache.TTL_SHOW, _fetch
+    )
 
 
 async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, lang: str = "eng") -> list[dict]:
     """Fetch episodes for a specific season (season_type=official) in the specified language."""
+    from core import provider_cache
+    return await provider_cache.cached(
+        "tvdb", "series_episodes", {"id": tvdb_id, "season": season_number, "lang": lang}, provider_cache.TTL_SEASON,
+        lambda: _get_series_episodes_uncached(tvdb_id, season_number, api_key, lang),
+    )
+
+
+async def _get_series_episodes_uncached(tvdb_id: int, season_number: int, api_key: str, lang: str = "eng") -> list[dict]:
     episodes = []
     page = 0
     try:

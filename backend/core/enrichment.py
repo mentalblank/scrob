@@ -108,6 +108,14 @@ async def enrich_media(
             }
             media.adult = data.get("adult", False)
 
+            # Pref=TVDB: override artwork only, keep TMDB metadata
+            if is_tvdb and series_tvdb_id and tvdb_api_key:
+                tvdb_poster, tvdb_backdrop = await _tvdb_series_artwork(series_tvdb_id, tvdb_api_key, tvdb_lang)
+                if tvdb_poster:
+                    media.poster_path = tvdb_poster
+                if tvdb_backdrop:
+                    media.backdrop_path = tvdb_backdrop
+
         elif media.media_type == MediaType.episode:
             if media.season_number is None or media.episode_number is None:
                 return
@@ -174,3 +182,92 @@ async def enrich_media(
             import traceback
             print(f"  Enrich FAILED for {media.title}: {e}")
             traceback.print_exc()
+
+
+async def _tvdb_series_artwork(series_tvdb_id: int, tvdb_api_key: str, tvdb_lang: str = "eng") -> tuple[str | None, str | None]:
+    """Resolve series (poster, backdrop) from TVDB, then Skyhook. (None, None) on failure."""
+    poster = backdrop = None
+    try:
+        from core import tvdb as tvdb_client
+        raw = await tvdb_client.get_series(series_tvdb_id, tvdb_api_key, lang=tvdb_lang)
+        if raw:
+            fmt = tvdb_client.format_series(raw, lang=tvdb_lang)
+            poster = fmt.get("poster_path")
+            backdrop = fmt.get("backdrop_path")
+    except Exception:
+        pass
+    if not poster or not backdrop:
+        try:
+            from core import skyhook
+            sky = await skyhook.get_show(series_tvdb_id)
+            if sky:
+                imgs = skyhook.extract_images(sky)
+                poster = poster or imgs.get("poster")
+                backdrop = backdrop or imgs.get("fanart")
+        except Exception:
+            pass
+    return poster, backdrop
+
+
+async def enrich_for_user(
+    db,
+    user_id: int,
+    media: Media,
+    *,
+    series_uri_id: str | None = None,
+    series_tmdb_id: int | None = None,
+    series_tvdb_id: int | None = None,
+) -> None:
+    """Resolve the user's metadata-source pref, keys, and TVDB series id, then
+    call enrich_media. Single entry point so call sites don't re-derive routing.
+    """
+    from sqlalchemy import select
+    from models.users import UserSettings
+
+    settings = (await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))).scalar_one_or_none()
+    prefs = settings.preferences if settings and settings.preferences else {}
+    is_tvdb = prefs.get("primary_metadata_source", "tmdb") == "tvdb"
+
+    if media.media_type == MediaType.series and not series_tmdb_id:
+        series_tmdb_id = media.tmdb_id
+
+    from routers.media import get_user_tmdb_key, get_user_content_language
+    api_key = await get_user_tmdb_key(db, user_id)
+
+    tvdb_api_key = None
+    tvdb_lang = "eng"
+    if is_tvdb:
+        from routers.shows import get_user_tvdb_key
+        from core import tvdb as tvdb_client
+        tvdb_api_key = await get_user_tvdb_key(db, user_id)
+        tvdb_lang = tvdb_client.to_three_letter_lang(await get_user_content_language(db, user_id))
+
+        if not series_tvdb_id:
+            if series_uri_id:
+                try:
+                    from utils.alias_lookup import get_provider_id_for_uri
+                    _tvdb = await get_provider_id_for_uri(db, series_uri_id, "tvdb")
+                    if _tvdb:
+                        series_tvdb_id = int(_tvdb)
+                except Exception:
+                    pass
+            if not series_tvdb_id and series_tmdb_id:
+                try:
+                    res = await tmdb.get_external_ids(series_tmdb_id, "tv", api_key=api_key)
+                    if res.get("tvdb_id"):
+                        series_tvdb_id = int(res["tvdb_id"])
+                except Exception:
+                    pass
+
+    use_tvdb = is_tvdb and bool(tvdb_api_key) and bool(series_tvdb_id)
+    await enrich_media(
+        media,
+        api_key=api_key,
+        series_tmdb_id=series_tmdb_id,
+        is_tvdb=use_tvdb,
+        tvdb_api_key=tvdb_api_key,
+        tvdb_lang=tvdb_lang,
+        series_tvdb_id=series_tvdb_id,
+        series_uri_id=series_uri_id,
+        db=db,
+    )

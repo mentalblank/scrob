@@ -201,6 +201,7 @@ async def _get_or_create_series_media(
     tmdb_id: int,
     title: str,
     api_key: str | None,
+    user_id: int | None = None,
 ) -> Media | None:
     result = await db.execute(
         select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
@@ -225,7 +226,11 @@ async def _get_or_create_series_media(
         )
         db.add(media)
         await db.flush()
-        await enrich_media(media, api_key=api_key)
+        if user_id is not None:
+            from core.enrichment import enrich_for_user
+            await enrich_for_user(db, user_id, media)
+        else:
+            await enrich_media(media, api_key=api_key)
         return media
     except Exception as e:
         logger.warning("Failed to fetch/create series media tmdb=%s: %s", tmdb_id, e)
@@ -493,7 +498,7 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                     tmdb_id = int(tmdb_id)
                     try:
                         async with db.begin_nested():
-                            media = await _get_or_create_series_media(db, tmdb_id, show_data.get("title", ""), api_key)
+                            media = await _get_or_create_series_media(db, tmdb_id, show_data.get("title", ""), api_key, user_id=user_id)
                             if not media:
                                 continue
                             if media.id not in existing_rated:
@@ -554,7 +559,7 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                     tmdb_id = int(tmdb_id)
                     try:
                         async with db.begin_nested():
-                            media = await _get_or_create_series_media(db, tmdb_id, show_data.get("title", ""), api_key)
+                            media = await _get_or_create_series_media(db, tmdb_id, show_data.get("title", ""), api_key, user_id=user_id)
                         if media and media.id not in wl_existing:
                             db.add(ListItem(list_id=watchlist.id, media_id=media.id))
                             wl_existing.add(media.id)

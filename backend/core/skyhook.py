@@ -9,18 +9,25 @@ async def get_show(tvdb_id: int, lang: str = "en") -> dict | None:
 
     Never raises — Skyhook is a best-effort supplement; callers degrade gracefully.
     """
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
-            r = await client.get(
-                f"{SKYHOOK_BASE}/{lang}/{int(tvdb_id)}",
-                headers={"Accept": "application/json"},
-            )
-            if r.status_code == 404:
-                return None
-            r.raise_for_status()
-            return r.json()
-    except Exception:
-        return None
+    from core import provider_cache
+
+    async def _fetch() -> dict | None:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+                r = await client.get(
+                    f"{SKYHOOK_BASE}/{lang}/{int(tvdb_id)}",
+                    headers={"Accept": "application/json"},
+                )
+                if r.status_code == 404:
+                    return None
+                r.raise_for_status()
+                return r.json()
+        except Exception:
+            return None
+
+    return await provider_cache.cached(
+        "skyhook", "show", {"id": int(tvdb_id), "lang": lang}, provider_cache.TTL_SKYHOOK, _fetch
+    )
 
 
 def extract_cross_ids(raw: dict) -> dict:
