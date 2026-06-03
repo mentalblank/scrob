@@ -12,18 +12,24 @@ let episodeOverrides = [];
 let groupedShowsList = [];
 let customTitles = [];
 let groupedCustomTitlesList = [];
+let matchedShows = [];
+let matchedMovies = [];
 let error = "";
 
 try {
-  const [dataSeason, dataEp, dataTitles, settings] = await Promise.all([
+  const [dataSeason, dataEp, dataTitles, settings, dataMatchedShows, dataMatchedMovies] = await Promise.all([
     api.sync.getSeasonOverrides(token),
     api.sync.getEpisodeOverrides(token),
     api.sync.getCustomTitles(token),
-    api.auth.getSettings(token)
+    api.auth.getSettings(token),
+    api.sync.getMatchedShows(token),
+    api.sync.getMatchedMovies(token)
   ]);
   
   seasonOverrides = dataSeason;
   episodeOverrides = dataEp.overrides || [];
+  matchedShows = dataMatchedShows || [];
+  matchedMovies = dataMatchedMovies || [];
   
   // Group episode overrides by show URI
   const groupedEpisodeOverrides: Record<string, any> = {};
@@ -445,6 +451,133 @@ try {
           </div>
         </div>
     )}
+    <!-- Unmatched Media Mappings Section -->
+    <div class="mt-16">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <h2 class="section-headline mb-1 flex items-center gap-2">
+          Unmatched Media Mappings
+          <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{matchedShows.length + matchedMovies.length}</span>
+        </h2>
+        <div class="flex items-center gap-3 w-full sm:w-auto">
+          {(matchedShows.length > 0 || matchedMovies.length > 0) && (
+            <input 
+              type="text" 
+              id="unmatched-search" 
+              placeholder="Search mappings..." 
+              class="px-4 py-2 bg-zinc-950/40 border border-zinc-800 focus:border-indigo-500 rounded-xl text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full sm:w-64 placeholder-zinc-600 transition-all"
+            />
+          )}
+        </div>
+      </div>
+
+      {matchedShows.length === 0 && matchedMovies.length === 0 ? (
+        <div class="flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
+          <div class="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-4 shadow-inner">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </div>
+          <h3 class="text-zinc-200 font-semibold mb-1">No Unmatched Mappings</h3>
+          <p class="text-zinc-500 text-xs max-w-sm text-center">You haven't mapped any unmatched local show or movie titles to TMDB/TVDB.</p>
+        </div>
+      ) : (
+        <div class="space-y-3" id="unmatched-mappings-list">
+          {/* Unmatched Shows */}
+          {matchedShows.map((s: any) => {
+            const displayTitle = s.show_title_matched || s.show_title;
+            const targetHref = s.show_uri_id ? `/show/${s.show_uri_id}` : (s.tvdb_id ? `/show/tvdb:s:${s.tvdb_id}` : '');
+            return (
+              <div class="unmatched-map-row flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-zinc-900/20 border border-zinc-800 hover:border-zinc-750/80 rounded-2xl transition-all backdrop-blur-md" data-title={s.show_title} data-matched-title={displayTitle} data-type="show">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-[10px] bg-indigo-500/10 text-indigo-400 font-bold px-2 py-0.5 rounded-full border border-indigo-500/20 uppercase tracking-wider">Show</span>
+                    <span class="text-zinc-400 text-xs">Original Local Title:</span>
+                    <span class="text-sm font-semibold text-zinc-200">{s.show_title}</span>
+                  </div>
+                  <div class="mt-1 flex items-center gap-1.5 text-xs text-zinc-400 flex-wrap">
+                    <span>Mapped to:</span>
+                    {targetHref ? (
+                      <a href={targetHref} class="text-indigo-400 hover:underline font-medium">{displayTitle}</a>
+                    ) : (
+                      <span class="font-medium text-zinc-300">{displayTitle}</span>
+                    )}
+                    {s.tvdb_id && <span class="text-zinc-600 font-mono">(TVDB ID: {s.tvdb_id})</span>}
+                    {s.show_id && <span class="text-zinc-600 font-mono">(TMDB ID: {s.show_id})</span>}
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  <button 
+                    type="button" 
+                    class="edit-unmatched-show-btn text-xs px-3 py-1.5 rounded-xl border border-green-700/50 text-green-400 hover:bg-green-900/20 cursor-pointer transition-colors"
+                    data-show-title={s.show_title}
+                  >
+                    Edit
+                  </button>
+                  <button 
+                    type="button" 
+                    class="unmatch-show-btn text-xs px-3 py-1.5 rounded-xl border border-rose-950/30 text-rose-400 hover:bg-rose-950/20 border-rose-900/35 hover:border-rose-900/60 cursor-pointer transition-colors"
+                    data-show-title={s.show_title}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Unmatched Movies */}
+          {matchedMovies.map((m: any) => {
+            const displayTitle = m.movie_title_matched || m.movie_title;
+            const targetHref = m.tmdb_id ? `/movie/${m.tmdb_id}` : '';
+            return (
+              <div class="unmatched-map-row flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-zinc-900/20 border border-zinc-800 hover:border-zinc-750/80 rounded-2xl transition-all backdrop-blur-md" data-title={m.movie_title} data-matched-title={displayTitle} data-type="movie">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-[10px] bg-amber-500/10 text-amber-400 font-bold px-2 py-0.5 rounded-full border border-amber-500/20 uppercase tracking-wider">Movie</span>
+                    <span class="text-zinc-400 text-xs">Original Local Title:</span>
+                    <span class="text-sm font-semibold text-zinc-200">{m.movie_title}</span>
+                  </div>
+                  <div class="mt-1 flex items-center gap-1.5 text-xs text-zinc-400 flex-wrap">
+                    <span>Mapped to:</span>
+                    {targetHref ? (
+                      <a href={targetHref} class="text-indigo-400 hover:underline font-medium">{displayTitle}</a>
+                    ) : (
+                      <span class="font-medium text-zinc-300">{displayTitle}</span>
+                    )}
+                    {m.tmdb_id && <span class="text-zinc-600 font-mono">(TMDB ID: {m.tmdb_id})</span>}
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  <button 
+                    type="button" 
+                    class="edit-unmatched-movie-btn text-xs px-3 py-1.5 rounded-xl border border-green-700/50 text-green-400 hover:bg-green-900/20 cursor-pointer transition-colors"
+                    data-movie-title={m.movie_title}
+                  >
+                    Edit
+                  </button>
+                  <button 
+                    type="button" 
+                    class="unmatch-movie-btn text-xs px-3 py-1.5 rounded-xl border border-rose-950/30 text-rose-400 hover:bg-rose-950/20 border-rose-900/35 hover:border-rose-900/60 cursor-pointer transition-colors"
+                    data-movie-title={m.movie_title}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          
+          <!-- Unmatched search empty state -->
+          <div id="no-unmatched-results" class="hidden flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
+            <div class="w-12 h-12 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-3 shadow-inner">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            </div>
+            <h3 class="text-zinc-300 font-semibold mb-1 text-sm">No Matching Mappings</h3>
+            <p class="text-zinc-500 text-xs text-center">Try adjusting your search query.</p>
+          </div>
+        </div>
+      )}
     </div>
 
     <!-- Custom Renames Section -->
@@ -2133,6 +2266,101 @@ try {
       });
     });
 
+    // Unmatched Media Mappings actions
+    document.querySelectorAll(".unmatch-show-btn").forEach(button => {
+      button.addEventListener("click", async () => {
+        const title = button.getAttribute("data-show-title");
+        if (!title) return;
+
+        if (!confirm(`Are you sure you want to remove the mapping for show "${title}"?`)) {
+          return;
+        }
+
+        const btn = button as HTMLButtonElement;
+        btn.disabled = true;
+        btn.textContent = "Removing…";
+
+        try {
+          const res = await fetch("/api/proxy/sync/unmatch-show", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ show_title: title })
+          });
+          if (res.ok) {
+            window.showToast?.("Mapping removed successfully", "success");
+            setTimeout(() => window.location.reload(), 600);
+          } else {
+            window.showToast?.("Failed to remove mapping", "error");
+            btn.disabled = false;
+            btn.textContent = "Remove";
+          }
+        } catch (err) {
+          window.showToast?.("Error removing mapping", "error");
+          btn.disabled = false;
+          btn.textContent = "Remove";
+        }
+      });
+    });
+
+    document.querySelectorAll(".unmatch-movie-btn").forEach(button => {
+      button.addEventListener("click", async () => {
+        const title = button.getAttribute("data-movie-title");
+        if (!title) return;
+
+        if (!confirm(`Are you sure you want to remove the mapping for movie "${title}"?`)) {
+          return;
+        }
+
+        const btn = button as HTMLButtonElement;
+        btn.disabled = true;
+        btn.textContent = "Removing…";
+
+        try {
+          const res = await fetch("/api/proxy/sync/unmatch-movie", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ movie_title: title })
+          });
+          if (res.ok) {
+            window.showToast?.("Mapping removed successfully", "success");
+            setTimeout(() => window.location.reload(), 600);
+          } else {
+            window.showToast?.("Failed to remove mapping", "error");
+            btn.disabled = false;
+            btn.textContent = "Remove";
+          }
+        } catch (err) {
+          window.showToast?.("Error removing mapping", "error");
+          btn.disabled = false;
+          btn.textContent = "Remove";
+        }
+      });
+    });
+
+    document.querySelectorAll(".edit-unmatched-show-btn").forEach(button => {
+      button.addEventListener("click", () => {
+        const title = button.getAttribute("data-show-title");
+        if (title) {
+          window.location.href = `/settings?match_show=${encodeURIComponent(title)}#tab-media-servers`;
+        }
+      });
+    });
+
+    document.querySelectorAll(".edit-unmatched-movie-btn").forEach(button => {
+      button.addEventListener("click", () => {
+        const title = button.getAttribute("data-movie-title");
+        if (title) {
+          window.location.href = `/settings?match_movie=${encodeURIComponent(title)}#tab-media-servers`;
+        }
+      });
+    });
+
     // Show/Hide Collapsible Panels for Grouped Episode Overrides
     document.querySelectorAll("[data-show-toggle]").forEach(header => {
       header.addEventListener("click", () => {
@@ -2457,6 +2685,39 @@ try {
         const noResults = document.getElementById("no-rename-results");
         if (noResults) {
           if (totalVisibleRenames === 0) {
+            noResults.classList.remove("hidden");
+          } else {
+            noResults.classList.add("hidden");
+          }
+        }
+      });
+    }
+
+    // 4. Unmatched Media Mappings Search
+    const unmatchedSearchInput = document.getElementById("unmatched-search");
+    if (unmatchedSearchInput) {
+      unmatchedSearchInput.addEventListener("input", (e) => {
+        const query = (e.target as HTMLInputElement).value.toLowerCase().trim();
+        const rows = document.querySelectorAll(".unmatched-map-row");
+        let totalVisible = 0;
+
+        rows.forEach(row => {
+          const el = row as HTMLElement;
+          const title = (el.dataset.title ?? "").toLowerCase();
+          const matchedTitle = (el.dataset.matchedTitle ?? "").toLowerCase();
+          const matches = title.includes(query) || matchedTitle.includes(query);
+
+          if (matches) {
+            el.classList.remove("hidden");
+            totalVisible++;
+          } else {
+            el.classList.add("hidden");
+          }
+        });
+
+        const noResults = document.getElementById("no-unmatched-results");
+        if (noResults) {
+          if (totalVisible === 0 && (rows.length > 0)) {
             noResults.classList.remove("hidden");
           } else {
             noResults.classList.add("hidden");

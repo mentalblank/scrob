@@ -1241,6 +1241,15 @@ export const api = {
     deleteCustomTitle: (showUriId: string, token: string) =>
       del<{ status: string }>("/sync/custom-title", { show_uri_id: showUriId }, token),
 
+    getMatchedShows: (token: string) =>
+      get<any[]>("/sync/matched-shows", undefined, token),
+    getMatchedMovies: (token: string) =>
+      get<any[]>("/sync/matched-movies", undefined, token),
+    unmatchShow: (body: { show_title: string }, token: string) =>
+      post<{ status: string; unmatched: number }>("/sync/unmatch-show", body, token),
+    unmatchMovie: (body: { movie_title: string }, token: string) =>
+      post<{ status: string; unmatched: number }>("/sync/unmatch-movie", body, token),
+
     // Source show/movie lookups for remaps
     getSourceShows: (token: string) =>
       get<any[]>("/sync/source-shows", undefined, token),

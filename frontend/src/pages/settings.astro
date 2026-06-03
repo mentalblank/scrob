@@ -5463,6 +5463,20 @@ const COUNTRIES = (countriesRes || [])
       // Auto-search immediately so results appear right away
       doSearch();
     };
+
+    // Auto-open match modal from URL parameters if requested
+    const urlParams = new URLSearchParams(window.location.search);
+    const matchShow = urlParams.get('match_show');
+    const matchMovie = urlParams.get('match_movie');
+    if (matchShow) {
+      setTimeout(() => {
+        window["openMatchModal"](matchShow);
+      }, 300);
+    } else if (matchMovie) {
+      setTimeout(() => {
+        window["openMatchMovieModal"](matchMovie);
+      }, 300);
+    }
   }
 </script>
 

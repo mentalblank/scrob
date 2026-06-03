@@ -5064,3 +5064,43 @@ async def list_matched_shows(
                 }
 
     return list(seen.values())
+
+
+@router.get("/matched-movies")
+async def list_matched_movies(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all matched movies (TMDB) for the current user.
+
+    Used by the overrides/remaps page to list matched unmatched movies.
+    """
+    jobs_res = await db.execute(
+        select(SyncJob.warnings).where(
+            SyncJob.user_id == current_user.id,
+            SyncJob.status == SyncStatus.completed,
+            SyncJob.warnings.isnot(None),
+        ).order_by(SyncJob.created_at.desc()).limit(10)
+    )
+    seen: dict[str, dict] = {}
+    for (warnings,) in jobs_res.all():
+        if not warnings:
+            continue
+        for w in warnings:
+            if not w.get("matched"):
+                continue
+            if w.get("media_type") != "movie":
+                continue
+            title = w.get("title")
+            if not title:
+                continue
+            key = title.lower()
+            if key not in seen:
+                seen[key] = {
+                    "movie_title": title,
+                    "tmdb_id": w.get("matched_tmdb_id"),
+                    "movie_title_matched": w.get("matched_movie_title"),
+                }
+
+    return list(seen.values())
+
