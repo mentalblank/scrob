@@ -54,13 +54,6 @@ const remainingDuration = visibleEpisodes
 const progressPct = totalEpisodesCount > 0 ? (watchedEpisodesCount / totalEpisodesCount) * 100 : 0;
 const showProgress = progressPct > 0;
 
-let hasExternalPlayback = false;
-try {
-  if (token) {
-    const conns = await api.auth.getConnections(token);
-    hasExternalPlayback = conns.some(c => c.external_server_url);
-  }
-} catch {}
 ---
 
 <Base title={season ? `${show?.title} — ${season.name}` : "Season Details"}>
@@ -201,18 +194,16 @@ try {
             <!-- Refresh Metadata Button -->
             {season.show_in_library && (
               <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
-                {hasExternalPlayback && (
-                  <VideoPlayer
-                    uriId={(show as any)?.uri_id ?? fetchKey}
-                    tmdbId={resolvedShowId}
-                    mediaType="season"
-                    seasonNumber={Number(season_number)}
-                    inLibrary={season.show_in_library}
-                    title={`${show?.title || "Unknown Show"} - Season ${season_number}`}
-                    token={token || ""}
-                    secondary={false}
-                  />
-                )}
+                <VideoPlayer
+                  uriId={(show as any)?.uri_id ?? fetchKey}
+                  tmdbId={resolvedShowId}
+                  mediaType="season"
+                  seasonNumber={Number(season_number)}
+                  inLibrary={season.show_in_library}
+                  title={`${show?.title || "Unknown Show"} - Season ${season_number}`}
+                  token={token || ""}
+                  secondary={false}
+                />
                 <RefreshMetadataButton refreshUrl={`/api/proxy/shows/${id}/refresh`} showRefreshBtn={season.show_in_library} />
               </div>
             )}

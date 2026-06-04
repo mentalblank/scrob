@@ -119,6 +119,8 @@ class UserSettings(Base):
     show_user_ratings : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     time_format_24h : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     use_hls_player  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # How "Play" behaves: "web" (open server web page) or "internal" (built-in player)
+    playback_target : Mapped[str]  = mapped_column(String(20), nullable=False, default="web", server_default="web")
     
     # Sync scheduling
     trakt_full_sync_interval    : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

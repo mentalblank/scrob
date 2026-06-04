@@ -129,6 +129,7 @@ class UserSettings(BaseModel):
     show_user_ratings: Optional[bool] = None
     time_format_24h: Optional[bool] = None
     use_hls_player: Optional[bool] = None
+    playback_target: Optional[str] = None  # "web" | "internal"
 
     class Config:
         from_attributes = True

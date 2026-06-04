@@ -482,6 +482,7 @@ export interface UserSettings {
   show_user_ratings: boolean;
   time_format_24h: boolean;
   use_hls_player: boolean;
+  playback_target: "web" | "internal";
 }
 
 export interface MediaServerConnection {

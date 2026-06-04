@@ -14,6 +14,7 @@ interface Props {
 const { uriId, tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = false, mediaId } = Astro.props;
 const mediaRef = uriId ?? (tmdbId != null ? String(tmdbId) : "0");
 const useHls = Astro.cookies.get("use_hls_player")?.value === "true";
+const playbackTarget = Astro.cookies.get("playback_target")?.value || "web";
 ---
 
 {inLibrary && (
@@ -39,6 +40,7 @@ const useHls = Astro.cookies.get("use_hls_player")?.value === "true";
       data-title={title}
       data-token={token}
       data-use-hls={useHls ? "true" : "false"}
+      data-playback-target={playbackTarget}
       class="fixed inset-0 z-50 w-full max-w-5xl mx-auto my-auto bg-zinc-950/90 border border-zinc-800/80 rounded-2xl shadow-2xl p-0 backdrop:bg-zinc-950/85 backdrop:backdrop-blur-md"
     >
       <div class="flex items-center justify-between px-5 py-3 border-b border-zinc-800/60">
@@ -120,6 +122,7 @@ const useHls = Astro.cookies.get("use_hls_player")?.value === "true";
     const title     = dialog.dataset.title!;
     const token     = dialog.dataset.token!;
     const useHls    = dialog.dataset.useHls === "true";
+    const playbackTarget = dialog.dataset.playbackTarget || 'web';
     const mediaIdParam = mediaId ? `&media_id=${mediaId}` : '';
 
     const playBtn   = document.getElementById('play-btn') as HTMLButtonElement | null;
@@ -435,14 +438,16 @@ const useHls = Astro.cookies.get("use_hls_player")?.value === "true";
           playBtn.classList.remove('opacity-80', 'cursor-not-allowed');
         }
 
-        // Try to find the preferred source if provided, otherwise the first external one
-        const targetSource = preferredConnectionId 
-          ? sources.find((s: any) => s.connection_id == preferredConnectionId) 
-          : sources.find((s: any) => s.external_url);
+        // "internal" — always use the built-in player. "web" — open the server web page.
+        if (playbackTarget !== 'internal') {
+          const targetSource = preferredConnectionId
+            ? sources.find((s: any) => s.connection_id == preferredConnectionId)
+            : sources.find((s: any) => s.external_url);
 
-        if (targetSource && targetSource.external_url) {
-          window.open(targetSource.external_url, '_blank', 'noopener,noreferrer');
-          return;
+          if (targetSource && targetSource.external_url) {
+            window.open(targetSource.external_url, '_blank', 'noopener,noreferrer');
+            return;
+          }
         }
 
         // Otherwise open the internal player modal
@@ -451,7 +456,10 @@ const useHls = Astro.cookies.get("use_hls_player")?.value === "true";
         renderSources(sources);
         if (sources.length > 0) {
           // If preferred connection exists, select it, otherwise first
-          const sourceToLoad = targetSource || sources[0];
+          const preferred = preferredConnectionId
+            ? sources.find((s: any) => s.connection_id == preferredConnectionId)
+            : null;
+          const sourceToLoad = preferred || sources[0];
           const btn = sourcesEl.querySelector(`[data-connection-id="${sourceToLoad.connection_id}"]`) as HTMLButtonElement | null;
           if (btn) btn.click();
         } else {

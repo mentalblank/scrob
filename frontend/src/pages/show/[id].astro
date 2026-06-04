@@ -101,16 +101,8 @@ const trailerYoutubeId = show?.trailer_youtube_id ?? null;
 const tmdbShowUrl = (show?.tmdb_id || (show as any)?.tmdb_id_cross) ? `https://www.themoviedb.org/tv/${show?.tmdb_id || (show as any)?.tmdb_id_cross}` : null;
 const logoPath = show?.logo_path ?? null;
 
-let hasExternalPlayback = false;
-try {
-  if (token) {
-    const conns = await api.auth.getConnections(token);
-    hasExternalPlayback = conns.some(c => c.external_server_url);
-  }
-} catch {}
-
 const activeButtonsCount = [
-  show && show.in_library && hasExternalPlayback,
+  show && show.in_library,
   show && show.in_library,
   !!trailerYoutubeId
 ].filter(Boolean).length;
@@ -247,7 +239,7 @@ const activeButtonsCount = [
             <!-- Header Buttons (Trailer, Refresh) -->
             {activeButtonsCount > 0 && (
               <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
-                {show.in_library && hasExternalPlayback && (
+                {show.in_library && (
                   <VideoPlayer
                     uriId={show.uri_id ?? (show.tmdb_id ? `tmdb:s:${show.tmdb_id}` : undefined)}
                     tmdbId={show.tmdb_id}

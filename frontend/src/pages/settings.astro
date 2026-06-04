@@ -58,6 +58,12 @@ const prefs: UserPreferences = {
   unified_filters: settings.preferences?.unified_filters !== false,
 };
 
+const playbackTarget = settings.playback_target ?? "web";
+const PLAYBACK_TARGETS: [string, string, string][] = [
+  ["internal", "Built-in Player", "Stream inside Scrob using the built-in player."],
+  ["web", "Server Web Page", "Open the media server's web player in a new tab."],
+];
+
 const PRIVACY_LEVELS: [PrivacyLevel, string, string][] = [
   ["private", "Private", "Only you can see your profile and activity."],
   ["friends_only", "Friends Only", "Only people you follow (and who follow you back) can see your activity."],
@@ -475,6 +481,29 @@ const COUNTRIES = (countriesRes || [])
                   </div>
                   <span class="text-xs text-zinc-500 leading-relaxed">Each page (Explore, Trending, Lists, etc.) remembers its own filters.</span>
                 </label>
+              </div>
+            </div>
+
+            <!-- Playback Behavior -->
+            <div class="space-y-4 pt-2">
+              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Playback</label>
+              <p class="text-xs text-zinc-500 -mt-2">What happens when you press Play on an item. Applies to all media server connections.</p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {PLAYBACK_TARGETS.map(([value, label, desc]) => (
+                  <label class={`relative flex flex-col p-4 rounded-xl border cursor-pointer transition-all hover:bg-zinc-900/50 group ${playbackTarget === value ? 'bg-blue-500/5 border-blue-500/50' : 'bg-zinc-950/40 border-zinc-800'}`}>
+                    <div class="flex items-center justify-between mb-1">
+                      <span class={`font-semibold ${playbackTarget === value ? 'text-blue-400' : 'text-zinc-100 group-hover:text-zinc-200'}`}>{label}</span>
+                      <input
+                        type="radio"
+                        name="playback_target"
+                        value={value}
+                        checked={playbackTarget === value}
+                        class="w-4 h-4 text-blue-500 bg-zinc-800 border-zinc-700 focus:ring-blue-500 focus:ring-offset-zinc-900"
+                      />
+                    </div>
+                    <span class="text-xs text-zinc-500 leading-relaxed">{desc}</span>
+                  </label>
+                ))}
               </div>
             </div>
 
@@ -4286,6 +4315,34 @@ const COUNTRIES = (countriesRes || [])
         });
       });
     });
+
+    document.querySelectorAll<HTMLInputElement>('input[name="playback_target"]').forEach(radio => {
+      radio.addEventListener('change', async () => {
+        document.querySelectorAll<HTMLInputElement>('input[name="playback_target"]').forEach(r => {
+          const label = r.closest('label');
+          const span = label?.querySelector('.font-semibold');
+          if (r.checked) {
+            label?.classList.add('bg-blue-500/5', 'border-blue-500/50');
+            label?.classList.remove('bg-zinc-950/40', 'border-zinc-800');
+            span?.classList.add('text-blue-400');
+            span?.classList.remove('text-zinc-100');
+          } else {
+            label?.classList.remove('bg-blue-500/5', 'border-blue-500/50');
+            label?.classList.add('bg-zinc-950/40', 'border-zinc-800');
+            span?.classList.remove('text-blue-400');
+            span?.classList.add('text-zinc-100');
+          }
+        });
+        if (!radio.checked) return;
+        document.cookie = `playback_target=${radio.value}; path=/; SameSite=Lax; Max-Age=31536000`;
+        const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+        await fetch('/api/proxy/auth/settings', {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playback_target: radio.value }),
+        });
+      });
+    });
   }
 
   const COPY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>`;
@@ -4550,6 +4607,12 @@ const COUNTRIES = (countriesRes || [])
         body: JSON.stringify({ use_hls_player: hlsPlayerToggle.checked }),
       });
     });
+  }
+
+  // Sync playback_target cookie from the server-rendered selection on page load.
+  const playbackRadio = document.querySelector('input[name="playback_target"]:checked') as HTMLInputElement | null;
+  if (playbackRadio) {
+    document.cookie = `playback_target=${playbackRadio.value}; path=/; SameSite=Lax; Max-Age=31536000`;
   }
 
   const ratingsToggle = document.getElementById('show-user-ratings-toggle') as HTMLInputElement | null;
