@@ -24,6 +24,7 @@ interface Props {
   listOnly?: boolean;
   hideBlock?: boolean;
   hideRate?: boolean;
+  centered?: boolean;
 }
 
 const {
@@ -51,6 +52,7 @@ const {
   listOnly = false,
   hideBlock = false,
   hideRate = false,
+  centered = false,
 } = Astro.props;
 
 const showUserRatings = Astro.cookies.get("show_user_ratings")?.value !== "false";
@@ -132,7 +134,7 @@ if (!effectiveUriId && tmdbId) {
   data-season={seasonNumber != null ? String(seasonNumber) : ""}
   data-episode-number={episodeNumber != null ? String(episodeNumber) : ""}
   data-media-id={mediaId != null ? String(mediaId) : ""}
-  class="flex w-full max-w-full overflow-hidden"
+  class={`flex w-full max-w-full overflow-hidden ${centered ? 'justify-center' : ''}`}
 >
   <div class="flex flex-row rounded-2xl bg-zinc-950/20 border border-zinc-800/80 shadow-lg backdrop-blur-md h-10 w-fit max-w-full overflow-hidden">
 

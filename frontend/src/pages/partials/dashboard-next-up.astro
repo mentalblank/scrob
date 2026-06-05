@@ -24,7 +24,7 @@ const hero = nextUp[0];
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
 const heroHref = mediaUrl(hero, primaryMetadataSource === "tvdb");
 const episodeLabel = hero.season_number != null && hero.episode_number != null
-  ? `S${hero.season_number} E${hero.episode_number}`
+  ? `S${String(hero.season_number).padStart(2, '0')}E${String(hero.episode_number).padStart(2, '0')}`
   : null;
 const rawBackdrop = hero.backdrop_path || hero.show_backdrop_path;
 const heroBackdrop = rawBackdrop
@@ -64,7 +64,7 @@ const heroBackdrop = rawBackdrop
       <div class="flex flex-col items-start gap-4 w-full">
         <a href={heroHref} class="block w-full min-w-0 group">
           {episodeLabel && (
-            <span class="inline-block text-xs font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full mb-3">
+            <span class="season-pill px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest mb-3">
               {episodeLabel}
             </span>
           )}
