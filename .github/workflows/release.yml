@@ -2,9 +2,6 @@ name: Release
 
 on:
   push:
-    branches-ignore:
-      - 'dev'
-      - 'uri'
     tags:
       - 'v*'
   workflow_dispatch:
@@ -12,7 +9,6 @@ on:
 jobs:
   release:
     name: Create GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -162,13 +158,29 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            APP_VERSION=${{ needs.release.outputs.new_release_version }}
+            APP_VERSION=${{ github.ref_name }}
+            APP_BRANCH=main
           tags: |
-            bellamy/scrob:latest-omnibus
-            bellamy/scrob:main-omnibus
-            bellamy/scrob:${{ needs.release.outputs.new_release_version }}-omnibus
-            ghcr.io/ellite/scrob:latest-omnibus
-            ghcr.io/ellite/scrob:main-omnibus
-            ghcr.io/ellite/scrob:${{ needs.release.outputs.new_release_version }}-omnibus
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:latest-omnibus
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ github.ref_name }}-omnibus
+            ghcr.io/${{ github.repository_owner }}/scrob:latest-omnibus
+            ghcr.io/${{ github.repository_owner }}/scrob:${{ github.ref_name }}-omnibus
           cache-from: type=gha,scope=scrob-omnibus-release
           cache-to: type=gha,mode=max,scope=scrob-omnibus-release
+
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    if: always()
+    permissions:
+      actions: write
+    steps:
+      - name: Delete old/failed runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for status in failure cancelled; do
+            gh run list --status "$status" --limit 100 --json databaseId -q '.[].databaseId' | xargs -I{} gh run delete {} || true
+          done
+          gh run list --created "<$(date -d '7 days ago' +%Y-%m-%d)" --limit 100 --json databaseId -q '.[].databaseId' | xargs -I{} gh run delete {} || true

@@ -1,6 +1,15 @@
+# ── Global Args ──────────────────────────────────────────────────────────────
+ARG APP_VERSION=dev
+ARG APP_BRANCH=unknown
+
 # ── Stage 1: Build frontend ───────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
+
+ARG APP_VERSION
+ARG APP_BRANCH
+ENV APP_VERSION=${APP_VERSION}
+ENV APP_BRANCH=${APP_BRANCH}
 
 COPY frontend/package*.json ./
 RUN npm ci
@@ -11,8 +20,8 @@ RUN npm run build
 # ── Stage 2: Runtime (Python + Node + supervisord) ────────────────────────────
 FROM python:3.12-slim
 
-ARG APP_VERSION=dev
-ARG APP_BRANCH=unknown
+ARG APP_VERSION
+ARG APP_BRANCH
 ENV APP_VERSION=${APP_VERSION}
 ENV APP_BRANCH=${APP_BRANCH}
 ENV TZ=UTC
