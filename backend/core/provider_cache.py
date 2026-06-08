@@ -18,6 +18,10 @@ TTL_MOVIE = 24 * 3600
 TTL_IMAGES = 24 * 3600
 TTL_SKYHOOK = 12 * 3600
 TTL_IDS = 7 * 24 * 3600
+TTL_TRENDING = 30 * 60
+TTL_LIST = 6 * 3600       # popular/top-rated/now-playing/upcoming/on-air/recommendations/discover
+TTL_SEARCH = 6 * 3600     # search results
+TTL_CONFIG = 7 * 24 * 3600  # genres, languages, countries, provider list — rarely change
 
 
 def _key(provider: str, endpoint: str, params: dict) -> str:
