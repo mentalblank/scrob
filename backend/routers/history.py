@@ -411,6 +411,7 @@ async def get_continue_watching(
         .limit(page_size)
     )
     rows = result.all()
+    await _apply_preferred_provider(db, current_user.id, [m for _, m in rows])
     items = [format_event(e, m) for e, m in rows]
     if items:
         await enrich_with_state(db, current_user.id, [i["media"] for i in items], False)
