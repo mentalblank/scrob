@@ -1,0 +1,38 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+
+// Plex forwards here post-auth; exchange the cookie's pin for a JWT.
+
+let error = "";
+
+const pinId = Astro.cookies.get("plex_pin")?.value ?? "";
+if (!pinId) {
+  error = "Your Plex sign-in session expired. Please try again.";
+} else {
+  Astro.cookies.delete("plex_pin", { path: "/" });
+  try {
+    const { access_token } = await api.auth.plexExchange(pinId);
+    Astro.cookies.set("token", access_token, {
+      path: "/",
+      httpOnly: true,
+      secure: import.meta.env.PROD,
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 7,
+    });
+    return Astro.redirect("/");
+  } catch (e: unknown) {
+    error = e instanceof Error ? e.message : "Plex sign-in failed";
+  }
+}
+---
+
+<Base title="Login" hideNav>
+  <div class="max-w-md mx-auto mt-20 p-8 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl">
+    <h1 class="text-3xl font-bold mb-6 text-zinc-100">Login</h1>
+    <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg mb-6">
+      {error}
+    </div>
+    <a href="/login" class="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Back to login</a>
+  </div>
+</Base>

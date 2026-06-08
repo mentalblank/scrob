@@ -1586,6 +1586,57 @@ const COUNTRIES = (countriesRes || [])
           </div>
         </section>
 
+        <!-- Plex Account -->
+        <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-zinc-800 pb-2">
+            <h2 class="section-headline">Plex Account</h2>
+          </div>
+          <div class="flex items-center justify-between gap-4 flex-wrap">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-[#e5a00d]/15 flex items-center justify-center shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e5a00d" class="w-5 h-5">
+                  <path d="M12 0L4 6v12l8 6 8-6V6l-8-6zm0 4.3l4.8 3.6v8.2L12 19.7l-4.8-3.6V7.9L12 4.3z" />
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-semibold text-zinc-100">{me.plex_linked ? "Plex connected" : "Connect your Plex account"}</h3>
+                <p class="text-sm text-zinc-400">
+                  {me.plex_linked
+                    ? <>Signed-in via Plex {me.plex_username ? <span class="text-zinc-300">as {me.plex_username}</span> : null}. Use “Find servers” to import your Plex servers.</>
+                    : "Link Plex to sign in with one click and import your servers."}
+                </p>
+              </div>
+            </div>
+            {me.plex_linked ? (
+              <div class="flex items-center gap-2">
+                <a
+                  href="/plex-link-start"
+                  class="bg-[#e5a00d] hover:bg-[#cc8f0b] text-zinc-950 font-bold px-5 py-2 rounded-xl transition-colors cursor-pointer"
+                >
+                  Find servers
+                </a>
+                <button
+                  id="plex-unlink-btn"
+                  type="button"
+                  class="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold px-6 py-2 rounded-xl transition-colors cursor-pointer border border-zinc-700 disabled:opacity-50"
+                >
+                  Unlink
+                </button>
+              </div>
+            ) : (
+              <a
+                href="/plex-link-start"
+                class="bg-[#e5a00d] hover:bg-[#cc8f0b] text-zinc-950 font-bold px-6 py-2 rounded-xl transition-colors cursor-pointer"
+              >
+                Connect Plex
+              </a>
+            )}
+          </div>
+          {me.plex_linked && !me.has_password && (
+            <p class="text-xs text-amber-400/80">Set a password above before unlinking, or you'll be locked out of this account.</p>
+          )}
+        </section>
+
         <!-- Two-Factor Authentication -->
         <section id="2fa-section" class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
           <div class="mb-4 border-b border-zinc-800 pb-2">
@@ -2205,6 +2256,45 @@ const COUNTRIES = (countriesRes || [])
   }
 
   setupTabs();
+
+  // ── Plex account link ─────────────────────────────────────────────────────
+  (function setupPlexAccount() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('plex_linked') === 'true') {
+      window.showToast?.('Plex account linked', 'success');
+    }
+    const plexErr = params.get('plex_error');
+    if (plexErr) {
+      window.showToast?.(plexErr, 'error');
+    }
+    if (params.has('plex_linked') || params.has('plex_error')) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('plex_linked');
+      url.searchParams.delete('plex_error');
+      history.replaceState(null, '', url.pathname + url.search + window.location.hash);
+    }
+
+    const unlinkBtn = document.getElementById('plex-unlink-btn') as HTMLButtonElement | null;
+    unlinkBtn?.addEventListener('click', async () => {
+      unlinkBtn.disabled = true;
+      const tok = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
+      try {
+        const res = await fetch('/api/proxy/auth/plex/unlink', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${tok}` },
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Failed to unlink Plex');
+        }
+        window.showToast?.('Plex account unlinked', 'success');
+        setTimeout(() => window.location.reload(), 600);
+      } catch (err: unknown) {
+        window.showToast?.(err instanceof Error ? err.message : 'Failed to unlink Plex', 'error');
+        unlinkBtn.disabled = false;
+      }
+    });
+  })();
 
   const esc = (window as any).esc || function(str: any) {
     if (str == null) return '';

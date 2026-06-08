@@ -1,0 +1,119 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+import type { PlexServerOption } from "../lib/api";
+
+// Link the account, then let the user pick which Plex servers to add.
+
+const token = Astro.cookies.get("token")?.value;
+if (!token) {
+  return Astro.redirect("/login");
+}
+
+const pinId = Astro.cookies.get("plex_pin")?.value ?? "";
+Astro.cookies.delete("plex_pin", { path: "/" });
+
+if (!pinId) {
+  return Astro.redirect("/settings?plex_error=" + encodeURIComponent("Plex session expired. Try again.") + "#tab-security");
+}
+
+let servers: PlexServerOption[] = [];
+try {
+  const res = await api.auth.plexLink(pinId, token);
+  servers = res.servers ?? [];
+} catch (e: unknown) {
+  const msg = e instanceof Error ? e.message : "Plex linking failed";
+  return Astro.redirect("/settings?plex_error=" + encodeURIComponent(msg) + "#tab-security");
+}
+
+// Nothing to choose — finish.
+const selectable = servers.filter((s) => !s.already_added);
+if (selectable.length === 0) {
+  return Astro.redirect("/settings?plex_linked=true#tab-security");
+}
+---
+
+<Base title="Add Plex Servers">
+  <div id="plex-link-data" data-token={token} data-pin={pinId} class="hidden"></div>
+  <div class="max-w-lg mx-auto mt-16 p-8 bg-zinc-900/85 border border-zinc-800/85 rounded-3xl shadow-2xl backdrop-blur-xl">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-xl bg-[#e5a00d]/15 flex items-center justify-center shrink-0">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e5a00d" class="w-5 h-5">
+          <path d="M12 0L4 6v12l8 6 8-6V6l-8-6zm0 4.3l4.8 3.6v8.2L12 19.7l-4.8-3.6V7.9L12 4.3z" />
+        </svg>
+      </div>
+      <h1 class="text-2xl font-bold text-zinc-100">Plex connected</h1>
+    </div>
+    <p class="text-sm text-zinc-400 mb-6">Choose which of your Plex servers to add as media-server connections. You can change these any time in settings.</p>
+
+    <div id="plex-server-list" class="space-y-2 mb-6">
+      {servers.map((s) => (
+        <label class={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${s.already_added ? "border-zinc-800 bg-zinc-950/40 opacity-60" : "border-zinc-800 bg-zinc-950/40 hover:border-zinc-700 cursor-pointer"}`}>
+          <input
+            type="checkbox"
+            class="plex-server-cb w-4 h-4 accent-[#e5a00d]"
+            value={s.client_identifier}
+            checked={!s.already_added}
+            disabled={s.already_added}
+          />
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="font-semibold text-zinc-100 truncate">{s.name}</span>
+              {s.owned ? null : <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">Shared</span>}
+              {s.already_added && <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">Added</span>}
+            </div>
+            <p class="text-xs text-zinc-500 truncate">{s.url}</p>
+          </div>
+        </label>
+      ))}
+    </div>
+
+    <div class="flex gap-3">
+      <a href="/settings?plex_linked=true#tab-security" class="flex-1 text-center px-4 py-2.5 bg-zinc-800/60 hover:bg-zinc-800 text-zinc-300 font-bold rounded-xl transition-colors border border-zinc-700/40">Skip</a>
+      <button id="plex-add-servers-btn" type="button" class="flex-1 px-4 py-2.5 bg-[#e5a00d] hover:bg-[#cc8f0b] text-zinc-950 font-bold rounded-xl transition-colors cursor-pointer disabled:opacity-50">Add selected</button>
+    </div>
+    <p id="plex-add-error" class="hidden mt-3 text-sm text-red-400"></p>
+  </div>
+</Base>
+
+<script>
+  const data = document.getElementById("plex-link-data") as HTMLElement | null;
+  const token = data?.dataset.token ?? "";
+  const pinId = data?.dataset.pin ?? "";
+  const btn = document.getElementById("plex-add-servers-btn") as HTMLButtonElement | null;
+  const errEl = document.getElementById("plex-add-error");
+
+  btn?.addEventListener("click", async () => {
+    const ids = Array.from(document.querySelectorAll<HTMLInputElement>(".plex-server-cb"))
+      .filter((cb) => cb.checked && !cb.disabled)
+      .map((cb) => cb.value);
+
+    if (ids.length === 0) {
+      window.location.href = "/settings?plex_linked=true#tab-security";
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Adding…";
+    errEl?.classList.add("hidden");
+    try {
+      const res = await fetch("/api/proxy/auth/plex/connections", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ pin_id: pinId, client_identifiers: ids }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || "Failed to add servers");
+      }
+      window.location.href = "/settings?plex_linked=true#tab-security";
+    } catch (e: unknown) {
+      if (errEl) {
+        errEl.textContent = e instanceof Error ? e.message : "Failed to add servers";
+        errEl.classList.remove("hidden");
+      }
+      btn.disabled = false;
+      btn.textContent = "Add selected";
+    }
+  });
+</script>

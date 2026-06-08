@@ -323,6 +323,9 @@ export interface UserProfile {
   avatar_url: string | null;
   api_key: string;
   totp_enabled: boolean;
+  has_password?: boolean;
+  plex_linked?: boolean;
+  plex_username?: string | null;
   created_at: string;
 }
 
@@ -403,6 +406,29 @@ export interface OidcAuthorizeResponse {
 
 export interface OidcExchangeResponse {
   access_token: string;
+}
+
+export interface PlexAuthorizeResponse {
+  auth_url: string;
+  pin_id: string;
+}
+
+export interface PlexExchangeResponse {
+  access_token: string;
+}
+
+export interface PlexServerOption {
+  name: string;
+  client_identifier: string;
+  url: string;
+  owned: boolean;
+  already_added: boolean;
+}
+
+export interface PlexLinkResponse {
+  status: string;
+  plex_username: string;
+  servers: PlexServerOption[];
 }
 
 export type PrivacyLevel = "public" | "friends_only" | "private";
@@ -971,6 +997,18 @@ export const api = {
       get<OidcAuthorizeResponse>("/auth/oidc/authorize"),
     oidcExchange: (code: string) =>
       post<OidcExchangeResponse>("/auth/oidc/exchange", { code }),
+    plexAuthorize: (link = false, redirectUri?: string) =>
+      get<PlexAuthorizeResponse>(
+        `/auth/plex/authorize?link=${link}${redirectUri ? `&redirect_uri=${encodeURIComponent(redirectUri)}` : ""}`,
+      ),
+    plexExchange: (pin_id: string) =>
+      post<PlexExchangeResponse>("/auth/plex/exchange", { pin_id }),
+    plexLink: (pin_id: string, token: string) =>
+      post<PlexLinkResponse>("/auth/plex/link", { pin_id }, token),
+    plexCreateConnections: (pin_id: string, client_identifiers: string[], token: string) =>
+      post<{ added: number }>("/auth/plex/connections", { pin_id, client_identifiers }, token),
+    plexUnlink: (token: string) =>
+      post<{ status: string }>("/auth/plex/unlink", undefined, token),
   },
 
   trakt: {

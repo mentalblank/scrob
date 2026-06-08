@@ -1,6 +1,7 @@
 import httpx
 import xmltodict
 from typing import Optional, List, Dict
+from urllib.parse import urlencode
 
 TIMEOUT = httpx.Timeout(120.0)
 
@@ -307,6 +308,126 @@ METADATA_BASE = "https://metadata.provider.plex.tv"
 DISCOVER_BASE = "https://discover.provider.plex.tv"
 PLEX_TV_BASE  = "https://plex.tv"
 COMMUNITY_BASE = "https://community.plex.tv"
+
+# ── Plex account SSO (plex.tv PIN OAuth) ───────────────────────────────────────
+PLEX_AUTH_CLIENT_ID = "scrob-login"
+PLEX_AUTH_PRODUCT = "Scrob"
+_AUTH_HEADERS = {
+    "Accept": "application/json",
+    "X-Plex-Product": PLEX_AUTH_PRODUCT,
+    "X-Plex-Client-Identifier": PLEX_AUTH_CLIENT_ID,
+}
+
+
+async def create_auth_pin() -> Optional[Dict]:
+    """Create a strong Plex auth PIN. Returns {id, code} or None."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
+            res = await client.post(
+                f"{PLEX_TV_BASE}/api/v2/pins",
+                headers=_AUTH_HEADERS,
+                params={"strong": "true"},
+            )
+            res.raise_for_status()
+            data = res.json()
+            return {"id": data["id"], "code": data["code"]}
+    except Exception:
+        return None
+
+
+def build_auth_url(code: str, forward_url: str) -> str:
+    """Build the app.plex.tv URL the browser is sent to for authentication."""
+    params = {
+        "clientID": PLEX_AUTH_CLIENT_ID,
+        "code": code,
+        "forwardUrl": forward_url,
+        "context[device][product]": PLEX_AUTH_PRODUCT,
+    }
+    return f"https://app.plex.tv/auth#?{urlencode(params)}"
+
+
+async def check_auth_pin(pin_id: str) -> Optional[str]:
+    """Poll a PIN; return the authToken once the user has authorised, else None."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
+            res = await client.get(
+                f"{PLEX_TV_BASE}/api/v2/pins/{pin_id}",
+                headers=_AUTH_HEADERS,
+            )
+            res.raise_for_status()
+            return res.json().get("authToken") or None
+    except Exception:
+        return None
+
+
+async def get_account(auth_token: str) -> Optional[Dict]:
+    """Fetch the Plex account for an authToken. Returns {id, username, email, thumb} or None."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
+            res = await client.get(
+                f"{PLEX_TV_BASE}/api/v2/user",
+                headers={**_AUTH_HEADERS, "X-Plex-Token": auth_token},
+            )
+            res.raise_for_status()
+            data = res.json()
+            if not data.get("id"):
+                return None
+            return {
+                "id": str(data["id"]),
+                "username": data.get("username") or data.get("title") or "",
+                "email": data.get("email") or "",
+                "thumb": data.get("thumb"),
+            }
+    except Exception:
+        return None
+
+
+def _connection_rank(conn: Dict) -> tuple:
+    """Sort key for a server connection: non-relay https remote first, relay last."""
+    relay = 1 if conn.get("relay") else 0
+    uri = str(conn.get("uri", ""))
+    https = 0 if (conn.get("protocol") == "https" or uri.startswith("https")) else 1
+    local = 1 if conn.get("local") else 0
+    return (relay, https, local)
+
+
+async def get_servers(auth_token: str) -> List[Dict]:
+    """List reachable Plex servers as [{name, client_identifier, token, url, owned}].
+
+    url is the first connection that responds; token is the per-server access token.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=True) as client:
+            res = await client.get(
+                f"{PLEX_TV_BASE}/api/v2/resources",
+                headers={**_AUTH_HEADERS, "X-Plex-Token": auth_token},
+                params={"includeHttps": 1, "includeRelay": 1},
+            )
+            res.raise_for_status()
+            devices = res.json()
+    except Exception:
+        return []
+
+    servers: List[Dict] = []
+    for dev in devices:
+        if "server" not in (dev.get("provides") or "").split(","):
+            continue
+        token = dev.get("accessToken")
+        if not token:
+            continue
+        for conn in sorted(dev.get("connections") or [], key=_connection_rank):
+            uri = conn.get("uri")
+            if uri and await validate_connection(uri, token):
+                servers.append({
+                    "name": dev.get("name") or "Plex",
+                    "client_identifier": dev.get("clientIdentifier"),
+                    "token": token,
+                    "url": uri,
+                    "owned": bool(dev.get("owned")),
+                })
+                break
+    return servers
+
 _CLOUD_HEADERS = {
     "Accept": "application/json",
     "X-Plex-Product": "Scrob",
