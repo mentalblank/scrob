@@ -214,7 +214,10 @@ async def validate_api_key(api_key: str) -> bool:
 
 async def search_series(query: str, api_key: str, lang: str | None = None) -> list[dict]:
     """Search for TV series by title. Returns list of simplified series dicts."""
-    data = await _get("/search", api_key, params={"query": query, "type": "series"}, lang=lang)
+    data = await provider_cache.cached(
+        "tvdb", "search_series", {"q": query, "lang": lang}, provider_cache.TTL_SEARCH,
+        lambda: _get("/search", api_key, params={"query": query, "type": "series"}, lang=lang),
+    )
     results = []
     for item in data.get("data") or []:
         tvdb_id_str = item.get("tvdb_id") or item.get("id") or ""
@@ -475,23 +478,29 @@ def format_episode(raw: dict) -> dict:
 
 async def get_series_episodes_by_type(tvdb_id: int, api_key: str, season_type: str = "official", lang: str = "eng") -> list[dict]:
     """Fetch all episodes for a series, paginated, using specific season_type and lang."""
-    episodes = []
-    page = 0
-    while True:
-        data = await _get(
-            f"/series/{tvdb_id}/episodes/{season_type}/{lang}",
-            api_key,
-            params={"page": page},
-            lang=lang
-        )
-        batch = (data.get("data") or {}).get("episodes") or []
-        if not batch:
-            break
-        episodes.extend(batch)
-        if len(batch) < 100:
-            break
-        page += 1
-    return episodes
+    async def _fetch():
+        episodes = []
+        page = 0
+        while True:
+            data = await _get(
+                f"/series/{tvdb_id}/episodes/{season_type}/{lang}",
+                api_key,
+                params={"page": page},
+                lang=lang
+            )
+            batch = (data.get("data") or {}).get("episodes") or []
+            if not batch:
+                break
+            episodes.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return episodes
+
+    return await provider_cache.cached(
+        "tvdb", "series_episodes_by_type", {"id": tvdb_id, "type": season_type, "lang": lang},
+        provider_cache.TTL_SEASON, _fetch,
+    )
 
 
 async def get_person(person_id: int, api_key: str) -> dict:
