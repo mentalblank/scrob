@@ -21,6 +21,9 @@ class User(Base):
     email_confirmed : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     totp_enabled  : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False)
     totp_secret   : Mapped[Optional[str]]  = mapped_column(String(255))
+    # Plex account link (SSO via plex.tv PIN OAuth)
+    plex_account_id : Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    plex_username   : Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at    : Mapped[datetime]       = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at    : Mapped[datetime]       = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -39,6 +42,10 @@ class User(Base):
     @property
     def has_password(self) -> bool:
         return self.password_hash is not None
+
+    @property
+    def plex_linked(self) -> bool:
+        return self.plex_account_id is not None
 
     settings          : Mapped[Optional["UserSettings"]]   = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     profile           : Mapped[Optional["UserProfileData"]] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")

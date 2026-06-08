@@ -117,6 +117,18 @@ if (token) {
 
     {!showTotpStep ? (
       <>
+        {/* Plex login (always available) */}
+        <a
+          href="/plex-start"
+          tabindex="1"
+          class="flex items-center justify-center gap-2 w-full bg-[#e5a00d] hover:bg-[#cc8f0b] text-zinc-950 font-bold py-2 rounded-xl transition-colors cursor-pointer mb-4"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
+            <path d="M12 0L4 6v12l8 6 8-6V6l-8-6zm0 4.3l4.8 3.6v8.2L12 19.7l-4.8-3.6V7.9L12 4.3z" />
+          </svg>
+          Login with Plex
+        </a>
+
         {/* OIDC button */}
         {oidcConfig.enabled && (
           <a
@@ -131,8 +143,8 @@ if (token) {
           </a>
         )}
 
-        {/* Divider when both options are visible */}
-        {oidcConfig.enabled && !oidcConfig.disable_password_login && (
+        {/* Divider between SSO buttons and the password form */}
+        {!oidcConfig.disable_password_login && (
           <div class="relative my-4">
             <div class="absolute inset-0 flex items-center">
               <div class="w-full border-t border-zinc-800"></div>

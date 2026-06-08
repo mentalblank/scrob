@@ -20,6 +20,8 @@ class User(UserBase):
     totp_enabled: bool = False
     email_confirmed: bool = True
     has_password: bool = True
+    plex_linked: bool = False
+    plex_username: Optional[str] = None
     created_at: datetime
 
     class Config:

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from db import engine, Base
 import models # noqa: F401
-from routers import webhooks, media, history, ratings, sync, shows, auth, lists, oidc, profile, trakt, simkl, comments, admin
+from routers import webhooks, media, history, ratings, sync, shows, auth, lists, oidc, plex_auth, profile, trakt, simkl, comments, admin
 
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -352,6 +352,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(oidc.router, prefix="/auth/oidc", tags=["oidc"])
+app.include_router(plex_auth.router, prefix="/auth/plex", tags=["plex-auth"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(media.router, prefix="/media", tags=["media"])
 app.include_router(history.router, prefix="/history", tags=["history"])

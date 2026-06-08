@@ -1,0 +1,45 @@
+---
+import { api } from "../lib/api";
+
+// Link flow: same PIN dance as login, but forwards to /plex-link-callback.
+
+const token = Astro.cookies.get("token")?.value;
+if (!token) {
+  return Astro.redirect("/login");
+}
+
+let errorMsg = "";
+
+const host = Astro.request.headers.get("x-forwarded-host") ?? Astro.url.host;
+const proto = Astro.request.headers.get("x-forwarded-proto") ?? Astro.url.protocol.replace(":", "");
+const redirectUri = `${proto}://${host}/plex-link-callback`;
+
+try {
+  const { auth_url, pin_id } = await api.auth.plexAuthorize(true, redirectUri);
+
+  Astro.cookies.set("plex_pin", pin_id, {
+    path: "/",
+    httpOnly: true,
+    secure: import.meta.env.PROD,
+    sameSite: "lax",
+    maxAge: 600,
+  });
+
+  return Astro.redirect(auth_url);
+} catch (e: unknown) {
+  errorMsg = e instanceof Error ? e.message : "Failed to start Plex linking";
+}
+---
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plex Link Error</title>
+  </head>
+  <body>
+    <p>{errorMsg}</p>
+    <a href="/settings">Back to settings</a>
+  </body>
+</html>
