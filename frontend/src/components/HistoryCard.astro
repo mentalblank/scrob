@@ -1,5 +1,6 @@
 ---
 import type { WatchEvent } from "../lib/api";
+import { tmdbImageUrl } from "../lib/api";
 import { mediaUrl } from "../lib/urls";
 
 interface Props {
@@ -10,22 +11,21 @@ interface Props {
 const { event, use24h = false } = Astro.props;
 const { media, watched_at } = event;
 
-const date = new Date(watched_at + 'Z');
-const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24h });
+const timeString = watched_at
+  ? new Date(watched_at + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24h })
+  : 'Unknown';
 
 const isEpisode = media.type === 'episode';
 const title = isEpisode ? media.title : media.title;
 const showTitle = isEpisode ? (media.show_title || media.title) : null;
 const year = media.release_date?.slice(0, 4);
 
-// Episodes: use episode still (poster_path in this context). Movies: use backdrop.
+// Episodes: use episode still. Movies: use backdrop.
 const rawImage = isEpisode 
   ? (media.poster_path ?? media.show_backdrop_path ?? media.show_poster_path)
   : (media.backdrop_path ?? media.poster_path);
 
-const imageUrl = rawImage
-  ? (rawImage.startsWith('http') ? rawImage : `https://image.tmdb.org/t/p/w780${rawImage}`)
-  : null;
+const imageUrl = tmdbImageUrl(rawImage, "w780");
 
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
 const href = mediaUrl(media, primaryMetadataSource === "tvdb") || "/";

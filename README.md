@@ -3,18 +3,17 @@
   <h1>Scrob</h1>
   <p>Open-source, self-hosted media tracking - your personal Letterboxd + Trakt.</p>
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/mentalblank/scrob?style=flat-square)](https://hub.docker.com/r/mentalblank/scrob)
-[![GitHub Contributors](https://img.shields.io/github/contributors/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/graphs/contributors)
-[![Latest Release](https://img.shields.io/github/v/release/mentalblank/scrob?style=flat-square)](https://github.com/mentalblank/scrob/releases/latest)
-
+  [![GitHub Stars](https://img.shields.io/github/stars/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/stargazers)
+  [![Docker Pulls](https://img.shields.io/docker/pulls/bellamy/scrob?style=flat-square)](https://hub.docker.com/r/bellamy/scrob)
+  [![GitHub Contributors](https://img.shields.io/github/contributors/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/graphs/contributors)
+  [![GitHub Sponsors](https://img.shields.io/github/sponsors/ellite?style=flat-square)](https://github.com/sponsors/ellite)
+  [![Latest Release](https://img.shields.io/github/v/release/ellite/scrob?style=flat-square)](https://github.com/ellite/scrob/releases/latest)
+  [![Build](https://github.com/ellite/scrob/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/ellite/scrob/actions/workflows/release.yml)
 </div>
 
 ---
 
-> [!NOTE]
-> This is a fork of the original [ellite/scrob](https://github.com/ellite/scrob) project, maintained by [mentalblank](https://github.com/mentalblank).
-
-Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks your watch history, ratings, and personal lists, and lets you push your activity back to your media server - all from a clean, app-like web interface that installs as a PWA on any device.
+Scrob syncs your libraries from **Jellyfin**, **Plex**, **Emby**, and **Nuvio**, tracks your watch history, ratings, and personal lists, and can push watched activity back to connected providers - all from a clean, app-like web interface that installs as a PWA on any device.
 
 ## Table of Contents
 
@@ -27,7 +26,11 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
   - [First Setup](#first-setup)
   - [Updating](#updating)
 - [Configuration](#configuration)
-- [Development](#development)
+- [Nuvio Cloud Synchronization](#nuvio-cloud-synchronization)
+  - [Connect Nuvio](#connect-nuvio)
+  - [Synchronization Directions](#synchronization-directions)
+  - [Scheduling and Limitations](#scheduling-and-limitations)
+- [MDBList Synchronization](#mdblist-synchronization)
 - [Webhooks](#webhooks-real-time-scrobbling)
   - [Jellyfin](#jellyfin)
   - [Plex](#plex)
@@ -37,58 +40,93 @@ Scrob syncs your libraries from **Jellyfin**, **Plex**, and **Emby**, tracks you
 - [Email Validation & SMTP](#email-validation--smtp)
 - [Contributing](#contributing)
 - [Contributors](#contributors)
+- [Development](#development)
 - [License](#license)
 
 ## Features
 
-- **Multi-source sync**: Import your full library, watch history, and ratings from Jellyfin, Plex, and Emby. Incremental syncs keep everything up to date.
-- **Keep all servers in sync**: Keep your watched status in sync between all your servers. Supports multiple instances.
+- **Multi-source sync**: Import libraries and watch history from Jellyfin, Plex, Emby, and Nuvio. Nuvio also imports playback progress for Continue Watching.
+- **Keep providers in sync**: Keep watched status synchronized between your media servers and Nuvio. Supports multiple instances and Nuvio profiles.
 - **Real-time scrobbling**: Webhooks from Jellyfin, Plex, Emby, and Kodi update your watch state as you play - no manual sync needed.
 - **Manual scrobble**: Start a watching session directly from any movie or episode page. Pause, resume, stop, or mark as watched - session progress shows live on the home screen.
 - **Trakt integration**: Sync your watched history and ratings from Trakt, and push Scrob activity back to Trakt automatically.
 - **Simkl integration**: Sync your watched history and ratings from Simkl, and push Scrob activity back to Simkl automatically.
+- **MDBList integration**: Pull watched history, ratings, and watchlist items from MDBList, and optionally push Scrob changes back using an MDBList API key.
 - **Watch history & ratings**: Track every movie and episode you've watched, including multiple plays with individual timestamps. Log plays manually with a custom date, or remove individual entries — all from the watched button on any movie or episode page. Rate them on a 10-point scale with optional reviews.
-- **Content Filtering**: Robust blocklist management for genres, keywords, and regex patterns to filter your explore and discovery pages.
 - **Season ratings**: Rate individual seasons separately from the overall show.
 - **Personal lists**: Create and curate lists of movies and shows. Mark them public to share with other users on the same instance.
 - **Comments**: Leave comments on movies, shows, seasons, and episodes.
 - **Social**: Follow other users and see their activity.
-- **Release schedule**: Movie pages show the full release schedule — theatrical, digital, and physical dates — sourced from TMDB.
-- **TMDB integration**: Rich metadata for every title — posters, backdrops, cast, crew, trailers, collections, and more.
-- **Trailers & Logos**: Play trailers directly in the UI and enjoy a premium cinematic feel with TMDB logo support.
+- **Release schedule**: Movie pages show the full release schedule ��� theatrical, digital, and physical dates — sourced from TMDB.
+- **TMDB integration**: Rich metadata for every title - posters, backdrops, cast, crew, trailers, collections, and more.
 - **Search**: Search TMDB across movies, shows, people, and collections, merged with your local library data.
-- **Infinite Scroll & Layouts**: Experience smooth navigation with infinite scrolling and toggle between Grid or List layouts for any media view.
 - **Pick a Movie / Pick a Show**: Get a suggestion on what to watch next from your library or your streaming services based on your preferences.
 - **Trending & Airing Today**: Daily trending movies and shows from TMDB, plus episodes airing today filtered to your collection.
-- **Continue Watching & Next Up**: Dashboard cards showing in-progress items and the next episode to watch, featuring visual progress bars.
+- **Continue Watching & Next Up**: Dashboard cards showing in-progress items and the next episode to watch in each series.
 - **Season & episode tracking**: Detailed season views with per-episode watched state and progress.
 - **Cast & crew pages**: Full filmography for any person, linked to your library.
-- **Radarr & Sonarr integration**: Add movies and shows to Radarr/Sonarr directly from the Scrob UI, and auto-import from personal lists.
+- **Radarr & Sonarr integration**: Add movies and shows to Radarr/Sonarr directly from the Scrob UI.
 - **Plex watchlist automation**: Automatically send items from your Plex watchlist (and selected friends' watchlists) to Radarr or Sonarr.
 - **Two-Factor Authentication**: TOTP-based 2FA with backup codes, managed from the settings page.
 - **OIDC / SSO**: Authenticate with any OpenID Connect provider (Authelia, Authentik, Keycloak, etc.).
 - **Progressive Web App**: Install Scrob on any device - Android, iOS, or desktop - for a native app feel.
 - **Single container**: Frontend and backend ship as one image on one port. No separate services to manage.
 
-## Screenshot
+## Screenshots
 
-<img src="docs/screenshots/scrob-show.png" alt="Scrob" width="800">
+<img src="docs/screenshots/scrobss.png" alt="Scrob" width="800">
+
+<details>
+<summary>View more screenshots</summary>
+
+**Dashboard**
+<img src="docs/screenshots/scrob-dashboard-dark.png" alt="Dashboard" width="800" />
+
+**Explore**
+<img src="docs/screenshots/scrob-explore-light.png" alt="Explore" width="800" />
+
+**Movie**
+<img src="docs/screenshots/scrob-movie-light.png" alt="Movie" width="800" />
+
+**Show**
+<img src="docs/screenshots/scrob-show-dark.png" alt="Show" width="800" />
+
+**Season**
+<img src="docs/screenshots/scrob-season-dark.png" alt="Season" width="800" />
+
+**Episode**
+<img src="docs/screenshots/scrob-episode-dark.png" alt="Episode" width="800" />
+
+**Search**
+<img src="docs/screenshots/scrob-search-light.png" alt="Search" width="800" />
+
+**History (mobile)**
+<img src="docs/screenshots/scrob-history-dark-mobile.png" alt="History mobile" width="800" />
+
+**Lists (mobile)**
+<img src="docs/screenshots/scrob-lists-light-mobile.png" alt="Lists mobile" width="800" />
+
+**Settings**
+<img src="docs/screenshots/scrob-settings-dark.png" alt="Settings" width="800" />
+
+
+</details>
 
 ## Getting Started
 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
-- A [TMDB API key](https://www.themoviedb.org/settings/api) (free) - used for metadata, search, and images
+- A [TMDB Read Access Token](https://www.themoviedb.org/settings/api) (free) - used for metadata, search, and images
 
 ### Docker Compose
 
-> Images are hosted on **Docker Hub** (`mentalblank/scrob`). A mirror is also available on GHCR (`ghcr.io/mentalblank/scrob`) if you prefer.
+> Images are hosted on **Docker Hub** (`bellamy/scrob`). A mirror is also available on GHCR (`ghcr.io/ellite/scrob`) if you prefer.
 
 1. Download the compose file:
 
 ```bash
-curl -o docker-compose.yaml https://raw.githubusercontent.com/mentalblank/scrob/main/docker-compose.yaml
+curl -o docker-compose.yaml https://raw.githubusercontent.com/ellite/scrob/main/docker-compose.yaml
 ```
 
 2. Edit `docker-compose.yaml` and replace the required values:
@@ -101,7 +139,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: scrob
-      POSTGRES_PASSWORD: changeme # ← change this
+      POSTGRES_PASSWORD: changeme        # ← change this
       POSTGRES_DB: scrob
     volumes:
       - db_data:/var/lib/postgresql/data
@@ -113,7 +151,7 @@ services:
 
   scrob:
     container_name: scrob
-    image: mentalblank/scrob:main
+    image: bellamy/scrob:latest
     restart: unless-stopped
     depends_on:
       scrob-db:
@@ -121,8 +159,8 @@ services:
     ports:
       - "7330:7330"
     environment:
-      DATABASE_URL: postgresql+asyncpg://scrob:changeme@scrob-db:5432/scrob # ← match password above
-      SECRET_KEY: changeme # ← generate with: openssl rand -hex 32
+      DATABASE_URL: postgresql+asyncpg://scrob:changeme@scrob-db:5432/scrob   # ← match password above
+      SECRET_KEY: changeme               # ← generate with: openssl rand -hex 32
       TZ: UTC
     volumes:
       - scrob_data:/app/backend/data
@@ -153,7 +191,7 @@ curl -o docker-compose.yml https://raw.githubusercontent.com/ellite/scrob/main/d
 2. Edit it and set your `SECRET_KEY`:
 
 ```yaml
-SECRET_KEY: changeme # ← generate with: openssl rand -hex 32
+SECRET_KEY: changeme   # ← generate with: openssl rand -hex 32
 ```
 
 3. Start:
@@ -217,8 +255,10 @@ docker run -d \
 ### First Setup
 
 1. Open `http://localhost:7330` and create your account.
-2. Go to **Settings → Integrations** to add your TMDB API key and connect Jellyfin, Plex, or Emby.
-3. Select which libraries to sync, then trigger your first sync from **Settings → Sync**.
+2. Go to **Settings → Integrations** to add your TMDB Read Access Token and connect Jellyfin, Plex, Emby, or Nuvio.
+3. Select which media-server libraries to sync, or select a Nuvio profile, then trigger your first sync.
+
+For Nuvio, choose **Nuvio** as the provider, sign in, and select one of the returned profiles. See [Nuvio Cloud Synchronization](#nuvio-cloud-synchronization) for credential handling, sync directions, scheduling, and current limitations.
 
 ### Updating
 
@@ -230,18 +270,18 @@ Database migrations run automatically on startup - no manual steps required.
 
 ## Configuration
 
-| Variable                         | Default | Description                                                                                                                                                          |
-| -------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SECRET_KEY`                     | -       | **Required.** JWT signing key. Generate with `openssl rand -hex 32`.                                                                                                 |
-| `DATABASE_URL`                   | -       | **Required** (standard image). PostgreSQL connection string (`postgresql+asyncpg://...`). Optional on the omnibus image — if omitted, the embedded database is used. |
-| `ENABLE_REGISTRATIONS`           | `true`  | Allow new users to register. The first user can always register regardless of this setting.                                                                          |
-| `REGISTRATION_MAX_ALLOWED_USERS` | `0`     | Maximum number of registered users. `0` = unlimited.                                                                                                                 |
-| `TZ`                             | `UTC`   | Container timezone (e.g. `Europe/Lisbon`).                                                                                                                           |
-| `PUID`                           | `1000`  | User ID to run the process as.                                                                                                                                       |
-| `PGID`                           | `1000`  | Group ID to run the process as.                                                                                                                                      |
-| `BACKEND_PORT`                   | `7331`  | Internal port the backend binds to. Override only if `7331` conflicts on bare metal.                                                                                 |
-| `OIDC_ENABLED`                   | `false` | Enable OIDC login.                                                                                                                                                   |
-| `OIDC_DISABLE_PASSWORD_LOGIN`    | `false` | Enforce OIDC-only login (disables username/password).                                                                                                                |
+| Variable | Default | Description |
+|---|---|---|
+| `SECRET_KEY` | - | **Required.** JWT signing key. Generate with `openssl rand -hex 32`. |
+| `DATABASE_URL` | - | **Required** (standard image). PostgreSQL connection string (`postgresql+asyncpg://...`). Optional on the omnibus image — if omitted, the embedded database is used. |
+| `ENABLE_REGISTRATIONS` | `false` | Allow new users to register. The first user can always register regardless of this setting. |
+| `REGISTRATION_MAX_ALLOWED_USERS` | `0` | Maximum number of registered users. `0` = unlimited. |
+| `TZ` | `UTC` | Container timezone (e.g. `Europe/Lisbon`). |
+| `PUID` | `1000` | User ID to run the process as. |
+| `PGID` | `1000` | Group ID to run the process as. |
+| `BACKEND_PORT` | `7331` | Internal port the backend binds to. Override only if `7331` conflicts on bare metal. |
+| `OIDC_ENABLED` | `false` | Enable OIDC login. |
+| `OIDC_DISABLE_PASSWORD_LOGIN` | `false` | Enforce OIDC-only login (disables username/password). |
 
 See `docker-compose.yaml` for the full list of OIDC variables and other variables.
 
@@ -264,6 +304,50 @@ Remove the `scrob-db` service and set `DATABASE_URL` to your existing instance:
 DATABASE_URL: postgresql+asyncpg://user:password@your-db-host:5432/scrob
 ```
 
+## Nuvio Cloud Synchronization
+
+Scrob connects to the [Nuvio public Cloud API](https://nuvio.tv/docs) at `https://api.nuvio.tv`. A TMDB Read Access Token must be configured in Scrob so Nuvio content identifiers can be matched to movies and shows.
+
+### Connect Nuvio
+
+1. Open **Settings → Media & Cloud Connections** and select **Add Connection**.
+2. Choose **Nuvio**, then enter a connection name, your Nuvio email, and your Nuvio password.
+3. Select **Test** to authenticate and load the profiles attached to the account.
+4. Select the Nuvio profile to synchronize, choose the pull and push options, then select **Add**.
+
+Scrob exchanges the email and password for a refresh token. The password is never persisted. Refresh-token rotation is handled automatically during connection checks and synchronization.
+
+Each connection targets one Nuvio profile. Add another connection if you need to synchronize another profile from the same account.
+
+### Synchronization Directions
+
+| Direction | Setting | Behavior |
+|---|---|---|
+| Nuvio → Scrob | **Collection status** | Imports the profile's library movies and series. |
+| Nuvio → Scrob | **Watched status** | Imports watched movies and episodes with their latest watch timestamps. |
+| Nuvio → Scrob | **Playback progress** | Imports position and duration into Continue Watching. |
+| Scrob → Nuvio | **Watched status** | Pushes watched and unwatched changes made in Scrob or imported from another connected provider. |
+| Scrob → Nuvio | **Playback progress** | Pushes current playback positions into Nuvio's Continue Watching state as non-destructive upserts. |
+
+**Sync now** runs an inbound synchronization using the enabled Nuvio → Scrob settings. **Push** sends the enabled watched-history and playback-progress data from Scrob to Nuvio. Both operations use non-destructive upserts; items absent from Scrob are not removed from Nuvio.
+
+Library membership is currently pull-only. Ratings are not synchronized with Nuvio.
+
+### Scheduling and Limitations
+
+**Auto Pull** repeats the enabled inbound synchronization every 15 minutes, 30 minutes, 1 hour, 3 hours, 6 hours, 12 hours, 24 hours, or 48 hours. Nuvio synchronization is polling-based; Nuvio does not use the media-server webhook URLs documented below.
+
+Inbound Nuvio identifiers are normalized to TMDB for Scrob's internal matching. Before an outbound push, Scrob resolves those TMDB identifiers to Nuvio-compatible bare IMDb identifiers (`tt...`) and caches the mapping. Unsupported identifiers are skipped rather than attached to the wrong title.
+
+## MDBList Synchronization
+
+1. Open **Settings → Connections → MDBList**.
+2. Copy the API key from [MDBList Preferences](https://mdblist.com/preferences), paste it into Scrob, and select **Save Changes**.
+3. Choose the data to import under **MDBList → Scrob**, then select **Pull**. MDBList pulls run only when this button is selected.
+4. To send changes back, enable the required **Scrob → MDBList** options. Watched-state and rating edits are pushed as they happen; edits to the managed **MDBList - Watchlist** are pushed to the MDBList watchlist.
+
+The manual **Push** action sends the complete enabled watched, ratings, or managed-watchlist snapshot. MDBList pagination follows `next_cursor` and requests the documented maximum of 1,000 items per page.
+
 ## Webhooks (Real-time Scrobbling)
 
 Webhooks update your watch history and Continue Watching in real time. Each user's webhook URL is shown in **Settings** next to the relevant integration.
@@ -281,7 +365,7 @@ https://your-scrob-url/api/proxy/webhooks/kodi?api_key=YOUR_API_KEY
 1. In Jellyfin, go to **Dashboard → Plugins → Catalogue**, install **Webhook**, then restart.
 2. Go to **Dashboard → Plugins → Webhook → Add Generic Destination**.
 3. Paste your Scrob Jellyfin webhook URL.
-4. Enable notification types: `Playback Start`, `Playback Progress`, `Playback Stop`, `Mark Played`.
+4. Enable notification types: `Playback Start`, `Playback Progress`, `Playback Stop`, `User Data Saved` (this is what fires when you manually mark something watched/unwatched - the plugin has no separate "Mark Played" event).
 5. Enable item types: `Movies` and `Episodes`.
 6. **Leave the Template field blank** and check **"Send all properties (ignore templates)"**.
 
@@ -343,16 +427,16 @@ SMTP_PASSWORD: "your-app-password"
 FROM_EMAIL: "myemail@gmail.com"
 ```
 
-| Variable                   | Default | Description                                                                     |
-| -------------------------- | ------- | ------------------------------------------------------------------------------- |
-| `REQUIRE_EMAIL_VALIDATION` | `false` | Require new users to verify their email before logging in.                      |
-| `SERVER_URL`               | -       | Public URL of your Scrob instance, used to build the validation link in emails. |
-| `SMTP_ADDRESS`             | -       | SMTP server hostname.                                                           |
-| `SMTP_PORT`                | `587`   | SMTP server port.                                                               |
-| `SMTP_ENCRYPTION`          | `tls`   | Encryption method - `tls` or `ssl`.                                             |
-| `SMTP_USERNAME`            | -       | SMTP login username.                                                            |
-| `SMTP_PASSWORD`            | -       | SMTP login password (use an app password if using Gmail).                       |
-| `FROM_EMAIL`               | -       | Address emails are sent from.                                                   |
+| Variable | Default | Description |
+|---|---|---|
+| `REQUIRE_EMAIL_VALIDATION` | `false` | Require new users to verify their email before logging in. |
+| `SERVER_URL` | - | Public URL of your Scrob instance, used to build the validation link in emails. |
+| `SMTP_ADDRESS` | - | SMTP server hostname. |
+| `SMTP_PORT` | `587` | SMTP server port. |
+| `SMTP_ENCRYPTION` | `tls` | Encryption method - `tls` or `ssl`. |
+| `SMTP_USERNAME` | - | SMTP login username. |
+| `SMTP_PASSWORD` | - | SMTP login password (use an app password if using Gmail). |
+| `FROM_EMAIL` | - | Address emails are sent from. |
 
 ## Contributing
 
@@ -365,8 +449,8 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## Contributors
 
-<a href="https://github.com/mentalblank/scrob/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=mentalblank/scrob" />
+<a href="https://github.com/ellite/scrob/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ellite/scrob" />
 </a>
 
 ## Development
@@ -383,7 +467,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 ### Setup
 
 ```bash
-git clone https://github.com/mentalblank/scrob.git
+git clone https://github.com/ellite/scrob.git
 cd scrob
 
 # Start a local database
@@ -419,9 +503,10 @@ The frontend dev server starts on `http://localhost:4321` and proxies API calls 
 
 Scrob is licensed under the [GNU General Public License v3.0](LICENSE.md).
 
-You are free to use, modify, and distribute Scrob, provided that any derivative works are also released under the GPLv3. See the [Changelog](CHANGELOG.md) for a record of modifications in this fork.
+You are free to use, modify, and distribute Scrob, provided that any derivative works are also released under the GPLv3.
 
 ## Links
 
-- Fork maintainer: [mentalblank](https://github.com/mentalblank)
-- Original author: [henrique.pt](https://henrique.pt)
+- The author: [henrique.pt](https://henrique.pt)
+- Scrob Landingpage: [scrob.app](https://scrob.app)
+- Join the conversation: [Discord Server](https://discord.gg/anex9GUrPW)

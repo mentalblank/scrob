@@ -3,9 +3,8 @@ import Base from "../layouts/Base.astro";
 import MediaRow from "../components/MediaRow.astro";
 import MediaCard from "../components/MediaCard.astro";
 import EpisodeCard from "../components/EpisodeCard.astro";
-
 import ActionBar from "../components/ActionBar.astro";
-import { api, type ContinueWatchingItem, type MediaItem } from "../lib/api";
+import { api, type ContinueWatchingItem, type MediaItem, tmdbImageUrl } from "../lib/api";
 import { mediaUrl } from "../lib/urls";
 
 const { token } = Astro.locals;
@@ -61,9 +60,7 @@ const discoverPick = backdropPool.length > 0
   ? backdropPool[Math.floor(Math.random() * backdropPool.length)]
   : null;
 const discoverBackdropUrl = discoverPick?.backdrop_path
-  ? (discoverPick.backdrop_path.startsWith("http")
-      ? discoverPick.backdrop_path
-      : `https://image.tmdb.org/t/p/w1280${discoverPick.backdrop_path}`)
+  ? tmdbImageUrl(discoverPick.backdrop_path, "w1280")
   : FALLBACK_BACKDROPS[Math.floor(Math.random() * FALLBACK_BACKDROPS.length)];
 ---
 
@@ -75,7 +72,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
       </div>
       <div class="flex-1">
         <h2 class="text-xl font-bold text-zinc-100 mb-1">Finish setting up your account</h2>
-        <p class="text-zinc-400">To start using Scrob and explore movies and shows, you must add your TMDB API Key.</p>
+        <p class="text-zinc-400">To start using Scrob and explore movies and shows, you must add your TMDB Read Access Token.</p>
       </div>
       <a href="/settings" class="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-zinc-100 font-bold rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95">
         Go to Settings
@@ -91,9 +88,7 @@ const discoverBackdropUrl = discoverPick?.backdrop_path
       ? `S${hero.season_number} E${hero.episode_number}`
       : null;
     const rawBackdrop = hero.backdrop_path || hero.show_backdrop_path;
-    const heroBackdrop = rawBackdrop
-      ? (rawBackdrop.startsWith('http') ? rawBackdrop : `https://image.tmdb.org/t/p/w1280${rawBackdrop}`)
-      : null;
+    const heroBackdrop = tmdbImageUrl(rawBackdrop, "w1280");
     return (
       <section class="relative md:-mt-8 mb-16" id="dashboard-next-up">
          <div class="absolute -top-20 md:-top-32 left-1/2 -translate-x-1/2 w-screen h-[600px] lg:h-[700px] xl:h-[780px] 2xl:h-[880px] overflow-hidden pointer-events-none" style="mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%);" data-adult-backdrop={hero.adult ? "true" : undefined}>

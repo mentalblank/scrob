@@ -364,10 +364,14 @@ const bottomNavItem = (active: boolean) =>
       <div id="watch-history-modal-events" class="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin"></div>
       
       <div class="p-4 border-t border-zinc-800 bg-zinc-950/40 space-y-3">
+        <button id="watch-history-unwatch-btn" class="hidden w-full px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none">
+          Mark as unwatched
+        </button>
         <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Log a new play</p>
         <div class="flex gap-2">
           <button id="watch-history-now-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white">Just now</button>
-          <button id="watch-history-custom-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Custom Date</button>
+          <button id="watch-history-custom-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Custom</button>
+          <button id="watch-history-unknown-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Unknown</button>
         </div>
         <input type="datetime-local" id="watch-history-date-input" class="hidden w-full px-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-sm text-zinc-200 focus:outline-none focus:border-blue-500 [color-scheme:dark]" />
         <button id="watch-history-log-btn" class="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-[0.98] shadow-lg shadow-indigo-900/20">
@@ -1296,7 +1300,7 @@ const bottomNavItem = (active: boolean) =>
     // ── Watch history modal ────────────────────────────────────────────────────
     let _watchHistoryTmdbId = '';
     let _watchHistoryMediaType = '';
-    let _watchHistoryUseNow = true;
+    let _watchHistoryDateMode: 'now' | 'custom' | 'unknown' = 'now';
 
     const toLocal = (d: Date) => {
       const p = (n: number) => String(n).padStart(2, '0');
@@ -1309,6 +1313,17 @@ const bottomNavItem = (active: boolean) =>
     let _watchHistoryShowUri: string | null = null;
     let _watchHistorySeason: string | null = null;
     let _watchHistoryEpisode: string | null = null;
+
+    // Shared identifier query used both to fetch events for the current item and to unwatch it.
+    function _watchHistoryIdQuery(): string {
+      if (_watchHistoryMediaId) return `id=${encodeURIComponent(_watchHistoryMediaId)}`;
+      if (_watchHistoryUriId) return `uri_id=${encodeURIComponent(_watchHistoryUriId)}`;
+      if (_watchHistoryShowUri && _watchHistorySeason && _watchHistoryEpisode) {
+        // Episode not in the library: resolve via parent show + season + episode.
+        return `show_uri_id=${encodeURIComponent(_watchHistoryShowUri)}&season_number=${_watchHistorySeason}&episode_number=${_watchHistoryEpisode}`;
+      }
+      return '';  // no identifier — backend returns empty events
+    }
 
     async function openWatchHistoryModal(_btn: HTMLElement | null, uriIdForHistory: string | null, mediaType: string, mediaId: string | null = null, showUri: string | null = null, season: string | null = null, episode: string | null = null) {
       // dataset values can be the literal strings "null"/"undefined"/"" — normalise to null.
@@ -1323,14 +1338,16 @@ const bottomNavItem = (active: boolean) =>
       _watchHistoryEpisode = _clean(episode);
 
       // Reset "add play" form to "Just now"
-      _watchHistoryUseNow = true;
+      _watchHistoryDateMode = 'now';
       const nowBtn = document.getElementById('watch-history-now-btn')!;
       const customBtn = document.getElementById('watch-history-custom-btn')!;
+      const unknownBtn = document.getElementById('watch-history-unknown-btn')!;
       const dateInput = document.getElementById('watch-history-date-input') as HTMLInputElement;
       const activeClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white';
       const inactiveClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200';
       nowBtn.className = activeClass;
       customBtn.className = inactiveClass;
+      unknownBtn.className = inactiveClass;
       dateInput.classList.add('hidden');
       dateInput.value = toLocal(new Date());
       dateInput.max = toLocal(new Date());
@@ -1343,18 +1360,10 @@ const bottomNavItem = (active: boolean) =>
     async function loadWatchHistoryEvents() {
       const eventsEl = document.getElementById('watch-history-modal-events')!;
       eventsEl.innerHTML = '<div class="text-zinc-500 text-sm text-center py-8 flex justify-center items-center gap-2"><svg class="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading plays...</div>';
+      const unwatchBtn = document.getElementById('watch-history-unwatch-btn') as HTMLButtonElement;
+      unwatchBtn.classList.add('hidden');
       try {
-        let query: string;
-        if (_watchHistoryMediaId) {
-          query = `id=${encodeURIComponent(_watchHistoryMediaId)}`;
-        } else if (_watchHistoryUriId) {
-          query = `uri_id=${encodeURIComponent(_watchHistoryUriId)}`;
-        } else if (_watchHistoryShowUri && _watchHistorySeason && _watchHistoryEpisode) {
-          // Episode not in the library: resolve via parent show + season + episode.
-          query = `show_uri_id=${encodeURIComponent(_watchHistoryShowUri)}&season_number=${_watchHistorySeason}&episode_number=${_watchHistoryEpisode}`;
-        } else {
-          query = '';  // no identifier — backend returns empty events
-        }
+        const query = _watchHistoryIdQuery();
         const res = await fetch(`/api/proxy/history/item/events?${query}&media_type=${_watchHistoryMediaType}`, {
           headers: { 'Authorization': `Bearer ${TOKEN()}` }
         });
@@ -1391,6 +1400,7 @@ const bottomNavItem = (active: boolean) =>
         }
         
         const isWatched = events.some((e: any) => e.completed);
+        unwatchBtn.classList.toggle('hidden', !isWatched);
         if (_watchHistoryUriId) {
           document.querySelectorAll<HTMLElement>(
             `[data-card][data-uri-id="${CSS.escape(_watchHistoryUriId)}"][data-media-type="${_watchHistoryMediaType}"] [data-action="watched"]`
@@ -1431,30 +1441,63 @@ const bottomNavItem = (active: boolean) =>
       }
     });
 
+    document.getElementById('watch-history-unwatch-btn')!.addEventListener('click', async () => {
+      const confirmed = await showConfirm(
+        'Mark as unwatched?',
+        'This will remove every recorded play for this item and mark it as unwatched on enabled services.'
+      );
+      if (!confirmed) return;
+
+      const unwatchBtn = document.getElementById('watch-history-unwatch-btn') as HTMLButtonElement;
+      unwatchBtn.disabled = true;
+      unwatchBtn.textContent = 'Removing…';
+      try {
+        const query = _watchHistoryIdQuery();
+        await apiFetch(`/history/item?${query}&media_type=${_watchHistoryMediaType}`, 'DELETE');
+        await loadWatchHistoryEvents();
+      } catch { /* keep the modal open so the user can retry */ }
+      unwatchBtn.disabled = false;
+      unwatchBtn.textContent = 'Mark as unwatched';
+    });
+
     (() => {
       const activeClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white';
       const inactiveClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200';
 
       document.getElementById('watch-history-now-btn')!.addEventListener('click', () => {
-        _watchHistoryUseNow = true;
+        _watchHistoryDateMode = 'now';
         (document.getElementById('watch-history-now-btn') as HTMLElement).className = activeClass;
         (document.getElementById('watch-history-custom-btn') as HTMLElement).className = inactiveClass;
+        (document.getElementById('watch-history-unknown-btn') as HTMLElement).className = inactiveClass;
         document.getElementById('watch-history-date-input')!.classList.add('hidden');
       });
 
       document.getElementById('watch-history-custom-btn')!.addEventListener('click', () => {
-        _watchHistoryUseNow = false;
+        _watchHistoryDateMode = 'custom';
         (document.getElementById('watch-history-now-btn') as HTMLElement).className = inactiveClass;
         (document.getElementById('watch-history-custom-btn') as HTMLElement).className = activeClass;
+        (document.getElementById('watch-history-unknown-btn') as HTMLElement).className = inactiveClass;
         const input = document.getElementById('watch-history-date-input') as HTMLInputElement;
         input.max = toLocal(new Date());
         input.classList.remove('hidden');
         input.focus();
       });
 
+      document.getElementById('watch-history-unknown-btn')!.addEventListener('click', () => {
+        _watchHistoryDateMode = 'unknown';
+        (document.getElementById('watch-history-now-btn') as HTMLElement).className = inactiveClass;
+        (document.getElementById('watch-history-custom-btn') as HTMLElement).className = inactiveClass;
+        (document.getElementById('watch-history-unknown-btn') as HTMLElement).className = activeClass;
+        document.getElementById('watch-history-date-input')!.classList.add('hidden');
+      });
+
       document.getElementById('watch-history-log-btn')!.addEventListener('click', async () => {
         const input = document.getElementById('watch-history-date-input') as HTMLInputElement;
-        const watchedAt = _watchHistoryUseNow ? toUTC(new Date()) : toUTC(new Date(input.value || toLocal(new Date())));
+        const watchedAt = _watchHistoryDateMode === 'unknown'
+          ? null
+          : _watchHistoryDateMode === 'now'
+            ? toUTC(new Date())
+            : toUTC(new Date(input.value || toLocal(new Date())));
         const logBtn = document.getElementById('watch-history-log-btn') as HTMLButtonElement;
         logBtn.disabled = true;
         logBtn.textContent = 'Logging…';
@@ -1471,9 +1514,10 @@ const bottomNavItem = (active: boolean) =>
           });
           await loadWatchHistoryEvents();
           // Reset to "Just now" after logging
-          _watchHistoryUseNow = true;
+          _watchHistoryDateMode = 'now';
           (document.getElementById('watch-history-now-btn') as HTMLElement).className = activeClass;
           (document.getElementById('watch-history-custom-btn') as HTMLElement).className = inactiveClass;
+          (document.getElementById('watch-history-unknown-btn') as HTMLElement).className = inactiveClass;
           input.classList.add('hidden');
         } catch { /* ignore */ }
         logBtn.disabled = false;

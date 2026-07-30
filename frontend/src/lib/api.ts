@@ -1,17 +1,24 @@
 const BACKEND_PORT = (import.meta.env.BACKEND_PORT as string | undefined) ?? "7331";
 const BASE = `http://localhost:${BACKEND_PORT}`;
 
+type ParamValue = string | number | boolean | undefined;
+
 async function request<T>(
   path: string,
   method: string = "GET",
-  params?: Record<string, string | number | boolean | undefined>,
+  params?: Record<string, ParamValue | ParamValue[]>,
   body?: unknown,
   token?: string
 ): Promise<T> {
   const url = new URL(path.startsWith("/") ? path.slice(1) : path, BASE.endsWith("/") ? BASE : BASE + "/");
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined) url.searchParams.set(k, String(v));
+      if (v === undefined) return;
+      if (Array.isArray(v)) {
+        v.forEach((item) => { if (item !== undefined) url.searchParams.append(k, String(item)); });
+      } else {
+        url.searchParams.set(k, String(v));
+      }
     });
   }
 
@@ -45,7 +52,7 @@ async function request<T>(
   return res.json();
 }
 
-async function get<T>(path: string, params?: Record<string, string | number | boolean | undefined>, token?: string): Promise<T> {
+async function get<T>(path: string, params?: Record<string, ParamValue | ParamValue[]>, token?: string): Promise<T> {
   return request<T>(path, "GET", params, undefined, token);
 }
 
@@ -236,7 +243,7 @@ export interface WatchEvent {
   id: number;
   media: MediaItem;
   user_id: number;
-  watched_at: string;
+  watched_at: string | null;
   completed: boolean;
   progress_percent: number | null;
 }
@@ -452,6 +459,7 @@ export interface UserPreferences {
   disliked_genres: string[];
   streaming_services: string[];
   content_language: string | null;
+  metadata_language: string | null;
   privacy_level: PrivacyLevel;
   avatar_url: string | null;
   pagination_type?: "infinite_scroll" | "pagination";
@@ -468,6 +476,7 @@ export interface UserSettings {
   tvdb_api_key: string | null;
   has_global_tvdb_key: boolean;
   has_effective_tvdb_key: boolean;
+  default_episode_order?: string | null;
 
   radarr_url: string | null;
   radarr_token: string | null;
@@ -484,6 +493,8 @@ export interface UserSettings {
   has_global_sonarr_config: boolean;
 
   // Trakt
+  trakt_client_id: string | null;
+  trakt_client_secret: string | null;
   trakt_connected: boolean;
   trakt_sync_watched: boolean;
   trakt_sync_ratings: boolean;
@@ -492,6 +503,7 @@ export interface UserSettings {
   trakt_push_watched: boolean;
   trakt_push_ratings: boolean;
   trakt_push_lists: boolean;
+  trakt_scrobble: boolean;
 
   // Simkl
   simkl_client_id: string | null;
@@ -501,6 +513,17 @@ export interface UserSettings {
   simkl_sync_lists: boolean;
   simkl_push_watched: boolean;
   simkl_push_ratings: boolean;
+  simkl_scrobble: boolean;
+
+  // MDBList
+  mdblist_api_key: string | null;
+  mdblist_connected: boolean;
+  mdblist_sync_watched: boolean;
+  mdblist_sync_ratings: boolean;
+  mdblist_sync_watchlist: boolean;
+  mdblist_push_watched: boolean;
+  mdblist_push_ratings: boolean;
+  mdblist_push_watchlist: boolean;
 
   preferences: UserPreferences | null;
   blur_explicit: boolean;
@@ -514,36 +537,46 @@ export interface UserSettings {
 export interface MediaServerConnection {
   id: number;
   user_id: number;
-  type: "jellyfin" | "emby" | "plex";
+  type: "jellyfin" | "emby" | "plex" | "nuvio";
   name: string;
   url: string;
   token: string;
   server_user_id: string | null;
   server_username: string | null;
+  external_server_url: string | null;
+  watchlist_all_users: boolean;
   sync_collection: boolean;
   sync_watched: boolean;
   sync_ratings: boolean;
   sync_playback: boolean;
   push_watched: boolean;
+  push_collection: boolean;
+  push_playback: boolean;
   push_ratings: boolean;
   auto_sync_interval: number | null;
+  auto_push_interval: number | null;
   created_at: string;
 }
 
 export interface MediaServerConnectionCreate {
-  type: "jellyfin" | "emby" | "plex";
+  type: "jellyfin" | "emby" | "plex" | "nuvio";
   name: string;
   url: string;
   token: string;
   server_user_id?: string | null;
   server_username?: string | null;
+  external_server_url?: string | null;
+  watchlist_all_users?: boolean;
   sync_collection?: boolean;
   sync_watched?: boolean;
   sync_ratings?: boolean;
   sync_playback?: boolean;
   push_watched?: boolean;
+  push_collection?: boolean;
+  push_playback?: boolean;
   push_ratings?: boolean;
   auto_sync_interval?: number | null;
+  auto_push_interval?: number | null;
 }
 
 export type MediaServerConnectionUpdate = Partial<Omit<MediaServerConnectionCreate, "type">>;
@@ -586,6 +619,7 @@ export interface ConnectionStatus {
   sonarr: ServiceStatus;
   trakt: ServiceStatus;
   simkl: ServiceStatus;
+  mdblist: ServiceStatus;
 }
 
 export interface MediaItem {
@@ -624,6 +658,7 @@ export interface MediaItem {
   next_up_hidden?: boolean;
   known_for_department?: string | null;
   in_library?: boolean;
+  playable?: boolean;
   // Card action state
   watched?: boolean;
   in_lists?: number[];
@@ -737,6 +772,7 @@ export interface Show {
   tvdb_id?: number | null;
   tmdb_id_cross?: number | null;   // TVDB shows that cross-reference TMDB
   uri_id?: string | null;
+  episode_order?: "tmdb" | "tvdb";
   title: string;
   original_title: string | null;
   overview: string;
@@ -1035,9 +1071,19 @@ export const api = {
       post<{ status: string; message: string }>("/simkl/push", undefined, token),
   },
 
+  mdblist: {
+    sync: (token: string) =>
+      post<{ status: string; job_id: number; message: string }>("/mdblist/sync", undefined, token),
+    push: (token: string) =>
+      post<{ status: string; job_id: number; message: string }>("/mdblist/push", undefined, token),
+  },
+
   media: {
-    list: (params?: { type?: string; sort?: string; page?: number; genre?: string; year?: number }, token?: string) =>
+    list: (params?: { type?: string; sort?: string; page?: number; genre?: string[]; year?: number[]; watched?: string[] }, token?: string) =>
       get<{ page: number; page_size: number; total_pages: number; total_results: number; results: MediaItem[] }>("/media", params, token),
+
+    years: (type: string, token?: string) =>
+      get<{ years: number[] }>("/media/years", { type }, token),
 
     get: (type: string, idOrUri: number | string, token?: string) =>
       get<MediaItem>(`/media/${type}/${idOrUri}`, undefined, token),
@@ -1135,12 +1181,16 @@ export const api = {
     getCountries: (token?: string) =>
       get<{ iso_3166_1: string; english_name: string; native_name: string }[]>("/media/countries", undefined, token),
 
-
+    updateProgress: (body: { uri_id: string; media_type: string; progress_seconds: number; completed?: boolean }, token: string) =>
+      post<{ status: string }>("/media/progress", body, token),
   },
 
   shows: {
-    list: (params?: { sort?: string; page?: number; page_size?: number; genre?: string; year?: number; status?: string }, token?: string) =>
+    list: (params?: { sort?: string; page?: number; page_size?: number; genre?: string[]; year?: number[]; status?: string[]; watched?: string[] }, token?: string) =>
       get<{ page: number; page_size: number; total_results: number; total_pages: number; results: any[] }>("/shows", params, token),
+
+    years: (token?: string) =>
+      get<{ years: number[] }>("/shows/years", undefined, token),
 
     get: (seriesId: number | string, token?: string) =>
       get<Show>(`/shows/${seriesId}`, undefined, token),
@@ -1157,13 +1207,25 @@ export const api = {
     refreshMetadata: (seriesId: number | string, token: string) =>
       post<{ message: string }>(`/shows/${seriesId}/refresh`, undefined, token),
 
+    setEpisodeOrder: (seriesTmdbId: number, episodeOrder: "tmdb" | "tvdb", token: string, forceRefresh = false) =>
+      post<{
+        episode_order: "tmdb" | "tvdb";
+        series_tmdb_id: number;
+        tvdb_id: number | null;
+        redirect: string;
+        mapping: { matched: number; tmdb_episodes: number; unmatched: number } | null;
+      }>(
+        `/shows/${seriesTmdbId}/episode-order`,
+        { episode_order: episodeOrder, force_refresh: forceRefresh },
+        token,
+      ),
   },
 
   history: {
     list: (params?: { page?: number; page_size?: number; type?: string; start_date?: string; end_date?: string }, token?: string) =>
       get<{ page: number; page_size: number; total_pages: number; total_results: number; results: WatchEvent[] }>("/history", params, token),
 
-    markAsWatched: (body: { uri_id: string; media_type: string; watched_at?: string; completed?: boolean }, token: string) =>
+    markAsWatched: (body: { uri_id?: string; tmdb_id?: number; media_type: string; watched_at?: string | null; completed?: boolean }, token: string) =>
       post<{ message: string }>("/history", body, token),
 
     unwatchItem: (uriId: string, mediaType: string, token: string) =>
@@ -1364,3 +1426,17 @@ export const api = {
       put<{ status: string; filter_languages: string[]; language_filter_mode: string }>("/media/content-filters/languages", { languages, mode }, token),
   },
 };
+
+export function tmdbImageUrl(path: string | null | undefined, size: string = "w500"): string | null {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    const match = /image\.tmdb\.org\/t\/p\/([^/]+)(\/.+)$/.exec(path);
+    if (match) {
+      return `/api/proxy/media/image/${match[1]}${match[2]}`;
+    }
+    return path;
+  }
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `/api/proxy/media/image/${size}${cleanPath}`;
+}
+

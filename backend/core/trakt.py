@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -11,6 +11,57 @@ logger = logging.getLogger(__name__)
 
 TRAKT_BASE = "https://api.trakt.tv"
 TIMEOUT = 30.0
+PAGE_SIZE = 250
+
+def _iso_utc(value: datetime) -> str:
+    """Format a datetime as ISO-8601 UTC with millisecond precision.
+
+    WatchEvent timestamps are stored as naive UTC values. Millisecond precision
+    matches Trakt's history responses and keeps local/remote idempotency keys stable.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _history_watched_at(value: Optional[datetime]) -> str:
+    """Serialize a Trakt history date, preserving an explicitly unknown date."""
+    return _iso_utc(value) if value is not None else "unknown"
+
+
+async def _get_all_pages(
+    client: httpx.AsyncClient,
+    path: str,
+    headers: dict,
+    extra_params: dict[str, str] | None = None,
+) -> list[dict]:
+    items: list[dict] = []
+    page = 1
+    while True:
+        params = dict(extra_params or {})
+        params.update({"page": page, "limit": PAGE_SIZE})
+        response = await client.get(
+            f"{TRAKT_BASE}{path}",
+            headers=headers,
+            params=params,
+        )
+        response.raise_for_status()
+        page_items = response.json()
+        if not isinstance(page_items, list):
+            raise TypeError(f"Trakt {path} returned a non-list response")
+        items.extend(page_items)
+
+        if not page_items:
+            return items
+        try:
+            page_count = int(response.headers.get("X-Pagination-Page-Count", page))
+        except (TypeError, ValueError):
+            page_count = page
+        if page >= page_count:
+            return items
+        page += 1
 
 
 def _headers(client_id: str, access_token: Optional[str] = None) -> dict:
@@ -116,51 +167,65 @@ async def validate_token(client_id: str, access_token: str) -> bool:
 
 # ── User Data Fetching ────────────────────────────────────────────────────────
 
-async def get_watched_movies(client_id: str, access_token: str) -> list[dict]:
-    """Fetch all watched movies.
-
-    Returns list of: {plays, last_watched_at, movie: {title, ids: {tmdb, ...}}}
-    """
+async def get_history_movies(
+    client_id: str,
+    access_token: str,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+) -> list[dict]:
+    """Fetch individual movie plays, optionally bounded by a UTC time window."""
+    params = {
+        key: _iso_utc(value)
+        for key, value in (("start_at", start_at), ("end_at", end_at))
+        if value is not None
+    }
     async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.get(
-            f"{TRAKT_BASE}/sync/watched/movies",
-            headers=_headers(client_id, access_token),
+        return await _get_all_pages(
+            client,
+            "/sync/history/movies",
+            _headers(client_id, access_token),
+            params,
         )
-        resp.raise_for_status()
-        return resp.json()
 
 
-async def get_watched_shows(client_id: str, access_token: str) -> list[dict]:
-    """Fetch all watched shows with episode-level detail.
-
-    Returns list of: {show: {title, ids: {tmdb, ...}}, seasons: [{number, episodes: [{number, plays, last_watched_at}]}]}
-    """
+async def get_history_episodes(
+    client_id: str,
+    access_token: str,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+) -> list[dict]:
+    """Fetch individual episode plays, optionally bounded by a UTC time window."""
+    params = {
+        key: _iso_utc(value)
+        for key, value in (("start_at", start_at), ("end_at", end_at))
+        if value is not None
+    }
     async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.get(
-            f"{TRAKT_BASE}/sync/watched/shows",
-            headers=_headers(client_id, access_token),
+        return await _get_all_pages(
+            client,
+            "/sync/history/episodes",
+            _headers(client_id, access_token),
+            params,
         )
-        resp.raise_for_status()
-        return resp.json()
 
 
 async def get_ratings(client_id: str, access_token: str) -> dict:
-    """Fetch all user ratings.
+    """Fetch every page of movie, show, and season ratings."""
 
-    Returns: {movies: [{rated_at, rating, movie: {ids: {tmdb}}}],
-              shows: [{rated_at, rating, show: {ids: {tmdb}}}]}
-    """
-    async def _fetch(path: str) -> list:
+    async def _fetch(path: str) -> list[dict]:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(f"{TRAKT_BASE}{path}", headers=_headers(client_id, access_token))
-            resp.raise_for_status()
-            return resp.json()
+            return await _get_all_pages(
+                client,
+                path,
+                _headers(client_id, access_token),
+            )
 
-    movies, shows = await asyncio.gather(
+    movies, shows, seasons = await asyncio.gather(
         _fetch("/sync/ratings/movies"),
         _fetch("/sync/ratings/shows"),
+        _fetch("/sync/ratings/seasons"),
     )
-    return {"movies": movies, "shows": shows}
+    return {"movies": movies, "shows": shows, "seasons": seasons}
 
 
 async def get_last_activities(client_id: str, access_token: str) -> dict:
@@ -202,10 +267,59 @@ async def get_history(
 async def add_to_history_batch(
     client_id: str,
     access_token: str,
+    movies: list[tuple[int, Optional[datetime]]],
+    episodes: list[tuple[int, int, int, Optional[datetime]]],
+) -> None:
+    """Add multiple movies and/or episodes to Trakt history in a single API call.
+
+    ``watched_at=None`` is serialized as Trakt's ``unknown`` sentinel so the
+    item is marked watched without inventing a watch date.
+    """
+    if not movies and not episodes:
+        return
+    body: dict = {}
+    if movies:
+        body["movies"] = [
+            {"ids": {"tmdb": tmdb_id}, "watched_at": _history_watched_at(watched_at)}
+            for tmdb_id, watched_at in movies
+        ]
+    if episodes:
+        shows_map: dict[int, dict[int, list[tuple[int, Optional[datetime]]]]] = {}
+        for show_tmdb_id, season, ep_num, watched_at in episodes:
+            shows_map.setdefault(show_tmdb_id, {}).setdefault(season, []).append((ep_num, watched_at))
+        body["shows"] = [
+            {
+                "ids": {"tmdb": show_tmdb_id},
+                "seasons": [
+                    {
+                        "number": season,
+                        "episodes": [
+                            {"number": n, "watched_at": _history_watched_at(watched_at)}
+                            for n, watched_at in eps
+                        ],
+                    }
+                    for season, eps in seasons.items()
+                ],
+            }
+            for show_tmdb_id, seasons in shows_map.items()
+        ]
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/history",
+            json=body,
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+
+async def add_to_collection_batch(
+    client_id: str,
+    access_token: str,
     movies: list[int],
     episodes: list[tuple[int, int, int]],
 ) -> None:
-    """Add multiple movies and/or episodes to Trakt history in a single API call.
+    """Add multiple movies and/or episodes to Trakt collection in a single API call.
 
     episodes: list of (show_tmdb_id, season_number, episode_number)
     """
@@ -230,7 +344,45 @@ async def add_to_history_batch(
         ]
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
-            f"{TRAKT_BASE}/sync/history",
+            f"{TRAKT_BASE}/sync/collection",
+            json=body,
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def remove_from_collection_batch(
+    client_id: str,
+    access_token: str,
+    movies: list[int],
+    episodes: list[tuple[int, int, int]],
+) -> None:
+    """Remove multiple movies and/or episodes from Trakt collection in a single API call.
+
+    episodes: list of (show_tmdb_id, season_number, episode_number)
+    """
+    if not movies and not episodes:
+        return
+    body: dict = {}
+    if movies:
+        body["movies"] = [{"ids": {"tmdb": tmdb_id}} for tmdb_id in movies]
+    if episodes:
+        shows_map: dict[int, dict[int, list[int]]] = {}
+        for show_tmdb_id, season, ep_num in episodes:
+            shows_map.setdefault(show_tmdb_id, {}).setdefault(season, []).append(ep_num)
+        body["shows"] = [
+            {
+                "ids": {"tmdb": show_tmdb_id},
+                "seasons": [
+                    {"number": season, "episodes": [{"number": n} for n in eps]}
+                    for season, eps in seasons.items()
+                ],
+            }
+            for show_tmdb_id, seasons in shows_map.items()
+        ]
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/collection/remove",
             json=body,
             headers=_headers(client_id, access_token),
         )
@@ -242,18 +394,32 @@ async def set_ratings_batch(
     access_token: str,
     movie_ratings: list[tuple[int, float]],
     show_ratings: list[tuple[int, float]],
+    season_ratings: list[tuple[int, float]] | None = None,
 ) -> None:
-    """Set ratings for multiple movies and/or shows in a single API call.
+    """Set movie, show, and season ratings in a single API call.
 
-    movie_ratings / show_ratings: list of (tmdb_id, rating)
+    Each tuple contains the TMDB identifier for that media object and its rating.
+    A season TMDB identifier is distinct from its parent show's TMDB identifier.
     """
-    if not movie_ratings and not show_ratings:
+    season_ratings = season_ratings or []
+    if not movie_ratings and not show_ratings and not season_ratings:
         return
     body: dict = {}
     if movie_ratings:
-        body["movies"] = [{"rating": max(1, min(10, round(r))), "ids": {"tmdb": tid}} for tid, r in movie_ratings]
+        body["movies"] = [
+            {"rating": max(1, min(10, round(rating))), "ids": {"tmdb": tmdb_id}}
+            for tmdb_id, rating in movie_ratings
+        ]
     if show_ratings:
-        body["shows"] = [{"rating": max(1, min(10, round(r))), "ids": {"tmdb": tid}} for tid, r in show_ratings]
+        body["shows"] = [
+            {"rating": max(1, min(10, round(rating))), "ids": {"tmdb": tmdb_id}}
+            for tmdb_id, rating in show_ratings
+        ]
+    if season_ratings:
+        body["seasons"] = [
+            {"rating": max(1, min(10, round(rating))), "ids": {"tmdb": tmdb_id}}
+            for tmdb_id, rating in season_ratings
+        ]
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
             f"{TRAKT_BASE}/sync/ratings",
@@ -263,12 +429,43 @@ async def set_ratings_batch(
         resp.raise_for_status()
 
 
-async def add_movie_to_history(client_id: str, access_token: str, tmdb_id: int) -> None:
-    """Mark a movie as watched on Trakt."""
+async def remove_ratings_batch(
+    client_id: str,
+    access_token: str,
+    movie_tmdb_ids: list[int],
+    show_tmdb_ids: list[int],
+    season_tmdb_ids: list[int],
+) -> None:
+    """Remove movie, show, and season ratings in one API call."""
+    if not movie_tmdb_ids and not show_tmdb_ids and not season_tmdb_ids:
+        return
+    body: dict = {}
+    if movie_tmdb_ids:
+        body["movies"] = [{"ids": {"tmdb": tmdb_id}} for tmdb_id in movie_tmdb_ids]
+    if show_tmdb_ids:
+        body["shows"] = [{"ids": {"tmdb": tmdb_id}} for tmdb_id in show_tmdb_ids]
+    if season_tmdb_ids:
+        body["seasons"] = [{"ids": {"tmdb": tmdb_id}} for tmdb_id in season_tmdb_ids]
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/ratings/remove",
+            json=body,
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def add_movie_to_history(
+    client_id: str,
+    access_token: str,
+    tmdb_id: int,
+    watched_at: Optional[datetime] = None,
+) -> None:
+    """Mark a movie as watched on Trakt, optionally without a known date."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
             f"{TRAKT_BASE}/sync/history",
-            json={"movies": [{"ids": {"tmdb": tmdb_id}}]},
+            json={"movies": [{"ids": {"tmdb": tmdb_id}, "watched_at": _history_watched_at(watched_at)}]},
             headers=_headers(client_id, access_token),
         )
         resp.raise_for_status()
@@ -303,12 +500,24 @@ async def add_episode_to_history(
     show_tmdb_id: int,
     season_number: int,
     episode_number: int,
+    watched_at: Optional[datetime] = None,
 ) -> None:
-    """Mark an episode as watched on Trakt."""
+    """Mark an episode as watched on Trakt, optionally without a known date."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
             f"{TRAKT_BASE}/sync/history",
-            json=_episode_history_payload(show_tmdb_id, season_number, episode_number),
+            json={
+                "shows": [{
+                    "ids": {"tmdb": show_tmdb_id},
+                    "seasons": [{
+                        "number": season_number,
+                        "episodes": [{
+                            "number": episode_number,
+                            "watched_at": _history_watched_at(watched_at),
+                        }],
+                    }],
+                }]
+            },
             headers=_headers(client_id, access_token),
         )
         resp.raise_for_status()
@@ -464,6 +673,38 @@ async def set_show_rating(
         )
         resp.raise_for_status()
 
+async def set_season_rating(
+    client_id: str,
+    access_token: str,
+    season_tmdb_id: int,
+    rating: float,
+) -> None:
+    """Rate a season on Trakt using its TMDB season identifier."""
+    trakt_rating = max(1, min(10, round(rating)))
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/ratings",
+            json={"seasons": [{"rating": trakt_rating, "ids": {"tmdb": season_tmdb_id}}]},
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def remove_season_rating(
+    client_id: str,
+    access_token: str,
+    season_tmdb_id: int,
+) -> None:
+    """Remove a season rating from Trakt."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/sync/ratings/remove",
+            json={"seasons": [{"ids": {"tmdb": season_tmdb_id}}]},
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
 
 async def remove_show_rating(client_id: str, access_token: str, tmdb_id: int) -> None:
     """Remove a show rating on Trakt."""
@@ -471,6 +712,72 @@ async def remove_show_rating(client_id: str, access_token: str, tmdb_id: int) ->
         resp = await client.post(
             f"{TRAKT_BASE}/sync/ratings/remove",
             json={"shows": [{"ids": {"tmdb": tmdb_id}}]},
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def scrobble_movie(
+    client_id: str,
+    access_token: str,
+    action: str,
+    tmdb_id: int,
+    progress: float,
+    title: Optional[str] = None,
+    year: Optional[int] = None,
+) -> None:
+    """Scrobble a movie to Trakt. action is 'start', 'pause', or 'stop'."""
+    body: dict = {
+        "movie": {"ids": {"tmdb": tmdb_id}},
+        "progress": round(min(100.0, max(0.0, progress)), 1),
+    }
+    if title:
+        body["movie"]["title"] = title
+    if year:
+        body["movie"]["year"] = year
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/scrobble/{action}",
+            json=body,
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+
+
+async def scrobble_episode(
+    client_id: str,
+    access_token: str,
+    action: str,
+    season_number: int,
+    episode_number: int,
+    progress: float,
+    show_tmdb_id: Optional[int] = None,
+    show_title: Optional[str] = None,
+    episode_tmdb_id: Optional[int] = None,
+) -> None:
+    """Scrobble an episode to Trakt. action is 'start', 'pause', or 'stop'."""
+    episode_ids: dict = {}
+    if episode_tmdb_id:
+        episode_ids["tmdb"] = episode_tmdb_id
+    body: dict = {
+        "episode": {
+            "season": season_number,
+            "number": episode_number,
+            **({"ids": episode_ids} if episode_ids else {}),
+        },
+        "progress": round(min(100.0, max(0.0, progress)), 1),
+    }
+    show_payload: dict = {}
+    if show_tmdb_id:
+        show_payload["ids"] = {"tmdb": show_tmdb_id}
+    if show_title:
+        show_payload["title"] = show_title
+    if show_payload:
+        body["show"] = show_payload
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{TRAKT_BASE}/scrobble/{action}",
+            json=body,
             headers=_headers(client_id, access_token),
         )
         resp.raise_for_status()

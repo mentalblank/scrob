@@ -109,7 +109,9 @@ class UserSettings(BaseModel):
     trakt_watchlist_split: Optional[bool] = None
     trakt_push_watched: Optional[bool] = None
     trakt_push_ratings: Optional[bool] = None
+    trakt_push_collection: Optional[bool] = None
     trakt_push_lists: Optional[bool] = None
+    trakt_scrobble: Optional[bool] = None
 
     trakt_full_sync_interval: Optional[int] = None
     trakt_partial_sync_interval: Optional[int] = None
@@ -124,6 +126,19 @@ class UserSettings(BaseModel):
     simkl_sync_lists: Optional[bool] = None
     simkl_push_watched: Optional[bool] = None
     simkl_push_ratings: Optional[bool] = None
+    simkl_scrobble: Optional[bool] = None
+
+    # MDBList — API key authentication
+    mdblist_api_key: Optional[str] = None
+    mdblist_connected: Optional[bool] = None  # read-only, validated by /auth/connection-status
+    mdblist_sync_watched: Optional[bool] = None
+    mdblist_sync_ratings: Optional[bool] = None
+    mdblist_sync_watchlist: Optional[bool] = None
+    mdblist_push_watched: Optional[bool] = None
+    mdblist_push_ratings: Optional[bool] = None
+    mdblist_push_watchlist: Optional[bool] = None
+    mdblist_push_collection: Optional[bool] = None
+    mdblist_scrobble: Optional[bool] = None
 
     preferences: Optional[dict] = None
     blur_explicit: Optional[bool] = None
@@ -132,9 +147,22 @@ class UserSettings(BaseModel):
     time_format_24h: Optional[bool] = None
     use_hls_player: Optional[bool] = None
     playback_target: Optional[str] = None  # "web" | "internal"
+    default_episode_order: Optional[str] = None  # "tmdb" | "tvdb"
 
     class Config:
         from_attributes = True
+
+
+class NuvioLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    url: str = "https://api.nuvio.tv"
+
+
+class NuvioConnectionTestRequest(BaseModel):
+    url: str
+    token: str
+    profile_id: int
 
 
 class MediaServerConnectionBase(BaseModel):
@@ -150,13 +178,18 @@ class MediaServerConnectionBase(BaseModel):
     sync_ratings: bool = True
     sync_playback: bool = True
     push_watched: bool = False
+    push_collection: bool = False
+    push_playback: bool = False
     push_ratings: bool = False
-    auto_sync_interval: Optional[int] = None
-    partial_sync_interval: Optional[int] = None
+    auto_sync_interval: Optional[float] = None
+    partial_sync_interval: Optional[float] = None
+    auto_push_interval: Optional[float] = None
     watchlist_to_radarr: bool = False
     watchlist_to_sonarr: bool = False
     watchlist_all_users: bool = False
     watchlist_monitored_users: Optional[list[str]] = None
+    plex_sync_watchlist: bool = False
+    plex_push_watchlist: bool = False
 
 
 class MediaServerConnectionCreate(MediaServerConnectionBase):
@@ -175,13 +208,18 @@ class MediaServerConnectionUpdate(BaseModel):
     sync_ratings: Optional[bool] = None
     sync_playback: Optional[bool] = None
     push_watched: Optional[bool] = None
+    push_collection: Optional[bool] = None
+    push_playback: Optional[bool] = None
     push_ratings: Optional[bool] = None
-    auto_sync_interval: Optional[int] = None
-    partial_sync_interval: Optional[int] = None
+    auto_sync_interval: Optional[float] = None
+    partial_sync_interval: Optional[float] = None
+    auto_push_interval: Optional[float] = None
     watchlist_to_radarr: Optional[bool] = None
     watchlist_to_sonarr: Optional[bool] = None
     watchlist_all_users: Optional[bool] = None
     watchlist_monitored_users: Optional[list[str]] = None
+    plex_sync_watchlist: Optional[bool] = None
+    plex_push_watchlist: Optional[bool] = None
 
 
 class MediaServerConnectionResponse(MediaServerConnectionBase):
@@ -230,9 +268,10 @@ class WatchEventCreate(BaseModel):
     uri_id: Optional[str] = None         # media URI (movie/series/episode)
     media_id: Optional[int] = None       # when row already exists locally
     media_type: MediaType
-    watched_at: Optional[datetime] = None
+    watched_at: Optional[datetime] = None  # omitted = now; explicit null = unknown date
     completed: bool = True
     show_uri_id: Optional[str] = None
+    series_tmdb_id: Optional[int] = None
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
 
@@ -261,6 +300,7 @@ class UserProfileUpdate(BaseModel):
     disliked_genres: Optional[list[str]] = None
     streaming_services: Optional[list[str]] = None
     content_language: Optional[str] = None
+    metadata_language: Optional[str] = None
     privacy_level: Optional[PrivacyLevel] = None
     pagination_type: Optional[str] = None
 
@@ -272,6 +312,7 @@ class UserProfileResponse(BaseModel):
     disliked_genres: list[str] = []
     streaming_services: list[str] = []
     content_language: Optional[str] = None
+    metadata_language: Optional[str] = None
     privacy_level: PrivacyLevel = PrivacyLevel.private
     avatar_url: Optional[str] = None
     pagination_type: str = "infinite_scroll"
@@ -330,6 +371,8 @@ class GlobalSettings(BaseModel):
     sonarr_season_folder        : bool = True
     radarr_require_approval     : bool = False
     sonarr_require_approval     : bool = False
+    image_cache_enabled         : bool = False
+    image_cache_limit_gb        : Optional[int] = None
 
     class Config:
         from_attributes = True

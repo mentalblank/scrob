@@ -548,13 +548,13 @@ const COUNTRIES = (countriesRes || [])
 
           <!-- ======== SYNC SECTION ======== -->
           <div class="space-y-3 mt-8">
-            <h2 class="section-headline border-b border-zinc-800 pb-2">Media Server Connections</h2>
+            <h2 class="section-headline border-b border-zinc-800 pb-2">Media &amp; Cloud Connections</h2>
 
             <!-- Connections list (server-side rendered, managed client-side) -->
             <div id="connections-list" class="space-y-3">
             {connections.map((conn) => {
-              const typeColor = conn.type === "jellyfin" ? "bg-purple-500" : conn.type === "emby" ? "bg-green-500" : "bg-yellow-500";
-              const typeLabel = conn.type === "jellyfin" ? "Jellyfin" : conn.type === "emby" ? "Emby" : "Plex";
+              const typeColor = conn.type === "jellyfin" ? "bg-purple-500" : conn.type === "emby" ? "bg-green-500" : conn.type === "plex" ? "bg-yellow-500" : "bg-cyan-500";
+              const typeLabel = conn.type === "jellyfin" ? "Jellyfin" : conn.type === "emby" ? "Emby" : conn.type === "plex" ? "Plex" : "Nuvio";
               return (
               <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden" data-connection-id={conn.id}>
                 <div class="collapsible-header flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target={`conn-body-${conn.id}`}>
@@ -593,7 +593,10 @@ const COUNTRIES = (countriesRes || [])
                 <div id={`conn-progress-${conn.id}`} class="hidden border-t border-zinc-800 px-6 py-3">
                   <div class="flex justify-between items-center mb-1.5">
                     <span id={`conn-job-label-${conn.id}`} class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
-                    <span id={`conn-job-pct-${conn.id}`} class="text-xs font-bold text-zinc-400">0%</span>
+                    <div class="flex items-center gap-3">
+                      <span id={`conn-job-pct-${conn.id}`} class="text-xs font-bold text-zinc-400">0%</span>
+                      <button type="button" id={`conn-job-cancel-${conn.id}`} class="hidden cursor-pointer text-xs font-semibold text-zinc-400 hover:text-red-400 border border-zinc-700 hover:border-red-500/50 px-2 py-0.5 rounded-md transition-colors">Cancel</button>
+                    </div>
                   </div>
                   <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                     <div id={`conn-job-bar-${conn.id}`} class="h-1.5 rounded-full transition-all duration-500 bg-blue-600" style="width: 0%"></div>
@@ -613,8 +616,8 @@ const COUNTRIES = (countriesRes || [])
                         <input type="text" class="conn-name-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.name} data-conn-id={conn.id} />
                       </div>
                       <div class="space-y-2">
-                        <label class="block text-sm font-medium text-zinc-400">Server URL</label>
-                        <input type="url" class="conn-url-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.url} data-conn-id={conn.id} />
+                        <label class="block text-sm font-medium text-zinc-400">{conn.type === "nuvio" ? "Cloud API URL" : "Server URL"}</label>
+                        <input type="url" class="conn-url-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-70" value={conn.url} data-conn-id={conn.id} disabled={conn.type === "nuvio"} />
                       </div>
                       <div class="space-y-2">
                         <label class="block text-sm font-medium text-zinc-400">
@@ -623,7 +626,7 @@ const COUNTRIES = (countriesRes || [])
                         <input type="url" class="conn-external-url-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.external_server_url || ""} data-conn-id={conn.id} />
                       </div>
                       <div class="space-y-2">
-                        <label class="block text-sm font-medium text-zinc-400">{conn.type === "plex" ? "X-Plex-Token" : "API Token"}</label>
+                        <label class="block text-sm font-medium text-zinc-400">{conn.type === "plex" ? "X-Plex-Token" : conn.type === "nuvio" ? "Refresh Token" : "API Token"}</label>
                         <div class="relative">
                           <input type="password" class="conn-token-input w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.token} data-conn-id={conn.id} />
                           <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle token visibility">
@@ -632,7 +635,14 @@ const COUNTRIES = (countriesRes || [])
                           </button>
                         </div>
                       </div>
-                      {conn.type !== "plex" && (
+                      {conn.type === "nuvio" ? (
+                        <div class="space-y-2">
+                          <label class="block text-sm font-medium text-zinc-400">Nuvio Profile</label>
+                          <select aria-label="Nuvio profile" class="conn-user-id-input w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
+                            <option value={conn.server_user_id || ""}>{conn.server_username || `Profile ${conn.server_user_id}`} (#{conn.server_user_id})</option>
+                          </select>
+                        </div>
+                      ) : conn.type !== "plex" && (
                         <div class="space-y-2">
                           <label class="block text-sm font-medium text-zinc-400">User ID</label>
                           <input type="text" class="conn-user-id-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_user_id || ""} data-conn-id={conn.id} />
@@ -645,25 +655,29 @@ const COUNTRIES = (countriesRes || [])
                           <input type="text" class="conn-username-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_username || ""} data-conn-id={conn.id} />
                         </div>
                       )}
-                      <div class="space-y-2">
-                        <label class="block text-sm font-medium text-zinc-400">Libraries to sync</label>
-                        <div class={`conn-library-picker`} data-conn-id={conn.id} data-conn-type={conn.type}>
-                          <div class="conn-libraries-list space-y-1 text-sm text-zinc-500 italic">Checking connection…</div>
-                          <p class="text-xs text-zinc-400 mt-1">Leave all unchecked to sync every library.</p>
-                          <div class="mt-3">
-                            <button type="button" data-action="scan_libraries" data-conn-id={conn.id} class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-xl transition-colors cursor-pointer">Trigger library scan</button>
+                      {conn.type !== "nuvio" && (
+                        <>
+                          <div class="space-y-2">
+                            <label class="block text-sm font-medium text-zinc-400">Libraries to sync</label>
+                            <div class={`conn-library-picker`} data-conn-id={conn.id} data-conn-type={conn.type}>
+                              <div class="conn-libraries-list space-y-1 text-sm text-zinc-500 italic">Checking connection…</div>
+                              <p class="text-xs text-zinc-400 mt-1">Leave all unchecked to sync every library.</p>
+                              <div class="mt-3">
+                                <button type="button" data-action="scan_libraries" data-conn-id={conn.id} class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-4 py-2 rounded-xl transition-colors cursor-pointer">Trigger library scan</button>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      </div>
-                      <div class="space-y-2">
-                        <label class="block text-sm font-medium text-zinc-400">Webhook URL</label>
-                        <div class="flex gap-2">
-                          <input type="text" readonly class="conn-webhook-url flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
-                          <button type="button" class="conn-copy-webhook px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer" data-conn-id={conn.id}>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
-                          </button>
-                        </div>
-                      </div>
+                          <div class="space-y-2">
+                            <label class="block text-sm font-medium text-zinc-400">Webhook URL</label>
+                            <div class="flex gap-2">
+                              <input type="text" readonly class="conn-webhook-url flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-300 font-mono text-xs focus:outline-none cursor-default select-all" value="" data-conn-id={conn.id} data-conn-type={conn.type} />
+                              <button type="button" class="conn-copy-webhook px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 rounded-xl transition-colors cursor-pointer" data-conn-id={conn.id}>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                     <!-- Right: Sync Preferences -->
                     <div class="space-y-4">
@@ -671,9 +685,10 @@ const COUNTRIES = (countriesRes || [])
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">{typeLabel} → Scrob</p>
                         {[
                           { key: "sync_collection", label: "Collection status" },
-                          { key: "sync_watched",    label: "Watched status" },
-                          { key: "sync_ratings",    label: "Ratings" },
-                          { key: "sync_playback",   label: "Playback events" },
+                          { key: "sync_watched", label: "Watched status" },
+                          ...(conn.type === "nuvio" ? [] : [{ key: "sync_ratings", label: "Ratings" }]),
+                          { key: "sync_playback", label: conn.type === "nuvio" ? "Playback progress" : "Playback events" },
+                          ...(conn.type === "plex" ? [{ key: "plex_sync_watchlist", label: "Watchlist" }] : []),
                         ].map(({ key, label }) => (
                           <label class="flex items-center gap-3 cursor-pointer group">
                             <input type="checkbox" class="conn-pref-checkbox w-4 h-4 rounded cursor-pointer" data-conn-id={conn.id} data-pref={key} checked={conn[key as keyof typeof conn] !== false} />
@@ -683,17 +698,20 @@ const COUNTRIES = (countriesRes || [])
                         <div class="flex items-center gap-3">
                           <button type="button" data-action="sync_connection" data-conn-id={conn.id} data-conn-type={conn.type} data-conn-name={conn.name}
                             disabled={!hasTmdbKey}
-                            title={!hasTmdbKey ? "TMDB API Key is required for sync" : `Pull from ${conn.name}`}
+                            title={!hasTmdbKey ? "TMDB API Key is required for sync" : conn.type === "nuvio" ? "Sync Nuvio library, watch history, and playback progress" : `Pull from ${conn.name}`}
                             class={`js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
-                          >Pull</button>
+                          >{conn.type === "nuvio" ? "Sync now" : "Pull"}</button>
                           <span id={`${conn.type}-last-sync`} class="hidden text-xs text-zinc-500"></span>
                         </div>
                       </div>
                       <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → {typeLabel}</p>
                         {[
+                          ...(conn.type === "nuvio" ? [{ key: "push_collection", label: "Collection status" }] : []),
                           { key: "push_watched", label: "Watched status" },
-                          { key: "push_ratings", label: "Ratings" },
+                          ...(conn.type === "nuvio" ? [{ key: "push_playback", label: "Playback progress" }] : []),
+                          ...(conn.type === "nuvio" ? [] : [{ key: "push_ratings", label: "Ratings" }]),
+                          ...(conn.type === "plex" ? [{ key: "plex_push_watchlist", label: "Watchlist" }] : []),
                         ].map(({ key, label }) => (
                           <label class="flex items-center gap-3 cursor-pointer group">
                             <input type="checkbox" class="conn-pref-checkbox w-4 h-4 rounded cursor-pointer" data-conn-id={conn.id} data-pref={key} checked={!!conn[key as keyof typeof conn]} />
@@ -701,7 +719,7 @@ const COUNTRIES = (countriesRes || [])
                           </label>
                         ))}
                         <button type="button" data-action="push_upstream" data-conn-id={conn.id} data-conn-name={conn.name}
-                          title="Push all watched states and ratings from Scrob to this server"
+                          title={`Push enabled data from Scrob to ${conn.name}`}
                           class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                         >Push</button>
                       </div>
@@ -712,8 +730,18 @@ const COUNTRIES = (countriesRes || [])
                             <label class="text-sm text-zinc-300">Full Audit</label>
                             <select class="conn-auto-sync bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
                               <option value="" selected={!conn.auto_sync_interval}>Disabled</option>
-                              {[6, 12, 24, 48, 168].map(h => (
-                                <option value={String(h)} selected={conn.auto_sync_interval === h}>Every {h === 168 ? 'week' : h + 'h'}</option>
+                              {[
+                                { value: 0.25, label: "Every 15m" },
+                                { value: 0.5, label: "Every 30m" },
+                                { value: 1, label: "Every 1h" },
+                                { value: 3, label: "Every 3h" },
+                                { value: 6, label: "Every 6h" },
+                                { value: 12, label: "Every 12h" },
+                                { value: 24, label: "Every 24h" },
+                                { value: 48, label: "Every 48h" },
+                                { value: 168, label: "Every week" },
+                              ].map(({ value, label }) => (
+                                <option value={String(value)} selected={conn.auto_sync_interval === value}>{label}</option>
                               ))}
                             </select>
                           </div>
@@ -726,6 +754,24 @@ const COUNTRIES = (countriesRes || [])
                               <option value="" selected={!conn.partial_sync_interval}>Disabled</option>
                               {[1, 2, 4, 8, 12, 24].map(h => (
                                 <option value={String(h)} selected={conn.partial_sync_interval === h}>Every {h}h</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div class="flex items-center justify-between gap-4">
+                            <label class="text-sm text-zinc-300">Push interval</label>
+                            <select class="conn-auto-push bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer" data-conn-id={conn.id}>
+                              <option value="" selected={!conn.auto_push_interval}>Disabled</option>
+                              {[
+                                { value: 0.25, label: "Every 15m" },
+                                { value: 0.5, label: "Every 30m" },
+                                { value: 1, label: "Every 1h" },
+                                { value: 3, label: "Every 3h" },
+                                { value: 6, label: "Every 6h" },
+                                { value: 12, label: "Every 12h" },
+                                { value: 24, label: "Every 24h" },
+                                { value: 48, label: "Every 48h" },
+                              ].map(({ value, label }) => (
+                                <option value={String(value)} selected={conn.auto_push_interval === value}>{label}</option>
                               ))}
                             </select>
                           </div>
@@ -798,11 +844,16 @@ const COUNTRIES = (countriesRes || [])
                         <option value="jellyfin">Jellyfin</option>
                         <option value="emby">Emby</option>
                         <option value="plex">Plex</option>
+                        <option value="nuvio">Nuvio</option>
                       </select>
                     </div>
-                    <div class="space-y-2">
-                      <label for="new-conn-url" class="block text-sm font-medium text-zinc-400">Server URL</label>
-                      <input type="url" id="new-conn-url" placeholder="http://192.168.1.100:8096" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    <div id="new-conn-url-row" class="space-y-2">
+                      <label id="new-conn-url-label" for="new-conn-url" class="block text-sm font-medium text-zinc-400">Server URL</label>
+                      <input type="url" id="new-conn-url" placeholder="http://192.168.1.100:8096" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-70" />
+                    </div>
+                    <div id="new-nuvio-email-row" class="space-y-2 hidden">
+                      <label for="new-nuvio-email" class="block text-sm font-medium text-zinc-400">Nuvio Email</label>
+                      <input type="email" id="new-nuvio-email" autocomplete="username" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                     </div>
                     <div class="space-y-2">
                       <label for="new-conn-external-url" class="block text-sm font-medium text-zinc-400">
@@ -812,7 +863,7 @@ const COUNTRIES = (countriesRes || [])
                       <p class="text-xs text-zinc-500 mt-1">If set, the Play button will redirect to this URL instead of the internal player. For Plex, use the base web URL including your machine identifier.</p>
                     </div>
                     <div class="space-y-2">
-                      <label for="new-conn-token" class="block text-sm font-medium text-zinc-400">Token</label>
+                      <label id="new-conn-token-label" for="new-conn-token" class="block text-sm font-medium text-zinc-400">Token</label>
                       <div class="relative">
                         <input type="password" id="new-conn-token" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
                         <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle token visibility">
@@ -824,6 +875,12 @@ const COUNTRIES = (countriesRes || [])
                     <div id="new-conn-user-id-row" class="space-y-2">
                       <label for="new-conn-user-id" class="block text-sm font-medium text-zinc-400">User ID</label>
                       <input type="text" id="new-conn-user-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                    </div>
+                    <div id="new-nuvio-profile-row" class="space-y-2 hidden">
+                      <label for="new-nuvio-profile" class="block text-sm font-medium text-zinc-400">Nuvio Profile</label>
+                      <select id="new-nuvio-profile" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
+                        <option value="">Sign in to load profiles</option>
+                      </select>
                     </div>
                     <div id="new-conn-username-row" class="space-y-2 hidden">
                       <label for="new-conn-username" class="block text-sm font-medium text-zinc-400">Plex Username</label>
@@ -837,30 +894,38 @@ const COUNTRIES = (countriesRes || [])
                   </div>
                   <div class="space-y-4">
                     <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
-                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Server → Scrob</p>
+                      <p id="new-pull-heading" class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Server → Scrob</p>
                       {[
                         { id: "new-sync-collection", label: "Collection status", defaultOn: true },
                         { id: "new-sync-watched",    label: "Watched status",    defaultOn: true },
                         { id: "new-sync-ratings",    label: "Ratings",           defaultOn: true },
                         { id: "new-sync-playback",   label: "Playback events",   defaultOn: true },
                       ].map(({ id, label, defaultOn }) => (
-                        <label class="flex items-center gap-3 cursor-pointer group">
+                        <label class="new-provider-pref flex items-center gap-3 cursor-pointer group">
                           <input type="checkbox" id={id} class="w-4 h-4 rounded cursor-pointer" checked={defaultOn} />
-                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                          <span id={`${id}-label`} class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
                         </label>
                       ))}
                     </div>
                     <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
-                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Server</p>
+                      <p id="new-push-heading" class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Server</p>
                       {[
                         { id: "new-push-watched", label: "Watched status" },
                         { id: "new-push-ratings", label: "Ratings" },
                       ].map(({ id, label }) => (
-                        <label class="flex items-center gap-3 cursor-pointer group">
+                        <label class="new-provider-pref flex items-center gap-3 cursor-pointer group">
                           <input type="checkbox" id={id} class="w-4 h-4 rounded cursor-pointer" />
                           <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
                         </label>
                       ))}
+                      <label id="new-push-collection-row" class="hidden new-provider-pref flex items-center gap-3 cursor-pointer group">
+                        <input type="checkbox" id="new-push-collection" class="w-4 h-4 rounded cursor-pointer" disabled />
+                        <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">Collection status</span>
+                      </label>
+                      <label id="new-push-playback-row" class="hidden new-provider-pref flex items-center gap-3 cursor-pointer group">
+                        <input type="checkbox" id="new-push-playback" class="w-4 h-4 rounded cursor-pointer" disabled />
+                        <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">Playback progress</span>
+                      </label>
                     </div>
                     <div class="bg-zinc-950 rounded-xl p-4 space-y-4">
                       <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Auto Sync</p>
@@ -869,7 +934,17 @@ const COUNTRIES = (countriesRes || [])
                           <label class="text-sm text-zinc-300">Full Audit</label>
                           <select id="new-auto-sync" class="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 cursor-pointer">
                             <option value="">Disabled</option>
-                            {[6, 12, 24, 48, 168].map(h => (<option value={String(h)}>Every {h === 168 ? 'week' : h + 'h'}</option>))}
+                            {[
+                              { value: 0.25, label: "Every 15m" },
+                              { value: 0.5, label: "Every 30m" },
+                              { value: 1, label: "Every 1h" },
+                              { value: 3, label: "Every 3h" },
+                              { value: 6, label: "Every 6h" },
+                              { value: 12, label: "Every 12h" },
+                              { value: 24, label: "Every 24h" },
+                              { value: 48, label: "Every 48h" },
+                              { value: 168, label: "Every week" },
+                            ].map(({ value, label }) => (<option value={String(value)}>{label}</option>))}
                           </select>
                         </div>
                         <div class="flex items-center justify-between gap-4">
@@ -877,6 +952,22 @@ const COUNTRIES = (countriesRes || [])
                           <select id="new-partial-sync" class="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 cursor-pointer">
                             <option value="">Disabled</option>
                             {[1, 2, 4, 8, 12, 24].map(h => (<option value={String(h)}>Every {h}h</option>))}
+                          </select>
+                        </div>
+                        <div class="flex items-center justify-between gap-4">
+                          <label class="text-sm text-zinc-300">Push interval</label>
+                          <select id="new-auto-push" class="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-100 cursor-pointer">
+                            <option value="">Disabled</option>
+                            {[
+                              { value: 0.25, label: "Every 15m" },
+                              { value: 0.5, label: "Every 30m" },
+                              { value: 1, label: "Every 1h" },
+                              { value: 3, label: "Every 3h" },
+                              { value: 6, label: "Every 6h" },
+                              { value: 12, label: "Every 12h" },
+                              { value: 24, label: "Every 24h" },
+                              { value: 48, label: "Every 48h" },
+                            ].map(({ value, label }) => (<option value={String(value)}>{label}</option>))}
                           </select>
                         </div>
                       </div>
@@ -1075,17 +1166,16 @@ const COUNTRIES = (countriesRes || [])
                       <>
                         <button
                           type="button"
-                          data-action="sync_trakt"
+                          data-action="full_sync_trakt"
                           disabled={!hasTmdbKey}
-                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Full library audit and sync"}
+                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Scan all Trakt watch history again"}
                           class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
                         >Full Sync</button>
                         <button
                           type="button"
                           data-action="sync_trakt"
-                          data-partial="true"
                           disabled={!hasTmdbKey}
-                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Quick incremental sync (history check)"}
+                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Pull new Trakt history since the last successful sync"}
                           class={`js-action-btn text-xs sm:text-sm px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-not-allowed opacity-50"}`}
                         >Partial Sync</button>
                         <button type="button" id="trakt-disconnect-btn" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer">Disconnect</button>
@@ -1102,7 +1192,10 @@ const COUNTRIES = (countriesRes || [])
               <div id="trakt-progress" class="hidden border-t border-zinc-800 px-6 py-3">
                 <div class="flex justify-between items-center mb-1.5">
                   <span id="trakt-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
-                  <span id="trakt-job-pct" class="text-xs font-bold text-zinc-400"></span>
+                  <div class="flex items-center gap-3">
+                    <span id="trakt-job-pct" class="text-xs font-bold text-zinc-400"></span>
+                    <button type="button" id="trakt-job-cancel" class="hidden cursor-pointer text-xs font-semibold text-zinc-400 hover:text-red-400 border border-zinc-700 hover:border-red-500/50 px-2 py-0.5 rounded-md transition-colors">Cancel</button>
+                  </div>
                 </div>
                 <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                   <div id="trakt-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-red-500 animate-pulse" style="width: 100%"></div>
@@ -1187,19 +1280,29 @@ const COUNTRIES = (countriesRes || [])
                             </label>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          data-action="sync_trakt"
-                          disabled={!hasTmdbKey}
-                          title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Pull watched history and ratings from Trakt"}
-                          class={`js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
-                        >Pull</button>
+                        <div class="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            data-action="sync_trakt"
+                            disabled={!hasTmdbKey}
+                            title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Pull new Trakt history since the last successful sync"}
+                            class={`js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
+                          >Pull</button>
+                          <button
+                            type="button"
+                            data-action="full_sync_trakt"
+                            disabled={!hasTmdbKey}
+                            title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Scan all Trakt watch history again"}
+                            class="js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-700"
+                          >Full resync</button>
+                        </div>
                       </div>
                       <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → Trakt</p>
                         {[
                           { key: "trakt_push_watched", label: "Watched status" },
                           { key: "trakt_push_ratings", label: "Ratings" },
+                          { key: "trakt_push_collection", label: "Collection" },
                           { key: "trakt_push_lists", label: "Lists" },
                         ].map(({ key, label }) => (
                           <label class="flex items-center gap-3 cursor-pointer group">
@@ -1207,6 +1310,12 @@ const COUNTRIES = (countriesRes || [])
                             <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
                           </label>
                         ))}
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name="trakt_scrobble" id="trakt_scrobble" checked={!!settings.trakt_scrobble} class="sync-pref-checkbox w-4 h-4 rounded accent-red-500 cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">
+                            Now watching <span class="text-zinc-500 text-xs">(live scrobble on play/pause/stop)</span>
+                          </span>
+                        </label>
                         <button
                           type="button"
                           data-action="push_trakt"
@@ -1272,7 +1381,10 @@ const COUNTRIES = (countriesRes || [])
               <div id="simkl-progress" class="hidden border-t border-zinc-800 px-6 py-3">
                 <div class="flex justify-between items-center mb-1.5">
                   <span id="simkl-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
-                  <span id="simkl-job-pct" class="text-xs font-bold text-zinc-400"></span>
+                  <div class="flex items-center gap-3">
+                    <span id="simkl-job-pct" class="text-xs font-bold text-zinc-400"></span>
+                    <button type="button" id="simkl-job-cancel" class="hidden cursor-pointer text-xs font-semibold text-zinc-400 hover:text-red-400 border border-zinc-700 hover:border-red-500/50 px-2 py-0.5 rounded-md transition-colors">Cancel</button>
+                  </div>
                 </div>
                 <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                   <div id="simkl-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-blue-600 animate-pulse" style="width: 100%"></div>
@@ -1343,6 +1455,12 @@ const COUNTRIES = (countriesRes || [])
                             <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
                           </label>
                         ))}
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name="simkl_scrobble" id="simkl_scrobble" checked={!!settings.simkl_scrobble} class="sync-pref-checkbox w-4 h-4 rounded accent-teal-500 cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">
+                            Now watching <span class="text-zinc-500 text-xs">(live checkin on play/stop)</span>
+                          </span>
+                        </label>
                         <button
                           type="button"
                           data-action="push_simkl"
@@ -1360,6 +1478,118 @@ const COUNTRIES = (countriesRes || [])
 
           <!-- Tab Panel: Integrations -->
           <div data-settings-tab="integrations" class="space-y-6 hidden">
+            <!-- MDBList collapsible row -->
+            <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-2xl backdrop-blur-xl overflow-hidden">
+              <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="mdblist-body">
+                <div class="flex items-center gap-3 pointer-events-none">
+                  <span class="w-2 h-2 bg-violet-400 rounded-full shrink-0"></span>
+                  <div class="flex flex-col gap-0.5">
+                    <span class="font-medium text-zinc-200">MDBList</span>
+                    <span id="mdblist-conn-status" class="hidden text-xs font-normal px-1.5 py-0.5 rounded self-start pointer-events-auto"></span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  {settings.mdblist_connected && (
+                    <div class="flex gap-2" onclick="event.stopPropagation()">
+                      <button type="button" id="mdblist-disconnect-btn" class="js-action-btn text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-xl transition-colors cursor-pointer">Disconnect</button>
+                    </div>
+                  )}
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none ml-1 shrink-0">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </div>
+              </div>
+              <div id="mdblist-progress" class="hidden border-t border-zinc-800 px-6 py-3">
+                <div class="flex justify-between items-center mb-1.5">
+                  <span id="mdblist-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
+                  <div class="flex items-center gap-3">
+                    <span id="mdblist-job-pct" class="text-xs font-bold text-zinc-400"></span>
+                    <button type="button" id="mdblist-job-cancel" class="hidden cursor-pointer text-xs font-semibold text-zinc-400 hover:text-red-400 border border-zinc-700 hover:border-red-500/50 px-2 py-0.5 rounded-md transition-colors">Cancel</button>
+                  </div>
+                </div>
+                <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                  <div id="mdblist-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-violet-500 animate-pulse" style="width: 100%"></div>
+                </div>
+                <div class="flex justify-between text-xs text-zinc-500 mt-1">
+                  <span id="mdblist-job-items"></span>
+                  <span id="mdblist-job-status"></span>
+                </div>
+              </div>
+              <div id="mdblist-body" class="border-t border-zinc-800 hidden">
+                <div class="grid md:grid-cols-2 gap-8 px-6 py-6">
+                  <div class="space-y-4">
+                    <div class="space-y-2">
+                      <label for="mdblist_api_key" class="block text-sm font-medium text-zinc-400">API Key</label>
+                      <div class="relative group/field">
+                        <input
+                          type="password"
+                          name="mdblist_api_key"
+                          id="mdblist_api_key"
+                          value={settings.mdblist_api_key || ""}
+                          placeholder="Your MDBList API key"
+                          class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all"
+                        />
+                        <button type="button" class="password-toggle absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer transition-colors" aria-label="Toggle password visibility">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.412 7.943 7.213 5 12 5c4.787 0 8.588 2.943 9.964 6.678.066.18.066.362 0 .544C20.588 16.057 16.787 19 12 19c-4.787 0-8.588-2.943-9.964-6.678z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 eye-slash-icon hidden"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                        </button>
+                      </div>
+                      <p class="text-xs text-zinc-500">Copy the API key from <span class="text-zinc-400">mdblist.com/preferences</span>. Save Settings validates it before storage.</p>
+                    </div>
+                  </div>
+                  <div class="space-y-4">
+                    <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">MDBList → Scrob</p>
+                      {[
+                        { key: "mdblist_sync_watched", label: "Watched history" },
+                        { key: "mdblist_sync_ratings", label: "Ratings" },
+                        { key: "mdblist_sync_watchlist", label: "Watchlist" },
+                      ].map(({ key, label }) => (
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name={key} id={key} checked={settings[key as keyof typeof settings] !== false} class="sync-pref-checkbox w-4 h-4 rounded accent-violet-500 cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                        </label>
+                      ))}
+                      <button
+                        type="button"
+                        data-action="sync_mdblist"
+                        disabled={!settings.mdblist_connected || !hasTmdbKey}
+                        title={!hasTmdbKey ? "TMDB API Key is required for sync" : "Pull watched history, ratings, and watchlist from MDBList"}
+                        class="js-action-btn text-sm bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border border-violet-500/30 px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                      >Pull</button>
+                    </div>
+                    <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → MDBList</p>
+                      {[
+                        { key: "mdblist_push_watched", label: "Watched status" },
+                        { key: "mdblist_push_ratings", label: "Ratings" },
+                        { key: "mdblist_push_watchlist", label: "Watchlist" },
+                        { key: "mdblist_push_collection", label: "Collection" },
+                      ].map(({ key, label }) => (
+                        <label class="flex items-center gap-3 cursor-pointer group">
+                          <input type="checkbox" name={key} id={key} checked={!!settings[key as keyof typeof settings]} class="sync-pref-checkbox w-4 h-4 rounded accent-violet-500 cursor-pointer" />
+                          <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">{label}</span>
+                        </label>
+                      ))}
+                      <label class="flex items-center gap-3 cursor-pointer group">
+                        <input type="checkbox" name="mdblist_scrobble" id="mdblist_scrobble" checked={!!settings.mdblist_scrobble} class="sync-pref-checkbox w-4 h-4 rounded accent-violet-500 cursor-pointer" />
+                        <span class="text-sm text-zinc-300 group-hover:text-zinc-100 transition-colors">
+                          Now watching <span class="text-zinc-500 text-xs">(live scrobble on play/pause/stop)</span>
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        data-action="push_mdblist"
+                        disabled={!settings.mdblist_connected}
+                        class="js-action-btn text-sm bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border border-violet-500/30 px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                        title="Push watched states, ratings, and the managed watchlist to MDBList"
+                      >Push</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Radarr collapsible row -->
             <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div class="collapsible-header flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="radarr-body">
@@ -1931,6 +2161,20 @@ const COUNTRIES = (countriesRes || [])
               </select>
               <p class="text-xs text-zinc-500">Choose which provider to use as the primary metadata source for TV shows. Movies will continue to use TMDB.</p>
             </div>
+
+            <!-- Default Episode Order -->
+            <div class="space-y-2 col-span-1 md:col-span-2">
+              <label for="default_episode_order" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Default Episode Order</label>
+              <select
+                name="default_episode_order"
+                id="default_episode_order"
+                class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-300 text-xs focus:border-blue-500 focus:outline-none transition cursor-pointer appearance-none"
+              >
+                <option value="tmdb" selected={settings.default_episode_order !== "tvdb"}>TheMovieDB (TMDB) Order - Default</option>
+                <option value="tvdb" selected={settings.default_episode_order === "tvdb"}>TheTVDB (TVDB) Order</option>
+              </select>
+              <p class="text-xs text-zinc-500">Default episode ordering scheme (TMDB vs TVDB) used when browsing TV shows.</p>
+            </div>
           </div>
         </section>
 
@@ -2306,6 +2550,29 @@ const COUNTRIES = (countriesRes || [])
   };
   const showMessage = (window as any).showMessage;
 
+  // ── Shared sync-job cancellation ──────────────────────────────────────────
+  // The background job only notices on its next cooperative checkpoint, so the
+  // strip keeps showing "Cancelling…" until the next poll reflects status=cancelled.
+  async function cancelSyncJob(jobId: number, btn: HTMLButtonElement | null) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
+    try {
+      await fetch(`/api/proxy/sync/${jobId}/cancel`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+    } catch {
+      // best-effort — the next poll reflects the real state either way
+    }
+  }
+
+  function wireCancelButton(btn: HTMLButtonElement | null, job: any) {
+    if (!btn) return;
+    btn.classList.remove('hidden');
+    btn.disabled = false;
+    btn.textContent = 'Cancel';
+    btn.onclick = () => cancelSyncJob(job.id, btn);
+  }
+
   // ── Per-connection progress tracking ─────────────────────────────────────
   const connPollers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -2316,6 +2583,7 @@ const COUNTRIES = (countriesRes || [])
     const label = document.getElementById(`conn-job-label-${connId}`);
     const items = document.getElementById(`conn-job-items-${connId}`);
     const statusEl = document.getElementById(`conn-job-status-${connId}`);
+    const cancelBtn = document.getElementById(`conn-job-cancel-${connId}`) as HTMLButtonElement | null;
     if (!strip) return;
 
     if (!job) { strip.classList.add('hidden'); return; }
@@ -2324,19 +2592,22 @@ const COUNTRIES = (countriesRes || [])
 
     const isPush = job.job_type === 'push';
     const isFailed = job.status === 'failed';
+    const isCancelled = job.status === 'cancelled';
     const isCompleted = job.status === 'completed';
     const isPending = job.status === 'pending';
 
-    if (isFailed) {
+    if (isFailed || isCancelled) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500'; bar.style.width = '100%'; }
-      if (label) label.textContent = isPush ? 'Push failed' : 'Pull failed';
+      if (label) label.textContent = isCancelled ? (isPush ? 'Push cancelled' : 'Pull cancelled') : (isPush ? 'Push failed' : 'Pull failed');
       if (pctEl) pctEl.textContent = '';
-      if (items) items.textContent = esc(job.error_message || 'Unknown error');
+      if (items) items.textContent = isCancelled ? '' : esc(job.error_message || 'Unknown error');
       if (statusEl) statusEl.textContent = '';
       return;
     }
 
     if (isCompleted) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (bar) { bar.className = `h-1.5 rounded-full transition-all duration-500 ${isPush ? 'bg-amber-500' : 'bg-blue-600'}`; bar.style.width = '100%'; }
       if (label) label.textContent = isPush ? 'Push complete' : 'Pull complete';
       if (pctEl) pctEl.textContent = '100%';
@@ -2346,6 +2617,7 @@ const COUNTRIES = (countriesRes || [])
       return;
     }
 
+    wireCancelButton(cancelBtn, job);
     // pending / running
     const pct = job.total_items > 0
       ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100))
@@ -2378,7 +2650,7 @@ const COUNTRIES = (countriesRes || [])
       const job = jobs.find(j => String(j.connection_id) === connId);
 
       const isActive = job && (job.status === 'pending' || job.status === 'running');
-      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed')
+      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled')
         && new Date(job.updated_at).getTime() > Date.now() - 8000;
 
       renderConnProgress(connId, (isActive || isRecentDone) ? job : null);
@@ -2417,6 +2689,7 @@ const COUNTRIES = (countriesRes || [])
     const pctEl  = document.getElementById('simkl-job-pct');
     const label  = document.getElementById('simkl-job-label');
     const items  = document.getElementById('simkl-job-items');
+    const cancelBtn = document.getElementById('simkl-job-cancel') as HTMLButtonElement | null;
     if (!strip) return;
 
     if (!job) { strip.classList.add('hidden'); return; }
@@ -2424,18 +2697,21 @@ const COUNTRIES = (countriesRes || [])
 
     const isPush     = job.job_type === 'push';
     const isFailed   = job.status === 'failed';
+    const isCancelled = job.status === 'cancelled';
     const isCompleted = job.status === 'completed';
     const isPending  = job.status === 'pending';
 
-    if (isFailed) {
+    if (isFailed || isCancelled) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500'; bar.style.width = '100%'; }
-      if (label) label.textContent = isPush ? 'Push failed' : 'Pull failed';
+      if (label) label.textContent = isCancelled ? (isPush ? 'Push cancelled' : 'Pull cancelled') : (isPush ? 'Push failed' : 'Pull failed');
       if (pctEl) pctEl.textContent = '';
-      if (items) items.textContent = esc(job.error_message || 'Unknown error');
+      if (items) items.textContent = isCancelled ? '' : esc(job.error_message || 'Unknown error');
       return;
     }
 
     if (isCompleted) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (bar) { bar.className = `h-1.5 rounded-full transition-all duration-500 ${isPush ? 'bg-amber-500' : 'bg-blue-600'}`; bar.style.width = '100%'; }
       if (label) label.textContent = isPush ? 'Push complete' : 'Pull complete';
       if (pctEl) pctEl.textContent = '100%';
@@ -2446,6 +2722,7 @@ const COUNTRIES = (countriesRes || [])
       return;
     }
 
+    wireCancelButton(cancelBtn, job);
     const pct = job.total_items > 0 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100)) : 0;
     const barColor = isPush ? 'bg-amber-500' : 'bg-blue-600';
     const indeterminate = isPending || pct === 0;
@@ -2465,7 +2742,7 @@ const COUNTRIES = (countriesRes || [])
       const jobs: any[] = await res.json();
       const job = jobs.find(j => j.source === 'simkl');
       const isActive = job && (job.status === 'pending' || job.status === 'running');
-      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed')
+      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled')
         && new Date(job.updated_at).getTime() > Date.now() - 8000;
       renderSimklProgress((isActive || isRecentDone) ? job : null);
       if (isActive) {
@@ -2494,6 +2771,7 @@ const COUNTRIES = (countriesRes || [])
     const pctEl  = document.getElementById('trakt-job-pct');
     const label  = document.getElementById('trakt-job-label');
     const items  = document.getElementById('trakt-job-items');
+    const cancelBtn = document.getElementById('trakt-job-cancel') as HTMLButtonElement | null;
     if (!strip) return;
 
     if (!job) { strip.classList.add('hidden'); return; }
@@ -2501,18 +2779,21 @@ const COUNTRIES = (countriesRes || [])
 
     const isPush      = job.job_type === 'push';
     const isFailed    = job.status === 'failed';
+    const isCancelled = job.status === 'cancelled';
     const isCompleted = job.status === 'completed';
     const isPending   = job.status === 'pending';
 
-    if (isFailed) {
+    if (isFailed || isCancelled) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500'; bar.style.width = '100%'; }
-      if (label) label.textContent = isPush ? 'Push failed' : 'Pull failed';
+      if (label) label.textContent = isCancelled ? (isPush ? 'Push cancelled' : 'Pull cancelled') : (isPush ? 'Push failed' : 'Pull failed');
       if (pctEl) pctEl.textContent = '';
-      if (items) items.textContent = esc(job.error_message || 'Unknown error');
+      if (items) items.textContent = isCancelled ? '' : esc(job.error_message || 'Unknown error');
       return;
     }
 
     if (isCompleted) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500'; bar.style.width = '100%'; }
       if (label) label.textContent = isPush ? 'Push complete' : 'Pull complete';
       if (pctEl) pctEl.textContent = '100%';
@@ -2523,6 +2804,7 @@ const COUNTRIES = (countriesRes || [])
       return;
     }
 
+    wireCancelButton(cancelBtn, job);
     const pct = job.total_items > 0 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100)) : 0;
     const indeterminate = isPending || pct === 0;
     if (bar) {
@@ -2541,7 +2823,7 @@ const COUNTRIES = (countriesRes || [])
       const jobs: any[] = await res.json();
       const job = jobs.find(j => j.source === 'trakt');
       const isActive = job && (job.status === 'pending' || job.status === 'running');
-      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed')
+      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled')
         && new Date(job.updated_at).getTime() > Date.now() - 8000;
       renderTraktProgress((isActive || isRecentDone) ? job : null);
       if (isActive) {
@@ -2561,6 +2843,111 @@ const COUNTRIES = (countriesRes || [])
     pollTraktJob();
   }
 
+  // ── MDBList progress tracking ─────────────────────────────────────────────
+  let mdblistPoller: ReturnType<typeof setTimeout> | null = null;
+  let mdblistHideTimer: ReturnType<typeof setTimeout> | null = null;
+  // The job id we last observed as pending/running. If that exact job later shows
+  // up as completed/failed, we show it regardless of how much wall-clock time has
+  // passed — comparing against job.updated_at alone is unreliable because browsers
+  // throttle setTimeout in backgrounded tabs (e.g. the user switching away to check
+  // mdblist.com while the push runs), which can delay the next poll well past any
+  // fixed "recently completed" window and make the job look stale when it isn't.
+  let mdblistTrackedJobId: number | null = null;
+
+  function renderMdblistProgress(job: any) {
+    const strip = document.getElementById('mdblist-progress');
+    const bar = document.getElementById('mdblist-job-bar');
+    const pctEl = document.getElementById('mdblist-job-pct');
+    const label = document.getElementById('mdblist-job-label');
+    const items = document.getElementById('mdblist-job-items');
+    const cancelBtn = document.getElementById('mdblist-job-cancel') as HTMLButtonElement | null;
+    if (!strip) return;
+    if (!job) { strip.classList.add('hidden'); return; }
+    strip.classList.remove('hidden');
+
+    const isPush = job.job_type === 'push';
+    const isFailed = job.status === 'failed';
+    const isCancelled = job.status === 'cancelled';
+    const isCompleted = job.status === 'completed';
+    const isPending = job.status === 'pending';
+
+    if (isFailed || isCancelled) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
+      if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500'; bar.style.width = '100%'; }
+      if (label) label.textContent = isCancelled ? (isPush ? 'Push cancelled' : 'Pull cancelled') : (isPush ? 'Push failed' : 'Pull failed');
+      if (pctEl) pctEl.textContent = '';
+      if (items) items.textContent = isCancelled ? '' : esc(job.error_message || 'Unknown error');
+      return;
+    }
+    if (isCompleted) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
+      if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-violet-500'; bar.style.width = '100%'; }
+      if (label) label.textContent = isPush ? 'Push complete' : 'Pull complete';
+      if (pctEl) pctEl.textContent = '100%';
+      if (items) items.textContent = `${job.processed_items ?? 0} items`;
+      return;
+    }
+
+    wireCancelButton(cancelBtn, job);
+    const pct = job.total_items > 0 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100)) : 0;
+    const indeterminate = isPending || pct === 0;
+    if (bar) {
+      bar.className = `h-1.5 rounded-full transition-all duration-500 bg-violet-500${indeterminate ? ' animate-pulse' : ''}`;
+      bar.style.width = indeterminate ? '100%' : `${pct}%`;
+    }
+    if (label) label.textContent = isPush ? (isPending ? 'Push queued…' : 'Pushing…') : (isPending ? 'Pull queued…' : 'Pulling…');
+    if (pctEl) pctEl.textContent = pct > 0 ? `${pct}%` : '';
+    if (items) items.textContent = job.total_items > 0 ? `${job.processed_items} / ${job.total_items} items` : 'Loading…';
+  }
+
+  async function pollMdblistJob() {
+    try {
+      const res = await fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) return;
+      const jobs: any[] = await res.json();
+      const job = jobs.find(j => j.source === 'mdblist');
+      const isActive = job && (job.status === 'pending' || job.status === 'running');
+      const isDone = job && (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled');
+      const isFresh = job && new Date(job.updated_at).getTime() > Date.now() - 8000;
+      const isTrackedJobDone = isDone && job.id === mdblistTrackedJobId;
+
+      if (isActive) {
+        mdblistTrackedJobId = job.id;
+        renderMdblistProgress(job);
+        mdblistPoller = setTimeout(pollMdblistJob, 2000);
+        return;
+      }
+
+      if (isDone && (isTrackedJobDone || isFresh)) {
+        renderMdblistProgress(job);
+        if (mdblistHideTimer != null) clearTimeout(mdblistHideTimer);
+        mdblistHideTimer = setTimeout(() => { renderMdblistProgress(null); mdblistHideTimer = null; }, 8000);
+      } else {
+        renderMdblistProgress(null);
+      }
+      mdblistTrackedJobId = null;
+      mdblistPoller = null;
+    } catch {
+      mdblistPoller = null;
+    }
+  }
+
+  function startMdblistPoller() {
+    if (mdblistPoller != null) clearTimeout(mdblistPoller);
+    pollMdblistJob();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    // Backgrounded tabs get their setTimeout throttled, which can delay the next
+    // poll long enough that a completed push silently disappears (see note above).
+    // Re-check immediately when the user comes back so they get the real state
+    // right away instead of whatever the delayed timer eventually catches.
+    if (document.visibilityState === 'visible' && mdblistTrackedJobId != null) {
+      if (mdblistPoller != null) clearTimeout(mdblistPoller);
+      pollMdblistJob();
+    }
+  });
+
   // ── Heal progress tracking ────────────────────────────────────────────────
   let healPoller: ReturnType<typeof setTimeout> | null = null;
 
@@ -2570,24 +2957,28 @@ const COUNTRIES = (countriesRes || [])
     const pctEl = document.getElementById('heal-job-pct');
     const label = document.getElementById('heal-job-label');
     const items = document.getElementById('heal-job-items');
+    const cancelBtn = document.getElementById('heal-job-cancel') as HTMLButtonElement | null;
     if (!strip) return;
 
     if (!job) { strip.classList.add('hidden'); return; }
     strip.classList.remove('hidden');
 
     const isFailed    = job.status === 'failed';
+    const isCancelled = job.status === 'cancelled';
     const isCompleted = job.status === 'completed';
     const isPending   = job.status === 'pending';
 
-    if (isFailed) {
+    if (isFailed || isCancelled) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500'; bar.style.width = '100%'; }
-      if (label) label.textContent = 'Heal failed';
+      if (label) label.textContent = isCancelled ? 'Heal cancelled' : 'Heal failed';
       if (pctEl) pctEl.textContent = '';
-      if (items) items.textContent = esc(job.error_message || 'Unknown error');
+      if (items) items.textContent = isCancelled ? '' : esc(job.error_message || 'Unknown error');
       return;
     }
 
     if (isCompleted) {
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-blue-600'; bar.style.width = '100%'; }
       if (label) label.textContent = 'Heal complete';
       if (pctEl) pctEl.textContent = '100%';
@@ -2595,6 +2986,7 @@ const COUNTRIES = (countriesRes || [])
       return;
     }
 
+    wireCancelButton(cancelBtn, job);
     const pct = job.total_items > 0 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100)) : 0;
     const indeterminate = isPending || pct === 0;
     if (bar) {
@@ -2613,7 +3005,7 @@ const COUNTRIES = (countriesRes || [])
       const jobs: any[] = await res.json();
       const job = jobs.find((j: any) => j.source === 'tmdb' && j.job_type === 'heal');
       const isActive = job && (job.status === 'pending' || job.status === 'running');
-      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed')
+      const isRecentDone = job && (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled')
         && new Date(job.updated_at).getTime() > Date.now() - 8000;
       renderHealProgress((isActive || isRecentDone) ? job : null);
       if (isActive) {
@@ -2650,6 +3042,9 @@ const COUNTRIES = (countriesRes || [])
         }
         if (job.source === 'trakt' && (job.status === 'pending' || job.status === 'running')) {
           startTraktPoller();
+        }
+        if (job.source === 'mdblist' && (job.status === 'pending' || job.status === 'running')) {
+          startMdblistPoller();
         }
         if (job.source === 'tmdb' && job.job_type === 'heal' && (job.status === 'pending' || job.status === 'running')) {
           startHealPoller();
@@ -2726,17 +3121,19 @@ const COUNTRIES = (countriesRes || [])
     if (!token) return;
     const traktConnected = !!document.getElementById('trakt-disconnect-btn');
     const simklConnected = !!document.getElementById('simkl-disconnect-btn');
+    const mdblistConfigured = !!document.getElementById('mdblist_api_key')?.value;
     const radarrConfigured = !!document.getElementById('radarr_url')?.value;
     const sonarrConfigured = !!document.getElementById('sonarr_url')?.value;
     const mediaServerIds = Array.from(document.querySelectorAll<HTMLElement>('[data-connection-id]'))
       .map(el => el.getAttribute('data-connection-id'))
       .filter(Boolean) as string[];
-    if (!radarrConfigured && !sonarrConfigured && !traktConnected && !simklConnected && mediaServerIds.length === 0) return;
+    if (!radarrConfigured && !sonarrConfigured && !traktConnected && !simklConnected && !mdblistConfigured && mediaServerIds.length === 0) return;
 
     if (radarrConfigured) setConnStatus('radarr-conn-status', 'checking');
     if (sonarrConfigured) setConnStatus('sonarr-conn-status', 'checking');
     if (traktConnected) setConnStatus('trakt-conn-status', 'checking');
     if (simklConnected) setConnStatus('simkl-conn-status', 'checking');
+    if (mdblistConfigured) setConnStatus('mdblist-conn-status', 'checking');
     for (const id of mediaServerIds) setConnStatus(`conn-status-${id}`, 'checking');
 
     try {
@@ -2782,8 +3179,29 @@ const COUNTRIES = (countriesRes || [])
       if (data.simkl?.configured) {
         setConnStatus('simkl-conn-status', data.simkl.connected ? 'connected' : 'disconnected');
       }
+      if (data.mdblist?.configured) {
+        setConnStatus('mdblist-conn-status', data.mdblist.connected ? 'connected' : 'disconnected');
+      }
       for (const cs of (data.connections ?? [])) {
         setConnStatus(`conn-status-${cs.id}`, cs.connected ? 'connected' : 'disconnected');
+        if (cs.token) {
+          const card = document.querySelector(`[data-connection-id="${cs.id}"]`);
+          const tokenInput = card?.querySelector('.conn-token-input') as HTMLInputElement | null;
+          if (tokenInput) tokenInput.value = cs.token;
+        }
+        if (cs.profiles?.length) {
+          const card = document.querySelector(`[data-connection-id="${cs.id}"]`);
+          const profileSelect = card?.querySelector('.conn-user-id-input') as HTMLSelectElement | null;
+          if (profileSelect) {
+            const selectedProfile = profileSelect.value;
+            profileSelect.innerHTML = cs.profiles.map((profile: any) =>
+              `<option value="${esc(String(profile.profile_index))}">${esc(profile.name || `Profile ${profile.profile_index}`)} (#${esc(String(profile.profile_index))})</option>`
+            ).join('');
+            if ([...profileSelect.options].some(option => option.value === selectedProfile)) {
+              profileSelect.value = selectedProfile;
+            }
+          }
+        }
         if (cs.connected) loadLibraries(String(cs.id));
       }
     } catch {
@@ -2874,6 +3292,26 @@ const COUNTRIES = (countriesRes || [])
     });
   }
 
+  async function persistMdblistPreferences(keys: string[]) {
+    const preferences = Object.fromEntries(keys.map(key => {
+      const input = document.querySelector<HTMLInputElement>(`input[name="${key}"]`);
+      return [key, input?.checked ?? false];
+    }));
+    const res = await fetch('/api/proxy/auth/settings', {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(preferences),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || 'Failed to save MDBList options');
+    }
+  }
+
+
   function setupActions() {
     const btns = document.querySelectorAll('.js-action-btn');
     btns.forEach(btn => {
@@ -2907,19 +3345,39 @@ const COUNTRIES = (countriesRes || [])
             const u = (card?.querySelector('.conn-url-input') as HTMLInputElement)?.value || '';
             const t = (card?.querySelector('.conn-token-input') as HTMLInputElement)?.value || '';
             const ui = (card?.querySelector('.conn-user-id-input') as HTMLInputElement)?.value || '';
-            let testEndpoint: string;
-            if (connType === 'plex') {
-              testEndpoint = `/api/proxy/auth/test-plex?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`;
-            } else if (connType === 'emby') {
-              testEndpoint = `/api/proxy/auth/test-emby?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+            let testRes: Response;
+            if (connType === 'nuvio') {
+              testRes = await fetch('/api/proxy/auth/test-nuvio', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: u, token: t, profile_id: parseInt(ui) }),
+              });
             } else {
-              testEndpoint = `/api/proxy/auth/test-jellyfin?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+              let testEndpoint: string;
+              if (connType === 'plex') {
+                testEndpoint = `/api/proxy/auth/test-plex?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`;
+              } else if (connType === 'emby') {
+                testEndpoint = `/api/proxy/auth/test-emby?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+              } else {
+                testEndpoint = `/api/proxy/auth/test-jellyfin?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+              }
+              testRes = await fetch(testEndpoint, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
             }
-            const testRes = await fetch(testEndpoint, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
             const testData = await testRes.json();
             if (testRes.ok) {
               showMessage(testData.message || 'Connection successful!');
               if (connId) setConnStatus(`conn-status-${connId}`, 'connected');
+              if (connType === 'nuvio' && connId) {
+                const saveTokenRes = await fetch(`/api/proxy/auth/connections/${connId}`, {
+                  method: 'PATCH',
+                  headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ token: testData.refresh_token }),
+                });
+                if (!saveTokenRes.ok) throw new Error('Nuvio session was validated but could not be saved');
+                const savedConnection = await saveTokenRes.json();
+                const tokenInput = card?.querySelector('.conn-token-input') as HTMLInputElement | null;
+                if (tokenInput) tokenInput.value = savedConnection.token;
+              }
             } else {
               if (connId) setConnStatus(`conn-status-${connId}`, 'disconnected');
               throw new Error(testData.detail || 'Connection test failed');
@@ -2937,7 +3395,11 @@ const COUNTRIES = (countriesRes || [])
               server_username: (card?.querySelector('.conn-username-input') as HTMLInputElement)?.value || null,
               auto_sync_interval: (() => {
                 const v = (card?.querySelector('.conn-auto-sync') as HTMLSelectElement)?.value;
-                return v ? parseInt(v) : null;
+                return v ? parseFloat(v) : null;
+              })(),
+              auto_push_interval: (() => {
+                const v = (card?.querySelector('.conn-auto-push') as HTMLSelectElement)?.value;
+                return v ? parseFloat(v) : null;
               })(),
               partial_sync_interval: (() => {
                 const v = (card?.querySelector('.conn-partial-sync') as HTMLSelectElement)?.value;
@@ -2962,6 +3424,9 @@ const COUNTRIES = (countriesRes || [])
               const err = await saveRes.json();
               throw new Error(err.detail || 'Failed to save connection');
             }
+            const savedConnection = await saveRes.json();
+            const savedTokenInput = card?.querySelector('.conn-token-input') as HTMLInputElement | null;
+            if (savedTokenInput && savedConnection.token) savedTokenInput.value = savedConnection.token;
             // Save libraries if they've been loaded
             const libList = card?.querySelector('.conn-libraries-list');
             if (libList && libList.querySelector('.library-checkbox')) {
@@ -3054,6 +3519,7 @@ const COUNTRIES = (countriesRes || [])
               sync_watched: 'watched status',
               sync_ratings: 'ratings',
               sync_playback: 'playback events',
+              plex_sync_watchlist: 'watchlist',
             };
             const pulling: string[] = [];
             card?.querySelectorAll('.conn-pref-checkbox').forEach((el: any) => {
@@ -3079,6 +3545,30 @@ const COUNTRIES = (countriesRes || [])
             syncConnId = connId;
           } else if (action === 'push_upstream') {
             const connId = newBtn.getAttribute('data-conn-id');
+            const connName = newBtn.getAttribute('data-conn-name') || 'this server';
+            const card = document.querySelector(`[data-connection-id="${connId}"]`);
+            const pushPrefLabels: Record<string, string> = {
+              push_watched: 'watched status',
+              push_ratings: 'ratings',
+              push_collection: 'collection status',
+              push_playback: 'playback progress',
+              plex_push_watchlist: 'watchlist',
+            };
+            const pushing: string[] = [];
+            card?.querySelectorAll('.conn-pref-checkbox').forEach((el: any) => {
+              const pref = el.getAttribute('data-pref');
+              if (pref && pushPrefLabels[pref] && el.checked) pushing.push(pushPrefLabels[pref]);
+            });
+            const noPush = pushing.length === 0;
+            const ok = await showConfirmModal(
+              noPush ? 'Nothing to push' : `Push to ${connName}?`,
+              noPush
+                ? `Your current settings have nothing selected to push to ${connName}. Enable at least one option in the "Scrob → ${connName}" section.`
+                : `This will push your ${formatList(pushing)} from Scrob to ${connName}. Existing data on the server may be overwritten.`,
+              noPush ? 'Got it' : 'Push',
+              noPush
+            );
+            if (!ok) return;
             url = `/api/proxy/sync/connection/${connId}/push`;
             syncConnId = connId;
           } else if (action === 'test_radarr') {
@@ -3165,8 +3655,8 @@ const COUNTRIES = (countriesRes || [])
             setConnStatus('sonarr-conn-status', 'connected');
             showMessage('Sonarr connection successful and profiles fetched!');
             return;
-          } else if (action === 'sync_trakt') {
-            const isPartial = (e as MouseEvent).shiftKey || newBtn.getAttribute('data-partial') === 'true';
+          } else if (action === 'sync_trakt' || action === 'full_sync_trakt') {
+            const fullResync = action === 'full_sync_trakt';
             const traktPullLabels: Record<string, string> = {
               trakt_sync_watched: 'watched history',
               trakt_sync_ratings: 'ratings',
@@ -3179,17 +3669,17 @@ const COUNTRIES = (countriesRes || [])
             });
             const noPull = pulling.length === 0;
             const ok = await showConfirmModal(
-              noPull ? 'Nothing to pull' : (isPartial ? 'Pull Partial from Trakt?' : 'Pull Full from Trakt?'),
+              noPull ? 'Nothing to pull' : fullResync ? 'Full resync from Trakt?' : 'Pull from Trakt?',
               noPull
                 ? 'Your current settings have nothing selected to pull from Trakt. Enable at least one option in the "Trakt → Scrob" section.'
-                : (isPartial 
-                   ? `This will perform a partial import of your ${formatList(pulling)} from Trakt into Scrob.`
-                   : `This will perform a full import of your ${formatList(pulling)} from Trakt into Scrob.`),
-              noPull ? 'Got it' : 'Pull',
+                : fullResync
+                  ? `This will scan your complete ${formatList(pulling)} on Trakt again. Existing Scrob events are retained and deduplicated.`
+                  : `This will import new ${formatList(pulling)} from Trakt since the last successful pull.`,
+              noPull ? 'Got it' : fullResync ? 'Full resync' : 'Pull',
               noPull
             );
             if (!ok) return;
-            url = `/api/proxy/trakt/sync${isPartial ? '?partial=true' : ''}`;
+            url = `/api/proxy/trakt/sync${fullResync ? '?full=true' : ''}`;
           } else if (action === 'sync_simkl') {
             const simklPullLabels: Record<string, string> = {
               simkl_sync_watched: 'watched history',
@@ -3235,7 +3725,71 @@ const COUNTRIES = (countriesRes || [])
             url = `/api/proxy/simkl/push`;
 
           } else if (action === 'push_trakt') {
+            const traktPushLabels: Record<string, string> = {
+              trakt_push_watched: 'watched history',
+              trakt_push_ratings: 'ratings',
+              trakt_push_collection: 'collection',
+              trakt_push_lists: 'lists',
+            };
+            const pushing: string[] = [];
+            document.querySelectorAll('.sync-pref-checkbox').forEach((el: any) => {
+              const name = el.getAttribute('name');
+              if (name && traktPushLabels[name] && el.checked) pushing.push(traktPushLabels[name]);
+            });
+            const noPush = pushing.length === 0;
+            const ok = await showConfirmModal(
+              noPush ? 'Nothing to push' : 'Push to Trakt?',
+              noPush
+                ? 'Your current settings have nothing selected to push to Trakt. Enable at least one option in the "Scrob → Trakt" section.'
+                : `This will push your ${formatList(pushing)} from Scrob to Trakt. Existing data on Trakt may be overwritten.`,
+              noPush ? 'Got it' : 'Push',
+              noPush
+            );
+            if (!ok) return;
             url = `/api/proxy/trakt/push`;
+          } else if (action === 'sync_mdblist') {
+            const labels: Record<string, string> = {
+              mdblist_sync_watched: 'watched history',
+              mdblist_sync_ratings: 'ratings',
+              mdblist_sync_watchlist: 'watchlist',
+            };
+            const selected = Array.from(document.querySelectorAll<HTMLInputElement>('.sync-pref-checkbox'))
+              .filter(el => el.checked && labels[el.name])
+              .map(el => labels[el.name]);
+            const empty = selected.length === 0;
+            const ok = await showConfirmModal(
+              empty ? 'Nothing to pull' : 'Pull from MDBList?',
+              empty
+                ? 'Enable at least one option in the "MDBList → Scrob" section.'
+                : `This will import your ${formatList(selected)} from MDBList into Scrob.`,
+              empty ? 'Got it' : 'Pull',
+              empty
+            );
+            if (!ok) return;
+            await persistMdblistPreferences(Object.keys(labels));
+            url = '/api/proxy/mdblist/sync';
+          } else if (action === 'push_mdblist') {
+            const labels: Record<string, string> = {
+              mdblist_push_watched: 'watched history',
+              mdblist_push_ratings: 'ratings',
+              mdblist_push_watchlist: 'watchlist',
+              mdblist_push_collection: 'collection',
+            };
+            const selected = Array.from(document.querySelectorAll<HTMLInputElement>('.sync-pref-checkbox'))
+              .filter(el => el.checked && labels[el.name])
+              .map(el => labels[el.name]);
+            const empty = selected.length === 0;
+            const ok = await showConfirmModal(
+              empty ? 'Nothing to push' : 'Push to MDBList?',
+              empty
+                ? 'Enable at least one option in the "Scrob → MDBList" section.'
+                : `This will add or update your ${formatList(selected)} on MDBList. Existing remote items are retained.`,
+              empty ? 'Got it' : 'Push',
+              empty
+            );
+            if (!ok) return;
+            await persistMdblistPreferences(Object.keys(labels));
+            url = '/api/proxy/mdblist/push';
           }
 
           const res = await fetch(url, {
@@ -3245,10 +3799,14 @@ const COUNTRIES = (countriesRes || [])
           const data = await res.json();
 
           if (res.ok) {
-            showMessage(data.message || 'Action successful!');
+            const showsProgressBar = !!syncConnId || [
+              'sync_trakt', 'full_sync_trakt', 'push_trakt', 'sync_simkl', 'push_simkl', 'sync_mdblist', 'push_mdblist',
+            ].includes(action);
+            showMessage(data.message || 'Action successful!', 'success', { scroll: !showsProgressBar });
             if (syncConnId) startConnPoller(syncConnId);
             if (action === 'sync_simkl' || action === 'push_simkl') startSimklPoller();
-            if (action === 'sync_trakt' || action === 'push_trakt') startTraktPoller();
+            if (action === 'sync_trakt' || action === 'full_sync_trakt' || action === 'push_trakt') startTraktPoller();
+            if (action === 'sync_mdblist' || action === 'push_mdblist') startMdblistPoller();
           } else {
             if (syncConnId) renderConnProgress(syncConnId, null);
             throw new Error(data.detail || 'Action failed');
@@ -3492,6 +4050,30 @@ const COUNTRIES = (countriesRes || [])
       }
     }
     setupSimklAuth();
+
+    // MDBList disconnect
+    function setupMdblistAuth() {
+      const disconnectBtn = document.getElementById('mdblist-disconnect-btn');
+      if (disconnectBtn) {
+        disconnectBtn.onclick = async () => {
+          if (!confirm('Disconnect MDBList? This will remove your MDBList API key from Scrob.')) return;
+          disconnectBtn.disabled = true;
+          disconnectBtn.textContent = 'Disconnecting…';
+          try {
+            await fetch('/api/proxy/mdblist/auth/disconnect', {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` },
+            });
+            window.location.reload();
+          } catch (e) {
+            showMessage('Failed to disconnect MDBList', 'error');
+            disconnectBtn.disabled = false;
+            disconnectBtn.textContent = 'Disconnect';
+          }
+        };
+      }
+    }
+    setupMdblistAuth();
 
     // Delete Account Logic
     const deleteBtn = document.getElementById('delete-account-btn');
@@ -3745,17 +4327,89 @@ const COUNTRIES = (countriesRes || [])
       cancelBtn.addEventListener('click', () => addForm.classList.add('hidden'));
     }
 
-    // Show/hide user_id vs username based on new connection type
+    // Provider-specific fields for a new connection
     const typeSelect = document.getElementById('new-conn-type') as HTMLSelectElement | null;
     const userIdRow = document.getElementById('new-conn-user-id-row');
     const usernameRow = document.getElementById('new-conn-username-row');
+    const nuvioEmailRow = document.getElementById('new-nuvio-email-row');
+    const nuvioProfileRow = document.getElementById('new-nuvio-profile-row');
+    const urlInput = document.getElementById('new-conn-url') as HTMLInputElement | null;
+    const urlLabel = document.getElementById('new-conn-url-label');
+    const tokenInput = document.getElementById('new-conn-token') as HTMLInputElement | null;
+    const tokenLabel = document.getElementById('new-conn-token-label');
+    const nuvioProfileSelect = document.getElementById('new-nuvio-profile') as HTMLSelectElement | null;
+    let pendingNuvioRefreshToken = '';
+    let previousType = typeSelect?.value ?? 'jellyfin';
+
     const updateTypeFields = () => {
-      const isPlex = typeSelect?.value === 'plex';
-      userIdRow?.classList.toggle('hidden', isPlex);
+      const type = typeSelect?.value ?? 'jellyfin';
+      const isPlex = type === 'plex';
+      const isNuvio = type === 'nuvio';
+      userIdRow?.classList.toggle('hidden', isPlex || isNuvio);
       usernameRow?.classList.toggle('hidden', !isPlex);
+      nuvioEmailRow?.classList.toggle('hidden', !isNuvio);
+      nuvioProfileRow?.classList.toggle('hidden', !isNuvio);
+      if (urlInput) {
+        if (isNuvio) {
+          urlInput.value = 'https://api.nuvio.tv';
+          urlInput.disabled = true;
+        } else {
+          if (previousType === 'nuvio' && urlInput.value === 'https://api.nuvio.tv') urlInput.value = '';
+          urlInput.disabled = false;
+        }
+      }
+      if (urlLabel) urlLabel.textContent = isNuvio ? 'Cloud API URL' : 'Server URL';
+      if (tokenLabel) tokenLabel.textContent = isNuvio ? 'Nuvio Password' : 'Token';
+      if (tokenInput) tokenInput.autocomplete = isNuvio ? 'current-password' : 'off';
+      const syncRatings = document.getElementById('new-sync-ratings') as HTMLInputElement | null;
+      const pushRatings = document.getElementById('new-push-ratings') as HTMLInputElement | null;
+      const pushPlayback = document.getElementById('new-push-playback') as HTMLInputElement | null;
+      pushPlayback?.closest('label')?.classList.toggle('hidden', !isNuvio);
+      if (pushPlayback) pushPlayback.disabled = !isNuvio;
+      const pushCollection = document.getElementById('new-push-collection') as HTMLInputElement | null;
+      pushCollection?.closest('label')?.classList.toggle('hidden', !isNuvio);
+      if (pushCollection) pushCollection.disabled = !isNuvio;
+      for (const checkbox of [syncRatings, pushRatings]) {
+        checkbox?.closest('label')?.classList.toggle('hidden', isNuvio);
+        if (checkbox) checkbox.disabled = isNuvio;
+      }
+      const playbackLabel = document.getElementById('new-sync-playback-label');
+      if (playbackLabel) playbackLabel.textContent = isNuvio ? 'Playback progress' : 'Playback events';
+      const pullHeading = document.getElementById('new-pull-heading');
+      const pushHeading = document.getElementById('new-push-heading');
+      if (pullHeading) pullHeading.textContent = isNuvio ? 'Nuvio → Scrob' : 'Server → Scrob';
+      if (pushHeading) pushHeading.textContent = isNuvio ? 'Scrob → Nuvio' : 'Scrob → Server';
+      if (type !== previousType) pendingNuvioRefreshToken = '';
+      previousType = type;
     };
     typeSelect?.addEventListener('change', updateTypeFields);
     updateTypeFields();
+
+    const authenticateNuvio = async () => {
+      const email = (document.getElementById('new-nuvio-email') as HTMLInputElement | null)?.value.trim() || '';
+      const password = tokenInput?.value || '';
+      const url = urlInput?.value || 'https://api.nuvio.tv';
+      if (!email || !password) throw new Error('Nuvio email and password are required.');
+      const selectedProfile = nuvioProfileSelect?.value || '';
+      const response = await fetch('/api/proxy/auth/nuvio-login', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, url }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Nuvio sign-in failed');
+      pendingNuvioRefreshToken = data.refresh_token;
+      if (nuvioProfileSelect) {
+        nuvioProfileSelect.innerHTML = (data.profiles || []).map((profile: any) =>
+          `<option value="${esc(String(profile.profile_index))}">${esc(profile.name || `Profile ${profile.profile_index}`)} (#${esc(String(profile.profile_index))})</option>`
+        ).join('');
+        if (selectedProfile && [...nuvioProfileSelect.options].some(option => option.value === selectedProfile)) {
+          nuvioProfileSelect.value = selectedProfile;
+        }
+      }
+      if (!nuvioProfileSelect?.value) throw new Error('No Nuvio profile is available for this account.');
+      return data;
+    };
 
     // Test new connection button
     const testNewBtn = document.getElementById('test-new-connection-btn');
@@ -3769,18 +4423,23 @@ const COUNTRIES = (countriesRes || [])
         const orig = testNewBtn.textContent;
         testNewBtn.textContent = '...';
         try {
-          let ep: string;
-          if (type === 'plex') {
-            ep = `/api/proxy/auth/test-plex?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`;
-          } else if (type === 'emby') {
-            ep = `/api/proxy/auth/test-emby?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+          if (type === 'nuvio') {
+            await authenticateNuvio();
+            showMessage('Nuvio connection successful. Select the profile to sync.');
           } else {
-            ep = `/api/proxy/auth/test-jellyfin?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+            let ep: string;
+            if (type === 'plex') {
+              ep = `/api/proxy/auth/test-plex?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`;
+            } else if (type === 'emby') {
+              ep = `/api/proxy/auth/test-emby?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+            } else {
+              ep = `/api/proxy/auth/test-jellyfin?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+            }
+            const res = await fetch(ep, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+            const data = await res.json();
+            if (res.ok) showMessage(data.message || 'Connection successful!');
+            else throw new Error(data.detail || 'Connection test failed');
           }
-          const res = await fetch(ep, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
-          const data = await res.json();
-          if (res.ok) showMessage(data.message || 'Connection successful!');
-          else throw new Error(data.detail || 'Connection test failed');
         } catch (e: any) {
           showMessage(e.message, 'error');
         } finally {
@@ -3797,10 +4456,13 @@ const COUNTRIES = (countriesRes || [])
         const name = (document.getElementById('new-conn-name') as HTMLInputElement)?.value.trim();
         const type = typeSelect?.value ?? 'jellyfin';
         const u = (document.getElementById('new-conn-url') as HTMLInputElement)?.value.trim();
-        const t = (document.getElementById('new-conn-token') as HTMLInputElement)?.value.trim();
-        const ui = (document.getElementById('new-conn-user-id') as HTMLInputElement)?.value.trim() || null;
-        const un = (document.getElementById('new-conn-username') as HTMLInputElement)?.value.trim() || null;
-        if (!name || !u || !t) { showMessage('Name, URL and Token are required.', 'error'); return; }
+        let connectionToken = (document.getElementById('new-conn-token') as HTMLInputElement)?.value.trim();
+        let userId = (document.getElementById('new-conn-user-id') as HTMLInputElement)?.value.trim() || null;
+        const username = (document.getElementById('new-conn-username') as HTMLInputElement)?.value.trim() || null;
+        if (!name || !u || !connectionToken) {
+          showMessage(type === 'nuvio' ? 'Name, Nuvio email and password are required.' : 'Name, URL and Token are required.', 'error');
+          return;
+        }
 
         createBtn.disabled = true;
         const orig = createBtn.textContent;
@@ -3808,27 +4470,38 @@ const COUNTRIES = (countriesRes || [])
 
         const externalUrl = (document.getElementById('new-conn-external-url') as HTMLInputElement)?.value || null;
 
-        const body: Record<string, any> = {
-          name, type, url: u, token: t, external_server_url: externalUrl,
-          sync_collection: (document.getElementById('new-sync-collection') as HTMLInputElement)?.checked ?? true,
-          sync_watched: (document.getElementById('new-sync-watched') as HTMLInputElement)?.checked ?? true,
-          sync_ratings: (document.getElementById('new-sync-ratings') as HTMLInputElement)?.checked ?? true,
-          sync_playback: (document.getElementById('new-sync-playback') as HTMLInputElement)?.checked ?? true,
-          push_watched: (document.getElementById('new-push-watched') as HTMLInputElement)?.checked ?? false,
-          push_ratings: (document.getElementById('new-push-ratings') as HTMLInputElement)?.checked ?? false,
-          auto_sync_interval: (() => {
-            const v = (document.getElementById('new-auto-sync') as HTMLSelectElement)?.value;
-            return v ? parseInt(v) : null;
-          })(),
-          partial_sync_interval: (() => {
-            const v = (document.getElementById('new-partial-sync') as HTMLSelectElement)?.value;
-            return v ? parseInt(v) : null;
-          })(),
-        };
-        if (type === 'plex') body.server_username = un;
-        else body.server_user_id = ui;
-
         try {
+          if (type === 'nuvio') {
+            await authenticateNuvio();
+            connectionToken = pendingNuvioRefreshToken;
+            userId = nuvioProfileSelect?.value || null;
+          }
+          const body: Record<string, any> = {
+            name, type, url: u, token: connectionToken, external_server_url: externalUrl,
+            sync_collection: (document.getElementById('new-sync-collection') as HTMLInputElement)?.checked ?? true,
+            sync_watched: (document.getElementById('new-sync-watched') as HTMLInputElement)?.checked ?? true,
+            sync_ratings: type === 'nuvio' ? false : ((document.getElementById('new-sync-ratings') as HTMLInputElement)?.checked ?? true),
+            sync_playback: (document.getElementById('new-sync-playback') as HTMLInputElement)?.checked ?? true,
+            push_watched: (document.getElementById('new-push-watched') as HTMLInputElement)?.checked ?? false,
+            push_collection: type === 'nuvio' && ((document.getElementById('new-push-collection') as HTMLInputElement)?.checked ?? false),
+            push_playback: type === 'nuvio' && ((document.getElementById('new-push-playback') as HTMLInputElement)?.checked ?? false),
+            push_ratings: type === 'nuvio' ? false : ((document.getElementById('new-push-ratings') as HTMLInputElement)?.checked ?? false),
+            auto_sync_interval: (() => {
+              const value = (document.getElementById('new-auto-sync') as HTMLSelectElement)?.value;
+              return value ? parseFloat(value) : null;
+            })(),
+            partial_sync_interval: (() => {
+              const value = (document.getElementById('new-partial-sync') as HTMLSelectElement)?.value;
+              return value ? parseFloat(value) : null;
+            })(),
+            auto_push_interval: (() => {
+              const value = (document.getElementById('new-auto-push') as HTMLSelectElement)?.value;
+              return value ? parseFloat(value) : null;
+            })(),
+          };
+          if (type === 'plex') body.server_username = username;
+          else body.server_user_id = userId;
+
           const res = await fetch('/api/proxy/auth/connections', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -4022,14 +4695,17 @@ const COUNTRIES = (countriesRes || [])
           trakt_full_sync_interval: formData.get('trakt_full_sync_interval') ? parseInt(formData.get('trakt_full_sync_interval') as string) : null,
           trakt_partial_sync_interval: formData.get('trakt_partial_sync_interval') ? parseInt(formData.get('trakt_partial_sync_interval') as string) : null,
           simkl_client_id: formData.get('simkl_client_id') || null,
+          mdblist_api_key: formData.get('mdblist_api_key') || null,
         };
 
-        // Collect boolean checkboxes (Trakt + Simkl sync prefs + app preferences)
+        // Collect boolean checkboxes (cloud sync preferences + app preferences)
         const syncKeys = [
           'trakt_sync_watched', 'trakt_sync_ratings', 'trakt_sync_lists', 'trakt_watchlist_split',
-          'trakt_push_watched', 'trakt_push_ratings', 'trakt_push_lists',
+          'trakt_push_watched', 'trakt_push_ratings', 'trakt_push_collection', 'trakt_push_lists', 'trakt_scrobble',
           'simkl_sync_watched', 'simkl_sync_ratings', 'simkl_sync_lists',
-          'simkl_push_watched', 'simkl_push_ratings',
+          'simkl_push_watched', 'simkl_push_ratings', 'simkl_scrobble',
+          'mdblist_sync_watched', 'mdblist_sync_ratings', 'mdblist_sync_watchlist',
+          'mdblist_push_watched', 'mdblist_push_ratings', 'mdblist_push_watchlist', 'mdblist_push_collection', 'mdblist_scrobble',
           'blur_explicit',
           'time_format_24h',
           'show_comments',
@@ -4101,11 +4777,14 @@ const COUNTRIES = (countriesRes || [])
           document.cookie = `time_format_24h=${timeFormatEl.checked ? 'true' : 'false'}; path=/; SameSite=Lax; Max-Age=31536000`;
         }
 
+        const defaultOrderEl = document.getElementById('default_episode_order') as HTMLSelectElement | null;
+        const default_episode_order = defaultOrderEl ? defaultOrderEl.value : 'tmdb';
+
         // Save auth settings
         saves.push(fetch(`/api/proxy/auth/settings`, {
           method: 'PATCH',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...settings, ...syncPrefs, preferences: updatedPreferences }),
+          body: JSON.stringify({ ...settings, ...syncPrefs, default_episode_order, preferences: updatedPreferences }),
         }));
 
         // Save profile preferences
@@ -4858,7 +5537,7 @@ const COUNTRIES = (countriesRes || [])
         return `${Math.floor(diff / 86400)}d ago`;
       }
 
-      for (const source of ['jellyfin', 'emby', 'plex'] as const) {
+      for (const source of ['jellyfin', 'emby', 'plex', 'nuvio'] as const) {
         const el = document.getElementById(`${source}-last-sync`);
         if (!el) continue;
         const job = jobs.find(j => j.source === source && (j.status === 'completed' || j.status === 'failed'));

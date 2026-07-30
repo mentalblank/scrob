@@ -1,7 +1,6 @@
 import asyncio
 import httpx
 from core.config import settings
-from core import provider_cache
 
 TMDB_BASE = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p"
@@ -52,143 +51,137 @@ async def validate_api_key(api_key: str) -> bool:
         return False
 
 
-async def get_movie(tmdb_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "movie", {"id": tmdb_id}, provider_cache.TTL_MOVIE,
-        lambda: _get(
-            f"{TMDB_BASE}/movie/{tmdb_id}",
-            headers=get_headers(api_key),
-            params={"append_to_response": "credits,release_dates,recommendations"},
-        ),
+async def get_movie(tmdb_id: int, api_key: str = None, language: str | None = None) -> dict:
+    params: dict = {"append_to_response": "credits,release_dates,recommendations,external_ids"}
+    if language:
+        params["language"] = language
+    return await _get(
+        f"{TMDB_BASE}/movie/{tmdb_id}",
+        headers=get_headers(api_key),
+        params=params,
     )
 
 
-async def get_show(tmdb_id: int, api_key: str = None, language: str = None) -> dict:
-    params = {"append_to_response": "credits,content_ratings,recommendations,external_ids"}
+async def get_show(tmdb_id: int, api_key: str = None, language: str | None = None) -> dict:
+    params: dict = {"append_to_response": "credits,content_ratings,recommendations,external_ids"}
     if language:
         params["language"] = language
-    return await provider_cache.cached(
-        "tmdb", "show", {"id": tmdb_id, "lang": language}, provider_cache.TTL_SHOW,
-        lambda: _get(f"{TMDB_BASE}/tv/{tmdb_id}", headers=get_headers(api_key), params=params),
+    return await _get(
+        f"{TMDB_BASE}/tv/{tmdb_id}",
+        headers=get_headers(api_key),
+        params=params,
     )
 
 
-async def get_season(tmdb_id: int, season_number: int, api_key: str = None, language: str = None) -> dict:
-    params = {}
+async def get_season(tmdb_id: int, season_number: int, api_key: str = None, language: str | None = None) -> dict:
+    params: dict = {}
     if language:
         params["language"] = language
-    return await provider_cache.cached(
-        "tmdb", "season", {"id": tmdb_id, "season": season_number, "lang": language}, provider_cache.TTL_SEASON,
-        lambda: _get(f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}", headers=get_headers(api_key), params=params),
+    return await _get(
+        f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}",
+        headers=get_headers(api_key),
+        params=params or None,
     )
 
 
-async def get_episode(tmdb_id: int, season_number: int, episode_number: int, api_key: str = None, language: str = None) -> dict:
-    params = {"append_to_response": "credits"}
+async def get_episode(tmdb_id: int, season_number: int, episode_number: int, api_key: str = None, language: str | None = None) -> dict:
+    params: dict = {"append_to_response": "credits"}
     if language:
         params["language"] = language
-    return await provider_cache.cached(
-        "tmdb", "episode", {"id": tmdb_id, "season": season_number, "episode": episode_number, "lang": language}, provider_cache.TTL_EPISODE,
-        lambda: _get(f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}/episode/{episode_number}", headers=get_headers(api_key), params=params),
+    return await _get(
+        f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}/episode/{episode_number}",
+        headers=get_headers(api_key),
+        params=params,
+    )
+
+
+async def get_episode_external_ids(
+    tmdb_id: int,
+    season_number: int,
+    episode_number: int,
+    api_key: str = None,
+) -> dict:
+    return await _get(
+        f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}/episode/{episode_number}/external_ids",
+        headers=get_headers(api_key),
     )
 
 
 async def get_trending_movies(time_window: str = "day", page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "trending_movies", {"window": time_window, "page": page}, provider_cache.TTL_TRENDING,
-        lambda: _get(f"{TMDB_BASE}/trending/movie/{time_window}", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/trending/movie/{time_window}", headers=get_headers(api_key), params={"page": page})
 
 
 async def get_trending_shows(time_window: str = "day", page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "trending_shows", {"window": time_window, "page": page}, provider_cache.TTL_TRENDING,
-        lambda: _get(f"{TMDB_BASE}/trending/tv/{time_window}", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/trending/tv/{time_window}", headers=get_headers(api_key), params={"page": page})
 
 
-async def get_show_light(tmdb_id: int, api_key: str = None) -> dict:
+async def get_show_light(tmdb_id: int, api_key: str = None, language: str | None = None) -> dict:
     """Fetch base show details (includes last_episode_to_air / next_episode_to_air)."""
-    return await provider_cache.cached(
-        "tmdb", "show_light", {"id": tmdb_id}, provider_cache.TTL_SHOW,
-        lambda: _get(f"{TMDB_BASE}/tv/{tmdb_id}", headers=get_headers(api_key)),
-    )
+    params: dict = {}
+    if language:
+        params["language"] = language
+    return await _get(f"{TMDB_BASE}/tv/{tmdb_id}", headers=get_headers(api_key), params=params or None)
+
+
+async def get_movie_light(tmdb_id: int, api_key: str = None, language: str | None = None) -> dict:
+    """Fetch base movie details without append_to_response (cheaper, used for translation backfill)."""
+    params: dict = {}
+    if language:
+        params["language"] = language
+    return await _get(f"{TMDB_BASE}/movie/{tmdb_id}", headers=get_headers(api_key), params=params or None)
 
 
 async def get_on_air_today(page: int = 1, api_key: str = None, timezone: str = "UTC") -> dict:
-    return await provider_cache.cached(
-        "tmdb", "on_air_today", {"page": page, "tz": timezone}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/tv/airing_today", headers=get_headers(api_key), params={"page": page, "timezone": timezone}),
-    )
+    return await _get(f"{TMDB_BASE}/tv/airing_today", headers=get_headers(api_key), params={"page": page, "timezone": timezone})
 
 
 async def get_popular_movies(page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "popular_movies", {"page": page}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/movie/popular", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/movie/popular", headers=get_headers(api_key), params={"page": page})
 
 
 async def get_top_rated_movies(page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "top_rated_movies", {"page": page}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/movie/top_rated", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/movie/top_rated", headers=get_headers(api_key), params={"page": page})
 
 
 async def get_popular_shows(page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "popular_shows", {"page": page}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/tv/popular", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/tv/popular", headers=get_headers(api_key), params={"page": page})
 
 
 async def get_top_rated_shows(page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "top_rated_shows", {"page": page}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/tv/top_rated", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/tv/top_rated", headers=get_headers(api_key), params={"page": page})
 
 
-async def search_multi(q: str, page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "search_multi", {"q": q, "page": page}, provider_cache.TTL_SEARCH,
-        lambda: _get(f"{TMDB_BASE}/search/multi", headers=get_headers(api_key), params={"query": q, "include_adult": "false", "page": page}),
-    )
+async def search_multi(q: str, page: int = 1, api_key: str = None, language: str | None = None) -> dict:
+    params: dict = {"query": q, "include_adult": "false", "page": page}
+    if language:
+        params["language"] = language
+    return await _get(f"{TMDB_BASE}/search/multi", headers=get_headers(api_key), params=params)
 
 
-async def search_movies(q: str, page: int = 1, year: int | None = None, api_key: str = None) -> dict:
+async def search_movies(q: str, page: int = 1, year: int | None = None, api_key: str = None, language: str | None = None) -> dict:
     params: dict = {"query": q, "include_adult": "false", "page": page}
     if year:
         params["primary_release_year"] = year
-    return await provider_cache.cached(
-        "tmdb", "search_movies", {"q": q, "year": year, "page": page}, provider_cache.TTL_MOVIE,
-        lambda: _get(f"{TMDB_BASE}/search/movie", headers=get_headers(api_key), params=params),
-    )
+    if language:
+        params["language"] = language
+    return await _get(f"{TMDB_BASE}/search/movie", headers=get_headers(api_key), params=params)
 
 
-async def search_shows(q: str, page: int = 1, year: int | None = None, api_key: str = None) -> dict:
+async def search_shows(q: str, page: int = 1, year: int | None = None, api_key: str = None, language: str | None = None) -> dict:
     params: dict = {"query": q, "include_adult": "false", "page": page}
     if year:
         params["first_air_date_year"] = year
-    return await provider_cache.cached(
-        "tmdb", "search_shows", {"q": q, "year": year, "page": page}, provider_cache.TTL_SEARCH,
-        lambda: _get(f"{TMDB_BASE}/search/tv", headers=get_headers(api_key), params=params),
-    )
+    if language:
+        params["language"] = language
+    return await _get(f"{TMDB_BASE}/search/tv", headers=get_headers(api_key), params=params)
 
 
 async def search_collection(q: str, page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "search_collection", {"q": q, "page": page}, provider_cache.TTL_SEARCH,
-        lambda: _get(f"{TMDB_BASE}/search/collection", headers=get_headers(api_key), params={"query": q, "include_adult": "false", "page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/search/collection", headers=get_headers(api_key), params={"query": q, "include_adult": "false", "page": page})
 
 
 async def search_people(q: str, page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "search_people", {"q": q, "page": page}, provider_cache.TTL_SEARCH,
-        lambda: _get(f"{TMDB_BASE}/search/person", headers=get_headers(api_key), params={"query": q, "include_adult": "false", "page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/search/person", headers=get_headers(api_key), params={"query": q, "include_adult": "false", "page": page})
 
 
 def poster_url(path: str, size: str = "w500") -> str | None:
@@ -198,59 +191,35 @@ def poster_url(path: str, size: str = "w500") -> str | None:
 
 
 async def get_person(person_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "person", {"id": person_id}, provider_cache.TTL_MOVIE,
-        lambda: _get(f"{TMDB_BASE}/person/{person_id}", headers=get_headers(api_key), params={"append_to_response": "combined_credits"}),
-    )
+    return await _get(f"{TMDB_BASE}/person/{person_id}", headers=get_headers(api_key), params={"append_to_response": "combined_credits"})
 
 
 async def get_movie_credits(movie_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "movie_credits", {"id": movie_id}, provider_cache.TTL_MOVIE,
-        lambda: _get(f"{TMDB_BASE}/movie/{movie_id}/credits", headers=get_headers(api_key)),
-    )
+    return await _get(f"{TMDB_BASE}/movie/{movie_id}/credits", headers=get_headers(api_key))
 
 
 async def get_genre_list(api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "genre_movie", {}, provider_cache.TTL_CONFIG,
-        lambda: _get(f"{TMDB_BASE}/genre/movie/list", headers=get_headers(api_key)),
-    )
+    return await _get(f"{TMDB_BASE}/genre/movie/list", headers=get_headers(api_key))
 
 
 async def get_now_playing(page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "now_playing", {"page": page}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/movie/now_playing", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/movie/now_playing", headers=get_headers(api_key), params={"page": page})
 
 
 async def get_upcoming_movies(page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "upcoming_movies", {"page": page}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/movie/upcoming", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/movie/upcoming", headers=get_headers(api_key), params={"page": page})
 
 
 async def get_on_air_this_week(page: int = 1, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "on_air_week", {"page": page}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/tv/on_the_air", headers=get_headers(api_key), params={"page": page}),
-    )
+    return await _get(f"{TMDB_BASE}/tv/on_the_air", headers=get_headers(api_key), params={"page": page})
 
 
 async def get_movie_recommendations(movie_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "movie_recommendations", {"id": movie_id}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/movie/{movie_id}/recommendations", headers=get_headers(api_key)),
-    )
+    return await _get(f"{TMDB_BASE}/movie/{movie_id}/recommendations", headers=get_headers(api_key))
 
 
 async def get_show_recommendations(show_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "show_recommendations", {"id": show_id}, provider_cache.TTL_LIST,
-        lambda: _get(f"{TMDB_BASE}/tv/{show_id}/recommendations", headers=get_headers(api_key)),
-    )
+    return await _get(f"{TMDB_BASE}/tv/{show_id}/recommendations", headers=get_headers(api_key))
 
 
 async def discover_movies(
@@ -285,14 +254,14 @@ async def discover_movies(
         params["watch_region"] = watch_region
     if with_original_language:
         params["with_original_language"] = with_original_language
-
-    async def _fetch():
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"{TMDB_BASE}/discover/movie", headers=get_headers(api_key), params=params)
-            r.raise_for_status()
-            return r.json()
-
-    return await provider_cache.cached("tmdb", "discover_movie", params, provider_cache.TTL_LIST, _fetch)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{TMDB_BASE}/discover/movie",
+            headers=get_headers(api_key),
+            params=params,
+        )
+        r.raise_for_status()
+        return r.json()
 
 
 async def discover_shows(
@@ -330,153 +299,38 @@ async def discover_shows(
         params["watch_region"] = watch_region
     if with_original_language:
         params["with_original_language"] = with_original_language
-
-    async def _fetch():
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"{TMDB_BASE}/discover/tv", headers=get_headers(api_key), params=params)
-            r.raise_for_status()
-            return r.json()
-
-    return await provider_cache.cached("tmdb", "discover_tv", params, provider_cache.TTL_LIST, _fetch)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{TMDB_BASE}/discover/tv",
+            headers=get_headers(api_key),
+            params=params,
+        )
+        r.raise_for_status()
+        return r.json()
 
 
 async def get_collection(collection_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "collection", {"id": collection_id}, provider_cache.TTL_MOVIE,
-        lambda: _get(f"{TMDB_BASE}/collection/{collection_id}", headers=get_headers(api_key)),
-    )
+    return await _get(f"{TMDB_BASE}/collection/{collection_id}", headers=get_headers(api_key))
 
 
 async def get_movie_videos(tmdb_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "movie_videos", {"id": tmdb_id}, provider_cache.TTL_MOVIE,
-        lambda: _get(f"{TMDB_BASE}/movie/{tmdb_id}/videos", headers=get_headers(api_key)),
-    )
-
-
-async def get_tv_videos(tmdb_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "tv_videos", {"id": tmdb_id}, provider_cache.TTL_MOVIE,
-        lambda: _get(f"{TMDB_BASE}/tv/{tmdb_id}/videos", headers=get_headers(api_key)),
-    )
+    return await _get(f"{TMDB_BASE}/movie/{tmdb_id}/videos", headers=get_headers(api_key))
 
 
 async def find_by_external_id(external_id: str, source: str, api_key: str = None) -> dict:
     """Find a movie or TV show by an external ID (imdb_id, tvdb_id, etc.)."""
-    return await provider_cache.cached(
-        "tmdb", "find", {"id": external_id, "source": source}, provider_cache.TTL_IDS,
-        lambda: _get(f"{TMDB_BASE}/find/{external_id}", headers=get_headers(api_key), params={"external_source": source}),
-    )
+    return await _get(f"{TMDB_BASE}/find/{external_id}", headers=get_headers(api_key), params={"external_source": source})
 
 
 async def get_external_ids(tmdb_id: int, type: str, api_key: str = None) -> dict:
     """Fetch external IDs (IMDB, TVDB, etc.) for a movie or TV show."""
     path = "movie" if type == "movie" else "tv"
-    return await provider_cache.cached(
-        "tmdb", "external_ids", {"id": tmdb_id, "type": path}, provider_cache.TTL_IDS,
-        lambda: _get(f"{TMDB_BASE}/{path}/{tmdb_id}/external_ids", headers=get_headers(api_key)),
-    )
+    return await _get(f"{TMDB_BASE}/{path}/{tmdb_id}/external_ids", headers=get_headers(api_key))
 
 
 async def get_movie_watch_providers(movie_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "movie_watch_providers", {"id": movie_id}, provider_cache.TTL_MOVIE,
-        lambda: _get(f"{TMDB_BASE}/movie/{movie_id}/watch/providers", headers=get_headers(api_key)),
-    )
+    return await _get(f"{TMDB_BASE}/movie/{movie_id}/watch/providers", headers=get_headers(api_key))
 
 
 async def get_show_watch_providers(show_id: int, api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "show_watch_providers", {"id": show_id}, provider_cache.TTL_MOVIE,
-        lambda: _get(f"{TMDB_BASE}/tv/{show_id}/watch/providers", headers=get_headers(api_key)),
-    )
-
-
-async def get_movie_images(tmdb_id: int, api_key: str = None) -> dict:
-    """Fetch all images (backdrops, logos, posters) for a movie."""
-    return await provider_cache.cached(
-        "tmdb", "movie_images", {"id": tmdb_id}, provider_cache.TTL_IMAGES,
-        lambda: _get(f"{TMDB_BASE}/movie/{tmdb_id}/images", headers=get_headers(api_key)),
-    )
-
-
-async def get_tv_images(tmdb_id: int, api_key: str = None) -> dict:
-    """Fetch all images (backdrops, logos, posters) for a TV show."""
-    return await provider_cache.cached(
-        "tmdb", "tv_images", {"id": tmdb_id}, provider_cache.TTL_IMAGES,
-        lambda: _get(f"{TMDB_BASE}/tv/{tmdb_id}/images", headers=get_headers(api_key)),
-    )
-
-
-async def get_tv_season_images(tmdb_id: int, season_number: int, api_key: str = None) -> dict:
-    """Fetch all images for a specific TV season."""
-    return await provider_cache.cached(
-        "tmdb", "tv_season_images", {"id": tmdb_id, "season": season_number}, provider_cache.TTL_IMAGES,
-        lambda: _get(f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}/images", headers=get_headers(api_key)),
-    )
-
-
-def pick_image(items: list[dict], preferred_lang: str | None = None, size: str = "original") -> str | None:
-    """Select the best image from TMDB images based on language availability and rating."""
-    if not items:
-        return None
-
-    def best_in(candidates: list[dict]) -> dict | None:
-        if not candidates:
-            return None
-        return max(candidates, key=lambda x: (x.get("vote_average") or 0, x.get("vote_count") or 0))
-
-    # Tier 1: No Language
-    no_lang = [i for i in items if i.get("iso_639_1") is None]
-    winner = best_in(no_lang)
-
-    # Tier 2: User's preferred language
-    if not winner and preferred_lang:
-        user_lang = [i for i in items if i.get("iso_639_1") == preferred_lang]
-        winner = best_in(user_lang)
-
-    # Tier 3: Any
-    if not winner:
-        winner = best_in(items)
-
-    if not winner:
-        return None
-    return poster_url(winner["file_path"], size=size)
-async def get_watch_providers(type: str = "movie", region: str = "US", api_key: str = None) -> list[dict]:
-    """Fetch available watch providers for a specific region from TMDB."""
-    path = "movie" if type == "movie" else "tv"
-    res = await provider_cache.cached(
-        "tmdb", "watch_providers_list", {"path": path, "region": region}, provider_cache.TTL_CONFIG,
-        lambda: _get(f"{TMDB_BASE}/watch/providers/{path}", headers=get_headers(api_key), params={"watch_region": region}),
-    )
-    return res.get("results", [])
-
-async def get_tv_genre_list(api_key: str = None) -> dict:
-    return await provider_cache.cached(
-        "tmdb", "genre_tv", {}, provider_cache.TTL_CONFIG,
-        lambda: _get(f"{TMDB_BASE}/genre/tv/list", headers=get_headers(api_key)),
-    )
-
-async def get_languages(api_key: str = None) -> list[dict]:
-    return await provider_cache.cached(
-        "tmdb", "config_languages", {}, provider_cache.TTL_CONFIG,
-        lambda: _get(f"{TMDB_BASE}/configuration/languages", headers=get_headers(api_key)),
-    )
-
-async def get_countries(api_key: str = None) -> list[dict]:
-    return await provider_cache.cached(
-        "tmdb", "config_countries", {}, provider_cache.TTL_CONFIG,
-        lambda: _get(f"{TMDB_BASE}/configuration/countries", headers=get_headers(api_key)),
-    )
-
-
-def extract_trailer(videos_data: dict) -> str | None:
-    """Extract the first official YouTube trailer, falling back to unofficial YouTube trailers."""
-    results = videos_data.get("results", []) if videos_data else []
-    for v in results:
-        if v.get("type") == "Trailer" and v.get("site") == "YouTube" and v.get("official"):
-            return v["key"]
-    for v in results:
-        if v.get("type") == "Trailer" and v.get("site") == "YouTube":
-            return v["key"]
-    return None
+    return await _get(f"{TMDB_BASE}/tv/{show_id}/watch/providers", headers=get_headers(api_key))

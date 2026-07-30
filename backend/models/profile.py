@@ -19,6 +19,7 @@ class UserProfileData(Base):
     disliked_genres     : Mapped[Optional[list[str]]]  = mapped_column(JSONB)
     streaming_services  : Mapped[Optional[list[str]]]  = mapped_column(JSONB)
     content_language    : Mapped[Optional[str]]        = mapped_column(String(10))
+    metadata_language   : Mapped[Optional[str]]        = mapped_column(String(10))
     privacy_level       : Mapped[PrivacyLevel]         = mapped_column(SQLEnum(PrivacyLevel), default=PrivacyLevel.private, nullable=False, server_default=PrivacyLevel.private.value)
     avatar_path         : Mapped[Optional[str]]        = mapped_column(String(255))
     pagination_type     : Mapped[str]                  = mapped_column(String(20), default="infinite_scroll", server_default="infinite_scroll")

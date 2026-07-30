@@ -1,13 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import asyncio
+from collections import defaultdict
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, case
+from sqlalchemy import func, case, or_
 from sqlalchemy.orm import aliased
 from datetime import date as DateType, timedelta as TimeDelta
 from typing import Optional
 
-from db import get_db
+from db import get_db, AsyncSessionLocal
+from core import tmdb as tmdb_client
+from core.translations import upsert_media_translation, upsert_show_translation
+
 from dependencies import get_current_user, get_optional_user
 from models.users import User
 from models.profile import UserProfileData, PrivacyLevel
@@ -155,6 +161,187 @@ async def delete_avatar(
     return {"status": "ok"}
 
 
+# ── Translation backfill ──────────────────────────────────────────────────────
+
+_TRANSLATION_BACKFILL: dict[int, dict] = {}
+
+
+@router.post("/me/translations/backfill")
+async def start_translation_backfill(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = current_user.id
+    if _TRANSLATION_BACKFILL.get(user_id, {}).get("running"):
+        raise HTTPException(status_code=409, detail="Backfill already running")
+
+    profile_result = await db.execute(select(UserProfileData).where(UserProfileData.user_id == user_id))
+    profile = profile_result.scalar_one_or_none()
+    if not profile or not profile.metadata_language:
+        raise HTTPException(status_code=400, detail="No metadata language set")
+
+    language = profile.metadata_language
+
+    from routers.media import get_user_tmdb_key
+    tmdb_key = await get_user_tmdb_key(db, user_id)
+    if not tmdb_key:
+        raise HTTPException(status_code=400, detail="TMDB API key not configured")
+
+    _TRANSLATION_BACKFILL[user_id] = {
+        "running": True, "progress": 0, "total": 0, "done": False, "error": None,
+    }
+    background_tasks.add_task(_run_translation_backfill, user_id, language, tmdb_key)
+    return {"status": "started"}
+
+
+@router.get("/me/translations/backfill/status")
+async def get_backfill_status(current_user: User = Depends(get_current_user)):
+    state = _TRANSLATION_BACKFILL.get(current_user.id)
+    if not state:
+        return {"running": False, "progress": 0, "total": 0, "done": False, "error": None}
+    return state
+
+
+@router.delete("/me/translations/backfill")
+async def abort_backfill(current_user: User = Depends(get_current_user)):
+    state = _TRANSLATION_BACKFILL.get(current_user.id)
+    if state and state.get("running"):
+        state["abort"] = True
+    return {"status": "ok"}
+
+
+async def _run_translation_backfill(user_id: int, language: str, tmdb_key: str) -> None:
+    state = _TRANSLATION_BACKFILL[user_id]
+    try:
+        # ── 1. Read all user-linked items from DB ─────────────────────────────
+        async with AsyncSessionLocal() as db:
+            has_items_filter = or_(
+                Media.id.in_(select(Collection.media_id).where(Collection.user_id == user_id)),
+                Media.id.in_(
+                    select(WatchEvent.media_id).where(
+                        WatchEvent.user_id == user_id, WatchEvent.completed == True
+                    )
+                ),
+            )
+
+            movie_q = await db.execute(
+                select(Media.id, Media.tmdb_id)
+                .where(Media.media_type == "movie", Media.tmdb_id.isnot(None), has_items_filter)
+                .distinct()
+            )
+            movies = movie_q.all()
+
+            show_q = await db.execute(
+                select(ShowModel.id, ShowModel.tmdb_id)
+                .join(Media, Media.show_id == ShowModel.id)
+                .where(Media.media_type == "episode", ShowModel.tmdb_id.isnot(None), has_items_filter)
+                .distinct()
+            )
+            shows = show_q.all()
+
+            ep_q = await db.execute(
+                select(Media.id, Media.episode_number, Media.season_number, ShowModel.tmdb_id.label("show_tmdb_id"))
+                .join(ShowModel, Media.show_id == ShowModel.id)
+                .where(
+                    Media.media_type == "episode",
+                    Media.season_number.isnot(None),
+                    Media.episode_number.isnot(None),
+                    ShowModel.tmdb_id.isnot(None),
+                    has_items_filter,
+                )
+                .distinct()
+            )
+            eps = ep_q.all()
+
+        season_map: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+        for media_id, ep_num, season_num, show_tmdb_id in eps:
+            season_map[(show_tmdb_id, season_num)].append((media_id, ep_num))
+
+        total = len(movies) + len(shows) + len(season_map)
+        state["total"] = total
+        if total == 0:
+            return
+
+        # ── 2. Fetch all translations from TMDB in parallel ───────────────────
+        sem = asyncio.Semaphore(5)
+
+        # Collected results written to DB after all fetches complete
+        movie_results: list[tuple[int, dict]] = []   # (media_id, data)
+        show_results: list[tuple[int, dict]] = []    # (show_id, data)
+        season_results: list[tuple[list[tuple[int, int]], dict]] = []  # (ep_list, season_data)
+
+        async def fetch_movie(media_id: int, tmdb_id: int) -> None:
+            async with sem:
+                if not state.get("abort"):
+                    try:
+                        data = await tmdb_client.get_movie_light(tmdb_id, api_key=tmdb_key, language=language)
+                        movie_results.append((media_id, data))
+                    except Exception:
+                        pass
+            state["progress"] += 1
+
+        async def fetch_show(show_id: int, show_tmdb_id: int) -> None:
+            async with sem:
+                if not state.get("abort"):
+                    try:
+                        data = await tmdb_client.get_show_light(show_tmdb_id, api_key=tmdb_key, language=language)
+                        show_results.append((show_id, data))
+                    except Exception:
+                        pass
+            state["progress"] += 1
+
+        async def fetch_season(show_tmdb_id: int, season_num: int, ep_list: list[tuple[int, int]]) -> None:
+            async with sem:
+                if not state.get("abort"):
+                    try:
+                        data = await tmdb_client.get_season(show_tmdb_id, season_num, api_key=tmdb_key, language=language)
+                        season_results.append((ep_list, data))
+                    except Exception:
+                        pass
+            state["progress"] += 1
+
+        await asyncio.gather(
+            *[fetch_movie(mid, tid) for mid, tid in movies],
+            *[fetch_show(sid, stid) for sid, stid in shows],
+            *[fetch_season(stid, snum, ep_list) for (stid, snum), ep_list in season_map.items()],
+        )
+
+        # ── 3. Write collected results to DB in one batch ─────────────────────
+        async with AsyncSessionLocal() as db:
+            for media_id, data in movie_results:
+                await upsert_media_translation(
+                    db, media_id, language,
+                    data.get("title"), data.get("overview"),
+                    data.get("tagline"), data.get("poster_path"),
+                )
+            for show_id, data in show_results:
+                await upsert_show_translation(
+                    db, show_id, language,
+                    data.get("name"), data.get("overview"),
+                    data.get("tagline"), data.get("poster_path"),
+                )
+            for ep_list, season_data in season_results:
+                ep_by_num = {ep["episode_number"]: ep for ep in (season_data.get("episodes") or [])}
+                for media_id, ep_num in ep_list:
+                    ep_data = ep_by_num.get(ep_num)
+                    if ep_data:
+                        await upsert_media_translation(
+                            db, media_id, language,
+                            ep_data.get("name"), ep_data.get("overview"),
+                            None, ep_data.get("still_path"),
+                        )
+            await db.commit()
+
+    except Exception as e:
+        state["error"] = str(e)
+    finally:
+        state["running"] = False
+        state["done"] = True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.get("/avatar/{user_id}")
 async def get_avatar(user_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(UserProfileData).where(UserProfileData.user_id == user_id))
@@ -204,7 +391,7 @@ async def search_users(
     movies_q = await db.execute(
         select(WatchEvent.user_id, func.count(func.distinct(WatchEvent.media_id)))
         .join(Media, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id.in_(user_ids), Media.media_type == "movie")
+        .where(WatchEvent.user_id.in_(user_ids), WatchEvent.completed == True, Media.media_type == "movie")
         .group_by(WatchEvent.user_id)
     )
     movies_map = dict(movies_q.all())
@@ -213,7 +400,7 @@ async def search_users(
         select(WatchEvent.user_id, func.count(func.distinct(ShowModel.id)))
         .join(Media, WatchEvent.media_id == Media.id)
         .join(ShowModel, Media.show_id == ShowModel.id)
-        .where(WatchEvent.user_id.in_(user_ids))
+        .where(WatchEvent.user_id.in_(user_ids), WatchEvent.completed == True)
         .group_by(WatchEvent.user_id)
     )
     shows_map = dict(shows_q.all())
@@ -316,7 +503,7 @@ async def get_public_profile(
     # --- Stats ---
     watched_q = await db.execute(
         select(func.count(func.distinct(WatchEvent.media_id)))
-        .where(WatchEvent.user_id == user_id)
+        .where(WatchEvent.user_id == user_id, WatchEvent.completed == True)
     )
     total_watched = watched_q.scalar_one()
 
@@ -329,7 +516,7 @@ async def get_public_profile(
     movies_q = await db.execute(
         select(func.count(func.distinct(WatchEvent.media_id)))
         .join(Media, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id == user_id, Media.media_type == "movie")
+        .where(WatchEvent.user_id == user_id, WatchEvent.completed == True, Media.media_type == "movie")
     )
     movies_watched = movies_q.scalar_one()
 
@@ -337,7 +524,7 @@ async def get_public_profile(
         select(func.count(func.distinct(ShowModel.id)))
         .join(Media, Media.show_id == ShowModel.id)
         .join(WatchEvent, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id == user_id)
+        .where(WatchEvent.user_id == user_id, WatchEvent.completed == True)
     )
     shows_watched = shows_q.scalar_one()
 
@@ -351,7 +538,12 @@ async def get_public_profile(
     rw_movies_q = await db.execute(
         select(WatchEvent, Media)
         .join(Media, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id == user_id, Media.media_type == "movie")
+        .where(
+            WatchEvent.user_id == user_id,
+            WatchEvent.completed == True,
+            Media.media_type == "movie",
+            WatchEvent.watched_at.isnot(None),
+        )
         .order_by(WatchEvent.watched_at.desc())
         .limit(12)
     )
@@ -372,7 +564,12 @@ async def get_public_profile(
         select(WatchEvent, Media, ShowModel)
         .join(Media, WatchEvent.media_id == Media.id)
         .outerjoin(ShowModel, Media.show_id == ShowModel.id)
-        .where(WatchEvent.user_id == user_id, Media.media_type == "episode")
+        .where(
+            WatchEvent.user_id == user_id,
+            WatchEvent.completed == True,
+            Media.media_type == "episode",
+            WatchEvent.watched_at.isnot(None),
+        )
         .order_by(WatchEvent.watched_at.desc())
         .limit(12)
     )
@@ -665,11 +862,15 @@ async def get_user_stats(
     await _check_profile_access(user_id, current_user, db)
 
     # Date range filters applied to all WatchEvent queries
-    date_filters = []
+    date_filters = [WatchEvent.completed == True]
     if since:
         date_filters.append(WatchEvent.watched_at >= since)
     if until:
         date_filters.append(WatchEvent.watched_at < until + TimeDelta(days=1))
+    # Additional filter for anything bucketed/grouped by watched_at (activity charts,
+    # weekday distribution, weeks-active count) — an unknown-dated event can't be
+    # placed on a timeline, so it's excluded there while still counting in plain totals.
+    dated_event_filters = [*date_filters, WatchEvent.watched_at.isnot(None)]
 
     # Activity granularity: daily for ranges ≤ 62 days, monthly otherwise
     if since and until:
@@ -740,7 +941,7 @@ async def get_user_stats(
             func.count(func.distinct(WatchEvent.media_id)).label("cnt"),
         )
         .join(Media, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *dated_event_filters)
         .group_by(activity_expr, Media.media_type)
         .order_by(activity_expr)
     )
@@ -763,7 +964,7 @@ async def get_user_stats(
             func.coalesce(func.sum(effective_runtime), 0).label("minutes"),
         )
         .join(WatchEvent, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *dated_event_filters)
         .group_by(activity_expr, Media.media_type)
         .order_by(activity_expr)
     )
@@ -786,7 +987,7 @@ async def get_user_stats(
             func.count(func.distinct(WatchEvent.media_id)).label("cnt"),
         )
         .join(Media, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *dated_event_filters)
         .group_by(dow_expr)
         .order_by(dow_expr)
     )
@@ -796,7 +997,7 @@ async def get_user_stats(
     weeks_q = await db.execute(
         select(func.count(func.distinct(func.to_char(WatchEvent.watched_at, "IYYY-IW"))))
         .join(Media, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *date_filters)
+        .where(WatchEvent.user_id == user_id, Media.media_type.in_(["movie", "episode"]), *dated_event_filters)
     )
     total_weeks = max(weeks_q.scalar_one() or 1, 1)
     day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -915,7 +1116,7 @@ async def get_user_stats(
     watched_movie_ids_sub = (
         select(WatchEvent.media_id)
         .join(Media, WatchEvent.media_id == Media.id)
-        .where(WatchEvent.user_id == user_id, Media.media_type == "movie")
+        .where(WatchEvent.user_id == user_id, WatchEvent.completed == True, Media.media_type == "movie")
         .scalar_subquery()
     )
     unwatched_movies_q = await db.execute(
@@ -935,7 +1136,7 @@ async def get_user_stats(
         .join(Media, Media.show_id == ShowModel.id)
         .join(Collection, Collection.media_id == Media.id)
         .join(WatchEvent, WatchEvent.media_id == Media.id)
-        .where(Collection.user_id == user_id, WatchEvent.user_id == user_id)
+        .where(Collection.user_id == user_id, WatchEvent.user_id == user_id, WatchEvent.completed == True)
     )
     shows_watched_collected = watched_shows_collected_q.scalar_one()
 

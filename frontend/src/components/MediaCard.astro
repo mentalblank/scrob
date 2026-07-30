@@ -1,5 +1,6 @@
 ---
 import type { MediaItem } from "../lib/api";
+import { tmdbImageUrl } from "../lib/api";
 import CardActionBar from "./CardActionBar.astro";
 import { mediaUrl } from "../lib/urls";
 
@@ -28,11 +29,10 @@ const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.valu
 const preferTvdb = primaryMetadataSource === "tvdb";
 const href = mediaUrl(item, preferTvdb) || null;
 
-const posterPath = isEpisode && item.show_poster_path
-  ? (item.show_poster_path.startsWith('http') ? item.show_poster_path : `https://image.tmdb.org/t/p/w500${item.show_poster_path}`)
-  : item.poster_path
-    ? (item.poster_path.startsWith('http') ? item.poster_path : `https://image.tmdb.org/t/p/w500${item.poster_path}`)
-    : null;
+const posterPath = tmdbImageUrl(
+  isEpisode && item.show_poster_path ? item.show_poster_path : item.poster_path,
+  "w500"
+);
 
 const showActionBar = !isPerson && !isCollection && !hideActionBar;
 const watched = item.watched ?? false;

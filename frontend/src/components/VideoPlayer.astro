@@ -1,4 +1,6 @@
 ---
+import { api } from "../lib/api";
+
 interface Props {
   uriId?: string | null;
   tmdbId?: number | null;
@@ -13,8 +15,10 @@ interface Props {
 
 const { uriId, tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = false, mediaId } = Astro.props;
 const mediaRef = uriId ?? (tmdbId != null ? String(tmdbId) : "0");
-const useHls = Astro.cookies.get("use_hls_player")?.value === "true";
-const playbackTarget = Astro.cookies.get("playback_target")?.value || "web";
+const settings = await api.auth.getSettings(token).catch(() => ({} as any));
+const cookieHls = Astro.cookies.get("use_hls_player")?.value;
+const useHls = cookieHls !== undefined ? cookieHls === "true" : (settings.use_hls_player === true);
+const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.playback_target || "web";
 ---
 
 {inLibrary && (
@@ -52,7 +56,7 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || "web";
         </button>
       </div>
       <div class="bg-black relative">
-        <video id="player-video" controls class="w-full max-h-[72vh] outline-none" preload="none"></video>
+        <video id="player-video" controls crossorigin="anonymous" class="w-full max-h-[72vh] outline-none" preload="none"></video>
         <div id="player-error" class="hidden absolute inset-0 flex items-center justify-center bg-black/90 p-6 pointer-events-none">
           <div class="pointer-events-auto text-center max-w-xs">
             <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-red-400 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">

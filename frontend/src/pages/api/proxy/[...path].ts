@@ -37,6 +37,10 @@ async function handle({ params, request }: Parameters<APIRoute>[0]): Promise<Res
   const range = request.headers.get("Range");
   if (range) forwardHeaders.set("Range", range);
 
+  // Forward API key for Radarr/Sonarr import list compat endpoints
+  const apiKey = request.headers.get("X-Api-Key");
+  if (apiKey) forwardHeaders.set("X-Api-Key", apiKey);
+
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   const body = hasBody ? await request.arrayBuffer() : undefined;
 
@@ -57,8 +61,8 @@ async function handle({ params, request }: Parameters<APIRoute>[0]): Promise<Res
     }
   }
 
-  // Forward streaming and download headers
-  for (const h of ["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition"]) {
+  // Forward streaming, download and caching headers
+  for (const h of ["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition", "Cache-Control", "ETag", "Last-Modified"]) {
     const v = res.headers.get(h);
     if (v) responseHeaders.set(h, v);
   }

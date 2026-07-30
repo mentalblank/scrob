@@ -29,7 +29,7 @@ const history = await api.history.list({
 const groupedHistory = history.results.reduce<Record<string, WatchEvent[]>>((acc, event) => {
   let key = "";
   if (groupBy === "show_movie") {
-    key = event.media.type === 'episode' 
+    key = event.media.type === 'episode'
       ? (event.media.show_title || event.media.title)
       : event.media.title;
   } else if (groupBy === "season") {
@@ -40,14 +40,16 @@ const groupedHistory = history.results.reduce<Record<string, WatchEvent[]>>((acc
     key = event.media.type === 'episode' ? 'TV Shows' : 'Movies';
   } else {
     // default: date
-    key = new Date(event.watched_at + 'Z').toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    key = event.watched_at
+      ? new Date(event.watched_at + 'Z').toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric'
+        })
+      : 'Date unknown';
   }
-  
+
   if (!acc[key]) {
     acc[key] = [];
   }

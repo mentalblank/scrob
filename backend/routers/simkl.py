@@ -1,4 +1,12 @@
-"""Simkl integration router."""
+"""Simkl integration router.
+
+Endpoints:
+  POST   /simkl/auth/pin/start   – Start PIN auth flow
+  POST   /simkl/auth/pin/poll    – Poll for token completion
+  DELETE /simkl/auth/disconnect  – Clear stored token
+  POST   /simkl/sync             – Trigger a Simkl import (watched history + ratings + lists)
+  POST   /simkl/push             – Push Scrob history/ratings to Simkl
+"""
 
 import asyncio
 import logging
@@ -12,12 +20,11 @@ from core import simkl as simkl_client
 from core.enrichment import enrich_media
 from db import get_db, engine
 from dependencies import get_current_user
-from utils.scrobble import should_track_scrobble
 from models.base import CollectionSource, MediaType
 from models.events import WatchEvent
 from models.lists import List as ListModel, ListItem
 from models.media import Media
-from models.ratings import Rating
+from models.ratings import Rating, RatingChanges
 from models.show import Show
 from models.sync import SyncJob, SyncStatus
 from models.users import User, UserSettings
@@ -129,26 +136,8 @@ async def _get_or_create_show(db: AsyncSession, tmdb_id: int, title: str, api_ke
     from core import tmdb
     try:
         d = await tmdb.get_show(tmdb_id, api_key=api_key)
-
-        tvdb_id_raw = d.get("external_ids", {}).get("tvdb_id")
-        tvdb_id_val = int(tvdb_id_raw) if tvdb_id_raw else None
-
-        if tvdb_id_val:
-            existing_tvdb_res = await db.execute(select(Show).where(Show.tvdb_id == tvdb_id_val))
-            existing_show = existing_tvdb_res.scalars().first()
-            if existing_show:
-                if existing_show.tmdb_id is None:
-                    existing_show.tmdb_id = tmdb_id
-                    existing_show.uri_id = f"tmdb:s:{tmdb_id}"
-                    await db.flush()
-                    return existing_show
-                else:
-                    tvdb_id_val = None
-
         show = Show(
             tmdb_id=tmdb_id,
-            uri_id=f"tmdb:s:{tmdb_id}",
-            tvdb_id=tvdb_id_val,
             title=d.get("name") or title,
             original_title=d.get("original_name"),
             overview=d.get("overview"),
@@ -189,52 +178,11 @@ async def _get_or_create_movie_media(db: AsyncSession, tmdb_id: int, title: str,
     media = result.scalars().first()
     if media:
         return media
-    media = Media(tmdb_id=tmdb_id, uri_id=f"tmdb:m:{tmdb_id}", media_type=MediaType.movie, title=title)
+    media = Media(tmdb_id=tmdb_id, media_type=MediaType.movie, title=title)
     db.add(media)
     await db.flush()
     await enrich_media(media, api_key=api_key)
     return media
-
-
-async def _get_or_create_series_media(
-    db: AsyncSession,
-    tmdb_id: int,
-    title: str,
-    api_key: str | None,
-    user_id: int | None = None,
-) -> Media | None:
-    result = await db.execute(
-        select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
-    )
-    media = result.scalars().first()
-    if media:
-        return media
-    from core import tmdb
-    try:
-        d = await tmdb.get_show(tmdb_id, api_key=api_key)
-        media = Media(
-            tmdb_id=tmdb_id,
-            uri_id=f"tmdb:s:{tmdb_id}",
-            media_type=MediaType.series,
-            title=d.get("name") or title,
-            poster_path=tmdb.poster_url(d.get("poster_path")),
-            backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
-            release_date=d.get("first_air_date"),
-            tmdb_rating=d.get("vote_average"),
-            overview=d.get("overview"),
-            adult=d.get("adult", False),
-        )
-        db.add(media)
-        await db.flush()
-        if user_id is not None:
-            from core.enrichment import enrich_for_user
-            await enrich_for_user(db, user_id, media)
-        else:
-            await enrich_media(media, api_key=api_key)
-        return media
-    except Exception as e:
-        logger.warning("Failed to fetch/create series media tmdb=%s: %s", tmdb_id, e)
-        return None
 
 
 async def _get_or_create_episode_media(
@@ -263,10 +211,8 @@ async def _get_or_create_episode_media(
             season_data = await tmdb.get_season(show_tmdb_id, season_number, api_key=api_key)
         ep_map = {ep["episode_number"]: ep for ep in season_data.get("episodes", [])}
         ep = ep_map.get(episode_number)
-        _ep_tid = ep["id"] if ep else None
         media = Media(
-            tmdb_id=_ep_tid,
-            uri_id=f"tmdb:e:{_ep_tid}" if _ep_tid else None,
+            tmdb_id=ep["id"] if ep else None,
             media_type=MediaType.episode,
             title=ep["name"] if ep else f"S{season_number:02d}E{episode_number:02d}",
             overview=ep.get("overview") if ep else None,
@@ -302,6 +248,7 @@ def _parse_watched_at(raw: str | None) -> datetime | None:
 # ── Background sync job ───────────────────────────────────────────────────────
 
 async def run_simkl_sync(user_id: int, job_id: int) -> None:
+    from routers.sync import SyncCancelled, _raise_if_cancelled
     print(f"Starting Simkl sync for user {user_id}, job {job_id}")
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -331,7 +278,7 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
 
             stats: dict[str, int] = {"movies": 0, "episodes": 0, "ratings": 0, "lists": 0, "list_items": 0, "skipped": 0, "errors": 0}
             _new_watched: set[int] = set()
-            _new_ratings: dict[int, float] = {}
+            _new_ratings: RatingChanges = {}
 
             print("  Fetching all items from Simkl…")
             all_items = await simkl_client.get_all_items(client_id, access_token)
@@ -342,13 +289,8 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
             await db.commit()
 
             # ── Pre-load existing watch events ────────────────────────────────
-            we_res = await db.execute(select(WatchEvent.media_id, WatchEvent.watched_at).where(WatchEvent.user_id == user_id))
-            existing_watched_media_ids: set[int] = set()
-            existing_watched_keys: set[tuple[int, int]] = set()
-            for row in we_res:
-                existing_watched_media_ids.add(row[0])
-                if row[1]:
-                    existing_watched_keys.add((row[0], int(row[1].timestamp())))
+            we_res = await db.execute(select(WatchEvent.media_id).where(WatchEvent.user_id == user_id))
+            existing_watched: set[int] = {row[0] for row in we_res}
 
             # ── Movies ────────────────────────────────────────────────────────
             if settings.simkl_sync_watched:
@@ -368,11 +310,8 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                             if not media:
                                 stats["errors"] += 1
                                 continue
-                            watched_at = _parse_watched_at(item.get("last_watched_at"))
-                            
-                            should_add = should_track_scrobble(media.id, watched_at, existing_watched_keys, existing_watched_media_ids)
-                                    
-                            if should_add:
+                            if media.id not in existing_watched:
+                                watched_at = _parse_watched_at(item.get("last_watched_at"))
                                 db.add(WatchEvent(
                                     user_id=user_id,
                                     media_id=media.id,
@@ -380,14 +319,16 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                                     completed=True,
                                     play_count=1,
                                 ))
+                                existing_watched.add(media.id)
                                 _new_watched.add(media.id)
                                 stats["movies"] += 1
-                            elif media.id in existing_watched_media_ids:
+                            else:
                                 stats["skipped"] += 1
                     except Exception as exc:
                         logger.warning("Error processing Simkl movie tmdb=%s: %s", tmdb_id, exc)
                         stats["errors"] += 1
                 await db.commit()
+                await _raise_if_cancelled(db, job_id)
 
             # ── Shows / Episodes ──────────────────────────────────────────────
             if settings.simkl_sync_watched:
@@ -430,12 +371,8 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                                         if not media:
                                             stats["errors"] += 1
                                             continue
-                                            
-                                        watched_at = _parse_watched_at(ep_entry.get("watched_at"))
-                                        
-                                        should_add = should_track_scrobble(media.id, watched_at, existing_watched_keys, existing_watched_media_ids)
-
-                                        if should_add:
+                                        if media.id not in existing_watched:
+                                            watched_at = _parse_watched_at(ep_entry.get("watched_at"))
                                             db.add(WatchEvent(
                                                 user_id=user_id,
                                                 media_id=media.id,
@@ -443,9 +380,10 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                                                 completed=True,
                                                 play_count=1,
                                             ))
+                                            existing_watched.add(media.id)
                                             _new_watched.add(media.id)
                                             stats["episodes"] += 1
-                                        elif media.id in existing_watched_media_ids:
+                                        else:
                                             stats["skipped"] += 1
                                 except Exception as exc:
                                     logger.warning("Error processing Simkl episode s%se%s show tmdb=%s: %s", season_num, ep_num, show_tmdb_id, exc)
@@ -455,6 +393,7 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                         stats["errors"] += 1
 
                 await db.commit()
+                await _raise_if_cancelled(db, job_id)
 
             # ── Ratings ───────────────────────────────────────────────────────
             if settings.simkl_sync_ratings:
@@ -465,7 +404,13 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                     logger.warning("Failed to fetch Simkl ratings: %s", exc)
                     ratings_data = {}
 
-                rat_res = await db.execute(select(Rating.media_id).where(Rating.user_id == user_id))
+                rat_res = await db.execute(
+                    select(Rating.media_id).where(
+                        Rating.user_id == user_id,
+                        Rating.season_number.is_(None),
+                        Rating.episode_order.is_(None),
+                    )
+                )
                 existing_rated: set[int] = {row[0] for row in rat_res}
 
                 for item in ratings_data.get("movies", []):
@@ -483,7 +428,7 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                             if media.id not in existing_rated:
                                 db.add(Rating(user_id=user_id, media_id=media.id, rating=float(rating_val)))
                                 existing_rated.add(media.id)
-                                _new_ratings[media.id] = float(rating_val)
+                                _new_ratings[(media.id, None)] = float(rating_val)
                                 stats["ratings"] += 1
                     except Exception as exc:
                         logger.warning("Error processing Simkl movie rating tmdb=%s: %s", tmdb_id, exc)
@@ -498,19 +443,28 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                     tmdb_id = int(tmdb_id)
                     try:
                         async with db.begin_nested():
-                            media = await _get_or_create_series_media(db, tmdb_id, show_data.get("title", ""), api_key, user_id=user_id)
+                            media_res = await db.execute(
+                                select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
+                            )
+                            media = media_res.scalar_one_or_none()
                             if not media:
-                                continue
+                                from core import tmdb
+                                d = await tmdb.get_show(tmdb_id, api_key=api_key)
+                                media = Media(tmdb_id=tmdb_id, media_type=MediaType.series, title=d.get("name") or show_data.get("title", ""))
+                                db.add(media)
+                                await db.flush()
+                                await enrich_media(media, api_key=api_key)
                             if media.id not in existing_rated:
                                 db.add(Rating(user_id=user_id, media_id=media.id, rating=float(rating_val)))
                                 existing_rated.add(media.id)
-                                _new_ratings[media.id] = float(rating_val)
+                                _new_ratings[(media.id, None)] = float(rating_val)
                                 stats["ratings"] += 1
                     except Exception as exc:
                         logger.warning("Error processing Simkl show rating tmdb=%s: %s", tmdb_id, exc)
                         stats["errors"] += 1
 
                 await db.commit()
+                await _raise_if_cancelled(db, job_id)
 
             # ── Watchlist / plan-to-watch ─────────────────────────────────────
             if settings.simkl_sync_lists:
@@ -559,7 +513,26 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                     tmdb_id = int(tmdb_id)
                     try:
                         async with db.begin_nested():
-                            media = await _get_or_create_series_media(db, tmdb_id, show_data.get("title", ""), api_key, user_id=user_id)
+                            media_res = await db.execute(
+                                select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
+                            )
+                            media = media_res.scalar_one_or_none()
+                            if not media:
+                                from core import tmdb
+                                d = await tmdb.get_show(tmdb_id, api_key=api_key)
+                                media = Media(
+                                    tmdb_id=tmdb_id,
+                                    media_type=MediaType.series,
+                                    title=d.get("name") or show_data.get("title", ""),
+                                    poster_path=tmdb.poster_url(d.get("poster_path")),
+                                    backdrop_path=tmdb.poster_url(d.get("backdrop_path"), size="w1280"),
+                                    release_date=d.get("first_air_date"),
+                                    tmdb_rating=d.get("vote_average"),
+                                    overview=d.get("overview"),
+                                    adult=d.get("adult", False),
+                                )
+                                db.add(media)
+                                await db.flush()
                         if media and media.id not in wl_existing:
                             db.add(ListItem(list_id=watchlist.id, media_id=media.id))
                             wl_existing.add(media.id)
@@ -579,10 +552,29 @@ async def run_simkl_sync(user_id: int, job_id: int) -> None:
                 f"Skipped: {stats['skipped']}. Errors: {stats['errors']}."
             )
             from routers.sync import _fan_out_changes_to_other_connections
-            await _fan_out_changes_to_other_connections(db, user_id, None, _new_watched, _new_ratings, settings=settings)
+            await _fan_out_changes_to_other_connections(
+                db,
+                user_id,
+                None,
+                _new_watched,
+                _new_ratings,
+                settings=settings,
+                exclude_cloud_source=CollectionSource.simkl,
+            )
             await db.execute(
                 update(SyncJob).where(SyncJob.id == job_id).values(
                     status=SyncStatus.completed,
+                    stats=stats,
+                    processed_items=stats["movies"] + stats["episodes"] + stats["ratings"],
+                )
+            )
+            await db.commit()
+
+        except SyncCancelled:
+            print(f"Simkl sync job {job_id} cancelled")
+            await db.execute(
+                update(SyncJob).where(SyncJob.id == job_id).values(
+                    status=SyncStatus.cancelled,
                     stats=stats,
                     processed_items=stats["movies"] + stats["episodes"] + stats["ratings"],
                 )
@@ -633,6 +625,7 @@ async def sync_simkl(
 # ── Push (Scrob → Simkl) ──────────────────────────────────────────────────────
 
 async def _run_simkl_push(user_id: int, job_id: int) -> None:
+    from routers.sync import SyncCancelled, _raise_if_cancelled
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
         try:
@@ -659,11 +652,16 @@ async def _run_simkl_push(user_id: int, job_id: int) -> None:
                 watched_ids = {row[0] for row in watched_result.all()}
                 all_media_ids |= watched_ids
 
+                from routers.sync import _latest_watched_at
+                watched_at_by_media = await _latest_watched_at(db, user_id, list(watched_ids))
+
             if settings.simkl_push_ratings:
                 ratings_result = await db.execute(
                     select(Rating.media_id, Rating.rating).where(
                         Rating.user_id == user_id,
                         Rating.rating.isnot(None),
+                        Rating.season_number.is_(None),
+                        Rating.episode_order.is_(None),
                     )
                 )
                 ratings_map = {row[0]: row[1] for row in ratings_result.all()}
@@ -686,49 +684,34 @@ async def _run_simkl_push(user_id: int, job_id: int) -> None:
                 shows_result = await db.execute(select(Show).where(Show.id.in_(show_ids)))
                 shows_by_id = {s.id: s for s in shows_result.scalars().all()}
 
-            # Build uri→tmdb alias cache for TVDB-only items
-            from utils.alias_lookup import get_provider_id_for_uri
-            alias_cache: dict[str, int | None] = {}
-
-            async def _resolve_tmdb(uri: str | None, existing_id: int | None) -> int | None:
-                if existing_id:
-                    return existing_id
-                if not uri:
-                    return None
-                if uri not in alias_cache:
-                    a = await get_provider_id_for_uri(db, uri, "tmdb")
-                    alias_cache[uri] = int(a) if a else None
-                return alias_cache[uri]
-
             push_tasks = []
 
             if settings.simkl_push_watched:
                 for mid in watched_ids:
                     media = media_by_id.get(mid)
-                    if not media:
+                    if not media or not media.tmdb_id:
                         continue
-                    tmdb_id = await _resolve_tmdb(media.uri_id, media.tmdb_id)
-                    if media.media_type == MediaType.movie and tmdb_id:
-                        push_tasks.append(simkl_client.add_movie_to_history(settings.simkl_client_id, settings.simkl_access_token, tmdb_id))
+                    # Simkl has no unknown-date representation, and watched_at=None
+                    # means "stamp as now" on its side — skip rather than fabricate.
+                    watched_at = watched_at_by_media.get(mid)
+                    if watched_at is None:
+                        continue
+                    if media.media_type == MediaType.movie:
+                        push_tasks.append(simkl_client.add_movie_to_history(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id, watched_at))
                     elif media.media_type == MediaType.episode and media.show_id and media.season_number is not None and media.episode_number is not None:
                         show = shows_by_id.get(media.show_id)
-                        if show:
-                            show_tmdb_id = await _resolve_tmdb(show.uri_id, show.tmdb_id)
-                            if show_tmdb_id:
-                                push_tasks.append(simkl_client.add_episode_to_history(settings.simkl_client_id, settings.simkl_access_token, show_tmdb_id, media.season_number, media.episode_number))
+                        if show and show.tmdb_id:
+                            push_tasks.append(simkl_client.add_episode_to_history(settings.simkl_client_id, settings.simkl_access_token, show.tmdb_id, media.season_number, media.episode_number, watched_at))
 
             if settings.simkl_push_ratings:
                 for mid, rating in ratings_map.items():
                     media = media_by_id.get(mid)
-                    if not media:
-                        continue
-                    tmdb_id = await _resolve_tmdb(media.uri_id, media.tmdb_id)
-                    if not tmdb_id:
+                    if not media or not media.tmdb_id:
                         continue
                     if media.media_type == MediaType.movie:
-                        push_tasks.append(simkl_client.set_movie_rating(settings.simkl_client_id, settings.simkl_access_token, tmdb_id, rating))
+                        push_tasks.append(simkl_client.set_movie_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id, rating))
                     elif media.media_type in (MediaType.series, MediaType.episode):
-                        push_tasks.append(simkl_client.set_show_rating(settings.simkl_client_id, settings.simkl_access_token, tmdb_id, rating))
+                        push_tasks.append(simkl_client.set_show_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id, rating))
 
             total = len(push_tasks)
 
@@ -748,6 +731,7 @@ async def _run_simkl_push(user_id: int, job_id: int) -> None:
                 failed    += sum(1 for r in results if isinstance(r, Exception))
                 await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(processed_items=succeeded + failed))
                 await db.commit()
+                await _raise_if_cancelled(db, job_id)
             print(f"Simkl full push: {succeeded}/{total} succeeded")
 
             await db.execute(
@@ -757,6 +741,15 @@ async def _run_simkl_push(user_id: int, job_id: int) -> None:
                     processed_items=succeeded + failed,
                 )
             )
+            await db.commit()
+
+        except SyncCancelled:
+            print(f"Simkl push job {job_id} cancelled")
+            await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(
+                status=SyncStatus.cancelled,
+                stats={"succeeded": succeeded, "failed": failed},
+                processed_items=succeeded + failed,
+            ))
             await db.commit()
 
         except Exception as exc:

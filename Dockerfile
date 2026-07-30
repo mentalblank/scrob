@@ -1,15 +1,6 @@
-# ── Global Args ──────────────────────────────────────────────────────────────
-ARG APP_VERSION=dev
-ARG APP_BRANCH=unknown
-
 # ── Stage 1: Build frontend ───────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
-
-ARG APP_VERSION
-ARG APP_BRANCH
-ENV APP_VERSION=${APP_VERSION}
-ENV APP_BRANCH=${APP_BRANCH}
 
 COPY frontend/package*.json ./
 RUN npm ci
@@ -20,23 +11,18 @@ RUN npm run build
 # ── Stage 2: Runtime (Python + Node + supervisord) ────────────────────────────
 FROM python:3.12-slim
 
-ARG APP_VERSION
-ARG APP_BRANCH
+ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
-ENV APP_BRANCH=${APP_BRANCH}
 ENV TZ=UTC
 
-# Install Node.js 22, supervisord, gosu, tzdata, and PostgreSQL client (pg_dump/pg_restore)
+# Install Node.js 22, supervisord, gosu, curl and tzdata
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     supervisor \
     tzdata \
-    postgresql-client \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && apt-get purge -y curl \
-    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -63,5 +49,9 @@ COPY supervisord.conf /etc/supervisor/conf.d/scrob.conf
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 7330
+
+# Requires Docker Engine 25+ for --start-interval
+HEALTHCHECK --interval=2m --timeout=2s --start-period=20s --start-interval=5s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:${BACKEND_PORT:-7331}/health || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]

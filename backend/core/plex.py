@@ -236,7 +236,6 @@ async def _get_all_plex_items(
     all_items = []
     current_offset = offset
     page_size = 500 if limit is None else min(limit, 500)
-
     while True:
         params = {"type": plex_type, "includeGuids": 1}
         if sort:
@@ -286,6 +285,12 @@ async def get_items_by_ids(url: str, token: str, section_id: str, rating_keys: L
         all_items.extend(data.get("MediaContainer", {}).get("Metadata", []))
 
     return all_items
+
+async def get_seasons(url: str, token: str, section_id: str) -> List[Dict]:
+    """Fetch season metadata, including user ratings, from a TV library."""
+    params = {"type": 3, "includeGuids": 1}
+    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
+    return data.get("MediaContainer", {}).get("Metadata", [])
 
 async def get_recently_added(url: str, token: str, section_id: str, media_type: int, limit: int = 50) -> List[Dict]:
     """Fetch the most recently-added items from a library section.
@@ -524,6 +529,99 @@ async def enrich_plex_item(token: str, plex_id: str) -> Optional[Dict]:
         return None
 
 
+async def resolve_tmdb_ratingkey(token: str, tmdb_id: int, media_type: str) -> str | None:
+    """Return the Plex Discover ratingKey for an item identified by TMDB ID.
+
+    media_type must be 'movie' or 'show'.
+    Returns None if the item cannot be found.
+    """
+    plex_type = "1" if media_type == "movie" else "2"
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+            res = await client.get(
+                f"{DISCOVER_BASE}/library/sections/computer/all",
+                headers={"X-Plex-Token": token, "Accept": "application/json"},
+                params={"X-Plex-Token": token, "guid": f"tmdb://{tmdb_id}", "type": plex_type, "includeGuids": 1},
+            )
+            if res.status_code >= 400:
+                return None
+            data = res.json()
+        items = data.get("MediaContainer", {}).get("Metadata", [])
+        return items[0]["ratingKey"] if items else None
+    except Exception:
+        return None
+
+
+async def resolve_season_rating_key(
+    url: str,
+    token: str,
+    show_tmdb_id: int,
+    season_number: int,
+) -> str | None:
+    """Resolve a local Plex season ratingKey from a TMDB show ID and season number."""
+    try:
+        data = await _get(
+            f"{url.rstrip('/')}/library/sections/all",
+            token,
+            params={"type": 2, "guid": f"tmdb://{show_tmdb_id}", "includeGuids": 1},
+        )
+        shows = data.get("MediaContainer", {}).get("Metadata", [])
+        show = next(
+            (
+                item
+                for item in shows
+                if extract_tmdb_id(get_guids(item)) == show_tmdb_id
+            ),
+            None,
+        )
+        if not show or not show.get("ratingKey"):
+            return None
+        children = await _get(
+            f"{url.rstrip('/')}/library/metadata/{show['ratingKey']}/children",
+            token,
+        )
+        seasons = children.get("MediaContainer", {}).get("Metadata", [])
+        match = next(
+            (
+                item
+                for item in seasons
+                if item.get("type") == "season" and item.get("index") == season_number
+            ),
+            None,
+        )
+        return str(match["ratingKey"]) if match and match.get("ratingKey") else None
+    except Exception:
+        return None
+
+
+async def add_to_watchlist(token: str, rating_key: str) -> bool:
+    """Add a Plex item to the user's watchlist by its Discover ratingKey."""
+    try:
+        async with httpx.AsyncClient(timeout=PUSH_TIMEOUT, follow_redirects=True) as client:
+            r = await client.put(
+                f"{DISCOVER_BASE}/actions/addToWatchlist",
+                headers={"X-Plex-Token": token, "Accept": "application/json"},
+                params={"X-Plex-Token": token, "ratingKey": rating_key},
+            )
+            return r.status_code < 400
+    except Exception:
+        return False
+
+
+async def remove_from_watchlist(token: str, rating_key: str) -> bool:
+    """Remove a Plex item from the user's watchlist by its Discover ratingKey."""
+    try:
+        async with httpx.AsyncClient(timeout=PUSH_TIMEOUT, follow_redirects=True) as client:
+            r = await client.delete(
+                f"{DISCOVER_BASE}/actions/removeFromWatchlist",
+                headers={"X-Plex-Token": token, "Accept": "application/json"},
+                params={"X-Plex-Token": token, "ratingKey": rating_key},
+            )
+            return r.status_code < 400
+    except Exception:
+        return False
+
+
 async def get_watchlist(token: str) -> List[Dict]:
     """Fetch all items from the user's Plex watchlist via the Plex Discover API."""
     items: List[Dict] = []
@@ -601,12 +699,13 @@ async def scan_libraries(url: str, token: str, section_keys: list[str]) -> bool:
 async def set_rating(url: str, token: str, rating_key: str, rating: float, client: httpx.AsyncClient | None = None) -> bool:
     """Set a star rating on a Plex item (0–10 scale)."""
     headers = {"X-Plex-Token": token, "Accept": "application/json"}
+    params = {"key": rating_key, "identifier": "com.plexapp.plugins.library", "rating": rating}
     try:
         if client:
-            r = await client.put(f"{url.rstrip('/')}/library/metadata/{rating_key}/userRating", headers=headers, params={"rating": rating})
+            r = await client.put(f"{url.rstrip('/')}/:/rate", headers=headers, params=params)
             return r.status_code < 400
         async with httpx.AsyncClient(timeout=PUSH_TIMEOUT, follow_redirects=False) as c:
-            r = await c.put(f"{url.rstrip('/')}/library/metadata/{rating_key}/userRating", headers=headers, params={"rating": rating})
+            r = await c.put(f"{url.rstrip('/')}/:/rate", headers=headers, params=params)
             return r.status_code < 400
     except Exception:
         return False

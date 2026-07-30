@@ -9,26 +9,22 @@ from sqlalchemy import select, desc, delete
 from db import get_db
 from models.media import Media
 from models.ratings import Rating
-from models.collection import Collection, CollectionFile
-from models.base import CollectionSource, MediaType
+from models.base import MediaType
 from models.users import UserSettings
-from models.connections import MediaServerConnection
 from dependencies import get_current_user
 from models.users import User
-import core.plex as plex_client
-import core.jellyfin as jellyfin_client
-import core.emby as emby_client
-import core.trakt as trakt_client
+from core.enrichment import enrich_media
 
 router = APIRouter()
 
 
 class RatingIn(BaseModel):
-    uri_id: str
+    tmdb_id: int
     media_type: str
     rating: float = Field(..., ge=0.0, le=10.0)
     review: Optional[str] = None
     season_number: Optional[int] = None
+    episode_order: Optional[str] = None
 
 
 def format_rating(rating: Rating, media: Media) -> dict:
@@ -36,7 +32,6 @@ def format_rating(rating: Rating, media: Media) -> dict:
         "id": rating.id,
         "media": {
             "id": media.id,
-            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "type": media.media_type,
             "title": media.title,
@@ -44,6 +39,7 @@ def format_rating(rating: Rating, media: Media) -> dict:
             "release_date": media.release_date,
         },
         "season_number": rating.season_number,
+        "episode_order": rating.episode_order,
         "user_id": rating.user_id,
         "rating": rating.rating,
         "review": rating.review,
@@ -72,54 +68,48 @@ async def submit_rating(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid media_type: {body.media_type}")
 
-    from utils.media_uri import MediaURI
-    try:
-        uri = MediaURI.parse(body.uri_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid uri_id: {body.uri_id!r}")
-
+    # Look up existing Media row, create on-the-fly if missing
     result = await db.execute(
-        select(Media).where(Media.uri_id == body.uri_id, Media.media_type == media_type)
+        select(Media).where(Media.tmdb_id == body.tmdb_id, Media.media_type == media_type)
     )
     media = result.scalar_one_or_none()
 
     if not media:
-        if uri.provider != "tmdb":
-            raise HTTPException(status_code=400, detail="Only TMDB URIs supported for new rating media; sync first")
-        tmdb_id_int = int(uri.id)
         from routers.media import get_user_tmdb_key
         from core import tmdb
         api_key = await get_user_tmdb_key(db, current_user.id)
         try:
             if media_type == MediaType.movie:
-                data = await tmdb.get_movie(tmdb_id_int, api_key=api_key)
+                data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
                 title = data.get("title")
             elif media_type == MediaType.series:
-                title = None
+                title = None  # enrich_media will populate all fields including title
             else:
                 raise HTTPException(status_code=400, detail="Cannot create media row for episodes via rating")
-            media = Media(
-                tmdb_id=tmdb_id_int,
-                uri_id=body.uri_id,
-                media_type=media_type,
-                title=title or "",
-            )
+            media = Media(tmdb_id=body.tmdb_id, media_type=media_type, title=title or "")
             db.add(media)
             await db.flush()
-            from core.enrichment import enrich_for_user
-            await enrich_for_user(db, current_user.id, media)
+            await enrich_media(media, api_key=api_key)
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
 
     effective_season = None if media_type == MediaType.episode else body.season_number
+    effective_episode_order = (
+        body.episode_order
+        if media_type == MediaType.series and effective_season is not None
+        else None
+    )
+    if effective_episode_order not in (None, "tvdb"):
+        raise HTTPException(status_code=400, detail="Invalid episode order")
 
     result2 = await db.execute(
         select(Rating).where(
             Rating.media_id == media.id,
             Rating.user_id == current_user.id,
             Rating.season_number == effective_season,
+            Rating.episode_order == effective_episode_order,
         )
     )
     rating = result2.scalar_one_or_none()
@@ -135,66 +125,29 @@ async def submit_rating(
             rating=body.rating,
             review=body.review,
             season_number=effective_season,
+            episode_order=effective_episode_order,
         )
         db.add(rating)
 
     await db.commit()
     await db.refresh(rating)
+    if effective_episode_order == "tvdb":
+        return format_rating(rating, media)
 
-    # Fan-out rating push to all connections with push_ratings enabled
-    import asyncio
-    push_tasks = []
-    conns_result = await db.execute(
-        select(MediaServerConnection).where(
-            MediaServerConnection.user_id == current_user.id,
-            MediaServerConnection.push_ratings == True,
-        )
+    settings_result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
     )
-    push_connections = conns_result.scalars().all()
-    if push_connections:
-        files_result = await db.execute(
-            select(CollectionFile)
-            .join(Collection, Collection.id == CollectionFile.collection_id)
-            .where(Collection.user_id == current_user.id, Collection.media_id == media.id)
-        )
-        coll_files = files_result.scalars().all()
-        conn_by_type: dict[str, list] = {}
-        for conn in push_connections:
-            conn_by_type.setdefault(conn.type, []).append(conn)
-        for coll_file in coll_files:
-            if not coll_file.source_id:
-                continue
-            source_type = coll_file.source.value if hasattr(coll_file.source, "value") else str(coll_file.source)
-            for conn in conn_by_type.get(source_type, []):
-                if coll_file.source == CollectionSource.plex:
-                    push_tasks.append(plex_client.set_rating(conn.url, conn.token, coll_file.source_id, body.rating))
-                elif coll_file.source == CollectionSource.jellyfin:
-                    push_tasks.append(jellyfin_client.set_rating(conn.url, conn.token, conn.server_user_id, coll_file.source_id, body.rating))
-                elif coll_file.source == CollectionSource.emby:
-                    push_tasks.append(emby_client.set_rating(conn.url, conn.token, conn.server_user_id, coll_file.source_id, body.rating))
-
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = settings_result.scalar_one_or_none()
+    from routers.sync import _fan_out_changes_to_other_connections
 
-    push_tmdb_id = media.tmdb_id
-    if not push_tmdb_id and media.uri_id:
-        from utils.alias_lookup import get_provider_id_for_uri
-        alias = await get_provider_id_for_uri(db, media.uri_id, "tmdb")
-        push_tmdb_id = int(alias) if alias else None
-
-    if settings and settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and push_tmdb_id:
-        if media_type == MediaType.movie:
-            push_tasks.append(trakt_client.set_movie_rating(settings.trakt_client_id, settings.trakt_access_token, push_tmdb_id, body.rating))
-        elif media_type == MediaType.series:
-            push_tasks.append(trakt_client.set_show_rating(settings.trakt_client_id, settings.trakt_access_token, push_tmdb_id, body.rating))
-    if settings and settings.simkl_push_ratings and settings.simkl_access_token and settings.simkl_client_id and push_tmdb_id:
-        from core import simkl as simkl_client
-        if media_type == MediaType.movie:
-            push_tasks.append(simkl_client.set_movie_rating(settings.simkl_client_id, settings.simkl_access_token, push_tmdb_id, body.rating))
-        elif media_type == MediaType.series:
-            push_tasks.append(simkl_client.set_show_rating(settings.simkl_client_id, settings.simkl_access_token, push_tmdb_id, body.rating))
-    if push_tasks:
-        await asyncio.gather(*push_tasks, return_exceptions=True)
+    await _fan_out_changes_to_other_connections(
+        db,
+        current_user.id,
+        None,
+        set(),
+        {(media.id, effective_season): body.rating},
+        settings=settings,
+    )
 
     return format_rating(rating, media)
 
@@ -232,9 +185,10 @@ async def get_media_rating(
 
 @router.delete("")
 async def delete_rating(
-    uri_id: str,
+    tmdb_id: int,
     media_type: str,
     season_number: Optional[int] = Query(None),
+    episode_order: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -244,19 +198,25 @@ async def delete_rating(
         raise HTTPException(status_code=400, detail=f"Invalid media_type: {media_type}")
 
     media_result = await db.execute(
-        select(Media).where(Media.uri_id == uri_id, Media.media_type == mt)
+        select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == mt)
     )
     media = media_result.scalar_one_or_none()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
 
     effective_season = None if mt == MediaType.episode else season_number
+    effective_episode_order = (
+        episode_order
+        if mt == MediaType.series and effective_season is not None
+        else None
+    )
 
     result = await db.execute(
         select(Rating).where(
             Rating.media_id == media.id,
             Rating.user_id == current_user.id,
             Rating.season_number == effective_season,
+            Rating.episode_order == effective_episode_order,
         )
     )
     rating = result.scalar_one_or_none()
@@ -264,59 +224,23 @@ async def delete_rating(
         raise HTTPException(status_code=404, detail="Rating not found")
     await db.delete(rating)
     await db.commit()
+    if effective_episode_order == "tvdb":
+        return {"status": "deleted"}
 
-    import asyncio
-    push_tasks = []
-    conns_result = await db.execute(
-        select(MediaServerConnection).where(
-            MediaServerConnection.user_id == current_user.id,
-            MediaServerConnection.push_ratings == True,
-        )
+    settings_result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
     )
-    push_connections = conns_result.scalars().all()
-    if push_connections:
-        files_result = await db.execute(
-            select(CollectionFile)
-            .join(Collection, Collection.id == CollectionFile.collection_id)
-            .where(Collection.user_id == current_user.id, Collection.media_id == media.id)
-        )
-        coll_files = files_result.scalars().all()
-        conn_by_type: dict[str, list] = {}
-        for conn in push_connections:
-            conn_by_type.setdefault(conn.type, []).append(conn)
-        for coll_file in coll_files:
-            if not coll_file.source_id:
-                continue
-            source_type = coll_file.source.value if hasattr(coll_file.source, "value") else str(coll_file.source)
-            for conn in conn_by_type.get(source_type, []):
-                if coll_file.source == CollectionSource.plex:
-                    push_tasks.append(plex_client.set_rating(conn.url, conn.token, coll_file.source_id, 0))
-                elif coll_file.source == CollectionSource.jellyfin:
-                    push_tasks.append(jellyfin_client.set_rating(conn.url, conn.token, conn.server_user_id, coll_file.source_id, 0))
-                elif coll_file.source == CollectionSource.emby:
-                    push_tasks.append(emby_client.set_rating(conn.url, conn.token, conn.server_user_id, coll_file.source_id, 0))
-
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = settings_result.scalar_one_or_none()
+    from routers.sync import _fan_out_changes_to_other_connections
 
-    del_push_tmdb_id = media.tmdb_id
-    if not del_push_tmdb_id and media.uri_id:
-        from utils.alias_lookup import get_provider_id_for_uri
-        alias = await get_provider_id_for_uri(db, media.uri_id, "tmdb")
-        del_push_tmdb_id = int(alias) if alias else None
-
-    if settings and settings.trakt_push_ratings and settings.trakt_access_token and settings.trakt_client_id and del_push_tmdb_id:
-        if mt == MediaType.movie:
-            push_tasks.append(trakt_client.remove_movie_rating(settings.trakt_client_id, settings.trakt_access_token, del_push_tmdb_id))
-        elif mt == MediaType.series:
-            push_tasks.append(trakt_client.remove_show_rating(settings.trakt_client_id, settings.trakt_access_token, del_push_tmdb_id))
-    if settings and settings.simkl_push_ratings and settings.simkl_access_token and settings.simkl_client_id and del_push_tmdb_id:
-        from core import simkl as simkl_client
-        if mt == MediaType.movie:
-            push_tasks.append(simkl_client.remove_movie_rating(settings.simkl_client_id, settings.simkl_access_token, del_push_tmdb_id))
-        elif mt == MediaType.series:
-            push_tasks.append(simkl_client.remove_show_rating(settings.simkl_client_id, settings.simkl_access_token, del_push_tmdb_id))
-    if push_tasks:
-        await asyncio.gather(*push_tasks, return_exceptions=True)
+    await _fan_out_changes_to_other_connections(
+        db,
+        current_user.id,
+        None,
+        set(),
+        {},
+        settings=settings,
+        removed_ratings={(media.id, effective_season)},
+    )
 
     return {"status": "deleted"}

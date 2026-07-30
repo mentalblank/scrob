@@ -91,10 +91,13 @@ class UserSettings(Base):
     # Trakt inbound sync flags (Trakt → Scrob)
     trakt_sync_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     trakt_sync_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    trakt_history_cursor_at  : Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     # Trakt outbound push flags (Scrob → Trakt)
     trakt_push_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_push_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    trakt_push_collection    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    trakt_scrobble           : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # Trakt list import/export
     trakt_sync_lists         : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
@@ -119,6 +122,7 @@ class UserSettings(Base):
     # Simkl outbound push flags (Scrob → Simkl)
     simkl_push_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     simkl_push_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    simkl_scrobble           : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     preferences    : Mapped[Optional[dict]] = mapped_column(JSONB)
     blur_explicit  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
@@ -128,12 +132,25 @@ class UserSettings(Base):
     use_hls_player  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # How "Play" behaves: "web" (open server web page) or "internal" (built-in player)
     playback_target : Mapped[str]  = mapped_column(String(20), nullable=False, default="web", server_default="web")
+    # Default episode ordering preference ("tmdb" or "tvdb")
+    default_episode_order : Mapped[str] = mapped_column(String(20), nullable=False, default="tmdb", server_default="tmdb")
     
     # Sync scheduling
     trakt_full_sync_interval    : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     trakt_partial_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_trakt_full_sync        : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_trakt_partial_sync     : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # MDBList — API key authentication
+    mdblist_api_key: Mapped[Optional[str]] = mapped_column(String(255))
+    mdblist_sync_watched: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    mdblist_sync_ratings: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    mdblist_sync_watchlist: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    mdblist_push_watched: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    mdblist_push_ratings: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    mdblist_push_watchlist: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    mdblist_push_collection: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    mdblist_scrobble: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     user : Mapped["User"] = relationship(back_populates="settings")
 

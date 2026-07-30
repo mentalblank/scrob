@@ -1,4 +1,8 @@
-"""TVDB v4 API client."""
+"""TVDB v4 API client.
+
+Token-based auth: POST /login returns a 30-day Bearer token.
+We cache the token in memory (module-level) and refresh it when it expires.
+"""
 import asyncio
 import time
 import httpx
@@ -10,6 +14,40 @@ _token_cache: dict[str, tuple[str, float]] = {}  # api_key -> (token, expires_at
 _token_lock = asyncio.Lock()
 
 TVDB_IMAGE_BASE = "https://artworks.thetvdb.com"
+
+# BCP 47 (metadata_language) → ISO 639-3 used by TVDB
+_TVDB_LANG: dict[str, str] = {
+    "en":    "eng",
+    "fr":    "fra",
+    "de":    "deu",
+    "es":    "spa",
+    "es-MX": "spa",
+    "it":    "ita",
+    "pt-BR": "por",
+    "pt-PT": "por",
+    "ja":    "jpn",
+    "ko":    "kor",
+    "zh-CN": "zho",
+    "zh-TW": "zho",
+    "hi":    "hin",
+    "ar":    "ara",
+    "ru":    "rus",
+    "nl":    "nld",
+    "pl":    "pol",
+    "tr":    "tur",
+    "sv":    "swe",
+    "cs":    "ces",
+    "hu":    "hun",
+    "hr":    "hrv",
+    "sr":    "srp",
+}
+
+
+def tvdb_language(metadata_language: str | None) -> str | None:
+    """Convert a BCP 47 metadata_language code to the ISO 639-3 code TVDB expects."""
+    if not metadata_language:
+        return None
+    return _TVDB_LANG.get(metadata_language)
 
 
 def _image_url(path: str | None) -> str | None:
@@ -46,160 +84,16 @@ async def _get_token(api_key: str) -> str:
         return token
 
 
-async def _get(path: str, api_key: str, params: dict | None = None, lang: str | None = None) -> dict:
+async def _get(path: str, api_key: str, params: dict | None = None) -> dict:
     token = await _get_token(api_key)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-    }
-    if lang:
-        headers["Accept-Language"] = lang
-
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         r = await client.get(
             f"{TVDB_BASE}{path}",
-            headers=headers,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             params=params or {},
         )
         r.raise_for_status()
         return r.json()
-
-
-def to_three_letter_lang(lang_code: str | None) -> str:
-    """Map a 2-letter language code (ISO 639-1) to 3-letter code (ISO 639-2/T).
-    Defaults to 'eng' if not found or empty."""
-    if not lang_code:
-        return "eng"
-    lang_code = lang_code.lower().strip()
-    if len(lang_code) == 3:
-        return lang_code
-    mapping = {
-        "aa": "aar", "ab": "abk", "ae": "ave", "af": "afr", "ak": "aka",
-        "am": "amh", "an": "arg", "ar": "ara", "as": "asm", "av": "ava",
-        "ay": "aym", "az": "aze", "ba": "bak", "be": "bel", "bg": "bul",
-        "bh": "bih", "bi": "bis", "bm": "bam", "bn": "ben", "bo": "bod",
-        "br": "bre", "bs": "bos", "ca": "cat", "ce": "che", "ch": "cha",
-        "co": "cos", "cr": "cre", "cs": "ces", "cu": "chu", "cv": "chv",
-        "cy": "cym", "da": "dan", "de": "deu", "dv": "div", "dz": "dzo",
-        "ee": "ewe", "el": "ell", "en": "eng", "eo": "epo", "es": "spa",
-        "et": "est", "eu": "eus", "fa": "fas", "ff": "ful", "fi": "fin",
-        "fj": "fij", "fo": "fao", "fr": "fra", "fy": "fry", "ga": "gle",
-        "gd": "gla", "gl": "glg", "gn": "grn", "gu": "guj", "gv": "glv",
-        "ha": "hau", "he": "heb", "hi": "hin", "ho": "hmo", "hr": "hrv",
-        "ht": "hat", "hu": "hun", "hy": "hye", "hz": "her", "ia": "ina",
-        "id": "ind", "ie": "ile", "ig": "ibo", "ii": "iii", "ik": "ipk",
-        "io": "ido", "is": "isl", "it": "ita", "iu": "iku", "ja": "jpn",
-        "jv": "jav", "ka": "kat", "kg": "kon", "ki": "kik", "kj": "kua",
-        "kk": "kaz", "kl": "kal", "km": "khm", "kn": "kan", "ko": "kor",
-        "kr": "kau", "ks": "kas", "kv": "kom", "kw": "cor", "ky": "kir",
-        "la": "lat", "lb": "ltz", "lg": "lug", "li": "lim", "ln": "lin",
-        "lo": "lao", "lt": "lit", "lu": "lub", "lv": "lav", "mg": "mlg",
-        "mh": "mah", "mi": "mri", "mk": "mkd", "ml": "mal", "mn": "mon",
-        "mr": "mar", "ms": "msa", "mt": "mlt", "my": "mya", "na": "nau",
-        "nb": "nob", "nd": "nde", "ne": "nep", "ng": "ndo", "nl": "nld",
-        "nn": "nno", "no": "nor", "nr": "nbl", "nv": "nav", "ny": "nya",
-        "oc": "oci", "oj": "oji", "om": "orm", "or": "ori", "os": "oss",
-        "pa": "pan", "pi": "pli", "pl": "pol", "ps": "pus", "pt": "por",
-        "qu": "que", "rm": "roh", "rn": "run", "ro": "ron", "ru": "rus",
-        "rw": "kin", "sa": "san", "sc": "srd", "sd": "snd", "se": "sme",
-        "sg": "sag", "sh": "hbs", "si": "sin", "sk": "slk", "sl": "slv",
-        "sm": "smo", "sn": "sna", "so": "som", "sq": "sqi", "sr": "srp",
-        "ss": "ssw", "st": "sot", "su": "sun", "sv": "swe", "sw": "swa",
-        "ta": "tam", "te": "tel", "tg": "tgk", "th": "tha", "ti": "tir",
-        "tk": "tuk", "tl": "tgl", "tn": "tsn", "to": "ton", "tr": "tur",
-        "ts": "tso", "tt": "tat", "tw": "twi", "ty": "tah", "ug": "uig",
-        "uk": "ukr", "ur": "urd", "uz": "uzb", "ve": "ven", "vi": "vie",
-        "vo": "vol", "wa": "wln", "wo": "wol", "xh": "xho", "yi": "yid",
-        "yo": "yor", "za": "zha", "zh": "zho", "zu": "zul"
-    }
-    return mapping.get(lang_code, "eng")
-
-
-_THREE_TO_TWO = {
-    "aar": "aa", "abk": "ab", "ave": "ae", "afr": "af", "aka": "ak",
-    "amh": "am", "arg": "an", "ara": "ar", "asm": "as", "ava": "av",
-    "aym": "ay", "aze": "az", "bak": "ba", "bel": "be", "bul": "bg",
-    "bih": "bh", "bis": "bi", "bam": "bm", "ben": "bn", "bod": "bo",
-    "bre": "br", "bos": "bs", "cat": "ca", "che": "ce", "cha": "ch",
-    "cos": "co", "cre": "cr", "ces": "cs", "chu": "cu", "chv": "cv",
-    "cym": "cy", "dan": "da", "deu": "de", "div": "dv", "dzo": "dz",
-    "ewe": "ee", "ell": "el", "eng": "en", "epo": "eo", "spa": "es",
-    "est": "et", "eus": "eu", "fas": "fa", "ful": "ff", "fin": "fi",
-    "fij": "fj", "fao": "fo", "fra": "fr", "fry": "fy", "gle": "ga",
-    "gla": "gd", "glg": "gl", "grn": "gn", "guj": "gu", "glv": "gv",
-    "hau": "ha", "heb": "he", "hin": "hi", "hmo": "ho", "hrv": "hr",
-    "hat": "ht", "hun": "hu", "hye": "hy", "her": "hz", "ina": "ia",
-    "ind": "id", "ile": "ie", "ibo": "ig", "iii": "ii", "ipk": "ik",
-    "ido": "io", "isl": "is", "ita": "it", "iku": "iu", "jpn": "ja",
-    "jav": "jv", "kat": "ka", "kon": "kg", "kik": "ki", "kua": "kj",
-    "kaz": "kk", "kal": "kl", "khm": "km", "kan": "kn", "kor": "ko",
-    "kau": "kr", "kas": "ks", "kom": "kv", "cor": "kw", "kir": "ky",
-    "lat": "la", "ltz": "lb", "lug": "lg", "lim": "li", "lin": "ln",
-    "lao": "lo", "lit": "lt", "lub": "lu", "lav": "lv", "mlg": "mg",
-    "mah": "mh", "mri": "mi", "mkd": "mk", "mal": "ml", "mon": "mn",
-    "mar": "mr", "msa": "ms", "mlt": "mt", "mya": "my", "nau": "na",
-    "nob": "nb", "nde": "nd", "nep": "ne", "ndo": "ng", "nld": "nl",
-    "nno": "nn", "nor": "no", "nbl": "nr", "nav": "nv", "nya": "ny",
-    "oci": "oc", "oji": "oj", "orm": "om", "ori": "or", "oss": "os",
-    "pan": "pa", "pli": "pi", "pol": "pl", "pus": "ps", "por": "pt",
-    "que": "qu", "roh": "rm", "run": "rn", "ron": "ro", "rus": "ru",
-    "kin": "rw", "san": "sa", "srd": "sc", "snd": "sd", "sme": "se",
-    "sag": "sg", "hbs": "sh", "sin": "si", "slk": "sk", "slv": "sl",
-    "smo": "sm", "sna": "sn", "som": "so", "sqi": "sq", "srp": "sr",
-    "ssw": "ss", "sot": "st", "sun": "su", "swe": "sv", "swa": "sw",
-    "tam": "ta", "tel": "te", "tgk": "tg", "tha": "th", "tir": "ti",
-    "tuk": "tk", "tgl": "tl", "tsn": "tn", "ton": "to", "tur": "tr",
-    "tso": "ts", "tat": "tt", "twi": "tw", "tah": "ty", "uig": "ug",
-    "ukr": "uk", "urd": "ur", "uzb": "uz", "ven": "ve", "vie": "vi",
-    "vol": "vo", "wln": "wa", "wol": "wo", "xho": "xh", "yid": "yi",
-    "yor": "yo", "zha": "za", "zho": "zh", "zul": "zu"
-}
-
-
-def to_two_letter_lang(lang_code: str | None) -> str | None:
-    """Map a 3-letter language code (ISO 639-2/T) back to 2-letter code (ISO 639-1)."""
-    if not lang_code:
-        return None
-    lang_code = lang_code.lower().strip()
-    if len(lang_code) == 2:
-        return lang_code
-    return _THREE_TO_TWO.get(lang_code)
-
-
-def get_season_label(lang: str) -> str:
-    """Return 'Season' localized for the given language."""
-    labels = {
-        "eng": "Season",
-        "spa": "Temporada",
-        "fra": "Saison",
-        "deu": "Staffel",
-        "ita": "Stagione",
-        "por": "Temporada",
-        "nld": "Seizoen",
-        "rus": "Сезон",
-        "zho": "季",
-        "jpn": "シーズン",
-        "kor": "시즌",
-    }
-    return labels.get(lang, "Season")
-
-
-def get_specials_label(lang: str) -> str:
-    """Return 'Specials' localized for the given language."""
-    labels = {
-        "eng": "Specials",
-        "spa": "Especiales",
-        "fra": "Spéciaux",
-        "deu": "Specials",
-        "ita": "Speciali",
-        "por": "Especiais",
-        "nld": "Specials",
-        "rus": "Спецвыпуски",
-        "zho": "特别篇",
-        "jpn": "スペシャル",
-        "kor": "스페셜",
-    }
-    return labels.get(lang, "Specials")
 
 
 async def validate_api_key(api_key: str) -> bool:
@@ -212,12 +106,9 @@ async def validate_api_key(api_key: str) -> bool:
         return False
 
 
-async def search_series(query: str, api_key: str, lang: str | None = None) -> list[dict]:
+async def search_series(query: str, api_key: str) -> list[dict]:
     """Search for TV series by title. Returns list of simplified series dicts."""
-    data = await provider_cache.cached(
-        "tvdb", "search_series", {"q": query, "lang": lang}, provider_cache.TTL_SEARCH,
-        lambda: _get("/search", api_key, params={"query": query, "type": "series"}, lang=lang),
-    )
+    data = await _get("/search", api_key, params={"query": query, "type": "series"})
     results = []
     for item in data.get("data") or []:
         tvdb_id_str = item.get("tvdb_id") or item.get("id") or ""
@@ -225,24 +116,10 @@ async def search_series(query: str, api_key: str, lang: str | None = None) -> li
             tvdb_id = int(str(tvdb_id_str).lstrip("series-"))
         except (ValueError, TypeError):
             continue
-        
-        # Try to find a translated title/overview in search results
-        title = None
-        if "translations" in item and isinstance(item["translations"], dict):
-            title = item["translations"].get(lang or "eng") or item["translations"].get("eng")
-        if not title:
-            title = item.get("name")
-            
-        overview = None
-        if "overviews" in item and isinstance(item["overviews"], dict):
-            overview = item["overviews"].get(lang or "eng") or item["overviews"].get("eng")
-        if not overview:
-            overview = item.get("overview")
-        
         results.append({
             "tvdb_id": tvdb_id,
-            "title": title or "",
-            "overview": overview,
+            "title": item.get("name") or item.get("translations", {}).get("eng", ""),
+            "overview": item.get("overview") or item.get("overviews", {}).get("eng"),
             "year": item.get("year"),
             "image_url": _image_url(item.get("image_url") or item.get("thumbnail")),
             "status": item.get("status"),
@@ -251,114 +128,100 @@ async def search_series(query: str, api_key: str, lang: str | None = None) -> li
     return results
 
 
-async def get_series(tvdb_id: int, api_key: str, lang: str | None = None) -> dict:
+async def get_series(tvdb_id: int, api_key: str) -> dict:
     """Fetch series extended info including episodes for accurate per-season counts."""
-    from core import provider_cache
+    data = await _get(f"/series/{tvdb_id}/extended", api_key, params={"meta": "translations,episodes"})
+    return data.get("data") or {}
 
-    async def _fetch() -> dict:
-        data = await _get(f"/series/{tvdb_id}/extended", api_key, params={"meta": "translations,episodes"}, lang=lang)
-        return data.get("data") or {}
 
-    return await provider_cache.cached(
-        "tvdb", "series", {"id": tvdb_id, "lang": lang}, provider_cache.TTL_SHOW, _fetch
+async def get_season(season_id: int, api_key: str) -> dict:
+    """Fetch extended season metadata, including translated names and overviews."""
+    data = await _get(
+        f"/seasons/{season_id}/extended",
+        api_key,
+        params={"meta": "translations"},
     )
+    return data.get("data") or {}
 
 
-async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, lang: str = "eng") -> list[dict]:
-    """Fetch episodes for a specific season (season_type=official) in the specified language."""
-    from core import provider_cache
-    return await provider_cache.cached(
-        "tvdb", "series_episodes", {"id": tvdb_id, "season": season_number, "lang": lang}, provider_cache.TTL_SEASON,
-        lambda: _get_series_episodes_uncached(tvdb_id, season_number, api_key, lang),
-    )
+def format_season(raw: dict, language: str | None = None) -> dict:
+    """Normalise extended TVDB season metadata."""
+    translations = raw.get("translations") or {}
+
+    def _pick(key: str, field: str) -> str | None:
+        entries = translations.get(key) or []
+        fallback = None
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if language and entry.get("language") == language:
+                return entry.get(field) or None
+            if entry.get("language") == "eng":
+                fallback = entry.get(field) or None
+        return fallback
+
+    return {
+        "season_number": raw.get("number"),
+        "name": _pick("nameTranslations", "name") or raw.get("name"),
+        "overview": _pick("overviewTranslations", "overview") or raw.get("overview"),
+        "poster_path": _image_url(raw.get("image")),
+        "air_date": raw.get("premiereDate"),
+        "id": raw.get("id"),
+    }
 
 
-async def _get_series_episodes_uncached(tvdb_id: int, season_number: int, api_key: str, lang: str = "eng") -> list[dict]:
+async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, language: str | None = None) -> list[dict]:
+    """Fetch episodes for a specific season (season_type=official)."""
     episodes = []
     page = 0
-    try:
-        while True:
-            data = await _get(
-                f"/series/{tvdb_id}/episodes/official/{lang}",
-                api_key,
-                params={"page": page, "season": season_number},
-                lang=lang
-            )
-            raw_batch = (data.get("data") or {}).get("episodes") or []
-            if not raw_batch:
-                break
-
-            # TVDB endpoint ignores season parameter; filter client-side. Paginate by raw count to avoid truncating long shows.
-            episodes.extend([e for e in raw_batch if e.get("seasonNumber") == season_number])
-
-            # TVDB paginates at 500; if the raw page was smaller, we've reached the end.
-            if len(raw_batch) < 500:
-                break
-            page += 1
-    except Exception:
-        # Fall back to english if custom language lookup fails
-        if lang != "eng":
-            return await get_series_episodes(tvdb_id, season_number, api_key, lang="eng")
-        else:
-            raise
+    while True:
+        params: dict = {"page": page, "season": season_number}
+        if language:
+            params["language"] = language
+        data = await _get(
+            f"/series/{tvdb_id}/episodes/official",
+            api_key,
+            params=params,
+        )
+        batch = (data.get("data") or {}).get("episodes") or []
+        if not batch:
+            break
+        episodes.extend(batch)
+        # TVDB paginates at 500; if we got fewer, we're done
+        if len(batch) < 500:
+            break
+        page += 1
     return episodes
 
 
-
-
-def format_series(raw: dict, lang: str = "eng") -> dict:
-    """Normalise TVDB extended series data into a frontend-friendly dict, translating name and overview if possible."""
+def format_series(raw: dict, language: str | None = None) -> dict:
+    """Normalise TVDB extended series data into a frontend-friendly dict."""
     image = raw.get("image") or ""
     poster = _image_url(image) if image else None
 
     translations = raw.get("translations") or {}
-    
-    # Try preferred overview translation
-    overview = None
-    for t in translations.get("overviewTranslations") or []:
-        if isinstance(t, dict) and t.get("language") == lang:
-            overview = t.get("overview")
-            break
-            
-    # Fallback to English overview if preferred translation not found
-    if not overview and lang != "eng":
-        for t in translations.get("overviewTranslations") or []:
-            if isinstance(t, dict) and t.get("language") == "eng":
-                overview = t.get("overview")
-                break
-                
-    if not overview:
-        overview = raw.get("overview")
 
-    # Try preferred title translation
-    title = None
-    for t in translations.get("nameTranslations") or []:
-        if isinstance(t, dict) and t.get("language") == lang:
-            title = t.get("name")
-            break
-            
-    # Fallback to English title if preferred translation not found
-    if not title and lang != "eng":
-        for t in translations.get("nameTranslations") or []:
-            if isinstance(t, dict) and t.get("language") == "eng":
-                title = t.get("name")
-                break
-                
-    if not title:
-        title = raw.get("name")
+    def _pick(key: str, field: str) -> str | None:
+        entries = translations.get(key) or []
+        result = None
+        for t in entries:
+            if not isinstance(t, dict):
+                continue
+            if language and t.get("language") == language:
+                return t.get(field) or None  # preferred language found
+            if t.get("language") == "eng":
+                result = t.get(field) or None  # English fallback
+        return result
+
+    translated_title = _pick("nameTranslations", "name")
+    eng_overview = _pick("overviewTranslations", "overview")
 
     genres = [g.get("name") for g in (raw.get("genres") or []) if g.get("name")]
 
     # Count episodes per season and derive premiere dates from embedded episodes
     episode_counts: dict[int, int] = {}
     season_premiere_dates: dict[int, str] = {}
-    seen_episodes = set()
     for ep in raw.get("episodes") or []:
-        ep_id = ep.get("id")
-        if ep_id in seen_episodes:
-            continue
-        seen_episodes.add(ep_id)
-        
         sn = ep.get("seasonNumber")
         if sn is None:
             continue
@@ -367,23 +230,14 @@ def format_series(raw: dict, lang: str = "eng") -> dict:
             season_premiere_dates[sn] = ep["aired"]
 
     seasons = []
-    season_label = get_season_label(lang)
-    specials_label = get_specials_label(lang)
     for s in raw.get("seasons") or []:
         if s.get("type", {}).get("type") == "official":
             sn = s.get("number")
             count = episode_counts.get(sn) if sn in episode_counts else (s.get("episodeCount") or 0)
-            
-            # Use season name if provided (should be localized now via Accept-Language)
-            # otherwise fallback to localized "Season X"
-            name = s.get("name")
-            if not name:
-                name = f"{season_label} {sn}" if sn != 0 else specials_label
-
             seasons.append({
                 "season_number": sn,
-                "name": name,
-                "overview": s.get("overview"),
+                "name": s.get("name") or f"Season {sn}",
+                "overview": None,
                 "poster_path": _image_url(s.get("image")),
                 "episode_count": count,
                 "air_date": s.get("premiereDate") or season_premiere_dates.get(sn),
@@ -420,9 +274,9 @@ def format_series(raw: dict, lang: str = "eng") -> dict:
 
     return {
         "tvdb_id": raw.get("id"),
-        "title": title,
-        "original_title": raw.get("originalName"),
-        "overview": overview,
+        "title": translated_title or raw.get("name"),
+        "original_title": raw.get("originalName") or raw.get("name"),
+        "overview": eng_overview or raw.get("overview"),
         "poster_path": poster,
         "backdrop_path": _image_url(raw.get("artworks", [{}])[0].get("image") if raw.get("artworks") else None),
         "first_air_date": raw.get("firstAired"),
@@ -445,7 +299,7 @@ def format_cast(raw: dict) -> list[dict]:
     return [
         {
             "tmdb_id": None,
-            "person_id": c.get("peopleId") or c.get("personId"),
+            "person_id": c.get("personId"),
             "name": c.get("personName") or "",
             "character": c.get("name") or "",
             "profile_path": _image_url(c.get("image")),
@@ -456,60 +310,13 @@ def format_cast(raw: dict) -> list[dict]:
 
 
 def format_episode(raw: dict) -> dict:
-    # Handle localized names if they come as a dict
-    title = raw.get("name")
-    if raw.get("nameTranslations") and isinstance(raw.get("nameTranslations"), dict):
-        title = raw.get("nameTranslations").get("eng", title)
-        
     return {
         "tvdb_id": raw.get("id"),
         "season_number": raw.get("seasonNumber"),
         "episode_number": raw.get("number"),
-        "title": title,
-        "name": title, # Keep for backwards compat temporarily
+        "name": raw.get("name"),
         "overview": raw.get("overview"),
         "air_date": raw.get("aired"),
         "runtime": raw.get("runtime"),
-        "still_path": _image_url(raw.get("image")),
-        "image_url": _image_url(raw.get("image")), # Keep for backwards compat
-        "type": "episode",
+        "image_url": _image_url(raw.get("image")),
     }
-
-
-async def get_series_episodes_by_type(tvdb_id: int, api_key: str, season_type: str = "official", lang: str = "eng") -> list[dict]:
-    """Fetch all episodes for a series, paginated, using specific season_type and lang."""
-    async def _fetch():
-        episodes = []
-        page = 0
-        while True:
-            data = await _get(
-                f"/series/{tvdb_id}/episodes/{season_type}/{lang}",
-                api_key,
-                params={"page": page},
-                lang=lang
-            )
-            batch = (data.get("data") or {}).get("episodes") or []
-            if not batch:
-                break
-            episodes.extend(batch)
-            if len(batch) < 100:
-                break
-            page += 1
-        return episodes
-
-    return await provider_cache.cached(
-        "tvdb", "series_episodes_by_type", {"id": tvdb_id, "type": season_type, "lang": lang},
-        provider_cache.TTL_SEASON, _fetch,
-    )
-
-
-async def get_person(person_id: int, api_key: str) -> dict:
-    """Fetch person details from TVDB."""
-    from core import provider_cache
-
-    async def _fetch() -> dict:
-        data = await _get(f"/people/{person_id}/extended", api_key)
-        return data.get("data") or {}
-
-    return await provider_cache.cached("tvdb", "person", {"id": person_id}, provider_cache.TTL_MOVIE, _fetch)
-

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,12 +29,14 @@ class MediaServerConnection(Base):
 
     # Outbound push flags (Scrob → source)
     push_watched     : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    push_collection  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    push_playback    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     push_ratings     : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # Auto sync interval in hours (null = disabled)
-    # auto_sync_interval is treated as the Full Sync interval for backward compatibility
-    auto_sync_interval    : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    partial_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    auto_sync_interval    : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    partial_sync_interval : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    auto_push_interval    : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     
     last_full_sync        : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_partial_sync     : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -45,5 +47,9 @@ class MediaServerConnection(Base):
     watchlist_all_users       : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     watchlist_monitored_users : Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     watchlist_synced_ids      : Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+
+    # Plex watchlist ↔ Scrob list sync (Plex connections only)
+    plex_sync_watchlist : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    plex_push_watchlist : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     created_at       : Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)

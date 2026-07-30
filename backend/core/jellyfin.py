@@ -3,9 +3,16 @@ from typing import Optional, List, Dict
 
 TIMEOUT = httpx.Timeout(120.0)  # 120 second timeout
 
+
+def _auth_headers(token: str) -> Dict[str, str]:
+    # Jellyfin 12.0 removed legacy X-Emby-Token support; Authorization: MediaBrowser
+    # Token="..." is the primary form and works on all versions (Jellyfin and Emby).
+    return {"Authorization": f'MediaBrowser Token="{token}"'}
+
+
 async def _get(url: str, token: str, path: str, params: Optional[Dict] = None) -> Dict:
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-        headers = {"X-Emby-Token": token}
+        headers = _auth_headers(token)
         full_url = f"{url.rstrip('/')}/{path.lstrip('/')}"
         r = await client.get(full_url, headers=headers, params=params)
         r.raise_for_status()
@@ -26,18 +33,18 @@ async def get_item(url: str, token: str, item_id: str, user_id: Optional[str] = 
 async def validate_connection(url: str, token: str, user_id: Optional[str] = None) -> bool:
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0), follow_redirects=False) as client:
-            headers = {"X-Emby-Token": token}
-            
+            headers = _auth_headers(token)
+
             # Basic connectivity check
             r = await client.get(f"{url.rstrip('/')}/System/Info", headers=headers)
             if r.status_code != 200:
                 return False
-                
+
             # Optional user validation
             if user_id:
                 r = await client.get(f"{url.rstrip('/')}/Users/{user_id}", headers=headers)
                 return r.status_code == 200
-                
+
             return True
     except Exception:
         return False
@@ -225,7 +232,7 @@ async def scan_libraries(url: str, token: str) -> bool:
     """Trigger a full library scan on the server."""
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-            headers = {"X-Emby-Token": token}
+            headers = _auth_headers(token)
             r = await client.post(
                 f"{url.rstrip('/')}/Library/Refresh",
                 headers=headers,
@@ -239,7 +246,7 @@ PUSH_TIMEOUT = httpx.Timeout(15.0)  # shorter timeout for bulk push operations
 
 async def mark_watched(url: str, token: str, user_id: str, item_id: str, client: httpx.AsyncClient | None = None) -> bool:
     """Mark a Jellyfin item as played."""
-    headers = {"X-Emby-Token": token}
+    headers = _auth_headers(token)
     try:
         if client:
             r = await client.post(f"{url.rstrip('/')}/Users/{user_id}/PlayedItems/{item_id}", headers=headers)
@@ -252,7 +259,7 @@ async def mark_watched(url: str, token: str, user_id: str, item_id: str, client:
 
 async def mark_unwatched(url: str, token: str, user_id: str, item_id: str, client: httpx.AsyncClient | None = None) -> bool:
     """Mark a Jellyfin item as unplayed."""
-    headers = {"X-Emby-Token": token}
+    headers = _auth_headers(token)
     try:
         if client:
             r = await client.delete(f"{url.rstrip('/')}/Users/{user_id}/PlayedItems/{item_id}", headers=headers)
@@ -265,7 +272,7 @@ async def mark_unwatched(url: str, token: str, user_id: str, item_id: str, clien
 
 async def set_rating(url: str, token: str, user_id: str, item_id: str, rating: float, client: httpx.AsyncClient | None = None) -> bool:
     """Set a star rating on a Jellyfin item (0–10 scale)."""
-    headers = {"X-Emby-Token": token, "Content-Type": "application/json"}
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
     body = {"PlayedPercentage": None, "UnplayedItemCount": None, "Rating": rating}
     try:
         if client:

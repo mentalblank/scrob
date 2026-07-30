@@ -12,6 +12,7 @@ import CommentsSection from "../../components/CommentsSection.astro";
 import ProgressStrip from "../../components/ProgressStrip.astro";
 import VideoPlayer from "../../components/VideoPlayer.astro";
 import TrailerButton from "../../components/TrailerButton.astro";
+import EpisodeOrderSelector from "../../components/EpisodeOrderSelector.astro";
 import { api, type Show, type MediaItem } from "../../lib/api";
 import { parseShowId } from "../../lib/normalize";
 import { personUrl } from "../../lib/urls";
@@ -28,10 +29,25 @@ const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.valu
 let show: Show | null = null;
 let error = "";
 
+// The backend still exposes separate TMDB (/shows/{id}) and TVDB (/shows/tvdb/{id})
+// endpoints rather than a single uri_id-aware one, so translate the parsed uri_id
+// into the right backend path here — this page's own routing/URLs stay uri_id-based.
+const showFetchPath = (p: "tmdb" | "tvdb", numId: number) => (p === "tvdb" ? `tvdb/${numId}` : String(numId));
+
+let hasTvdbKey = false;
 try {
-  show = await api.shows.get(fetchKey, token);
-  if (show && provider !== "tvdb" && primaryMetadataSource === "tvdb" && show.tvdb_id) {
-    show = await api.shows.get(`tvdb:s:${show.tvdb_id}`, token);
+  const settings = await api.auth.getSettings(token!);
+  hasTvdbKey = !!settings?.has_effective_tvdb_key;
+} catch {}
+
+try {
+  show = await api.shows.get(showFetchPath(provider, resolvedShowId), token);
+  // Refetch TVDB-shaped data when either the global "primary metadata source"
+  // preference or this show's own per-show episode-order choice says TVDB.
+  const wantsTvdbData = show && provider !== "tvdb" && show.tvdb_id &&
+    (primaryMetadataSource === "tvdb" || (show as any)?.episode_order === "tvdb");
+  if (wantsTvdbData) {
+    show = await api.shows.get(showFetchPath("tvdb", show!.tvdb_id!), token);
   }
 } catch (e: any) {
   const status = (e as any)?.status ?? (e as any)?.response?.status;
@@ -49,6 +65,19 @@ if (!show && !error) {
 const resolvedTmdbId = (show as any)?.tmdb_id ?? (show as any)?.tmdb_id_cross ?? (show as any)?.tvdb_id ?? resolvedShowId;
 const resolvedUriId = show?.uri_id ?? (provider === "tvdb" ? `tvdb:s:${resolvedShowId}` : `tmdb:s:${resolvedShowId}`);
 const isTvdbResponse = provider === "tvdb" || ((show as any)?.tvdb_id && !(show as any)?.tmdb_id);
+
+// Per-show (falling back to the global default) TVDB-vs-TMDB episode ordering.
+// episode-order/{tmdbId} endpoints are keyed by the real TMDB id, so don't fall
+// back to the TVDB id here the way resolvedTmdbId does.
+const episodeOrderTmdbId = show?.tmdb_id ?? (show as any)?.tmdb_id_cross ?? null;
+const selectedEpisodeOrder: "tmdb" | "tvdb" = (show as any)?.episode_order === "tvdb" ? "tvdb" : "tmdb";
+const showEpisodeOrderSelector = !!(episodeOrderTmdbId && show?.tvdb_id && hasTvdbKey);
+
+// The /refresh endpoint is also split between the tmdb and tvdb routers, keyed
+// by whichever numeric id matches the data shape currently being displayed.
+const refreshPath = isTvdbResponse
+  ? showFetchPath("tvdb", (show as any)?.tvdb_id ?? resolvedShowId)
+  : showFetchPath("tmdb", resolvedTmdbId);
 
 const seasons = Object.entries(show?.seasons ?? {}).sort(
   ([a], [b]) => Number(a.replace("season_", "")) - Number(b.replace("season_", ""))
@@ -224,6 +253,8 @@ const activeButtonsCount = [
                 userRating={show.user_rating ?? null}
                 isBlocked={show.is_blocked ?? false}
                 isDropped={show.is_dropped ?? false}
+                episodeOrder={selectedEpisodeOrder}
+                tvdbId={show.tvdb_id ?? undefined}
                 centered={true}
               />
               {showProgress && (
@@ -237,6 +268,16 @@ const activeButtonsCount = [
                 </div>
               )}
             </div>
+
+            <!-- Episode Order (TVDB vs TMDB numbering) -->
+            {showEpisodeOrderSelector && (
+              <EpisodeOrderSelector
+                tmdbId={episodeOrderTmdbId as number}
+                tvdbId={show.tvdb_id as number}
+                selected={selectedEpisodeOrder}
+                token={token}
+              />
+            )}
 
             <!-- Header Buttons (Trailer, Refresh) -->
             {activeButtonsCount > 0 && (
@@ -252,7 +293,7 @@ const activeButtonsCount = [
                     secondary={false}
                   />
                 )}
-                <RefreshMetadataButton refreshUrl={`/api/proxy/shows/${id}/refresh`} showRefreshBtn={show.in_library} />
+                <RefreshMetadataButton refreshUrl={`/api/proxy/shows/${refreshPath}/refresh`} showRefreshBtn={show.in_library} />
                 <TrailerButton youtubeId={trailerYoutubeId} />
               </div>
             )}
@@ -614,6 +655,8 @@ const activeButtonsCount = [
                         seasonNumber={seasonNum}
                         hideRequest={true}
                         userRating={seasonState.user_rating ?? null}
+                        episodeOrder="tmdb"
+                        tvdbId={show.tvdb_id ?? undefined}
                       />
                     </div>
                   );
