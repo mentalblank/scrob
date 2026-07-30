@@ -39,7 +39,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
       // routes themselves (avoid redirect loops / breaking the wizards' own fetches).
       const skipOnboardingGate =
         isStaticAsset || pathname.startsWith("/api/") || pathname === "/logout" ||
-        pathname.startsWith("/setup") || pathname.startsWith("/welcome");
+        pathname.startsWith("/setup") || pathname.startsWith("/welcome") ||
+        // The welcome wizard's optional Plex-link step leaves and re-enters the
+        // app via these routes — don't bounce them back to /welcome mid-flow.
+        pathname.startsWith("/plex-link");
       if (!skipOnboardingGate) {
         if (user.is_admin && user.needs_setup) {
           return context.redirect("/setup", 302);

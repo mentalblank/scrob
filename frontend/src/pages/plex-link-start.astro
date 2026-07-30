@@ -10,6 +10,21 @@ if (!token) {
 
 let errorMsg = "";
 
+// Optional local return destination (e.g. /welcome?step=plex from the
+// onboarding wizard). Stored in a short-lived cookie for the callback.
+const rawNext = Astro.url.searchParams.get("next") ?? "";
+if (rawNext.startsWith("/") && !rawNext.startsWith("//")) {
+  Astro.cookies.set("plex_link_next", rawNext, {
+    path: "/",
+    httpOnly: true,
+    secure: import.meta.env.PROD,
+    sameSite: "lax",
+    maxAge: 600,
+  });
+} else {
+  Astro.cookies.delete("plex_link_next", { path: "/" });
+}
+
 const host = Astro.request.headers.get("x-forwarded-host") ?? Astro.url.host;
 const proto = Astro.request.headers.get("x-forwarded-proto") ?? Astro.url.protocol.replace(":", "");
 const redirectUri = `${proto}://${host}/plex-link-callback`;

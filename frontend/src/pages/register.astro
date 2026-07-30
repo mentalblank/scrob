@@ -10,7 +10,9 @@ let pendingEmailConfirmation = false;
 const { enabled: registrationEnabled } = await api.auth.registrationStatus().catch(() => ({ enabled: false }));
 const { has_users: hasUsers } = await api.auth.hasUsers().catch(() => ({ has_users: true }));
 
-if (!registrationEnabled) {
+// First user is always allowed to register (backend enforces the same rule) —
+// only bounce to login when registrations are closed AND accounts already exist.
+if (!registrationEnabled && hasUsers) {
   return Astro.redirect("/login");
 }
 
@@ -55,6 +57,9 @@ if (Astro.request.method === "POST") {
     error = e instanceof Error ? e.message : "Registration failed";
   }
 }
+
+// When a POST failed, jump straight back to the manual form instead of the chooser.
+const startOnForm = !!error;
 ---
 
 <Base title="Register" hideNav>
@@ -64,10 +69,22 @@ if (Astro.request.method === "POST") {
       <img src="/scrob.png" alt="Scrob Logo" class="w-36 object-contain mb-2" />
       <span class="text-zinc-100 font-bold text-xl tracking-tight">Scrob</span>
     </div>
-    <h1 class="text-3xl font-bold mb-6 text-zinc-100 text-center">
+    <h1 class="text-3xl font-bold mb-2 text-zinc-100 text-center">
       {pendingEmailConfirmation ? "Account created" : "Create Account"}
     </h1>
-    
+    {!pendingEmailConfirmation && (
+      <p class="text-sm text-zinc-400 text-center mb-6">Choose how you'd like to get started.</p>
+    )}
+
+    {!hasUsers && !pendingEmailConfirmation && (
+      <div class="bg-blue-500/10 border border-blue-500/30 text-blue-300 p-3 rounded-xl mb-6 text-sm flex items-start gap-2.5">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 mt-0.5 shrink-0">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>You're the first user — this account will be the <strong class="font-semibold">server admin</strong>.</span>
+      </div>
+    )}
+
     {error && (
       <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-xl mb-6">
         {error}
@@ -89,63 +106,115 @@ if (Astro.request.method === "POST") {
         <a href="/login" class="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Back to login</a>
       </div>
     ) : (
-    <form method="POST" class="space-y-4">
-      <div>
-        <label for="email" class="block text-sm font-medium text-zinc-400 mb-1">Email</label>
-        <input
-          type="email"
-          name="email"
-          id="email"
-          required
-          class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-        />
+    <div>
+      <!-- Path chooser -->
+      <div id="register-chooser" class={`space-y-3 ${startOnForm ? "hidden" : ""}`}>
+        <a
+          href="/plex-start"
+          class="flex items-center gap-4 w-full p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded-2xl transition-colors cursor-pointer group"
+        >
+          <div class="w-10 h-10 rounded-xl bg-[#e5a00d]/15 flex items-center justify-center shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e5a00d" class="w-5 h-5">
+              <path d="M12 0L4 6v12l8 6 8-6V6l-8-6zm0 4.3l4.8 3.6v8.2L12 19.7l-4.8-3.6V7.9L12 4.3z" />
+            </svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-zinc-100">Sign up with Plex</p>
+            <p class="text-xs text-zinc-500 mt-0.5">Use your plex.tv account — no password needed here.</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-zinc-300 transition shrink-0"><path d="M9 18l6-6-6-6"/></svg>
+        </a>
+
+        <button
+          type="button"
+          id="show-email-form-btn"
+          class="flex items-center gap-4 w-full p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded-2xl transition-colors cursor-pointer group text-left"
+        >
+          <div class="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-5 h-5 text-blue-400">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-zinc-100">Create account with email</p>
+            <p class="text-xs text-zinc-500 mt-0.5">Classic email, username & password — link Plex later if you like.</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-zinc-300 transition shrink-0"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
       </div>
-      <div>
-        <label for="username" class="block text-sm font-medium text-zinc-400 mb-1">Username</label>
-        <input
-          type="text"
-          name="username"
-          id="username"
-          required
-          class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-        />
+
+      <!-- Manual email/password form -->
+      <div id="register-form-wrap" class={startOnForm ? "" : "hidden"}>
+        <button type="button" id="back-to-chooser-btn" class="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300 transition-colors mb-4 cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          Other sign-up options
+        </button>
+        <form method="POST" class="space-y-4" id="register-form">
+          <div>
+            <label for="email" class="block text-sm font-medium text-zinc-400 mb-1">Email</label>
+            <input
+              type="email"
+              name="email"
+              id="email"
+              required
+              class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            />
+          </div>
+          <div>
+            <label for="username" class="block text-sm font-medium text-zinc-400 mb-1">Username</label>
+            <input
+              type="text"
+              name="username"
+              id="username"
+              required
+              class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            />
+          </div>
+          <div>
+            <label for="password" class="block text-sm font-medium text-zinc-400 mb-1">Password</label>
+            <div class="relative group/field">
+              <input
+                type="password"
+                name="password"
+                id="password"
+                required
+                class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              />
+              <PasswordToggle />
+            </div>
+          </div>
+          <div>
+            <label for="confirm_password" class="block text-sm font-medium text-zinc-400 mb-1">Confirm Password</label>
+            <div class="relative group/field">
+              <input
+                type="password"
+                name="confirm_password"
+                id="confirm_password"
+                required
+                class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              />
+              <PasswordToggle />
+            </div>
+          </div>
+          <label class="flex items-start gap-3 p-3.5 bg-zinc-800/50 border border-zinc-700 rounded-xl cursor-pointer">
+            <input type="checkbox" id="link-plex-after" class="w-4 h-4 mt-0.5 accent-[#e5a00d] cursor-pointer shrink-0" />
+            <span>
+              <span class="block text-sm font-semibold text-zinc-100">Link your Plex account after setup</span>
+              <span class="block text-xs text-zinc-500 mt-0.5">We'll offer a Plex-link step during onboarding so you can connect your servers.</span>
+            </span>
+          </label>
+          <button
+            type="submit"
+            class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95 duration-200 cursor-pointer mt-4"
+          >
+            Create Account
+          </button>
+        </form>
       </div>
-      <div>
-        <label for="password" class="block text-sm font-medium text-zinc-400 mb-1">Password</label>
-        <div class="relative group/field">
-          <input
-            type="password"
-            name="password"
-            id="password"
-            required
-            class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-          />
-          <PasswordToggle />
-        </div>
+
+      <div class="mt-6 text-center text-sm text-zinc-500">
+        Already have an account? <a href="/login" class="text-zinc-100 hover:underline">Login</a>
       </div>
-      <div>
-        <label for="confirm_password" class="block text-sm font-medium text-zinc-400 mb-1">Confirm Password</label>
-        <div class="relative group/field">
-          <input
-            type="password"
-            name="confirm_password"
-            id="confirm_password"
-            required
-            class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-          />
-          <PasswordToggle />
-        </div>
-      </div>
-      <button
-        type="submit"
-        class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95 duration-200 cursor-pointer mt-4"
-      >
-        Create Account
-      </button>
-    </form>
-    
-    <div class="mt-6 text-center text-sm text-zinc-500">
-      Already have an account? <a href="/login" class="text-zinc-100 hover:underline">Login</a>
     </div>
     )}
   </div>
@@ -198,6 +267,35 @@ if (Astro.request.method === "POST") {
 </div>
 
 <script>
+  // ── Path chooser ⇄ email form toggle ──
+  const chooser = document.getElementById('register-chooser');
+  const formWrap = document.getElementById('register-form-wrap');
+  document.getElementById('show-email-form-btn')?.addEventListener('click', () => {
+    chooser?.classList.add('hidden');
+    formWrap?.classList.remove('hidden');
+  });
+  document.getElementById('back-to-chooser-btn')?.addEventListener('click', () => {
+    formWrap?.classList.add('hidden');
+    chooser?.classList.remove('hidden');
+  });
+
+  // ── "Link Plex after setup" intent ──
+  // Remembered in localStorage so the welcome wizard can insert a Plex-link step.
+  const linkPlexCb = document.getElementById('link-plex-after') as HTMLInputElement | null;
+  if (linkPlexCb) {
+    // Restore choice after a failed POST round-trip.
+    linkPlexCb.checked = localStorage.getItem('link_plex_after_onboarding') === '1';
+    const syncFlag = () => {
+      if (linkPlexCb.checked) {
+        localStorage.setItem('link_plex_after_onboarding', '1');
+      } else {
+        localStorage.removeItem('link_plex_after_onboarding');
+      }
+    };
+    linkPlexCb.addEventListener('change', syncFlag);
+    document.getElementById('register-form')?.addEventListener('submit', syncFlag);
+  }
+
   // ── Bootstrap restore ──
   const bootstrapFile = document.getElementById('bootstrap-restore-file') as HTMLInputElement | null;
   const bootstrapBtn = document.getElementById('bootstrap-restore-btn') as HTMLButtonElement | null;

@@ -19,6 +19,12 @@ const oidcConfig: OidcConfig = await api.auth.oidcConfig().catch(() => ({
 const { enabled: registrationEnabled, smtp_configured: smtpConfigured } = await api.auth.registrationStatus().catch(() => ({ enabled: false, smtp_configured: false }));
 const { has_users: hasUsers } = await api.auth.hasUsers().catch(() => ({ has_users: true }));
 
+// Fresh install — no accounts yet. Send straight to first-run onboarding
+// (backend always allows the first registration regardless of settings).
+if (!hasUsers && Astro.request.method !== "POST") {
+  return Astro.redirect("/register");
+}
+
 if (Astro.url.searchParams.get("restored") === "true") {
   success = "Database restored successfully. You can now log in.";
 }
