@@ -24,7 +24,7 @@ from core.config import settings as app_settings
 from core.email import send_activation_email, send_password_reset_email
 from core.url_validator import validate_service_url
 from core.limiter import limiter
-from core.backup import restore_backup
+from core.backup import pg_restore
 from core.nuvio import NuvioAPIError, parse_profile_id
 import schemas
 from dependencies import get_current_user
@@ -320,8 +320,26 @@ async def bootstrap_restore(
 
 
 @router.get("/me", response_model=schemas.User)
-async def read_users_me(current_user: User = Depends(get_current_user)):
-    return current_user
+async def read_users_me(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    settings_result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )
+    user_settings = settings_result.scalar_one_or_none()
+    needs_onboarding = not (user_settings and user_settings.onboarded)
+
+    needs_setup = False
+    if current_user.is_admin:
+        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        global_settings = gs_result.scalar_one_or_none()
+        needs_setup = not (global_settings and global_settings.setup_completed)
+
+    resp = schemas.User.model_validate(current_user)
+    resp.needs_onboarding = needs_onboarding
+    resp.needs_setup = needs_setup
+    return resp
 
 @router.delete("/me")
 async def delete_user_me(

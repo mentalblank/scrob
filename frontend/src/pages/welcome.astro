@@ -1,0 +1,214 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+
+const { user, token } = Astro.locals;
+
+if (!user) {
+  return Astro.redirect("/login");
+}
+
+const settings = await api.auth.getSettings(token!).catch(() => null);
+---
+
+<Base title="Welcome" hideNav>
+  <div class="max-w-lg mx-auto mt-10 md:mt-16 mb-16">
+    <div class="flex flex-col items-center mb-8 text-center">
+      <img src="/scrob.png" alt="Scrob Logo" class="w-20 object-contain mb-3" />
+      <h1 class="text-2xl font-bold text-zinc-100">Welcome, {user.display_name}</h1>
+      <p class="text-sm text-zinc-400 mt-1">A few quick preferences before you dive in.</p>
+    </div>
+
+    <!-- Step indicator -->
+    <div class="flex items-center gap-2 mb-8 px-2" id="step-indicator">
+      {[0, 1, 2, 3].map((i) => (
+        <div class="flex-1 h-1.5 rounded-full bg-zinc-800 step-dot" data-step={i}></div>
+      ))}
+    </div>
+
+    <div class="bg-zinc-900/40 border border-zinc-800 rounded-3xl shadow-2xl backdrop-blur-md p-8">
+      <div id="welcome-error" class="hidden bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-xl mb-6 text-sm"></div>
+
+      <!-- Step 0: Theme -->
+      <section class="welcome-step" data-step="0">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Appearance</h2>
+        <p class="text-sm text-zinc-400 mb-5">Pick a look. You can change this anytime from the nav bar.</p>
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <button type="button" id="theme-dark-btn" class="theme-choice-btn px-4 py-3 rounded-xl border-2 text-sm font-semibold transition-all cursor-pointer">Dark</button>
+          <button type="button" id="theme-light-btn" class="theme-choice-btn px-4 py-3 rounded-xl border-2 text-sm font-semibold transition-all cursor-pointer">Light</button>
+        </div>
+        <div class="flex flex-wrap gap-2" id="accent-swatches">
+          {["blue", "purple", "green", "red", "orange", "pink"].map((c) => (
+            <button type="button" class="accent-swatch w-8 h-8 rounded-full border-2 border-transparent cursor-pointer transition-transform hover:scale-110" data-accent={c} style={`background: var(--accent-swatch-${c}, ${c})`}></button>
+          ))}
+        </div>
+      </section>
+
+      <!-- Step 1: Content prefs -->
+      <section class="welcome-step hidden" data-step="1">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Content Preferences</h2>
+        <p class="text-sm text-zinc-400 mb-5">You can fine-tune these anytime in Settings.</p>
+        <div class="space-y-3">
+          <label class="flex items-center justify-between p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl cursor-pointer">
+            <div>
+              <p class="text-sm font-semibold text-zinc-100">Blur explicit content</p>
+              <p class="text-xs text-zinc-500 mt-0.5">Blurs posters/backdrops flagged as adult until clicked</p>
+            </div>
+            <input type="checkbox" id="blur_explicit" checked={settings?.blur_explicit ?? true} class="w-5 h-5 accent-blue-500 cursor-pointer shrink-0" />
+          </label>
+          <label class="flex items-center justify-between p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl cursor-pointer">
+            <div>
+              <p class="text-sm font-semibold text-zinc-100">24-hour time format</p>
+              <p class="text-xs text-zinc-500 mt-0.5">Show times as 18:30 instead of 6:30 PM</p>
+            </div>
+            <input type="checkbox" id="time_format_24h" checked={settings?.time_format_24h ?? false} class="w-5 h-5 accent-blue-500 cursor-pointer shrink-0" />
+          </label>
+        </div>
+      </section>
+
+      <!-- Step 2: Integrations (skippable) -->
+      <section class="welcome-step hidden" data-step="2">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Connect Services <span class="text-zinc-500 font-normal text-sm">(optional)</span></h2>
+        <p class="text-sm text-zinc-400 mb-5">Sync your watch history with Trakt, Simkl, or a media server. This can be fully set up later.</p>
+        <a href="/settings#integrations" class="flex items-center justify-between p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded-xl transition cursor-pointer group">
+          <div>
+            <p class="text-sm font-semibold text-zinc-100">Open Integrations settings</p>
+            <p class="text-xs text-zinc-500 mt-0.5">Trakt, Simkl, MDBList, Jellyfin, Plex, Emby, Nuvio</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-zinc-300 transition"><path d="M9 18l6-6-6-6"/></svg>
+        </a>
+      </section>
+
+      <!-- Step 3: Done -->
+      <section class="welcome-step hidden" data-step="3">
+        <div class="text-center py-2">
+          <div class="w-14 h-14 bg-green-500/10 border border-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-400"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <h2 class="text-lg font-bold text-zinc-100 mb-1">You're ready to go</h2>
+          <p class="text-sm text-zinc-400">Enjoy Scrob. Everything here can be changed later in Settings.</p>
+        </div>
+      </section>
+
+      <!-- Nav buttons -->
+      <div class="flex items-center justify-between mt-8">
+        <button id="welcome-back-btn" class="hidden px-4 py-2.5 text-sm text-zinc-400 hover:text-zinc-100 transition cursor-pointer">Back</button>
+        <div class="flex-1"></div>
+        <button id="welcome-skip-btn" class="px-4 py-2.5 text-sm text-zinc-500 hover:text-zinc-300 transition cursor-pointer">Skip</button>
+        <button id="welcome-next-btn" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95 cursor-pointer ml-2">
+          Continue
+        </button>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<style>
+  .theme-choice-btn { border-color: var(--color-nav-border, #27272a); color: #a1a1aa; }
+  .theme-choice-btn.active { border-color: #3b82f6; color: #f4f4f5; background: rgba(59,130,246,0.1); }
+  .accent-swatch.active { border-color: #f4f4f5; }
+</style>
+
+<script define:vars={{ token }}>
+  const TOTAL_STEPS = 4;
+  let step = 0;
+
+  const steps = document.querySelectorAll('.welcome-step');
+  const dots = document.querySelectorAll('.step-dot');
+  const backBtn = document.getElementById('welcome-back-btn');
+  const skipBtn = document.getElementById('welcome-skip-btn');
+  const nextBtn = document.getElementById('welcome-next-btn');
+  const errorEl = document.getElementById('welcome-error');
+
+  function render() {
+    steps.forEach(s => s.classList.toggle('hidden', Number(s.dataset.step) !== step));
+    dots.forEach(d => d.classList.toggle('bg-blue-500', Number(d.dataset.step) <= step));
+    backBtn.classList.toggle('hidden', step === 0);
+    skipBtn.classList.toggle('hidden', step === TOTAL_STEPS - 1);
+    nextBtn.textContent = step === TOTAL_STEPS - 1 ? 'Finish' : 'Continue';
+    errorEl.classList.add('hidden');
+  }
+
+  // ── Theme step ──
+  const darkBtn = document.getElementById('theme-dark-btn');
+  const lightBtn = document.getElementById('theme-light-btn');
+  const isLight = document.documentElement.classList.contains('light');
+  darkBtn.classList.toggle('active', !isLight);
+  lightBtn.classList.toggle('active', isLight);
+
+  darkBtn.addEventListener('click', () => {
+    document.documentElement.classList.remove('light');
+    localStorage.setItem('theme', 'dark');
+    darkBtn.classList.add('active');
+    lightBtn.classList.remove('active');
+  });
+  lightBtn.addEventListener('click', () => {
+    document.documentElement.classList.add('light');
+    localStorage.setItem('theme', 'light');
+    lightBtn.classList.add('active');
+    darkBtn.classList.remove('active');
+  });
+
+  const currentAccent = localStorage.getItem('accentTheme') || 'blue';
+  document.querySelectorAll('.accent-swatch').forEach(sw => {
+    sw.classList.toggle('active', sw.dataset.accent === currentAccent);
+    sw.addEventListener('click', () => {
+      const accent = sw.dataset.accent;
+      if (accent && accent !== 'blue') {
+        document.documentElement.setAttribute('data-accent', accent);
+        localStorage.setItem('accentTheme', accent);
+      } else {
+        document.documentElement.removeAttribute('data-accent');
+        localStorage.setItem('accentTheme', 'blue');
+      }
+      document.querySelectorAll('.accent-swatch').forEach(s => s.classList.toggle('active', s === sw));
+    });
+  });
+
+  async function finish() {
+    nextBtn.disabled = true;
+    nextBtn.textContent = 'Saving…';
+    try {
+      const res = await fetch('/api/proxy/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          blur_explicit: document.getElementById('blur_explicit').checked,
+          time_format_24h: document.getElementById('time_format_24h').checked,
+          onboarded: true,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to save preferences');
+      }
+      window.location.href = '/';
+    } catch (err) {
+      errorEl.textContent = err instanceof Error ? err.message : 'Failed to save preferences';
+      errorEl.classList.remove('hidden');
+      nextBtn.disabled = false;
+      nextBtn.textContent = 'Finish';
+    }
+  }
+
+  nextBtn.addEventListener('click', () => {
+    if (step === TOTAL_STEPS - 1) {
+      finish();
+      return;
+    }
+    step++;
+    render();
+  });
+
+  skipBtn.addEventListener('click', () => {
+    step++;
+    render();
+  });
+
+  backBtn.addEventListener('click', () => {
+    if (step > 0) step--;
+    render();
+  });
+
+  render();
+</script>

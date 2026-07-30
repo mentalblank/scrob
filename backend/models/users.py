@@ -134,7 +134,10 @@ class UserSettings(Base):
     playback_target : Mapped[str]  = mapped_column(String(20), nullable=False, default="web", server_default="web")
     # Default episode ordering preference ("tmdb" or "tvdb")
     default_episode_order : Mapped[str] = mapped_column(String(20), nullable=False, default="tmdb", server_default="tmdb")
-    
+    # Personal-prefs onboarding wizard completed. New rows default False (needs onboarding);
+    # existing rows backfill True via server_default so current users aren't interrupted.
+    onboarded      : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="true")
+
     # Sync scheduling
     trakt_full_sync_interval    : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     trakt_partial_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

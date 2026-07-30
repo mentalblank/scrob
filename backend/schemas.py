@@ -23,6 +23,8 @@ class User(UserBase):
     plex_linked: bool = False
     plex_username: Optional[str] = None
     created_at: datetime
+    needs_setup: bool = False        # admin only — global setup wizard not yet completed
+    needs_onboarding: bool = False   # personal-prefs wizard not yet completed
 
     class Config:
         from_attributes = True
@@ -148,6 +150,7 @@ class UserSettings(BaseModel):
     use_hls_player: Optional[bool] = None
     playback_target: Optional[str] = None  # "web" | "internal"
     default_episode_order: Optional[str] = None  # "tmdb" | "tvdb"
+    onboarded: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -373,6 +376,7 @@ class GlobalSettings(BaseModel):
     sonarr_require_approval     : bool = False
     image_cache_enabled         : bool = False
     image_cache_limit_gb        : Optional[int] = None
+    setup_completed             : bool = False
 
     class Config:
         from_attributes = True

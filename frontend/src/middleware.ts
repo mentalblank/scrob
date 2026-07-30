@@ -34,6 +34,20 @@ export const onRequest = defineMiddleware(async (context, next) => {
       if (pathname === "/login" || pathname === "/register") {
         return context.redirect("/", 302);
       }
+
+      // Onboarding gate — skip for static assets, API proxy calls, and the wizard
+      // routes themselves (avoid redirect loops / breaking the wizards' own fetches).
+      const skipOnboardingGate =
+        isStaticAsset || pathname.startsWith("/api/") || pathname === "/logout" ||
+        pathname.startsWith("/setup") || pathname.startsWith("/welcome");
+      if (!skipOnboardingGate) {
+        if (user.is_admin && user.needs_setup) {
+          return context.redirect("/setup", 302);
+        }
+        if (user.needs_onboarding) {
+          return context.redirect("/welcome", 302);
+        }
+      }
     } catch (e) {
       // Token invalid or expired
       context.cookies.delete("token", { path: "/" });

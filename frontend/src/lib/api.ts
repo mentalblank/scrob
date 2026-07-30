@@ -334,6 +334,8 @@ export interface UserProfile {
   plex_linked?: boolean;
   plex_username?: string | null;
   created_at: string;
+  needs_setup?: boolean;
+  needs_onboarding?: boolean;
 }
 
 export interface AdminUser {
@@ -347,6 +349,7 @@ export interface AdminUser {
 
 export interface GlobalSettings {
   tmdb_api_key: string | null;
+  tvdb_api_key: string | null;
   radarr_url: string | null;
   radarr_token: string | null;
   radarr_root_folder: string | null;
@@ -360,6 +363,9 @@ export interface GlobalSettings {
   sonarr_season_folder: boolean;
   radarr_require_approval: boolean;
   sonarr_require_approval: boolean;
+  image_cache_enabled: boolean;
+  image_cache_limit_gb: number | null;
+  setup_completed: boolean;
 }
 
 export interface MediaRequestItem {
@@ -532,6 +538,7 @@ export interface UserSettings {
   time_format_24h: boolean;
   use_hls_player: boolean;
   playback_target: "web" | "internal";
+  onboarded?: boolean;
 }
 
 export interface MediaServerConnection {
