@@ -273,12 +273,12 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       <h2 class="section-headline border-b border-zinc-800 pb-2 mb-6">Performance Settings</h2>
       <p class="text-zinc-400 text-sm mb-6">Configure media caching, limits, and system performance optimizations.</p>
 
-      <form id="performance-settings-form" class="space-y-6 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+      <form id="performance-settings-form" class="space-y-6 bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6">
         <!-- Enable Caching -->
         <label class="flex items-center justify-between gap-3 p-4 bg-zinc-950 border border-zinc-800 rounded-xl cursor-pointer hover:bg-zinc-800/40 transition-colors">
           <div>
-            <span class="block text-sm font-semibold text-zinc-200">Enable TMDB Image Cache</span>
-            <span class="block text-xs text-zinc-500 mt-0.5">Cache poster and backdrop images locally on the server to improve load times and support offline mode.</span>
+            <span class="block text-sm font-semibold text-zinc-200">Enable Image Cache (TMDB &amp; TVDB)</span>
+            <span class="block text-xs text-zinc-500 mt-0.5">Cache TMDB and TVDB poster and backdrop images locally on the server to improve load times and support offline mode.</span>
           </div>
           <input type="checkbox" name="image_cache_enabled" id="image_cache_enabled" value="true" class="sr-only peer" checked={globalSettings.image_cache_enabled ?? false} />
           <div class="relative w-10 h-5 bg-zinc-700 peer-checked:bg-blue-600 rounded-full transition-colors pointer-events-none shrink-0 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5"></div>
@@ -294,7 +294,7 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
             min="0"
             placeholder="0 (Unlimited)"
             value={globalSettings.image_cache_limit_gb ?? ""}
-            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
           <p class="text-xs text-zinc-500">Set a maximum storage limit in GB. Oldest accessed images will be pruned when the limit is exceeded. Set to 0 or leave empty for unlimited.</p>
         </div>

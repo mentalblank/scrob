@@ -1441,6 +1441,12 @@ export function tmdbImageUrl(path: string | null | undefined, size: string = "w5
     if (match) {
       return `/api/proxy/media/image/${match[1]}${match[2]}`;
     }
+    // TVDB artwork: cache under the pseudo-size "tvdb" (backend redirects to
+    // the original URL when the cache is disabled or the download fails)
+    const tvdbMatch = /artworks\.thetvdb\.com(\/[^?#]+)/.exec(path);
+    if (tvdbMatch) {
+      return `/api/proxy/media/image/tvdb${tvdbMatch[1]}`;
+    }
     return path;
   }
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
