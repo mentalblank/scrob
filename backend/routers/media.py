@@ -14,8 +14,10 @@ from starlette.background import BackgroundTask
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, delete, func, cast as sa_cast, Text
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.attributes import flag_modified
 
 from db import get_db, AsyncSessionLocal
+from utils.media_uri import MediaURI
 from models.media import Media
 from models.collection import Collection, CollectionFile
 from models.connections import MediaServerConnection
@@ -79,6 +81,93 @@ TV_GENRE_IDS: dict[str, int] = {
 
 MOVIE_GENRE_NAMES: dict[int, str] = {v: k for k, v in MOVIE_GENRE_IDS.items()}
 TV_GENRE_NAMES: dict[int, str] = {v: k for k, v in TV_GENRE_IDS.items()}
+
+# ── Content-filter helpers ───────────────────────────────────────────────────
+
+# Combined genre name → TMDB ID map (movie + TV)
+_ALL_GENRE_ID_MAP: dict[str, int] = {**MOVIE_GENRE_IDS, **TV_GENRE_IDS}
+# Reverse: numeric genre ID → name, used when filtering raw TMDB list results
+_GENRE_ID_TO_NAME: dict[int, str] = {v: k for k, v in _ALL_GENRE_ID_MAP.items()}
+
+
+async def _get_content_filters(db: AsyncSession, user_id: int, lower: bool = True) -> tuple:
+    """Return (blocked_genre_names, blocked_keywords, blocked_regexes, filter_languages, language_filter_mode) from user preferences."""
+    q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    settings = q.scalar_one_or_none()
+    prefs: dict = (settings.preferences or {}) if settings else {}
+    cf = prefs.get("content_filters", {})
+
+    genres = cf.get("blocked_genres", [])
+    keywords = cf.get("blocked_keywords", [])
+    regexes = cf.get("blocked_regexes", [])
+    languages = cf.get("filter_languages", [])
+    mode = cf.get("language_filter_mode", "blacklist")
+
+    if lower:
+        return (
+            {g.lower() for g in genres},
+            [k.lower() for k in keywords],
+            regexes,
+            [lang.lower() for lang in languages],
+            mode.lower(),
+        )
+    return (genres, keywords, regexes, languages, mode)
+
+
+def _is_content_filtered(
+    item: dict,
+    blocked_genres: set[str],
+    blocked_keywords: list[str],
+    blocked_regexes: list[str],
+    filter_languages: list[str],
+    language_filter_mode: str,
+) -> bool:
+    """Return True if item should be hidden due to a content filter rule."""
+    import re as _re
+
+    if filter_languages:
+        itype = item.get("type")
+        if itype is None or itype in ("movie", "series"):
+            raw_lang = (item.get("original_language") or "").lower()
+            from core.tvdb import to_two_letter_lang
+            item_lang = to_two_letter_lang(raw_lang) or raw_lang
+
+            if language_filter_mode == "blacklist":
+                if item_lang in filter_languages or raw_lang in filter_languages:
+                    return True
+            elif language_filter_mode == "whitelist":
+                if item_lang and item_lang not in filter_languages and raw_lang not in filter_languages:
+                    return True
+
+    title = (item.get("title") or item.get("name") or "").lower()
+
+    # Genre check: TMDB list results use numeric genre_ids; detail views may use string genres
+    if blocked_genres:
+        item_genre_ids: list[int] = item.get("genre_ids") or []
+        resolved: set[str] = {_GENRE_ID_TO_NAME[gid].lower() for gid in item_genre_ids if gid in _GENRE_ID_TO_NAME}
+        raw_genres = item.get("genres") or []
+        for g in raw_genres:
+            if isinstance(g, dict):
+                resolved.add((g.get("name") or "").lower())
+            elif isinstance(g, str):
+                resolved.add(g.lower())
+        if resolved & blocked_genres:
+            return True
+
+    # Keyword check (case-insensitive substring)
+    for kw in blocked_keywords:
+        if kw and kw in title:
+            return True
+
+    # Regex check (invalid patterns are silently skipped)
+    for pat in blocked_regexes:
+        try:
+            if pat and _re.search(pat, title, _re.IGNORECASE):
+                return True
+        except _re.error:
+            pass
+
+    return False
 
 
 def _genre_weight(genre_ids: list[int], liked: set[str], disliked: set[str], name_map: dict[int, str]) -> float:
@@ -763,6 +852,73 @@ async def list_media_years(
     return {"years": years}
 
 
+@router.get("/genres")
+async def get_genres(
+    type: str = Query("movie"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        return {"genres": []}
+    try:
+        if type == "movie":
+            return await tmdb.get_genre_list(api_key=tmdb_key)
+        else:
+            return await tmdb.get_tv_genre_list(api_key=tmdb_key)
+    except Exception:
+        return {"genres": []}
+
+
+@router.get("/languages")
+async def get_languages(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        return []
+    try:
+        return await tmdb.get_languages(api_key=tmdb_key)
+    except Exception:
+        return []
+
+
+@router.get("/countries")
+async def get_countries(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        return []
+    try:
+        return await tmdb.get_countries(api_key=tmdb_key)
+    except Exception:
+        return []
+
+
+@router.get("/watch-providers")
+async def get_watch_providers(
+    type: str = Query("movie"),
+    region: str = Query("US"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tmdb_key = await get_user_tmdb_key(db, current_user.id)
+    if not check_tmdb_key(tmdb_key):
+        return {"results": []}
+    try:
+        providers = await tmdb.get_watch_providers(type=type, region=region, api_key=tmdb_key)
+        # Normalize logo paths
+        for p in providers:
+            if p.get("logo_path"):
+                p["logo_path"] = tmdb.poster_url(p["logo_path"], size="w154")
+        return {"results": providers}
+    except Exception:
+        return {"results": []}
+
+
 @router.get("/find-by-imdb")
 async def find_by_imdb(
     imdb_id: str = Query(...),
@@ -1008,6 +1164,10 @@ async def search_media(
     except Exception as e:
         print(f"TMDB search error: {e}")
 
+    # Filter out content-filtered items
+    cf = await _get_content_filters(db, current_user.id)
+    raw_results = [res for res in raw_results if not _is_content_filtered(res, *cf)]
+
     # 2. Check which TMDB results are in the local library.
     # Must filter by media_type: TMDB movie/show IDs are in separate namespaces but the
     # integers can collide with episode tmdb_ids in the local DB, corrupting the map.
@@ -1144,6 +1304,9 @@ async def trending_movies(
     if not tmdb_results:
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
 
+    cf = await _get_content_filters(db, current_user.id)
+    tmdb_results = [res for res in tmdb_results if not _is_content_filtered(res, *cf)]
+
     tmdb_ids = [res["id"] for res in tmdb_results]
     query = (
         select(Media)
@@ -1194,6 +1357,9 @@ async def trending_shows(
     if not tmdb_results:
         return {"page": page, "total_pages": 1, "total_results": 0, "results": []}
 
+    cf = await _get_content_filters(db, current_user.id)
+    tmdb_results = [res for res in tmdb_results if not _is_content_filtered(res, *cf)]
+
     tmdb_ids = [res["id"] for res in tmdb_results]
 
     # Collect which of these show TMDB IDs the user has in their library
@@ -1241,6 +1407,7 @@ async def on_air_today(
     if not check_tmdb_key(tmdb_key):
         return {"results": [], "page": 1, "total_pages": 1, "total_results": 0}
     data = await tmdb.get_on_air_today(page=page, api_key=tmdb_key)
+    cf = await _get_content_filters(db, current_user.id)
     results = [
         {
             "id": None,
@@ -1253,6 +1420,7 @@ async def on_air_today(
             "release_date": s.get("first_air_date"),
         }
         for s in data.get("results", [])
+        if not _is_content_filtered(s, *cf)
     ]
     await enrich_with_state(db, current_user.id, results)
     return {
@@ -1662,6 +1830,10 @@ async def get_tmdb_list(
                 data = await tmdb.get_popular_shows(page=page, api_key=tmdb_key)
 
         results = data.get("results", [])
+
+        cf = await _get_content_filters(db, current_user.id)
+        results = [r for r in results if not _is_content_filtered(r, *cf)]
+
         tmdb_ids = [res["id"] for res in results]
 
         # Check local library
@@ -1865,6 +2037,8 @@ async def upcoming_movies(
     try:
         data = await tmdb.get_upcoming_movies(api_key=tmdb_key)
         results = data.get("results", [])
+        cf = await _get_content_filters(db, current_user.id)
+        results = [r for r in results if not _is_content_filtered(r, *cf)]
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
         items = _enrich_movie_list(results, lib)
@@ -1885,6 +2059,8 @@ async def on_air_this_week(
     try:
         data = await tmdb.get_on_air_this_week(api_key=tmdb_key)
         results = data.get("results", [])
+        cf = await _get_content_filters(db, current_user.id)
+        results = [r for r in results if not _is_content_filtered(r, *cf)]
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _show_library_ids(db, current_user.id, ids)
         items = _enrich_show_list(results, lib)
@@ -1906,6 +2082,7 @@ async def hidden_gems(
         return {"results": []}
     try:
         page = random.randint(1, 5)
+        cf = await _get_content_filters(db, current_user.id)
         if type == MediaType.movie:
             data = await tmdb.discover_movies(
                 page=page, sort_by="vote_average.desc",
@@ -1913,6 +2090,7 @@ async def hidden_gems(
                 api_key=tmdb_key,
             )
             results = data.get("results", [])
+            results = [r for r in results if not _is_content_filtered(r, *cf)]
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _movie_library_ids(db, current_user.id, ids)
             items = _enrich_movie_list(results, lib)
@@ -1925,6 +2103,7 @@ async def hidden_gems(
                 api_key=tmdb_key,
             )
             results = data.get("results", [])
+            results = [r for r in results if not _is_content_filtered(r, *cf)]
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _show_library_ids(db, current_user.id, ids)
             items = _enrich_show_list(results, lib)
@@ -1945,6 +2124,8 @@ async def top_rated_movies(
     try:
         data = await tmdb.get_top_rated_movies(api_key=tmdb_key)
         results = data.get("results", [])
+        cf = await _get_content_filters(db, current_user.id)
+        results = [r for r in results if not _is_content_filtered(r, *cf)]
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _movie_library_ids(db, current_user.id, ids)
         items = _enrich_movie_list(results, lib)
@@ -1965,6 +2146,8 @@ async def top_rated_shows(
     try:
         data = await tmdb.get_top_rated_shows(api_key=tmdb_key)
         results = data.get("results", [])
+        cf = await _get_content_filters(db, current_user.id)
+        results = [r for r in results if not _is_content_filtered(r, *cf)]
         ids = [r["id"] for r in results if r.get("id")]
         lib = await _show_library_ids(db, current_user.id, ids)
         items = _enrich_show_list(results, lib)
@@ -2071,6 +2254,10 @@ async def for_you(
             seen2.add(rid)
             unique_shows.append(r)
 
+    cf = await _get_content_filters(db, current_user.id)
+    unique_movies = [r for r in unique_movies if not _is_content_filtered(r, *cf)]
+    unique_shows = [r for r in unique_shows if not _is_content_filtered(r, *cf)]
+
     movie_ids = [r["id"] for r in unique_movies]
     show_ids = [r["id"] for r in unique_shows]
 
@@ -2102,6 +2289,7 @@ async def streaming(
     if not check_tmdb_key(tmdb_key):
         return {"results": []}
     try:
+        cf = await _get_content_filters(db, current_user.id)
         if type == MediaType.movie:
             data = await tmdb.discover_movies(
                 watch_provider_id=provider_id,
@@ -2109,6 +2297,7 @@ async def streaming(
                 api_key=tmdb_key,
             )
             results = data.get("results", [])
+            results = [r for r in results if not _is_content_filtered(r, *cf)]
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _movie_library_ids(db, current_user.id, ids)
             items = _enrich_movie_list(results, lib)
@@ -2119,6 +2308,7 @@ async def streaming(
                 api_key=tmdb_key,
             )
             results = data.get("results", [])
+            results = [r for r in results if not _is_content_filtered(r, *cf)]
             ids = [r["id"] for r in results if r.get("id")]
             lib = await _show_library_ids(db, current_user.id, ids)
             items = _enrich_show_list(results, lib)
@@ -2892,6 +3082,121 @@ async def get_request_status(
         raise HTTPException(status_code=503, detail="Service unavailable")
 
     return {"monitored": monitored}
+
+
+# ── Content Filters (genre / keyword / regex) ───────────────────────────────
+
+@router.get("/content-filters")
+async def get_content_filters(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the user's active content filter rules and the known genre list."""
+    blocked_genres, blocked_keywords, blocked_regexes, filter_languages, language_filter_mode = await _get_content_filters(db, current_user.id, lower=False)
+    return {
+        "blocked_genres": sorted(blocked_genres),
+        "blocked_keywords": blocked_keywords,
+        "blocked_regexes": blocked_regexes,
+        "filter_languages": filter_languages,
+        "language_filter_mode": language_filter_mode,
+        "available_genres": sorted(set(list(MOVIE_GENRE_IDS.keys()) + list(TV_GENRE_IDS.keys()))),
+    }
+
+
+class GenreFilterRequest(BaseModel):
+    genres: list[str]
+
+class KeywordFilterRequest(BaseModel):
+    keywords: list[str]
+
+class RegexFilterRequest(BaseModel):
+    regexes: list[str]
+
+class LanguageFilterRequest(BaseModel):
+    languages: list[str]
+    mode: str
+
+
+async def _patch_content_filters(db: AsyncSession, user_id: int, update: dict) -> None:
+    """Merge `update` into the user's preferences.content_filters, creating settings row if absent."""
+    q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    settings = q.scalar_one_or_none()
+    if not settings:
+        settings = UserSettings(user_id=user_id, preferences={})
+        db.add(settings)
+    prefs = dict(settings.preferences or {})
+    cf = dict(prefs.get("content_filters", {}))
+    cf.update(update)
+    prefs["content_filters"] = cf
+    settings.preferences = prefs
+    flag_modified(settings, "preferences")
+    await db.commit()
+
+
+@router.put("/content-filters/genres")
+async def update_genre_filters(
+    req: GenreFilterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the blocked genre list."""
+    # Validate against known genres
+    known = set(list(MOVIE_GENRE_IDS.keys()) + list(TV_GENRE_IDS.keys()))
+    valid = [g for g in req.genres if g in known]
+    await _patch_content_filters(db, current_user.id, {"blocked_genres": valid})
+    return {"status": "ok", "blocked_genres": valid}
+
+
+@router.put("/content-filters/keywords")
+async def update_keyword_filters(
+    req: KeywordFilterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the blocked keyword list."""
+    cleaned = [k.strip() for k in req.keywords if k.strip()]
+    await _patch_content_filters(db, current_user.id, {"blocked_keywords": cleaned})
+    return {"status": "ok", "blocked_keywords": cleaned}
+
+
+@router.put("/content-filters/regexes")
+async def update_regex_filters(
+    req: RegexFilterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the blocked regex list. Invalid patterns are rejected with a 422."""
+    import re as _re
+    validated: list[str] = []
+    for pat in req.regexes:
+        pat = pat.strip()
+        if not pat:
+            continue
+        try:
+            _re.compile(pat)
+            validated.append(pat)
+        except _re.error as e:
+            raise HTTPException(status_code=422, detail=f"Invalid regex '{pat}': {e}")
+    await _patch_content_filters(db, current_user.id, {"blocked_regexes": validated})
+    return {"status": "ok", "blocked_regexes": validated}
+
+
+@router.put("/content-filters/languages")
+async def update_language_filters(
+    req: LanguageFilterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the language filter list and mode."""
+    cleaned = [lang.strip().lower() for lang in req.languages if lang.strip()]
+    mode = req.mode.strip().lower()
+    if mode not in ("blacklist", "whitelist"):
+        mode = "blacklist"
+    await _patch_content_filters(db, current_user.id, {
+        "filter_languages": cleaned,
+        "language_filter_mode": mode
+    })
+    return {"status": "ok", "filter_languages": cleaned, "language_filter_mode": mode}
 
 
 @router.post("/{type}/{tmdb_id}/request")
@@ -4166,14 +4471,26 @@ async def report_session(
     return {"ok": True}
 
 
-@router.get("/{type}/{tmdb_id}")
+@router.get("/{type}/{id_or_uri}")
 async def get_media_details(
     type: MediaType,
-    tmdb_id: int,
+    id_or_uri: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Unified endpoint for Movies and Episodes details."""
+    """Unified endpoint for Movies and Episodes details. Accepts either a raw
+    TMDB id or a uri_id string (e.g. "tmdb:m:1368337", "tmdb:e:123")."""
+    if ":" in id_or_uri:
+        try:
+            tmdb_id = int(MediaURI.parse(id_or_uri).id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid media identifier")
+    else:
+        try:
+            tmdb_id = int(id_or_uri)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid media identifier")
+
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(tmdb_key):
         raise HTTPException(status_code=404, detail="TMDB API Key not configured")
@@ -4456,14 +4773,25 @@ async def get_media_details(
         raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
 
 
-@router.get("/{type}/{tmdb_id}/recommendations")
+@router.get("/{type}/{id_or_uri}/recommendations")
 async def get_media_recommendations(
     type: MediaType,
-    tmdb_id: int,
+    id_or_uri: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Fetch movie/series recommendations from TMDB and enrich with state."""
+    if ":" in id_or_uri:
+        try:
+            tmdb_id = int(MediaURI.parse(id_or_uri).id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid media identifier")
+    else:
+        try:
+            tmdb_id = int(id_or_uri)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid media identifier")
+
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(tmdb_key):
         return {"results": []}
@@ -4815,22 +5143,29 @@ async def serve_image(
     if not path.startswith("/"):
         path = "/" + path
 
+    from core.image_cache import (
+        ALLOWED_SIZES,
+        TVDB_SIZE,
+        download_and_cache_image,
+        prune_cache_bg,
+        source_image_url,
+    )
+
     # Check settings
     settings_stmt = select(GlobalSettings).where(GlobalSettings.id == 1)
     gs = (await db.execute(settings_stmt)).scalar_one_or_none()
 
     if not gs or not gs.image_cache_enabled:
-        return RedirectResponse(f"https://image.tmdb.org/t/p/{size}{path}")
+        return RedirectResponse(source_image_url(size, path))
 
-    from core.image_cache import ALLOWED_SIZES, download_and_cache_image, prune_cache_bg
-    if size not in ALLOWED_SIZES:
+    if size not in ALLOWED_SIZES and size != TVDB_SIZE:
         raise HTTPException(status_code=400, detail="Invalid image size")
     if ".." in path:
         raise HTTPException(status_code=400, detail="Invalid image path")
 
     local_path_str = await download_and_cache_image(db, size, path)
     if not local_path_str:
-        return RedirectResponse(f"https://image.tmdb.org/t/p/{size}{path}")
+        return RedirectResponse(source_image_url(size, path))
 
     # Eviction pruning check in background
     bg_tasks = BackgroundTask(prune_cache_bg, limit_gb=gs.image_cache_limit_gb)

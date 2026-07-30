@@ -4,7 +4,7 @@ import re
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy import select, update, delete, func, cast
+from sqlalchemy import select, update, delete, func, cast, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.dialects.postgresql import insert, JSONB
@@ -4637,6 +4637,212 @@ async def apply_season_override(
 
     await db.commit()
     return {"status": "ok", "remapped": len(episodes)}
+
+
+# ── Custom title endpoints ────────────────────────────────────────────────────
+
+class CustomTitleBody(BaseModel):
+    show_uri_id: str | None = None
+    media_id: int | None = None
+    custom_title: str | None = None
+    season_number: int | None = None
+    season_custom_name: str | None = None
+
+
+async def _resolve_show_by_uri_id(db: AsyncSession, uri_id: str) -> "Show | None":
+    """Resolve a Show row from a URI string (e.g. 'tmdb:s:1396').
+
+    Tries the stored Show.uri_id column first, then falls back to matching the
+    parsed provider ID against tmdb_id/tvdb_id, then the media_aliases table.
+    """
+    result = await db.execute(select(Show).where(Show.uri_id == uri_id))
+    show = result.scalar_one_or_none()
+    if show:
+        return show
+
+    from utils.media_uri import MediaURI
+    try:
+        uri = MediaURI.parse(uri_id)
+    except ValueError:
+        return None
+
+    try:
+        ext_id = int(uri.id)
+    except (TypeError, ValueError):
+        ext_id = None
+    if ext_id is not None:
+        if uri.provider == "tvdb":
+            q = await db.execute(select(Show).where(Show.tvdb_id == ext_id))
+        else:
+            q = await db.execute(select(Show).where(Show.tmdb_id == ext_id))
+        show = q.scalar_one_or_none()
+        if show:
+            return show
+
+    from utils.alias_lookup import find_show_by_provider_id
+    return await find_show_by_provider_id(db, uri.provider, uri.id)
+
+
+@router.get("/custom-titles")
+async def get_all_custom_titles(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch all active custom renames (Shows, Seasons, Episodes, Movies) for the management UI."""
+    results = []
+
+    # 1. Shows and Seasons
+    shows_q = await db.execute(
+        select(Show).where(
+            or_(Show.custom_title.isnot(None), Show.custom_season_names.isnot(None))
+        )
+    )
+    shows = shows_q.scalars().all()
+
+    for s in shows:
+        if s.custom_title:
+            results.append({
+                "type": "show",
+                "show_uri_id": s.uri_id,
+                "show_tmdb_id": s.tmdb_id,
+                "show_title": s.title,
+                "show_poster_path": s.poster_path,
+                "media_id": None,
+                "season_number": None,
+                "original_title": s.title,
+                "custom_title": s.custom_title,
+                "context": "Show"
+            })
+        if s.custom_season_names:
+            for snum_str, custom_name in s.custom_season_names.items():
+                results.append({
+                    "type": "season",
+                    "show_uri_id": s.uri_id,
+                    "show_tmdb_id": s.tmdb_id,
+                    "show_title": s.title,
+                    "show_poster_path": s.poster_path,
+                    "media_id": None,
+                    "season_number": int(snum_str),
+                    "original_title": f"Season {snum_str}",
+                    "custom_title": custom_name,
+                    "context": f"{s.title} - Season {snum_str}"
+                })
+
+    # 2. Episodes
+    episodes_q = await db.execute(
+        select(Media, Show.title, Show.uri_id, Show.tmdb_id, Show.poster_path)
+        .outerjoin(Show, Show.id == Media.show_id)
+        .where(Media.custom_title.isnot(None))
+        .where(Media.media_type != MediaType.movie)
+    )
+    for media, show_title, show_uri_id, show_tmdb_id, show_poster_path in episodes_q.all():
+        context = "Episode"
+        if show_title and media.season_number is not None and media.episode_number is not None:
+            context = f"{show_title} - S{media.season_number:02d}E{media.episode_number:02d}"
+        elif show_title:
+            context = show_title
+        results.append({
+            "type": "episode",
+            "show_uri_id": show_uri_id,
+            "show_tmdb_id": show_tmdb_id,
+            "show_title": show_title,
+            "show_poster_path": show_poster_path,
+            "media_id": media.id,
+            "season_number": None,
+            "original_title": media.title or "Unknown Episode",
+            "custom_title": media.custom_title,
+            "context": context
+        })
+
+    # 3. Movies
+    movies_q = await db.execute(
+        select(Media)
+        .where(Media.media_type == MediaType.movie)
+        .where(Media.custom_title.isnot(None))
+    )
+    for m in movies_q.scalars().all():
+        results.append({
+            "type": "movie",
+            "show_uri_id": None,
+            "show_tmdb_id": None,
+            "show_title": None,
+            "show_poster_path": m.poster_path,
+            "media_id": m.id,
+            "season_number": None,
+            "original_title": m.title,
+            "custom_title": m.custom_title,
+            "context": "Movie"
+        })
+
+    # Sort results to be nice: Shows first, then Seasons, then Episodes, then Movies
+    type_order = {"show": 1, "season": 2, "episode": 3, "movie": 4}
+    results.sort(key=lambda x: (type_order[x["type"]], x["context"] or ""))
+
+    return {"results": results}
+
+
+@router.patch("/custom-title")
+async def set_custom_title(
+    body: CustomTitleBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Set or clear a custom title for a show, a season, or an episode/movie."""
+    if body.show_uri_id:
+        show = await _resolve_show_by_uri_id(db, body.show_uri_id)
+        if not show:
+            raise HTTPException(status_code=404, detail="Show not found")
+
+        if body.season_number is not None:
+            names = dict(show.custom_season_names or {})
+            if body.season_custom_name:
+                names[str(body.season_number)] = body.season_custom_name
+            else:
+                names.pop(str(body.season_number), None)
+            show.custom_season_names = names if names else None
+            flag_modified(show, "custom_season_names")
+        else:
+            show.custom_title = body.custom_title or None
+
+        await db.commit()
+        return {
+            "status": "ok",
+            "show_uri_id": show.uri_id,
+            "custom_title": show.custom_title,
+            "custom_season_names": show.custom_season_names,
+        }
+
+    elif body.media_id is not None:
+        result = await db.execute(select(Media).where(Media.id == body.media_id))
+        media = result.scalar_one_or_none()
+        if not media:
+            raise HTTPException(status_code=404, detail="Episode not found")
+        media.custom_title = body.custom_title or None
+        await db.commit()
+        return {"status": "ok", "media_id": body.media_id, "custom_title": media.custom_title}
+
+    raise HTTPException(status_code=400, detail="Provide either show_uri_id or media_id")
+
+
+@router.delete("/custom-title")
+async def clear_all_custom_titles_for_show(
+    show_uri_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Clear the show's custom title, all its season renames, and all episode renames."""
+    show = await _resolve_show_by_uri_id(db, show_uri_id)
+    if show:
+        show.custom_title = None
+        show.custom_season_names = None
+        flag_modified(show, "custom_season_names")
+        await db.execute(
+            update(Media)
+            .where(Media.show_id == show.id)
+            .values(custom_title=None)
+        )
+    await db.commit()
+    return {"status": "ok"}
 
 
 # ── Unmatched show matching ───────────────────────────────────────────────────
