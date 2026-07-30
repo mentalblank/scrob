@@ -254,11 +254,12 @@ async def enrich_with_state(
         tid = item.get("tmdb_id")
         t   = item.get("type")
         if t in ("movie", "series") and tid:
+            req_uri = f"tmdb:{'m' if t == 'movie' else 's'}:{tid}"
             req_q = await db.execute(
                 select(MediaRequest)
                 .where(
                     MediaRequest.user_id == user_id,
-                    MediaRequest.tmdb_id == tid,
+                    MediaRequest.uri_id == req_uri,
                     MediaRequest.media_type == t,
                     MediaRequest.status.in_([RequestStatus.pending, RequestStatus.rejected]),
                 )
@@ -3215,10 +3216,11 @@ async def request_media(
 
     async def _upsert_request(media_type_str: str, title: str, poster_path: str | None) -> dict:
         """Create or update a pending media request, return 202 response."""
+        req_uri = f"tmdb:{'m' if media_type_str == 'movie' else 's'}:{tmdb_id}"
         existing_q = await db.execute(
             select(MediaRequest).where(
                 MediaRequest.user_id == current_user.id,
-                MediaRequest.tmdb_id == tmdb_id,
+                MediaRequest.uri_id == req_uri,
                 MediaRequest.media_type == media_type_str,
             )
         )
@@ -3231,7 +3233,7 @@ async def request_media(
         else:
             db.add(MediaRequest(
                 user_id=current_user.id,
-                tmdb_id=tmdb_id,
+                uri_id=req_uri,
                 media_type=media_type_str,
                 title=title,
                 poster_path=poster_path,

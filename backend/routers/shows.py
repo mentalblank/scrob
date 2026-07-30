@@ -546,7 +546,13 @@ async def get_show(
         select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id)
     )
     show = show_result.scalar_one_or_none()
-    default_order = (current_user.settings.default_episode_order if current_user and current_user.settings and current_user.settings.default_episode_order else "tmdb")
+    # Explicit query — current_user.settings is a lazy relationship and would
+    # raise MissingGreenlet if touched outside the loading session.
+    user_settings_q = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )
+    user_settings = user_settings_q.scalar_one_or_none()
+    default_order = (user_settings.default_episode_order if user_settings and user_settings.default_episode_order else "tmdb")
     order_preference = await get_episode_order(db, current_user.id, series_tmdb_id)
     selected_episode_order = order_preference.episode_order if order_preference else default_order
 

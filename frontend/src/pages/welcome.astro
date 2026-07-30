@@ -9,6 +9,13 @@ if (!user) {
   return Astro.redirect("/login");
 }
 
+// Admins must complete the server setup wizard (API keys etc.) before the
+// personal walkthrough — /welcome is exempt from the middleware gate, so
+// enforce the ordering here too.
+if (user.is_admin && user.needs_setup) {
+  return Astro.redirect("/setup");
+}
+
 const [settings, profile, countriesRes, languagesRes, movieGenresRes, showGenresRes] = await Promise.all([
   api.auth.getSettings(token!).catch(() => null),
   api.profile.get(token!).catch(() => null),
