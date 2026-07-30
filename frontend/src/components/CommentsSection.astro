@@ -54,7 +54,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
               name="content"
               rows="3"
               placeholder="What are your thoughts?"
-              class="w-full bg-zinc-950/60 border border-zinc-850 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-450 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none"
+              class="w-full bg-zinc-950/60 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none"
               required
             ></textarea>
           </div>
@@ -155,7 +155,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
                 </div>
                 <!-- Spoiler wrapper: always present, overlay toggled via JS -->
                 <div class="comment-body relative">
-                  <p class={`comment-text text-zinc-350 leading-relaxed font-medium whitespace-pre-wrap break-words${comment.is_spoiler ? ' blur-md select-none pointer-events-none' : ''}`}>{comment.content}</p>
+                  <p class={`comment-text text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap break-words${comment.is_spoiler ? ' blur-md select-none pointer-events-none' : ''}`}>{comment.content}</p>
                   <div class={`spoiler-overlay absolute inset-0 flex items-center justify-center rounded-2xl cursor-pointer bg-zinc-950/70 backdrop-blur-sm${comment.is_spoiler ? '' : ' hidden'}`}>
                     <span class="text-[10px] font-black uppercase tracking-widest text-amber-400 bg-zinc-900 px-3 py-1.5 rounded-xl border border-amber-500/30">Reveal Spoiler</span>
                   </div>
@@ -216,7 +216,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
       ? `<a href="/profile/${esc(String(comment.user_id))}" class="font-black text-zinc-100 truncate hover:text-blue-400 transition-colors">${esc(comment.display_name)}</a>`
       : `<span class="font-black text-zinc-100 truncate">${esc(comment.display_name)}</span>`;
 
-    const spoilerBadgeHtml = `<span class="spoiler-badge text-[10px] font-bold text-amber-400 uppercase tracking-widest px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded shrink-0${comment.is_spoiler ? '' : ' hidden'}">Spoiler</span>`;
+    const spoilerBadgeHtml = `<span class="spoiler-badge text-[10px] font-bold text-amber-400 uppercase tracking-widest px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded-xl shrink-0${comment.is_spoiler ? '' : ' hidden'}">Spoiler</span>`;
 
     const editBtnHtml = showActions.edit
       ? `<button class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-xl hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Edit Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
@@ -238,7 +238,7 @@ const showComments = Astro.cookies.get("show_comments")?.value !== "false";
         <div class="flex items-center gap-3 mb-1.5">
           <div class="flex items-center gap-3 flex-1 min-w-0">
             ${nameHtml}
-            <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded shrink-0">${esc(dateStr)}</span>
+            <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded-xl shrink-0">${esc(dateStr)}</span>
             ${spoilerBadgeHtml}
           </div>
           ${actionBtns}

@@ -186,7 +186,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
       <!-- Automation Modal -->
       <div id="automation-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm hidden">
         <div id="automation-backdrop" class="absolute inset-0"></div>
-        <div class="relative w-full max-w-lg bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 shadow-2xl overflow-hidden backdrop-blur-xl">
+        <div class="relative w-full max-w-lg max-h-[90vh] overflow-y-auto bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 shadow-2xl backdrop-blur-xl">
           <button type="button" id="auto-close-x" class="absolute top-6 right-6 p-2 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 rounded-xl transition-all cursor-pointer z-10" aria-label="Close modal">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -412,7 +412,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
             type="text"
             id="search-input"
             placeholder="Search for a movie, show, or person to add..."
-            class="flex-1 bg-zinc-950/60 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all placeholder:text-zinc-450"
+            class="flex-1 bg-zinc-950/60 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all placeholder:text-zinc-500"
           />
           <div class="flex gap-1.5 bg-zinc-950/40 border border-zinc-800/40 rounded-xl p-1 shrink-0">
             {[
@@ -1159,14 +1159,14 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
       : '';
 
     const actionBar = showActionBar ? `
-      <div class="grid grid-cols-3 flex-shrink-0">
+      <div class="card-action-bar">
         <button
           data-action="watched"
           data-watched="${watched}"
           data-watch-pct="${watchPct}"
           data-state="${watchActive ? 'active' : 'inactive'}"
           title="${isSeries ? `${watchPct}% watched` : (watched ? 'Mark as unwatched' : 'Mark as watched')}"
-          class="flex flex-col items-center justify-center gap-1 py-2.5 transition-all cursor-pointer border-r border-zinc-800/60 hover:brightness-125 ${watchActive ? 'bg-green-500/20 text-green-400' : 'bg-zinc-900 text-zinc-400 hover:bg-green-500/10 hover:text-green-500'}"
+          class="card-action-btn"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
@@ -1179,7 +1179,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
           data-in-lists="${esc(JSON.stringify(inLists))}"
           data-state="${inLists.length > 0 ? 'active' : 'inactive'}"
           title="Add to list"
-          class="flex flex-col items-center justify-center gap-1 py-2.5 transition-all cursor-pointer border-r border-zinc-800/60 hover:brightness-125 ${inLists.length > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-zinc-900 text-zinc-400 hover:bg-sky-500/10 hover:text-sky-400'}"
+          class="card-action-btn"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
@@ -1195,7 +1195,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
           data-state="${(inLibrary || collectionPct > 0) ? 'active' : 'inactive'}"
           title="${isSeries ? `${collectionPct}% in library` : (inLibrary ? 'In collection' : 'Add to collection')}"
           style="${esc(collectStyle)}"
-          class="relative flex flex-col items-center justify-center gap-1 py-2.5 transition-all cursor-pointer overflow-hidden hover:brightness-125 ${(inLibrary || collectionPct > 0) ? 'bg-purple-500/20 text-purple-400' : 'bg-zinc-900 text-zinc-400 hover:bg-purple-500/10 hover:text-purple-400'}"
+          class="card-action-btn relative overflow-hidden"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
@@ -1217,7 +1217,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
 
     return `
       <div
-        class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1"
+        class="group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
         data-card
         data-tmdb-id="${media.tmdb_id}"
         data-uri-id="${media.uri_id ?? ''}"
@@ -1236,7 +1236,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
               : `<div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center"><span class="text-3xl mb-2 opacity-30">🎬</span><span class="text-xs font-bold uppercase tracking-widest">${esc(media.title)}</span></div>`
             }
             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            ${rating ? `<div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
+            ${rating ? `<div class="rating-badge absolute top-2 left-2 bg-zinc-950/85 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800/50 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
             ${showProgress ? `
               <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
                 <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
@@ -1246,7 +1246,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
         </a>
         ${actionBar}
         ${removeBtn}
-        <a href="${esc(href)}" class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+        <a href="${esc(href)}" class="block p-3 bg-transparent flex-1">
           <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">${esc(media.title)}</h3>
           <div class="flex items-center justify-between">
             ${year ? `<span class="text-[11px] font-medium text-zinc-500 tracking-wide">${esc(year)}</span>` : '<span></span>'}

@@ -59,7 +59,7 @@ const options: { key: keyof ExploreFilters; label: string }[] = [
       {options.map(({ key, label }) => (
         <div class="flex items-center justify-between p-2 rounded-xl hover:bg-zinc-800/30 transition-colors">
           <span class="text-xs font-medium text-zinc-300">{label}</span>
-          <div class="flex items-center bg-zinc-950/60 border border-zinc-850 rounded-xl p-0.5" data-filter-group={key}>
+          <div class="flex items-center bg-zinc-950/60 border border-zinc-800 rounded-xl p-0.5" data-filter-group={key}>
             {['show', 'fade', 'hide'].map((action) => (
               <button
                 data-action={action}

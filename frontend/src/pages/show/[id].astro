@@ -361,7 +361,7 @@ const activeButtonsCount = [
                       <details class="w-full group/details watch-providers-details" open>
                         <summary class="list-none flex items-center gap-1 cursor-pointer select-none text-[9px] font-bold text-zinc-500 hover:text-zinc-300 uppercase tracking-wider transition-colors outline-none mb-2">
                           <span>{subscribed.length > 0 ? "Other Options" : "Available On"}</span>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="transition-transform duration-200 group-open/details:rotate-180 text-zinc-650"><polyline points="6 9 12 15 18 9"/></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="transition-transform duration-200 group-open/details:rotate-180 text-zinc-600"><polyline points="6 9 12 15 18 9"/></svg>
                         </summary>
                         <div class="flex flex-wrap gap-2">
                           {others.map(s => {
@@ -441,7 +441,7 @@ const activeButtonsCount = [
                 {show.status && (
                   <div class="flex justify-between items-center">
                     <span class="text-zinc-500">Status</span>
-                    <span class="capitalize px-1.5 py-0.5 bg-zinc-850 border border-zinc-800 rounded text-[9px] font-bold text-zinc-350">{show.status}</span>
+                    <span class="capitalize px-1.5 py-0.5 bg-zinc-800 border border-zinc-800 rounded text-[9px] font-bold text-zinc-300">{show.status}</span>
                   </div>
                 )}
                 
@@ -472,7 +472,7 @@ const activeButtonsCount = [
                       <span class="text-zinc-500 text-[10px]">Network</span>
                       <div class="flex items-center gap-2">
                         <img src={n.logo_path!} alt={n.name} title={n.name} class="h-4 max-w-[90px] object-contain opacity-70" />
-                        <span class="text-zinc-350 text-[11px] font-medium">{n.name}</span>
+                        <span class="text-zinc-300 text-[11px] font-medium">{n.name}</span>
                       </div>
                     </div>
                   ) : null;
@@ -490,7 +490,7 @@ const activeButtonsCount = [
                   <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
                   Overview
                 </h2>
-                <p class="text-zinc-350 leading-relaxed text-base md:text-lg opacity-90">
+                <p class="text-zinc-300 leading-relaxed text-base md:text-lg opacity-90">
                   {show.overview}
                 </p>
               </div>
@@ -553,7 +553,7 @@ const activeButtonsCount = [
             </div>
             
             {isTvdbResponse ? (
-              <div class="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-3 md:gap-4">
+              <div class="grid grid-cols-2 min-[480px]:grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-3 md:gap-4">
                 {activeSeasons.map((s) => {
                   const seasonNum = s.season_number;
                   const episodes = show.seasons?.[`season_${seasonNum}`] || [];
@@ -672,7 +672,7 @@ const activeButtonsCount = [
             <div class="flex items-center justify-between mb-10">
               <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase">Top Cast</h2>
             </div>
-            <div class="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-4 gap-3">
+            <div class="grid grid-cols-3 min-[480px]:grid-cols-4 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-4 gap-3">
               {(show.cast ?? []).slice(0, 12).map((person: any) => (
                 <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
                   <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">

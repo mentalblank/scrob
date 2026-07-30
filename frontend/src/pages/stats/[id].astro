@@ -78,11 +78,11 @@ const isOwnStats = currentUser && String(currentUser.id) === String(id);
               <option value="last7">Last 7 days</option>
             </select>
             <div id="period-nav" style="display:none" class="items-center gap-1">
-              <button id="prev-btn" class="w-8 h-8 flex items-center justify-center rounded-lg bg-zinc-900/40 border border-zinc-800/80 hover:bg-zinc-900/60 hover:border-zinc-700 text-zinc-300 transition disabled:opacity-30 disabled:cursor-not-allowed">
+              <button id="prev-btn" class="w-8 h-8 flex items-center justify-center rounded-xl bg-zinc-900/40 border border-zinc-800/80 hover:bg-zinc-900/60 hover:border-zinc-700 text-zinc-300 transition disabled:opacity-30 disabled:cursor-not-allowed">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
               </button>
               <span id="period-label" class="text-sm font-bold text-zinc-400 min-w-28 text-center px-1"></span>
-              <button id="next-btn" class="w-8 h-8 flex items-center justify-center rounded-lg bg-zinc-900/40 border border-zinc-800/80 hover:bg-zinc-900/60 hover:border-zinc-700 text-zinc-300 transition disabled:opacity-30 disabled:cursor-not-allowed" disabled>
+              <button id="next-btn" class="w-8 h-8 flex items-center justify-center rounded-xl bg-zinc-900/40 border border-zinc-800/80 hover:bg-zinc-900/60 hover:border-zinc-700 text-zinc-300 transition disabled:opacity-30 disabled:cursor-not-allowed" disabled>
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
               </button>
             </div>
@@ -520,7 +520,7 @@ const isOwnStats = currentUser && String(currentUser.id) === String(id);
               ${genres.length > 0 ? genres.map(g => {
                 const pct = (g.count / max) * 100;
                 return `
-                  <div class="relative flex items-center justify-between px-3 py-2 bg-zinc-950/40 border border-zinc-850/60 rounded-xl overflow-hidden">
+                  <div class="relative flex items-center justify-between px-3 py-2 bg-zinc-950/40 border border-zinc-800/60 rounded-xl overflow-hidden">
                     <div class="absolute inset-0" style="width:${pct}%;background:${bgColor};pointer-events:none"></div>
                     <span class="relative text-xs font-bold text-zinc-300">${g.name}</span>
                     <span class="relative text-xs font-black" style="color:${textColor}">${g.count}</span>
@@ -544,7 +544,7 @@ const isOwnStats = currentUser && String(currentUser.id) === String(id);
         { label: 'Movies', value: data.movie_watch_minutes, textColor: '#38bdf8' },
         { label: 'Shows',  value: data.show_watch_minutes,  textColor: '#c084fc' },
       ].map(({ label, value, textColor }) => `
-        <div class="flex items-center justify-between bg-zinc-950/40 border border-zinc-850/60 rounded-xl px-4 py-3">
+        <div class="flex items-center justify-between bg-zinc-950/40 border border-zinc-800/60 rounded-xl px-4 py-3">
           <span class="text-sm font-bold text-zinc-300">${label}</span>
           <span style="color:${textColor}" class="font-black text-lg">${formatMinutes(value)}</span>
         </div>
@@ -559,7 +559,7 @@ const isOwnStats = currentUser && String(currentUser.id) === String(id);
         { label: 'Movies', value: data.avg_movie_rating, textColor: '#38bdf8' },
         { label: 'Shows', value: data.avg_show_rating,   textColor: '#c084fc' },
       ].map(({ label, value, textColor }) => `
-        <div class="flex items-center justify-between bg-zinc-950/40 border border-zinc-850/60 rounded-xl px-4 py-3">
+        <div class="flex items-center justify-between bg-zinc-950/40 border border-zinc-800/60 rounded-xl px-4 py-3">
           <span class="text-sm font-bold text-zinc-300">${label}</span>
           ${value != null
             ? `<span class="flex items-center gap-1.5 font-black text-lg" style="color:${textColor}"><span class="text-sm text-yellow-400">★</span>${value.toFixed(1)}</span>`
@@ -609,7 +609,7 @@ const isOwnStats = currentUser && String(currentUser.id) === String(id);
         { label: 'Shows Collected',    value: data.shows_collected.toLocaleString(),    textColor: '#c084fc' },
         { label: 'Episodes Collected', value: data.episodes_collected.toLocaleString(), textColor: '#818cf8' },
       ].map(({ label, value, textColor }) => `
-        <div class="flex items-center justify-between bg-zinc-950/40 border border-zinc-850/60 rounded-xl px-4 py-3">
+        <div class="flex items-center justify-between bg-zinc-950/40 border border-zinc-800/60 rounded-xl px-4 py-3">
           <span class="text-sm font-bold text-zinc-300">${label}</span>
           <span style="color:${textColor}" class="font-black text-lg">${value}</span>
         </div>
