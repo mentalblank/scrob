@@ -1,7 +1,7 @@
 """add outbound live scrobble flag for mdblist
 
 Revision ID: x8y9z0a1b2c3
-Revises: w7x8y9z0a1b2
+Revises: w7x8y9z0a1b2u
 Create Date: 2026-07-19
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "x8y9z0a1b2c3"
-down_revision = "w7x8y9z0a1b2"
+down_revision = "w7x8y9z0a1b2u"
 branch_labels = None
 depends_on = None
 

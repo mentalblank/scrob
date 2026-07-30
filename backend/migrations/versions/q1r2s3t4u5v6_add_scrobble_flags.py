@@ -1,13 +1,13 @@
 """Add trakt_scrobble and simkl_scrobble flags to user_settings
 
-Revision ID: q1r2s3t4u5v6
+Revision ID: q1r2s3t4u5v6u
 Revises: p0q1r2s3t4u5
 Create Date: 2026-06-25
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = 'q1r2s3t4u5v6'
+revision = 'q1r2s3t4u5v6u'
 down_revision = 'p0q1r2s3t4u5'
 branch_labels = None
 depends_on = None

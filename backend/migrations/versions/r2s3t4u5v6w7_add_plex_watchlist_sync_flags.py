@@ -1,14 +1,14 @@
 """Add plex_sync_watchlist and plex_push_watchlist to media_server_connections
 
-Revision ID: r2s3t4u5v6w7
-Revises: q1r2s3t4u5v6
+Revision ID: r2s3t4u5v6w7u
+Revises: q1r2s3t4u5v6u
 Create Date: 2026-06-27
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = 'r2s3t4u5v6w7'
-down_revision = 'q1r2s3t4u5v6'
+revision = 'r2s3t4u5v6w7u'
+down_revision = 'q1r2s3t4u5v6u'
 branch_labels = None
 depends_on = None
 

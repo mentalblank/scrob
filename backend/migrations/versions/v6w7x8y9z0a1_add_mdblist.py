@@ -1,7 +1,7 @@
 """add MDBList synchronization settings
 
-Revision ID: v6w7x8y9z0a1
-Revises: u5v6w7x8y9z0
+Revision ID: v6w7x8y9z0a1u
+Revises: u5v6w7x8y9z0u
 Create Date: 2026-07-17
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "v6w7x8y9z0a1"
-down_revision = "u5v6w7x8y9z0"
+revision = "v6w7x8y9z0a1u"
+down_revision = "u5v6w7x8y9z0u"
 branch_labels = None
 depends_on = None
 

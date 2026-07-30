@@ -1,7 +1,7 @@
 """add outbound collection push flags for trakt and mdblist
 
-Revision ID: w7x8y9z0a1b2
-Revises: v6w7x8y9z0a1
+Revision ID: w7x8y9z0a1b2u
+Revises: v6w7x8y9z0a1u
 Create Date: 2026-07-19
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "w7x8y9z0a1b2"
-down_revision = "v6w7x8y9z0a1"
+revision = "w7x8y9z0a1b2u"
+down_revision = "v6w7x8y9z0a1u"
 branch_labels = None
 depends_on = None
 

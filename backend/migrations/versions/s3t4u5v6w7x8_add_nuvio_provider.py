@@ -1,15 +1,15 @@
 """add Nuvio provider
 
-Revision ID: s3t4u5v6w7x8
-Revises: r2s3t4u5v6w7
+Revision ID: s3t4u5v6w7x8u
+Revises: r2s3t4u5v6w7u
 Create Date: 2026-07-14
 """
 
 from alembic import op
 
 
-revision = "s3t4u5v6w7x8"
-down_revision = "r2s3t4u5v6w7"
+revision = "s3t4u5v6w7x8u"
+down_revision = "r2s3t4u5v6w7u"
 branch_labels = None
 depends_on = None
 

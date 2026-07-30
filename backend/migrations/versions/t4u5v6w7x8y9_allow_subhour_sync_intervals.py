@@ -1,7 +1,7 @@
 """allow sub-hour connection sync intervals
 
-Revision ID: t4u5v6w7x8y9
-Revises: s3t4u5v6w7x8
+Revision ID: t4u5v6w7x8y9u
+Revises: s3t4u5v6w7x8u
 Create Date: 2026-07-14
 """
 from typing import Sequence, Union
@@ -9,8 +9,8 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "t4u5v6w7x8y9"
-down_revision: Union[str, Sequence[str], None] = "s3t4u5v6w7x8"
+revision: str = "t4u5v6w7x8y9u"
+down_revision: Union[str, Sequence[str], None] = "s3t4u5v6w7x8u"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
