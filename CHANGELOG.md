@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file. This projec
 
 ### Added
 
+- **Registration Controls**: Admins can allow or block new registrations and set a maximum user count from Global Server Settings, without editing environment variables or restarting. Leaving them unset keeps the existing `ENABLE_REGISTRATIONS` / `REGISTRATION_MAX_ALLOWED_USERS` behaviour.
 - **First-Run Setup Wizard**: Fresh installs land on registration, the first account becomes admin, and admins are walked through API keys before anything else.
 - **Onboarding Walkthrough**: Register offers Plex sign-up, email, or email-plus-link-later, followed by a skippable settings walkthrough (profile, appearance, region, genres, content preferences, optional Plex link).
 - **Content Rating Blocklist**: Block titles by age certification (TV-MA, R, MA15+, +18 and others). Ratings are region-aware, derived from the profile country, and any value can be added by hand.

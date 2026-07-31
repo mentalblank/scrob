@@ -370,6 +370,8 @@ export interface GlobalSettings {
   image_cache_enabled: boolean;
   image_cache_limit_gb: number | null;
   image_cache_expiry_days: number | null;
+  enable_registrations: boolean | null;
+  registration_max_allowed_users: number | null;
   setup_completed: boolean;
 }
 

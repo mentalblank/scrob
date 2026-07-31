@@ -38,6 +38,32 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
 
       <form id="global-settings-form" class="space-y-3">
 
+        <!-- Registrations -->
+        <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 space-y-5">
+          <label class="flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <span class="block text-sm font-semibold text-zinc-200">Allow New Registrations</span>
+              <span class="block text-xs text-zinc-500 mt-0.5">Let new users create accounts. The first account is always allowed so the server can be set up.</span>
+            </div>
+            <input type="checkbox" name="enable_registrations" id="enable_registrations" value="true" class="sr-only peer" checked={globalSettings.enable_registrations ?? false} />
+            <div class="relative w-10 h-5 bg-zinc-700 peer-checked:bg-blue-600 rounded-full transition-colors pointer-events-none shrink-0 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5"></div>
+          </label>
+
+          <div class="space-y-2 max-w-md">
+            <label for="registration_max_allowed_users" class="block text-sm font-medium text-zinc-400">Maximum Users</label>
+            <input
+              type="number"
+              name="registration_max_allowed_users"
+              id="registration_max_allowed_users"
+              min="0"
+              placeholder="0 (Unlimited)"
+              value={globalSettings.registration_max_allowed_users ?? ""}
+              class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            />
+            <p class="text-xs text-zinc-500">Stop accepting registrations once this many accounts exist. Set to 0 or leave empty for unlimited. Overrides the ENABLE_REGISTRATIONS and REGISTRATION_MAX_ALLOWED_USERS environment variables.</p>
+          </div>
+        </div>
+
         <!-- TMDB -->
         <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl overflow-hidden">
           <div class="collapsible-header flex items-center justify-between px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="tmdb-body">
@@ -861,6 +887,9 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       body[f] = v ? parseInt(v) : null;
     }
     body['sonarr_season_folder']      = fd.get('sonarr_season_folder') === 'true';
+    body['enable_registrations']      = fd.get('enable_registrations') === 'true';
+    const maxUsers = ((fd.get('registration_max_allowed_users') as string) ?? '').trim();
+    body['registration_max_allowed_users'] = maxUsers ? parseInt(maxUsers) : null;
     body['radarr_require_approval']   = fd.get('radarr_require_approval') === 'true';
     body['sonarr_require_approval']   = fd.get('sonarr_require_approval') === 'true';
     const radarrTags = fd.getAll('radarr_tags').map(v => parseInt(v as string)).filter(n => !isNaN(n));

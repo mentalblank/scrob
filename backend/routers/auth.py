@@ -76,12 +76,25 @@ async def _registration_allowed(db: AsyncSession) -> bool:
     if count == 0:
         return True
 
-    if not app_settings.enable_registrations:
+    # An admin-set value in global_settings wins; NULL falls back to the env var.
+    from models.global_settings import GlobalSettings
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    gs = gs_result.scalar_one_or_none()
+
+    enabled = app_settings.enable_registrations
+    max_users = app_settings.registration_max_allowed_users
+    if gs is not None:
+        if gs.enable_registrations is not None:
+            enabled = gs.enable_registrations
+        if gs.registration_max_allowed_users is not None:
+            max_users = gs.registration_max_allowed_users
+
+    if not enabled:
         return False
 
     # 0 means unlimited; otherwise enforce the cap
-    if app_settings.registration_max_allowed_users > 0:
-        return count < app_settings.registration_max_allowed_users
+    if max_users and max_users > 0:
+        return count < max_users
 
     return True
 

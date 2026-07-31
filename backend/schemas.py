@@ -377,6 +377,8 @@ class GlobalSettings(BaseModel):
     image_cache_enabled         : bool = False
     image_cache_limit_gb        : Optional[int] = None
     image_cache_expiry_days     : Optional[int] = None
+    enable_registrations        : Optional[bool] = None
+    registration_max_allowed_users: Optional[int] = None
     setup_completed             : bool = False
 
     class Config:
