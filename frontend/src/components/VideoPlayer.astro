@@ -127,7 +127,13 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
     const token     = dialog.dataset.token!;
     const useHls    = dialog.dataset.useHls === "true";
     const playbackTarget = dialog.dataset.playbackTarget || 'web';
-    const mediaIdParam = mediaId ? `&media_id=${mediaId}` : '';
+
+    // Show- and season-level Play buttons resolve server-side to a concrete
+    // episode, so every stream/subtitle/report call after that must address the
+    // resolved episode rather than the show this component was rendered for.
+    let activeMediaRef  = mediaRef;
+    let activeMediaType = mediaType;
+    let activeMediaIdParam = mediaId ? `&media_id=${mediaId}` : '';
 
     const playBtn   = document.getElementById('play-btn') as HTMLButtonElement | null;
     const video     = document.getElementById('player-video') as HTMLVideoElement;
@@ -217,7 +223,7 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
         const track = document.createElement('track');
         track.kind = 'subtitles';
         const keyParam = sub.key ? `&key=${encodeURIComponent(sub.key)}` : '';
-        const srcUrl = `/api/proxy/media/subtitles/${mediaType}/${mediaRef}?connection_id=${connectionId}&stream_index=${sub.index}${keyParam}${sessionParam}${mediaIdParam}${fileParam}`;
+        const srcUrl = `/api/proxy/media/subtitles/${activeMediaType}/${activeMediaRef}?connection_id=${connectionId}&stream_index=${sub.index}${keyParam}${sessionParam}${activeMediaIdParam}${fileParam}`;
 
         // On-demand subtitle loading for Plex embedded subtitle tracks to prevent overwhelming the server with concurrent transcode sessions
         const isPlexEmbedded = source === 'plex' && (!sub.key || sub.key === 'None');
@@ -238,7 +244,7 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
     async function reportSession(state) {
       if (!currentConnectionId) return;
       try {
-        await fetch(`/api/proxy/media/session/report/${mediaType}/${mediaRef}${mediaIdParam}`, {
+        await fetch(`/api/proxy/media/session/report/${activeMediaType}/${activeMediaRef}${activeMediaIdParam}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -323,10 +329,10 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
         const codecParams = `&video_codecs=${encodeURIComponent(codecs.video)}&audio_codecs=${encodeURIComponent(codecs.audio)}`;
         const sessionParam = plexSessionId ? `&session_id=${plexSessionId}` : '';
         const hlsPath = source === 'plex' ? 'plex-hls' : 'hls';
-        loadHlsUrl(`/api/proxy/media/${hlsPath}/${mediaType}/${mediaRef}?connection_id=${connectionId}${mediaIdParam}${fileParam}${codecParams}${sessionParam}`);
+        loadHlsUrl(`/api/proxy/media/${hlsPath}/${activeMediaType}/${activeMediaRef}?connection_id=${connectionId}${activeMediaIdParam}${fileParam}${codecParams}${sessionParam}`);
       } else {
         destroyHls();
-        video.src = `/api/proxy/media/stream/${mediaType}/${mediaRef}?connection_id=${connectionId}${mediaIdParam}${fileParam}&token=${encodeURIComponent(token)}`;
+        video.src = `/api/proxy/media/stream/${activeMediaType}/${activeMediaRef}?connection_id=${connectionId}${activeMediaIdParam}${fileParam}&token=${encodeURIComponent(token)}`;
         video.play().catch(() => {});
       }
 
@@ -340,12 +346,12 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
     video.addEventListener('play',    () => { reportSession('playing'); });
     async function markWatched(): Promise<void> {
       try {
-        const uId = mediaRef.includes(':') ? mediaRef : (mediaType === 'movie' ? `tmdb:m:${mediaRef}` : `tmdb:e:${mediaRef}`);
+        const uId = activeMediaRef.includes(':') ? activeMediaRef : (activeMediaType === 'movie' ? `tmdb:m:${activeMediaRef}` : `tmdb:e:${activeMediaRef}`);
         await fetch('/api/proxy/history', {
           method: 'POST',
           keepalive: true,
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uri_id: uId, media_type: mediaType, completed: true }),
+          body: JSON.stringify({ uri_id: uId, media_type: activeMediaType, completed: true }),
         });
       } catch {}
     }
@@ -365,6 +371,7 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
       video_codec?: string | null;
       audio_codec?: string | null;
       subtitles: { index: number; key?: string | null; language: string; label: string }[];
+      media_id?: number | null;
     }[]): void {
       if (sources.length === 0) {
         sourcesEl.innerHTML = '<span class="text-xs text-zinc-500">No playback source found.</span>';
@@ -380,6 +387,7 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
           data-video-codec="${esc(s.video_codec)}"
           data-audio-codec="${esc(s.audio_codec)}"
           data-subtitles="${esc(JSON.stringify(s.subtitles || []))}"
+          data-media-id="${s.media_id ?? ''}"
         >
           ${LOCAL_SOURCES.includes(s.source) ? `<img src="/icons/${esc(s.source)}.svg" alt="${esc(s.source)}" class="w-4 h-4 rounded shrink-0" />` : ''}
           ${esc(s.name)}${s.resolution ? ` <span class="opacity-60 font-mono">${esc(s.resolution)}</span>` : ''}
@@ -395,6 +403,9 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
           btn.classList.add('bg-blue-600', 'border-blue-500', 'text-white', 'hover:bg-blue-500');
           btn.classList.remove('bg-zinc-900/40', 'border-zinc-800', 'text-zinc-300', 'hover:border-zinc-700');
           const sourceBtn = btn as HTMLButtonElement;
+          // A manually-matched title can have its files spread over several media
+          // rows — follow the row this specific source belongs to.
+          if (sourceBtn.dataset.mediaId) activeMediaIdParam = `&media_id=${sourceBtn.dataset.mediaId}`;
           loadSource(
             sourceBtn.dataset.connectionId!,
             sourceBtn.dataset.fileId || null,
@@ -436,7 +447,16 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
         });
         
         const sources = res.ok ? await res.json() : [];
-        
+
+        // For show/season refs the server resolved a concrete episode — address
+        // that from here on so streams and progress reports land on the episode.
+        const resolved = sources[0];
+        if (resolved?.media_type) {
+          activeMediaType = resolved.media_type;
+          activeMediaRef = resolved.media_ref || activeMediaRef;
+          activeMediaIdParam = resolved.media_id ? `&media_id=${resolved.media_id}` : '';
+        }
+
         if (playBtn) {
           playBtn.innerHTML = playBtn.dataset.origText || playBtn.innerHTML;
           playBtn.classList.remove('opacity-80', 'cursor-not-allowed');
@@ -455,7 +475,7 @@ const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.p
         }
 
         // Otherwise open the internal player modal
-        titleEl.textContent = title;
+        titleEl.textContent = resolved?.title ? `${title} — ${resolved.title}` : title;
         dialog.showModal();
         renderSources(sources);
         if (sources.length > 0) {

@@ -18,6 +18,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from db import get_db, AsyncSessionLocal
 from utils.media_uri import MediaURI
+from utils.alias_lookup import get_provider_id_for_uri
 from models.media import Media
 from models.collection import Collection, CollectionFile
 from models.connections import MediaServerConnection
@@ -4591,34 +4592,200 @@ def _srt_to_vtt(srt: str) -> str:
     return "WEBVTT\n\n" + vtt.strip()
 
 
+async def _resolve_playback_media_ids(
+    db: AsyncSession, media_ref: str, type: MediaType, media_id: int | None
+) -> list[int]:
+    """Resolve a playback path ref to Media row ids.
 
-@router.get("/playback/{type}/{tmdb_id}")
+    ``media_ref`` is either a raw TMDB id ("1368337") or a uri_id ("tvdb:e:9876"),
+    since pages pinned to a non-TMDB provider identify items by URI. ALL matching
+    rows are returned — a manually-matched title can carry its CollectionFile on a
+    different row than the one ``.first()`` would pick.
+    """
+    if media_id:
+        rows = await db.execute(select(Media.id).where(Media.id == media_id))
+        return [r[0] for r in rows.all()]
+
+    if ":" in media_ref:
+        rows = await db.execute(
+            select(Media.id).where(Media.uri_id == media_ref, Media.media_type == type)
+        )
+        media_ids = [r[0] for r in rows.all()]
+        if media_ids:
+            return media_ids
+        # Fall back to the TMDB id this URI translates to, for rows stored in a
+        # different provider namespace or predating the uri_id column.
+        try:
+            uri = MediaURI.parse(media_ref)
+        except ValueError:
+            return []
+        if uri.provider == "tmdb":
+            media_ref = uri.id
+        else:
+            translated = await get_provider_id_for_uri(db, media_ref, "tmdb")
+            if not translated:
+                return []
+            media_ref = translated
+
+    try:
+        tmdb_id = int(media_ref)
+    except ValueError:
+        return []
+    rows = await db.execute(
+        select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
+    )
+    return [r[0] for r in rows.all()]
+
+
+async def _media_server_web_url(
+    conn: MediaServerConnection,
+    cf: CollectionFile,
+    jellyfin_server_id: str | None = None,
+    plex_machine_ids: dict[int, str | None] | None = None,
+) -> str | None:
+    """Build a deep link to this item's page in the media server's own web UI.
+
+    Used by the "server webpage" playback target. ``external_server_url`` wins over
+    the internal URL, since the link is opened by the user's browser rather than by
+    this server.
+    """
+    if not conn or not cf.source_id:
+        return None
+    base = (conn.external_server_url or conn.url or "").rstrip("/")
+    if not base:
+        return None
+
+    source = cf.source.value
+    if source == "jellyfin":
+        suffix = f"&serverId={jellyfin_server_id}" if jellyfin_server_id else ""
+        return f"{base}/web/index.html#/details?id={cf.source_id}{suffix}"
+    if source == "emby":
+        suffix = f"&serverId={jellyfin_server_id}" if jellyfin_server_id else ""
+        return f"{base}/web/index.html#!/item?id={cf.source_id}{suffix}"
+    if source == "plex":
+        from core import plex as plex_core
+
+        # Plex deep links are keyed by machineIdentifier — look it up once per
+        # connection instead of once per file.
+        if plex_machine_ids is not None and conn.id in plex_machine_ids:
+            machine_id = plex_machine_ids[conn.id]
+        else:
+            machine_id = await plex_core.get_machine_identifier(conn.url, conn.token)
+            if plex_machine_ids is not None:
+                plex_machine_ids[conn.id] = machine_id
+        if not machine_id:
+            return None
+        key = urllib.parse.quote(f"/library/metadata/{cf.source_id}", safe="")
+        return f"{base}/web/index.html#!/server/{machine_id}/details?key={key}"
+    return None
+
+
+async def _resolve_show_playback_episode(
+    db: AsyncSession, media_ref: str, user_id: int, season_number: int | None
+) -> Media | None:
+    """Pick the episode a show- or season-level Play button should start.
+
+    The first unwatched episode that actually has a local file, falling back to the
+    first episode with a file once everything has been watched.
+    """
+    show_q = None
+    if ":" in media_ref:
+        show_q = await db.execute(select(ShowModel).where(ShowModel.uri_id == media_ref))
+    else:
+        try:
+            show_q = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == int(media_ref)))
+        except ValueError:
+            return None
+    show = show_q.scalars().first()
+    if show is None and ":" in media_ref:
+        # Show rows predating uri_id, or stored under another provider namespace.
+        try:
+            uri = MediaURI.parse(media_ref)
+        except ValueError:
+            return None
+        if uri.provider not in ("tmdb", "tvdb"):
+            return None
+        column = ShowModel.tvdb_id if uri.provider == "tvdb" else ShowModel.tmdb_id
+        show_q = await db.execute(select(ShowModel).where(column == int(uri.id)))
+        show = show_q.scalars().first()
+    if show is None:
+        return None
+
+    filters = [
+        Media.media_type == MediaType.episode,
+        Media.show_id == show.id,
+        Collection.user_id == user_id,
+        CollectionFile.connection_id.isnot(None),
+        CollectionFile.source_id.isnot(None),
+        CollectionFile.source.in_(
+            [CollectionSource.jellyfin, CollectionSource.emby, CollectionSource.plex]
+        ),
+    ]
+    if season_number is not None:
+        filters.append(Media.season_number == season_number)
+
+    eps_q = await db.execute(
+        select(Media)
+        .join(Collection, Collection.media_id == Media.id)
+        .join(CollectionFile, CollectionFile.collection_id == Collection.id)
+        .where(*filters)
+        .order_by(Media.season_number, Media.episode_number)
+    )
+    # dict.fromkeys dedupes episodes that have more than one file while keeping order.
+    episodes = list(dict.fromkeys(eps_q.scalars().all()))
+    if not episodes:
+        return None
+
+    watched_q = await db.execute(
+        select(WatchEvent.media_id).where(
+            WatchEvent.user_id == user_id,
+            WatchEvent.completed == True,
+            WatchEvent.media_id.in_([m.id for m in episodes]),
+        )
+    )
+    watched = {r[0] for r in watched_q.all()}
+    return next((m for m in episodes if m.id not in watched), episodes[0])
+
+
+@router.get("/playback/{type}/{media_ref}")
 async def get_playback_sources(
-    type: MediaType,
-    tmdb_id: int,
+    type: str,
+    media_ref: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     media_id: int | None = Query(None),
+    season_number: int | None = Query(None),
 ):
-    """Return available local-server playback sources for a movie or episode."""
-    if type not in (MediaType.movie, MediaType.episode):
+    """Return available local-server playback sources for a movie or episode.
+
+    Show- and season-level refs are accepted too: they resolve to the episode the
+    user should watch next, and every source reports the resolved episode so the
+    caller can address it directly on the stream/subtitle endpoints.
+    """
+    if type not in ("movie", "episode", "series", "season"):
         raise HTTPException(400, "Only movie/episode streaming supported")
 
-    if media_id:
-        media_q = await db.execute(select(Media.id).where(Media.id == media_id))
-        media_ids = [r[0] for r in media_q.all()]
-    else:
-        # Collect ALL Media rows for this tmdb_id — a manually-matched movie may
-        # have its CollectionFile on a different row than the one .first() would pick.
-        media_q = await db.execute(
-            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
+    resolved_type = MediaType.movie if type == "movie" else MediaType.episode
+    resolved_title: str | None = None
+    if type in ("series", "season"):
+        episode = await _resolve_show_playback_episode(
+            db, media_ref, current_user.id, season_number
         )
-        media_ids = [r[0] for r in media_q.all()]
+        if episode is None:
+            return []
+        media_id = episode.id
+        media_ref = episode.uri_id or (str(episode.tmdb_id) if episode.tmdb_id else media_ref)
+        resolved_title = (
+            f"S{episode.season_number:02d}E{episode.episode_number:02d}"
+            f" — {episode.custom_title or episode.title}"
+        )
+
+    media_ids = await _resolve_playback_media_ids(db, media_ref, resolved_type, media_id)
     if not media_ids:
         return []
 
     files_q = await db.execute(
-        select(CollectionFile, MediaServerConnection)
+        select(CollectionFile, MediaServerConnection, Collection.media_id)
         .join(Collection, Collection.id == CollectionFile.collection_id)
         .outerjoin(MediaServerConnection, MediaServerConnection.id == CollectionFile.connection_id)
         .where(
@@ -4634,17 +4801,20 @@ async def get_playback_sources(
     from core import plex as plex_core
 
     sources = []
-    for cf, conn in files_q.all():
+    plex_machine_ids: dict[int, str | None] = {}
+    for cf, conn, source_media_id in files_q.all():
         if not conn:
             continue
         resolution = cf.resolution
         subtitles: list[dict] = []
         audio_tracks: list[dict] = []
+        jellyfin_server_id: str | None = None
 
         if cf.source.value in ("jellyfin", "emby") and cf.source_id:
             try:
                 item = await jellyfin_core.get_item(conn.url, conn.token, cf.source_id, user_id=conn.server_user_id)
                 if item:
+                    jellyfin_server_id = item.get("ServerId")
                     if resolution is None:
                         q = jellyfin_core.extract_quality(item.get("MediaStreams", []))
                         resolution = q.get("resolution")
@@ -4715,6 +4885,11 @@ async def get_playback_sources(
             if not plex_item_valid:
                 continue
 
+        try:
+            external_url = await _media_server_web_url(conn, cf, jellyfin_server_id, plex_machine_ids)
+        except Exception:
+            external_url = None
+
         sources.append({
             "file_id": cf.id,
             "connection_id": cf.connection_id,
@@ -4725,15 +4900,20 @@ async def get_playback_sources(
             "audio_codec": cf.audio_codec,
             "subtitles": subtitles,
             "audio_tracks": audio_tracks,
+            "external_url": external_url,
+            "media_type": resolved_type.value,
+            "media_ref": media_ref,
+            "media_id": source_media_id,
+            "title": resolved_title,
         })
 
     return sources
 
 
-@router.get("/subtitles/{type}/{tmdb_id}")
+@router.get("/subtitles/{type}/{media_ref}")
 async def get_subtitle(
     type: MediaType,
-    tmdb_id: int,
+    media_ref: str,
     connection_id: int,
     stream_index: int,
     db: AsyncSession = Depends(get_db),
@@ -4747,13 +4927,7 @@ async def get_subtitle(
     if type not in (MediaType.movie, MediaType.episode):
         raise HTTPException(400, "Only movie/episode subtitles supported")
 
-    if media_id:
-        media_ids = [media_id]
-    else:
-        media_id_q = await db.execute(
-            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
-        )
-        media_ids = [r[0] for r in media_id_q.all()]
+    media_ids = await _resolve_playback_media_ids(db, media_ref, type, media_id)
     if not media_ids:
         raise HTTPException(404, "Not in library")
 
@@ -4837,10 +5011,10 @@ async def get_subtitle(
         raise HTTPException(400, f"Subtitles not supported for source: {cf.source.value}")
 
 
-@router.get("/stream/{type}/{tmdb_id}")
+@router.get("/stream/{type}/{media_ref}")
 async def stream_media(
     type: MediaType,
-    tmdb_id: int,
+    media_ref: str,
     connection_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -4852,13 +5026,7 @@ async def stream_media(
     if type not in (MediaType.movie, MediaType.episode):
         raise HTTPException(400, "Only movie/episode streaming supported")
 
-    if media_id:
-        media_ids = [media_id]
-    else:
-        media_id_q = await db.execute(
-            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
-        )
-        media_ids = [r[0] for r in media_id_q.all()]
+    media_ids = await _resolve_playback_media_ids(db, media_ref, type, media_id)
     if not media_ids:
         raise HTTPException(404, "Not in library")
 
@@ -4983,10 +5151,10 @@ async def _get_conn_for_user(connection_id: int, user_id: int, db: AsyncSession)
     return conn
 
 
-@router.get("/hls/{type}/{tmdb_id}")
+@router.get("/hls/{type}/{media_ref}")
 async def hls_master_manifest(
     type: MediaType,
-    tmdb_id: int,
+    media_ref: str,
     connection_id: int,
     audio_stream_index: int | None = None,
     db: AsyncSession = Depends(get_db),
@@ -5001,13 +5169,7 @@ async def hls_master_manifest(
     if type not in (MediaType.movie, MediaType.episode):
         raise HTTPException(400, "Only movie/episode HLS supported")
 
-    if media_id:
-        media_ids = [media_id]
-    else:
-        media_id_q = await db.execute(
-            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
-        )
-        media_ids = [r[0] for r in media_id_q.all()]
+    media_ids = await _resolve_playback_media_ids(db, media_ref, type, media_id)
     if not media_ids:
         raise HTTPException(404, "Not in library")
 
@@ -5113,10 +5275,10 @@ async def hls_master_manifest(
     )
 
 
-@router.get("/plex-hls/{type}/{tmdb_id}")
+@router.get("/plex-hls/{type}/{media_ref}")
 async def plex_hls_manifest(
     type: MediaType,
-    tmdb_id: int,
+    media_ref: str,
     connection_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -5130,13 +5292,7 @@ async def plex_hls_manifest(
     if type not in (MediaType.movie, MediaType.episode):
         raise HTTPException(400, "Only movie/episode HLS supported")
 
-    if media_id:
-        media_ids = [media_id]
-    else:
-        media_id_q = await db.execute(
-            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
-        )
-        media_ids = [r[0] for r in media_id_q.all()]
+    media_ids = await _resolve_playback_media_ids(db, media_ref, type, media_id)
     if not media_ids:
         raise HTTPException(404, "Not in library")
 
@@ -5338,10 +5494,10 @@ async def hls_segment_proxy(
     )
 
 
-@router.post("/session/report/{type}/{tmdb_id}")
+@router.post("/session/report/{type}/{media_ref}")
 async def report_session(
     type: MediaType,
-    tmdb_id: int,
+    media_ref: str,
     body: SessionReportRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -5351,13 +5507,7 @@ async def report_session(
     if type not in (MediaType.movie, MediaType.episode):
         return {"ok": False}
 
-    if media_id:
-        media_ids = [media_id]
-    else:
-        media_id_q = await db.execute(
-            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
-        )
-        media_ids = [r[0] for r in media_id_q.all()]
+    media_ids = await _resolve_playback_media_ids(db, media_ref, type, media_id)
     if not media_ids:
         return {"ok": False}
 
