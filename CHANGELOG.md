@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file. This projec
 
 ### Added
 
+- **First-Run Setup Wizard**: Fresh installs land on registration, the first account becomes admin, and admins are walked through API keys before anything else.
+- **Onboarding Walkthrough**: Register offers Plex sign-up, email, or email-plus-link-later, followed by a skippable settings walkthrough (profile, appearance, region, genres, content preferences, optional Plex link).
+- **Content Rating Blocklist**: Block titles by age certification (TV-MA, R, MA15+, +18 and others). Ratings are region-aware, derived from the profile country, and any value can be added by hand.
+- **Image Cache Expiration**: Set how long cached artwork is kept, alongside the existing size limit.
+- **Episode to Movie Matching**: Link an episode that a catalogue files as a film to its TMDB movie without removing it from the season, with a "Matched as Movies" list and one-click revert.
+- **Dismiss Sync Warnings**: Hide unmatched items that can't be fixed, on both the remaps page and the media servers panel, with a restore action.
+- **Content Rating Backfill**: Admin maintenance action to fetch certifications for the existing library.
 - **Plex Account Login**: Sign in with a Plex account via the plex.tv PIN flow, link/unlink Plex from existing accounts, and pick which discovered Plex servers to import as media-server connections.
 - **Language Filters**: Added a new content filter section allowing users to blacklist or whitelist specific languages to exclude/include them in discovery results.
 - **Media Server Enrichment Toggle**: Added a setting to enable/disable metadata enrichment (resolution, languages) from Plex, Jellyfin, and Emby.
@@ -34,6 +41,11 @@ All notable changes to this project will be documented in this file. This projec
 
 ### Changed
 
+- **Next Up**: Includes any show with watch progress rather than only collected items, and lists only episodes that have aired.
+- **Image Cache Coverage**: Hero images, posters, people, collections, requests and logos bypassed the cache entirely, and several valid TMDB sizes were rejected.
+- **Episode Order Switching**: Switching a matched show between TMDB and TVDB navigates straight to the other view instead of running an episode mapping job first.
+- **Remap Targets**: A remap can point at a show that isn't in the library yet; it is fetched and created on demand.
+- **Sync Warnings**: Each warning states which catalogue the lookup failed against, and warnings whose episodes are already identified are no longer reported.
 - **Detail Page Action Buttons**: Redesigned buttons across movie, show, and episode detail pages into a unified, dynamically scaling grid to eliminate empty margins.
 - **Discover and Airing Today Cards**: Aligned discover page grids and home page airing today cards to use the vertical 2:3 `MediaCard` poster layout.
 - **Single-Season Breadcrumbs**: Simplified breadcrumbs on episode detail pages to skip the intermediate season level for single-season shows.
