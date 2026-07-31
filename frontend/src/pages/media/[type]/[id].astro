@@ -212,7 +212,7 @@ const activeButtonsCount = [
 
             <!-- Action Buttons Container (Play, Session, Refresh, Trailer) -->
             {activeButtonsCount > 0 && (
-              <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
+              <div class="flex flex-col gap-2.5 w-full [&>*]:w-full [&>*]:min-w-0">
                 {((item.type === 'movie' || item.type === 'episode')) && item.in_library && (
                   <VideoPlayer
                     uriId={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : item.type === 'episode' ? `tmdb:e:${item.tmdb_id}` : undefined)}
@@ -532,20 +532,6 @@ const activeButtonsCount = [
                 )}
               </div>
             )}
-
-            {(item.type === 'movie' || item.type === 'episode') && (
-              <ManualScrobble
-                tmdbId={item.tmdb_id}
-                mediaType={item.type}
-                runtime={item.runtime}
-                title={item.title}
-                showTmdbId={item.show_tmdb_id}
-                seasonNumber={item.season_number}
-                episodeNumber={item.episode_number}
-              />
-            )}
-
-
 
 
             <!-- Overview -->

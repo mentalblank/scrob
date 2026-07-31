@@ -245,7 +245,7 @@ const activeButtonsCount = [
 
             <!-- Action Buttons Container (Play, Session, Refresh) -->
             {activeButtonsCount > 0 && (
-              <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
+              <div class="flex flex-col gap-2.5 w-full [&>*]:w-full [&>*]:min-w-0">
                 {episode.in_library && (
                   <VideoPlayer
                     uriId={(episode as any).uri_id ?? (episode.tmdb_id ? `tmdb:e:${episode.tmdb_id}` : undefined)}

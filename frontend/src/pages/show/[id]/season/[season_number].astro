@@ -203,7 +203,7 @@ const showProgress = progressPct > 0;
 
             <!-- Refresh Metadata Button -->
             {season.show_in_library && (
-              <div class="flex flex-col md:flex-row md:items-start gap-2.5 w-full md:[&>*]:flex-1 md:[&>*]:min-w-0">
+              <div class="flex flex-col gap-2.5 w-full [&>*]:w-full [&>*]:min-w-0">
                 <VideoPlayer
                   uriId={(show as any)?.uri_id ?? fetchKey}
                   tmdbId={resolvedShowId}
