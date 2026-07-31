@@ -51,7 +51,9 @@ try {
         show_key: showKey.replace(/[^a-zA-Z0-9_-]/g, '_'),
         show_title: override.source_show_title,
         show_uri_id: override.source_show_uri_id,
-        show_tmdb_id: override.source_show_id,
+        // source_show_id is the local row id, not a provider id.
+        show_tmdb_id: override.source_show_tmdb_id,
+        show_tvdb_id: override.source_show_tvdb_id,
         show_poster_path: override.source_show_poster_path,
         overrides: [],
         seasons: {}
@@ -179,6 +181,13 @@ try {
               
               <!-- Source Show -->
               <div class="flex items-center gap-3 w-full md:w-2/5 min-w-0">
+                <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
+                  {override.source_show_poster_path ? (
+                    <img src={tmdbImageUrl(override.source_show_poster_path, "w185")} alt="" class="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div class="w-full h-full flex items-center justify-center text-[8px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                  )}
+                </div>
                 <div class="min-w-0 flex-1">
                   <span class="text-[9px] font-extrabold uppercase text-zinc-500 tracking-wider">Source Show</span>
                   {override.source_show_uri_id
@@ -187,7 +196,11 @@ try {
                   }
                   <div class="flex flex-wrap items-center gap-1.5 mt-1">
                     <span class="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded-md text-[10px] font-bold text-zinc-300">Season {override.source_season_number}</span>
-                    <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-800">{override.source_show_uri_id}</span>
+                    {override.source_show_tmdb_id && <span class="text-[9px] text-sky-400 font-medium bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/30">tmdb:s:{override.source_show_tmdb_id}</span>}
+                    {override.source_show_tvdb_id && <span class="text-[9px] text-indigo-400 font-medium bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/30">tvdb:s:{override.source_show_tvdb_id}</span>}
+                    {!override.source_show_tmdb_id && !override.source_show_tvdb_id && (
+                      <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-800">{override.source_show_uri_id}</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -201,6 +214,13 @@ try {
 
               <!-- Target Show -->
               <div class="flex items-center gap-3 w-full md:w-2/5 min-w-0">
+                <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
+                  {override.target_show_poster_path ? (
+                    <img src={tmdbImageUrl(override.target_show_poster_path, "w185")} alt="" class="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div class="w-full h-full flex items-center justify-center text-[8px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                  )}
+                </div>
                 <div class="min-w-0 flex-1">
                   <span class="text-[9px] font-extrabold uppercase text-blue-400 tracking-wider">Target TMDB Show</span>
                   {override.target_show_uri_id
@@ -209,7 +229,11 @@ try {
                   }
                   <div class="flex flex-wrap items-center gap-1.5 mt-1">
                     <span class="px-2 py-0.5 bg-blue-950/40 border border-blue-900/30 rounded-md text-[10px] font-bold text-blue-400">Season {override.target_season_number}</span>
-                    <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-800">{override.target_show_uri_id}</span>
+                    {override.target_show_tmdb_id && <span class="text-[9px] text-sky-400 font-medium bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/30">tmdb:s:{override.target_show_tmdb_id}</span>}
+                    {override.target_show_tvdb_id && <span class="text-[9px] text-indigo-400 font-medium bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/30">tvdb:s:{override.target_show_tvdb_id}</span>}
+                    {!override.target_show_tmdb_id && !override.target_show_tvdb_id && (
+                      <span class="text-[9px] text-zinc-500 font-medium bg-zinc-950/60 px-1.5 py-0.5 rounded border border-zinc-800">{override.target_show_uri_id}</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -303,12 +327,27 @@ try {
                   >
                     <path d="m9 18 6-6-6-6"/>
                   </svg>
-                  
+
+                  <!-- Show Poster Image -->
+                  <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
+                    {showGroup.show_poster_path ? (
+                      <img src={tmdbImageUrl(showGroup.show_poster_path, "w185")} alt="" class="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <div class="w-full h-full flex items-center justify-center text-[8px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                    )}
+                  </div>
+
                   <div class="min-w-0">
                     <h3 class="text-base font-bold text-zinc-100 truncate hover:text-indigo-400 transition-colors">
                       {showGroup.show_title}
                     </h3>
-                    <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800 mt-1 inline-block">{showGroup.show_uri_id ?? ("TMDB ID: " + showGroup.show_tmdb_id)}</span>
+                    <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                      {showGroup.show_tmdb_id && <span class="text-[10px] text-sky-400 font-bold bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/30">tmdb:s:{showGroup.show_tmdb_id}</span>}
+                      {showGroup.show_tvdb_id && <span class="text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/30">tvdb:s:{showGroup.show_tvdb_id}</span>}
+                      {!showGroup.show_tmdb_id && !showGroup.show_tvdb_id && (
+                        <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">{showGroup.show_uri_id}</span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -495,7 +534,7 @@ try {
           {movieConversions.map((c: any) => (
             <div class="flex items-center gap-4 p-4">
               {c.movie_poster_path
-                ? <img src={c.movie_poster_path} class="w-9 h-13 rounded object-cover shrink-0 border border-zinc-800" loading="lazy" />
+                ? <img src={tmdbImageUrl(c.movie_poster_path, "w185")} class="w-9 h-13 rounded object-cover shrink-0 border border-zinc-800" loading="lazy" />
                 : <div class="w-9 h-13 rounded bg-zinc-950 border border-zinc-800 shrink-0"></div>}
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
@@ -636,6 +675,13 @@ try {
             const targetHref = s.show_uri_id ? `/show/${s.show_uri_id}` : (s.tvdb_id ? `/show/tvdb:s:${s.tvdb_id}` : '');
             return (
               <div class="unmatched-map-row flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-zinc-900/20 border border-zinc-800 hover:border-zinc-700/80 rounded-2xl transition-all backdrop-blur-md" data-title={s.show_title} data-matched-title={displayTitle} data-type="show">
+                <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
+                  {s.poster_path ? (
+                    <img src={tmdbImageUrl(s.poster_path, "w185")} alt="" class="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div class="w-full h-full flex items-center justify-center text-[8px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                  )}
+                </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-[10px] bg-indigo-500/10 text-indigo-400 font-bold px-2 py-0.5 rounded-full border border-indigo-500/20 uppercase tracking-wider">Show</span>
@@ -679,6 +725,13 @@ try {
             const targetHref = m.tmdb_id ? `/media/movie/tmdb:m:${m.tmdb_id}` : '';
             return (
               <div class="unmatched-map-row flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-zinc-900/20 border border-zinc-800 hover:border-zinc-700/80 rounded-2xl transition-all backdrop-blur-md" data-title={m.movie_title} data-matched-title={displayTitle} data-type="movie">
+                <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
+                  {m.poster_path ? (
+                    <img src={tmdbImageUrl(m.poster_path, "w185")} alt="" class="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div class="w-full h-full flex items-center justify-center text-[8px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
+                  )}
+                </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-[10px] bg-amber-500/10 text-amber-400 font-bold px-2 py-0.5 rounded-full border border-amber-500/20 uppercase tracking-wider">Movie</span>

@@ -19,6 +19,7 @@ from models.show import Show as ShowModel
 from models.sync import SyncJob, SyncStatus
 from models.users import User, UserSettings
 from models.episode_order import EpisodeOrderMapping, UserShowEpisodeOrder
+from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
 from routers.media import format_media, get_user_tmdb_key, get_user_country, check_tmdb_key, enrich_with_state, refresh_technical_data, _extract_show_content_rating, get_where_to_watch, _effective_sonarr, _get_global_settings
 
 from dependencies import get_current_user
@@ -36,6 +37,62 @@ from core.translations import (
 )
 
 router = APIRouter()
+
+
+async def get_remapped_episodes(
+    db: AsyncSession, user_id: int, show_id: int | None
+) -> dict[tuple[int, int], Media]:
+    """Episodes a remap moved off this show, keyed by the position they left behind.
+
+    Applying a remap physically moves the Media rows onto the target show, so the
+    remapped season reads as empty on the show it is still browsed from.
+    """
+    if not show_id:
+        return {}
+
+    remapped: dict[tuple[int, int], Media] = {}
+
+    season_overrides = await db.execute(
+        select(ShowSeasonOverride).where(
+            ShowSeasonOverride.user_id == user_id,
+            ShowSeasonOverride.source_show_id == show_id,
+            ShowSeasonOverride.target_show_id.isnot(None),
+        )
+    )
+    for override in season_overrides.scalars().all():
+        episodes = await db.execute(
+            select(Media).where(
+                Media.show_id == override.target_show_id,
+                Media.season_number == override.target_season_number,
+                Media.media_type == MediaType.episode,
+                Media.episode_number.isnot(None),
+            )
+        )
+        for episode in episodes.scalars().all():
+            remapped[(override.source_season_number, episode.episode_number)] = episode
+
+    episode_overrides = await db.execute(
+        select(ShowEpisodeOverride).where(
+            ShowEpisodeOverride.user_id == user_id,
+            ShowEpisodeOverride.source_show_id == show_id,
+            ShowEpisodeOverride.target_show_id.isnot(None),
+        )
+    )
+    for override in episode_overrides.scalars().all():
+        episode_q = await db.execute(
+            select(Media).where(
+                Media.show_id == override.target_show_id,
+                Media.season_number == override.target_season_number,
+                Media.episode_number == override.target_episode_number,
+                Media.media_type == MediaType.episode,
+            )
+        )
+        episode = episode_q.scalars().first()
+        if episode:
+            # The more specific instruction wins over a season remap at the same position.
+            remapped[(override.source_season_number, override.source_episode_number)] = episode
+
+    return remapped
 
 
 async def get_user_tvdb_key(db: AsyncSession, user_id: int) -> str | None:
@@ -699,6 +756,7 @@ async def get_show(
             .order_by(Media.season_number.asc(), Media.episode_number.asc())
         )
         episodes = episodes_result.scalars().all()
+        remapped_eps = await get_remapped_episodes(db, current_user.id, show.id)
 
         seasons_meta = {
             s["season_number"]: s for s in (show.tmdb_data or {}).get("seasons", [])
@@ -713,6 +771,29 @@ async def get_show(
             ep_formatted = format_media(ep)
             ep_formatted["poster_path"] = ep.poster_path or season_poster
             seasons.setdefault(s_num, []).append(ep_formatted)
+
+        # format_media carries no per-user state, and a single-season show draws its
+        # episode cards from here rather than from the season endpoint.
+        episode_ids = [ep.id for ep in episodes]
+        if episode_ids:
+            collected_q = await db.execute(
+                select(Collection.media_id).where(
+                    Collection.user_id == current_user.id,
+                    Collection.media_id.in_(episode_ids),
+                )
+            )
+            watched_q = await db.execute(
+                select(WatchEvent.media_id).where(
+                    WatchEvent.user_id == current_user.id,
+                    WatchEvent.media_id.in_(episode_ids),
+                )
+            )
+            collected_episode_ids = {row[0] for row in collected_q.all()}
+            watched_episode_ids = {row[0] for row in watched_q.all()}
+            for ep_list in seasons.values():
+                for ep_formatted in ep_list:
+                    ep_formatted["in_library"] = ep_formatted["id"] in collected_episode_ids
+                    ep_formatted["watched"] = ep_formatted["id"] in watched_episode_ids
 
         # Fetch networks + recommendations from TMDB if key is available
         networks = []
@@ -821,6 +902,35 @@ async def get_show(
             coll_per_season[sn] = collected
             watched_per_season[sn] = watched
 
+        # The query above only sees episodes still attached to this show.
+        if remapped_eps:
+            remapped_ids = [ep.id for ep in remapped_eps.values()]
+            remapped_collected_q = await db.execute(
+                select(Collection.media_id).where(
+                    Collection.user_id == current_user.id,
+                    Collection.media_id.in_(remapped_ids),
+                )
+            )
+            remapped_watched_q = await db.execute(
+                select(WatchEvent.media_id).where(
+                    WatchEvent.user_id == current_user.id,
+                    WatchEvent.media_id.in_(remapped_ids),
+                )
+            )
+            remapped_collected = {row[0] for row in remapped_collected_q.all()}
+            remapped_watched = {row[0] for row in remapped_watched_q.all()}
+            collected_by_season: dict[int, set[int]] = {}
+            watched_by_season: dict[int, set[int]] = {}
+            for (sn, ep_num), ep in remapped_eps.items():
+                if ep.id in remapped_collected:
+                    collected_by_season.setdefault(sn, set()).add(ep_num)
+                if ep.id in remapped_watched:
+                    watched_by_season.setdefault(sn, set()).add(ep_num)
+            for sn, numbers in collected_by_season.items():
+                coll_per_season[sn] = coll_per_season.get(sn, 0) + len(numbers)
+            for sn, numbers in watched_by_season.items():
+                watched_per_season[sn] = watched_per_season.get(sn, 0) + len(numbers)
+
         # Season user ratings (stored against the show's Media row with season_number)
         show_media_q = await db.execute(
             select(Media).where(Media.tmdb_id == series_tmdb_id, Media.media_type == MediaType.series)
@@ -862,12 +972,17 @@ async def get_show(
                 if sn > last_sn:
                     season_ep_counts[sn] = 0
 
+        # A remapped season is usually absent from this show's own metadata.
+        remapped_totals: dict[int, int] = {}
+        for sn, _ in remapped_eps:
+            remapped_totals[sn] = remapped_totals.get(sn, 0) + 1
+
         # Build season states for all known seasons
         for sn in set(list(coll_per_season.keys()) + list(season_ep_counts.keys())):
             collected = coll_per_season.get(sn, 0)
             watched = watched_per_season.get(sn, 0)
-            total = season_ep_counts.get(sn, 0)
-            
+            total = season_ep_counts.get(sn, 0) or remapped_totals.get(sn, 0)
+
             # Use distinct (season, episode) from user's collection for calculation
             # to be consistent with how total is calculated (unique episodes in season).
             season_states[sn] = {
@@ -1811,7 +1926,9 @@ async def get_tvdb_show(
             )
         )
         local_eps = list(local_eps_result.scalars().all())
+        remapped_eps = await get_remapped_episodes(db, current_user.id, show.id)
         local_media_ids = [episode.id for episode in local_eps]
+        local_media_ids += [episode.id for episode in remapped_eps.values()]
         collected_ids: set[int] = set()
         watched_ids: set[int] = set()
         if local_media_ids:
@@ -1844,6 +1961,13 @@ async def get_tvdb_show(
                 target_episode = episode.episode_number
             if target_season is None or target_episode is None:
                 continue
+            if episode.id in collected_ids:
+                collected_positions.setdefault(target_season, set()).add(target_episode)
+            if episode.id in watched_ids:
+                watched_positions.setdefault(target_season, set()).add(target_episode)
+
+        # Already keyed by their position here, so they skip the mapping above.
+        for (target_season, target_episode), episode in remapped_eps.items():
             if episode.id in collected_ids:
                 collected_positions.setdefault(target_season, set()).add(target_episode)
             if episode.id in watched_ids:
@@ -2049,6 +2173,7 @@ async def get_tvdb_season(
     }
 
     local_ep_map: dict[tuple[int, int], Media] = {}
+    remapped_eps: dict[tuple[int, int], Media] = {}
     if show:
         ep_result = await db.execute(
             select(Media).where(
@@ -2062,6 +2187,7 @@ async def get_tvdb_season(
             for episode in local_eps
             if episode.season_number is not None and episode.episode_number is not None
         }
+        remapped_eps = await get_remapped_episodes(db, current_user.id, show.id)
 
     mapped_rows: list[tuple[dict, EpisodeOrderMapping | None, Media | None]] = []
     for episode in eps:
@@ -2078,6 +2204,11 @@ async def get_tvdb_season(
             # No mapping for this specific TVDB episode — fall back to matching
             # by raw position rather than reporting it as missing from the library.
             local_episode = local_ep_map.get(
+                (season_number, episode.get("episode_number"))
+            )
+        if local_episode is None:
+            # The whole season may have been remapped onto another show.
+            local_episode = remapped_eps.get(
                 (season_number, episode.get("episode_number"))
             )
         mapped_rows.append((episode, mapping, local_episode))
@@ -2272,6 +2403,10 @@ async def get_tvdb_episode(
             )
         )
         local_ep = local_ep_q.scalars().first()
+        if local_ep is None:
+            # This episode's season may have been remapped onto another show.
+            remapped_eps = await get_remapped_episodes(db, current_user.id, show.id)
+            local_ep = remapped_eps.get((season_number, episode_number))
         if local_ep:
             local_ep_id = local_ep.id
             coll_q = await db.execute(

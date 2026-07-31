@@ -314,6 +314,8 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
                     _ScalarOneResult(show),                             # show_result
                     _ExistingResult([mapping]),                         # mapping_result
                     _ExistingResult([mapped_episode, unmapped_episode]),  # ep_result
+                    _EmptyResult(),                                     # season overrides — none
+                    _EmptyResult(),                                     # episode overrides — none
                     _ExistingResult([(201,), (202,)]),                  # watched_q — both watched
                     _ExistingResult([(201,)]),                          # collected_q — only 201 collected
                     _ExistingResult([]),                                # episode_ratings_q
@@ -349,6 +351,74 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["season_watch_pct"], 100)
         self.assertTrue(result["season_watched"])
         self.assertEqual(result["season_collection_pct"], 50)
+
+    async def test_tvdb_season_reads_state_from_a_remapped_season(self) -> None:
+        """Regression: a season remap moves the episodes onto the target show, so
+        the source season goes empty and its state has to be read back from there."""
+        show = ShowModel(id=42, tvdb_id=500, tmdb_id=999)
+        override = SimpleNamespace(
+            source_season_number=3,
+            target_show_id=77,
+            target_season_number=1,
+        )
+        # Lives on show 77 season 1 now, but is still browsed as season 3 of show 42.
+        remapped_episode = Media(
+            id=301,
+            show_id=77,
+            media_type=MediaType.episode,
+            season_number=1,
+            episode_number=1,
+            tmdb_id=9101,
+        )
+
+        raw_series = {
+            "id": 500,
+            "name": "Test Show",
+            "remoteIds": [{"sourceName": "TheMovieDB", "id": "999"}],
+            "seasons": [{"number": 3, "type": {"type": "official"}, "id": 113}],
+        }
+        raw_episodes = [
+            {"id": 5301, "seasonNumber": 3, "number": 1, "name": "Ep1", "aired": "2025-01-01"},
+        ]
+
+        db = SimpleNamespace(
+            execute=AsyncMock(
+                side_effect=[
+                    _ScalarOneResult(show),              # show_result
+                    _EmptyResult(),                      # mapping_result — no order mappings
+                    _EmptyResult(),                      # ep_result — season 3 is empty here now
+                    _ExistingResult([override]),         # season overrides
+                    _ExistingResult([remapped_episode]),  # target-season episodes
+                    _EmptyResult(),                      # episode overrides
+                    _ExistingResult([(301,)]),           # watched_q
+                    _ExistingResult([(301,)]),           # collected_q
+                    _ExistingResult([]),                 # episode_ratings_q
+                    _ScalarOneResult(None),              # show_media_result
+                ]
+            ),
+        )
+
+        with (
+            patch("routers.shows.get_user_tvdb_key", AsyncMock(return_value="tvdb-key")),
+            patch("routers.shows.get_user_metadata_language", AsyncMock(return_value=None)),
+            patch("routers.shows.get_user_tmdb_key", AsyncMock(return_value=None)),
+            patch("routers.shows.tvdb_client.get_series", AsyncMock(return_value=raw_series)),
+            patch("routers.shows.tvdb_client.get_series_episodes", AsyncMock(return_value=raw_episodes)),
+            patch("routers.shows.tvdb_client.get_season", AsyncMock(return_value={})),
+        ):
+            result = await get_tvdb_season(
+                tvdb_id=500,
+                season_number=3,
+                db=db,
+                current_user=SimpleNamespace(id=7),
+            )
+
+        episode = result["episodes"][0]
+        self.assertEqual(episode["id"], 301)
+        self.assertTrue(episode["watched"])
+        self.assertTrue(episode["in_library"])
+        self.assertEqual(result["season_watch_pct"], 100)
+        self.assertEqual(result["season_collection_pct"], 100)
 
     def test_rejects_unknown_episode_order(self) -> None:
         self.assertEqual(validate_episode_order("tmdb"), "tmdb")

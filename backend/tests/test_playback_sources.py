@@ -6,8 +6,15 @@ from unittest.mock import patch
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 
-from models.base import CollectionSource
-from routers.media import _media_server_web_url
+from sqlalchemy.dialects import postgresql
+
+from models.base import CollectionSource, MediaType
+from routers.media import (
+    _media_row_match,
+    _media_server_web_url,
+    movie_media_match,
+    movie_tmdb_key,
+)
 
 
 def _conn(url="http://jelly.lan:8096", external=None):
@@ -64,6 +71,34 @@ class MediaServerWebUrlTests(unittest.IsolatedAsyncioTestCase):
             await _media_server_web_url(_conn(), _file("plex", "1"), None, cache)
             await _media_server_web_url(_conn(), _file("plex", "2"), None, cache)
         self.assertEqual(len(calls), 1)
+
+
+class ConvertedMovieMatchTests(unittest.TestCase):
+    """An episode re-filed as a movie stays an episode row, reachable as the movie
+    only through the linked_movie_tmdb_id it records."""
+
+    def _compiled(self, clause) -> str:
+        return str(clause.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        ))
+
+    def test_movie_match_covers_both_real_movies_and_converted_episodes(self) -> None:
+        sql = self._compiled(movie_media_match([46687]))
+        self.assertIn("media.media_type", sql)
+        self.assertIn("linked_movie_tmdb_id", sql)
+        # Either branch alone is enough to match a row.
+        self.assertIn(" OR ", sql)
+
+    def test_movie_key_reports_the_film_a_converted_row_stands_for(self) -> None:
+        sql = self._compiled(movie_tmdb_key())
+        self.assertIn("CASE WHEN", sql)
+        self.assertIn("linked_movie_tmdb_id", sql)
+
+    def test_episode_lookups_are_left_alone(self) -> None:
+        # Only movies follow conversions; an episode id must still match exactly.
+        sql = self._compiled(_media_row_match(MediaType.episode, 1234))
+        self.assertNotIn("linked_movie_tmdb_id", sql)
+        self.assertNotIn(" OR ", sql)
 
 
 if __name__ == "__main__":

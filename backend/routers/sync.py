@@ -4650,12 +4650,15 @@ def _serialise_season_override(override: ShowSeasonOverride) -> dict:
         "source_show_title": source.title if source else None,
         "source_show_poster_path": source.poster_path if source else None,
         "source_show_tmdb_id": source.tmdb_id if source else None,
+        # Both ids: uri_id only names the provider the show is keyed on.
+        "source_show_tvdb_id": source.tvdb_id if source else None,
         "source_season_number": override.source_season_number,
         "target_show_id": target.id if target else override.target_show_id,
         "target_show_uri_id": _show_uri(target),
         "target_show_title": target.title if target else None,
         "target_show_poster_path": target.poster_path if target else None,
         "target_show_tmdb_id": target.tmdb_id if target else None,
+        "target_show_tvdb_id": target.tvdb_id if target else None,
         "target_season_number": override.target_season_number,
         "created_at": override.created_at.isoformat() if override.created_at else None,
     }
@@ -4671,6 +4674,7 @@ def _serialise_episode_override(override: ShowEpisodeOverride) -> dict:
         "source_show_title": source.title if source else None,
         "source_show_poster_path": source.poster_path if source else None,
         "source_show_tmdb_id": source.tmdb_id if source else None,
+        "source_show_tvdb_id": source.tvdb_id if source else None,
         "source_season_number": override.source_season_number,
         "source_episode_number": override.source_episode_number,
         "target_show_id": target.id if target else override.target_show_id,
@@ -4678,6 +4682,7 @@ def _serialise_episode_override(override: ShowEpisodeOverride) -> dict:
         "target_show_title": target.title if target else None,
         "target_show_poster_path": target.poster_path if target else None,
         "target_show_tmdb_id": target.tmdb_id if target else None,
+        "target_show_tvdb_id": target.tvdb_id if target else None,
         "target_season_number": override.target_season_number,
         "target_episode_number": override.target_episode_number,
         "created_at": override.created_at.isoformat() if override.created_at else None,
@@ -6097,14 +6102,23 @@ async def list_matched_shows(
     # Fetch all shows in the system to build a db_id -> Show mapping
     # This allows us to map any database show.id to its tmdb_id dynamically,
     # correcting any legacy/already-stamped warning entries where matched_show_id was show.id.
-    shows_res = await db.execute(select(Show.id, Show.tmdb_id, Show.tvdb_id, Show.title))
+    shows_res = await db.execute(
+        select(Show.id, Show.tmdb_id, Show.tvdb_id, Show.title, Show.poster_path)
+    )
     show_id_map = {
         row.id: {
             "tmdb_id": row.tmdb_id,
             "tvdb_id": row.tvdb_id,
             "title": row.title,
+            "poster_path": row.poster_path,
         }
         for row in shows_res.all()
+    }
+    # Artwork for rows whose show was only identified by a stamped warning.
+    poster_by_title = {
+        (info["title"] or "").lower(): info["poster_path"]
+        for info in show_id_map.values()
+        if info["poster_path"]
     }
 
     seen: dict[str, dict] = {}
@@ -6116,6 +6130,7 @@ async def list_matched_shows(
             Show.tmdb_id.label("show_id"),
             Show.tvdb_id,
             Show.title.label("show_title_matched"),
+            Show.poster_path,
         )
         .join(Collection, Collection.media_id == Media.id)
         .join(Show, Show.id == Media.show_id)
@@ -6136,6 +6151,7 @@ async def list_matched_shows(
                 "show_id": row.show_id,
                 "tvdb_id": row.tvdb_id,
                 "show_title_matched": row.show_title_matched,
+                "poster_path": row.poster_path,
             }
 
     # Source 2: SyncJob warnings stamped with matched:true (fallback for missing show_title)
@@ -6160,6 +6176,9 @@ async def list_matched_shows(
                 legacy_show_id = w.get("matched_show_id")
                 matched_tvdb_id = w.get("matched_tvdb_id")
                 matched_show_id = legacy_show_id
+                matched_poster = poster_by_title.get(
+                    (w.get("matched_show_title") or "").lower()
+                ) or poster_by_title.get(key)
 
                 if legacy_show_id in show_id_map:
                     show_info = show_id_map[legacy_show_id]
@@ -6170,12 +6189,14 @@ async def list_matched_shows(
                         matched_show_id = show_info["tmdb_id"]
                         if show_info["tvdb_id"]:
                             matched_tvdb_id = show_info["tvdb_id"]
+                        matched_poster = show_info["poster_path"] or matched_poster
 
                 seen[key] = {
                     "show_title": title,
                     "show_id": matched_show_id,
                     "tvdb_id": matched_tvdb_id,
                     "show_title_matched": w.get("matched_show_title"),
+                    "poster_path": matched_poster,
                 }
 
     return list(seen.values())
@@ -6810,6 +6831,21 @@ async def list_matched_movies(
                 "movie_title": title,
                 "movie_title_matched": w.get("matched_movie_title"),
                 "tmdb_id": w.get("matched_tmdb_id"),
+                "poster_path": None,
             }
+
+    # The warning carries no artwork, so take it from the movie rows.
+    matched_ids = [entry["tmdb_id"] for entry in seen.values() if entry["tmdb_id"]]
+    if matched_ids:
+        posters_res = await db.execute(
+            select(Media.tmdb_id, Media.poster_path).where(
+                Media.tmdb_id.in_(matched_ids),
+                Media.media_type == MediaType.movie,
+                Media.poster_path.isnot(None),
+            )
+        )
+        poster_by_tmdb_id = dict(posters_res.all())
+        for entry in seen.values():
+            entry["poster_path"] = poster_by_tmdb_id.get(entry["tmdb_id"])
 
     return list(seen.values())

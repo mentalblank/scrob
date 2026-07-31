@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response
 from starlette.background import BackgroundTask
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, delete, func, cast as sa_cast, Text
+from sqlalchemy import select, or_, and_, case, delete, func, cast as sa_cast, Integer, Text
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -243,6 +243,34 @@ TV_STATUS_IDS: dict[str, int] = {
 }
 
 
+# An episode re-filed as a movie stays an episode row and only records which film it
+# is, so matching on (tmdb_id, media_type=movie) misses its collection and history.
+LINKED_MOVIE_TMDB_ID = Media.tmdb_data["linked_movie_tmdb_id"].astext.cast(Integer)
+
+
+def movie_media_match(movie_tmdb_ids):
+    """Predicate matching every Media row that stands for one of these movies."""
+    return or_(
+        and_(Media.tmdb_id.in_(movie_tmdb_ids), Media.media_type == MediaType.movie),
+        LINKED_MOVIE_TMDB_ID.in_(movie_tmdb_ids),
+    )
+
+
+def movie_tmdb_key():
+    """The movie TMDB id a matched row stands for, whichever kind of row it is."""
+    return case(
+        (Media.media_type == MediaType.movie, Media.tmdb_id),
+        else_=LINKED_MOVIE_TMDB_ID,
+    )
+
+
+def _media_row_match(media_type: MediaType, tmdb_id: int):
+    """Match the Media rows for one title, following episode→movie conversions."""
+    if media_type == MediaType.movie:
+        return movie_media_match([tmdb_id])
+    return and_(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+
+
 async def enrich_with_state(
     db: AsyncSession,
     user_id: int,
@@ -310,9 +338,9 @@ async def enrich_with_state(
     watched_movies: set[int] = set()
     if movie_tmdb_ids:
         q = await db.execute(
-            select(Media.tmdb_id)
+            select(movie_tmdb_key())
             .join(WatchEvent, WatchEvent.media_id == Media.id)
-            .where(WatchEvent.user_id == user_id, WatchEvent.completed == True, Media.tmdb_id.in_(movie_tmdb_ids), Media.media_type == MediaType.movie)
+            .where(WatchEvent.user_id == user_id, WatchEvent.completed == True, movie_media_match(movie_tmdb_ids))
             .distinct()
         )
         watched_movies = {r[0] for r in q.all()}
@@ -562,9 +590,9 @@ async def enrich_with_state(
     collected_movie_ids: set[int] = set()
     if movie_tmdb_ids:
         coll_q = await db.execute(
-            select(Media.tmdb_id)
+            select(movie_tmdb_key())
             .join(Collection, Collection.media_id == Media.id)
-            .where(Collection.user_id == user_id, Media.tmdb_id.in_(movie_tmdb_ids), Media.media_type == MediaType.movie)
+            .where(Collection.user_id == user_id, movie_media_match(movie_tmdb_ids))
             .distinct()
         )
         collected_movie_ids = {r[0] for r in coll_q.all()}
@@ -604,15 +632,15 @@ async def enrich_with_state(
         tid0 = item0.get("tmdb_id")
         t0 = item0.get("type")
         if tid0 and t0 in ("movie", "episode"):
-            mt0 = MediaType.movie if t0 == "movie" else MediaType.episode
+            row_match = (
+                movie_media_match([tid0])
+                if t0 == "movie"
+                else and_(Media.tmdb_id == tid0, Media.media_type == MediaType.episode)
+            )
             pc_q = await db.execute(
                 select(func.count(WatchEvent.id))
                 .join(Media, Media.id == WatchEvent.media_id)
-                .where(
-                    WatchEvent.user_id == user_id,
-                    Media.tmdb_id == tid0,
-                    Media.media_type == mt0,
-                )
+                .where(WatchEvent.user_id == user_id, row_match)
             )
             play_count_map[tid0] = pc_q.scalar() or 0
 
@@ -2569,9 +2597,7 @@ async def resolve_media_by_uri(
         if parsed.provider == "tmdb":
             resolved_tmdb_id = int(parsed.id)
             media_q = await db.execute(
-                select(Media).where(
-                    Media.tmdb_id == resolved_tmdb_id, Media.media_type == media_type
-                )
+                select(Media).where(_media_row_match(media_type, resolved_tmdb_id))
             )
             return media_q.scalars().first(), resolved_tmdb_id
         return None, tmdb_id
@@ -2579,7 +2605,7 @@ async def resolve_media_by_uri(
     if tmdb_id is None:
         return None, None
     media_q = await db.execute(
-        select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+        select(Media).where(_media_row_match(media_type, tmdb_id))
     )
     return media_q.scalars().first(), tmdb_id
 
@@ -4631,9 +4657,7 @@ async def _resolve_playback_media_ids(
         tmdb_id = int(media_ref)
     except ValueError:
         return []
-    rows = await db.execute(
-        select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
-    )
+    rows = await db.execute(select(Media.id).where(_media_row_match(type, tmdb_id)))
     return [r[0] for r in rows.all()]
 
 
@@ -5756,7 +5780,7 @@ async def get_media_details(
         # 2. Check local info — aggregate across ALL Media rows for this tmdb_id so
         # that a manually-matched movie whose CollectionFile lives on a different row
         # (e.g. Emby stub vs Trakt row) is still surfaced correctly.
-        query = select(Media).where(Media.tmdb_id == tmdb_id, Media.media_type == type)
+        query = select(Media).where(_media_row_match(type, tmdb_id))
         result = await db.execute(query)
         all_media = result.scalars().all()
         media = all_media[0] if all_media else None
