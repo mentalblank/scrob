@@ -30,9 +30,11 @@ export function showUrl(
   if (preferTvdb && tvdb_id != null) return `/show/tvdb:s:${tvdb_id}`;
   const parsed = parseUri(uri_id);
   if (parsed?.prefix === "s") {
+    if (preferTvdb && tvdb_id != null) return `/show/tvdb:s:${tvdb_id}`;
     if (!preferTvdb && parsed.provider === "tvdb" && tmdb_id != null) return `/show/tmdb:s:${tmdb_id}`;
     return `/show/${parsed.provider}:s:${parsed.id}`;
   }
+  if (preferTvdb && tvdb_id != null) return `/show/tvdb:s:${tvdb_id}`;
   if (tmdb_id != null) return `/show/tmdb:s:${tmdb_id}`;
   if (tvdb_id != null) return `/show/tvdb:s:${tvdb_id}`;
   return "/shows";
@@ -44,11 +46,12 @@ export function personUrl(
   tvdb_id: any,
   preferTvdb = false,
 ): string {
-  const tmdbValid = tmdb_id != null && tmdb_id !== 'null';
-  const tvdbValid = tvdb_id != null && tvdb_id !== 'null';
+  const tmdbValid = tmdb_id != null && tmdb_id !== 'null' && tmdb_id !== '';
+  const tvdbValid = tvdb_id != null && tvdb_id !== 'null' && tvdb_id !== '';
 
   if (tvdbValid && (!tmdbValid || preferTvdb)) return `/person/tvdb:p:${tvdb_id}`;
   if (tmdbValid) return `/person/tmdb:p:${tmdb_id}`;
+  if (tvdbValid) return `/person/tvdb:p:${tvdb_id}`;
   return "/";
 }
 

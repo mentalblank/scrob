@@ -121,6 +121,9 @@ async def plex_exchange(body: PinRequest, db: AsyncSession = Depends(get_db)):
         if not await _registration_allowed(db):
             raise HTTPException(status_code=403, detail="No account found and registrations are disabled")
 
+        count_result = await db.execute(select(func.count()).select_from(User))
+        is_first_user = count_result.scalar_one() == 0
+
         username = (account["username"] or account["email"].split("@")[0])[:100]
         base, counter = username, 1
         while True:
@@ -135,6 +138,7 @@ async def plex_exchange(body: PinRequest, db: AsyncSession = Depends(get_db)):
             username=username,
             password_hash=None,
             api_key=_generate_api_key(),
+            is_admin=is_first_user,
             email_confirmed=True,
             plex_account_id=account["id"],
             plex_username=account["username"],

@@ -8,7 +8,7 @@ import CommentsSection from "../../../../../components/CommentsSection.astro";
 import VideoPlayer from "../../../../../components/VideoPlayer.astro";
 import ManualScrobble from "../../../../../components/ManualScrobble.astro";
 import ProgressStrip from "../../../../../components/ProgressStrip.astro";
-import { api, type EpisodeDetail } from "../../../../../lib/api";
+import { api, tmdbImageUrl, type EpisodeDetail } from "../../../../../lib/api";
 import { parseShowId } from "../../../../../lib/normalize";
 import { personUrl } from "../../../../../lib/urls";
 
@@ -25,8 +25,10 @@ let error = "";
 
 try {
   episode = await api.shows.getEpisode(fetchKey, Number(season_number), Number(episode_number), token);
-  if (episode && provider !== "tvdb" && primaryMetadataSource === "tvdb" && (episode as any).show?.tvdb_id) {
-    episode = await api.shows.getEpisode(`tvdb:s:${(episode as any).show.tvdb_id}`, Number(season_number), Number(episode_number), token);
+  // A `provider:type:id` url pins this page to that provider; only bare numeric
+  // ids are ambiguous enough to fall back to the global metadata preference.
+  if (episode && !id?.includes(":") && provider !== "tvdb" && primaryMetadataSource === "tvdb" && (episode as any).show?.tvdb_id) {
+    return Astro.redirect(`/show/tvdb:s:${(episode as any).show.tvdb_id}/season/${season_number}/${episode_number}`);
   }
 } catch (e: any) {
   error = e.message;
@@ -63,7 +65,7 @@ const activeButtonsCount = [
         <div class="absolute -top-20 md:-top-32 left-1/2 -translate-x-1/2 w-screen h-[600px] lg:h-[700px] xl:h-[780px] 2xl:h-[880px] overflow-hidden" style="mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%);" data-adult-backdrop={show.adult ? "true" : undefined}>
           <div class="absolute inset-0 bg-gradient-to-t from-[var(--color-hero-fade)] via-[var(--color-hero-fade)]/40 to-transparent z-10"></div>
           <img
-            src={show.backdrop_path}
+            src={tmdbImageUrl(show.backdrop_path, "w1280")}
             alt=""
             class="w-full h-full object-cover opacity-50 blur-[1px]"
             loading="eager"
@@ -175,7 +177,7 @@ const activeButtonsCount = [
                 {thumbnail ? (
                   <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge thumbnail for ${episode.title}`}>
                     <img
-                      src={thumbnail}
+                      src={tmdbImageUrl(thumbnail, "w780")}
                       alt={episode.title}
                       class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
                       loading="eager"
@@ -366,11 +368,11 @@ const activeButtonsCount = [
                 </h2>
                 <div class="grid grid-cols-3 min-[480px]:grid-cols-4 sm:grid-cols-5 xl:grid-cols-6 gap-3">
                   {episode.cast.map((person) => (
-                    <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
+                    <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id || person.id, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
                       <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
                         {person.profile_path ? (
                           <img
-                            src={person.profile_path}
+                            src={tmdbImageUrl(person.profile_path, "w185")}
                             alt={person.name}
                             class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
                             loading="lazy"
@@ -399,11 +401,11 @@ const activeButtonsCount = [
                 </h2>
                 <div class="grid grid-cols-3 min-[480px]:grid-cols-4 sm:grid-cols-5 xl:grid-cols-6 gap-3">
                   {episode.guest_stars.map((person) => (
-                    <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
+                    <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id || person.id, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
                       <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
                         {person.profile_path ? (
                           <img
-                            src={person.profile_path}
+                            src={tmdbImageUrl(person.profile_path, "w185")}
                             alt={person.name}
                             class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
                             loading="lazy"

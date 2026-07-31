@@ -1,11 +1,14 @@
 ---
 import Base from "../layouts/Base.astro";
-import { api } from "../lib/api";
+import { api, tmdbImageUrl } from "../lib/api";
 
 const { token } = Astro.locals;
 if (!token) {
   return Astro.redirect("/login");
 }
+
+// Which provider's id the remap/rename pickers should default to.
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value === "tvdb" ? "tvdb" : "tmdb";
 
 let seasonOverrides = [];
 let episodeOverrides = [];
@@ -14,22 +17,30 @@ let customTitles = [];
 let groupedCustomTitlesList = [];
 let matchedShows = [];
 let matchedMovies = [];
+let unmatchedSeasons = [];
+let movieConversions = [];
+let unmatchedTitles = [];
 let error = "";
 
 try {
-  const [dataSeason, dataEp, dataTitles, settings, dataMatchedShows, dataMatchedMovies] = await Promise.all([
+  const [dataSeason, dataEp, dataTitles, settings, dataMatchedShows, dataMatchedMovies, dataUnmatched, dataConversions] = await Promise.all([
     api.sync.getSeasonOverrides(token),
     api.sync.getEpisodeOverrides(token),
     api.sync.getCustomTitles(token),
     api.auth.getSettings(token),
     api.sync.getMatchedShows(token),
-    api.sync.getMatchedMovies(token)
+    api.sync.getMatchedMovies(token),
+    api.sync.getUnmatchedWarnings(token).catch(() => ({ seasons: [], titles: [] })),
+    api.sync.getEpisodeMovieConversions(token).catch(() => ({ conversions: [] })),
   ]);
   
   seasonOverrides = dataSeason;
   episodeOverrides = dataEp.overrides || [];
   matchedShows = dataMatchedShows || [];
   matchedMovies = dataMatchedMovies || [];
+  unmatchedSeasons = dataUnmatched?.seasons || [];
+  unmatchedTitles = dataUnmatched?.titles || [];
+  movieConversions = dataConversions?.conversions || [];
   
   // Group episode overrides by show URI
   const groupedEpisodeOverrides: Record<string, any> = {};
@@ -61,7 +72,10 @@ try {
   // Group custom titles by show ID
   const groupedCustomTitles: Record<string, any> = {};
   customTitles.forEach((item: any) => {
-    let groupId = item.show_uri_id ?? String(item.show_tmdb_id ?? 0);
+    // Group per provider as well as per show: TVDB and TMDB number seasons
+    // differently, so lumping both into one panel hides which catalogue a
+    // rename actually applies to.
+    let groupId = `${item.provider ?? 'tmdb'}:${item.show_uri_id ?? String(item.show_tmdb_id ?? 0)}`;
     let groupTitle = item.show_title || "Global / Unlinked";
     let groupPoster = item.show_poster_path || null;
 
@@ -75,6 +89,7 @@ try {
       groupedCustomTitles[groupId] = {
         show_key: groupId.replace(/[^a-zA-Z0-9_-]/g, '_'),
         show_title: groupTitle,
+        provider: item.type === 'movie' ? null : (item.provider ?? 'tmdb'),
         show_uri_id: item.show_uri_id ?? null,
         show_tmdb_id: item.show_tmdb_id || 0,
         show_poster_path: groupPoster,
@@ -99,7 +114,7 @@ try {
 ---
 
 <Base title="Metadata Overrides">
-  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+  <div id="app-data" data-token={token} data-primary-source={primaryMetadataSource} class="hidden" aria-hidden="true"></div>
 
   <div class="max-w-6xl mx-auto px-4 py-8">
     <!-- Header with Back Button -->
@@ -451,12 +466,74 @@ try {
           </div>
         </div>
     )}
+    <!-- Matched as Movies Section -->
+    <div class="mt-16">
+      <div class="flex items-center justify-between gap-4 mb-6">
+        <h2 class="section-headline mb-1 flex items-center gap-2">
+          Matched as Movies
+          <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{movieConversions.length}</span>
+        </h2>
+        <button
+          id="add-movie-match-btn"
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-indigo-600/10 cursor-pointer transition-all shrink-0"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
+          Add Movie Match
+        </button>
+      </div>
+
+      {movieConversions.length === 0 ? (
+        <div class="flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
+          <div class="w-16 h-16 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-4 shadow-inner">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 4 16 0M4 20l16 0M4 4v16M20 4v16M8 4v16M16 4v16"/></svg>
+          </div>
+          <h3 class="text-zinc-200 font-semibold mb-1">No Episodes Matched as Movies</h3>
+          <p class="text-zinc-500 text-xs max-w-sm text-center">When a catalogue files a film as an episode, use "Match as Movies" on an unmatched season to re-file it.</p>
+        </div>
+      ) : (
+        <div class="border border-zinc-800 rounded-3xl bg-zinc-900/20 overflow-hidden backdrop-blur-md divide-y divide-zinc-800/60">
+          {movieConversions.map((c: any) => (
+            <div class="flex items-center gap-4 p-4">
+              {c.movie_poster_path
+                ? <img src={c.movie_poster_path} class="w-9 h-13 rounded object-cover shrink-0 border border-zinc-800" loading="lazy" />
+                : <div class="w-9 h-13 rounded bg-zinc-950 border border-zinc-800 shrink-0"></div>}
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-[10px] bg-blue-900/30 text-blue-400 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Movie</span>
+                  <span class="text-sm font-bold text-zinc-100 truncate">{c.movie_title}</span>
+                  {c.movie_release_date && <span class="text-xs text-zinc-500">{c.movie_release_date.slice(0, 4)}</span>}
+                </div>
+                <p class="text-xs text-zinc-500 mt-1">
+                  was
+                  <span class="text-zinc-400 font-medium"> {c.original_show_title ?? "unknown show"}</span>
+                  {c.original_season_number != null && (
+                    <span class="text-zinc-400 font-medium"> S{String(c.original_season_number).padStart(2, "0")}E{String(c.original_episode_number ?? 0).padStart(2, "0")}</span>
+                  )}
+                  {c.original_title && <span class="text-zinc-600"> — “{c.original_title}”</span>}
+                </p>
+                <span class="text-[10px] text-zinc-600 font-mono">tmdb:m:{c.movie_tmdb_id}</span>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <a href={`/media/movie/tmdb:m:${c.movie_tmdb_id}`} class="text-xs px-3 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40">View</a>
+                <button
+                  type="button"
+                  class="revert-conversion-btn text-xs px-3 py-1.5 rounded-xl border border-rose-900/40 text-rose-400 hover:bg-rose-950/30 hover:border-rose-900/70 transition-colors cursor-pointer"
+                  data-conversion-id={c.id}
+                  title="Put this back as an episode"
+                >Revert</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+
     <!-- Unmatched Media Mappings Section -->
     <div class="mt-16">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <h2 class="section-headline mb-1 flex items-center gap-2">
           Unmatched Media Mappings
-          <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{matchedShows.length + matchedMovies.length}</span>
+          <span class="text-xs bg-zinc-800 text-zinc-400 font-bold px-2 py-0.5 rounded-full">{matchedShows.length + matchedMovies.length + unmatchedSeasons.length + unmatchedTitles.length}</span>
         </h2>
         <div class="flex items-center gap-3 w-full sm:w-auto">
           {(matchedShows.length > 0 || matchedMovies.length > 0) && (
@@ -469,6 +546,76 @@ try {
           )}
         </div>
       </div>
+
+      {(unmatchedSeasons.length > 0 || unmatchedTitles.length > 0) && (
+        <div class="mb-6 border border-amber-500/25 bg-amber-500/[0.03] rounded-3xl overflow-hidden backdrop-blur-md">
+          <div class="px-5 py-4 border-b border-amber-500/20">
+            <h3 class="text-sm font-bold text-amber-300">Still unmatched from the last sync</h3>
+            <p class="text-xs text-zinc-500 mt-1">Each row shows the catalogue the lookup failed against. Remap a season onto the right show, or match a title that has no provider id.</p>
+            <button type="button" id="restore-dismissed-btn" class="mt-2 text-[10px] font-bold text-zinc-500 hover:text-zinc-300 uppercase tracking-widest transition-colors cursor-pointer">Restore dismissed items</button>
+          </div>
+          <div class="divide-y divide-zinc-800/60">
+            {unmatchedSeasons.map((w: any) => (
+              <div class="flex items-center gap-3 px-5 py-3">
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm text-zinc-200 font-medium">{w.show}</span>
+                  <span class="ml-2 text-xs text-zinc-500">Season {w.season}</span>
+                  <span class={`ml-2 text-[10px] font-black px-1.5 py-0.5 rounded border ${w.provider === 'tvdb' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' : 'bg-sky-500/10 text-sky-400 border-sky-500/30'}`}>No {w.provider.toUpperCase()} match</span>
+                  <p class="text-xs text-zinc-500 mt-0.5">{w.affected_episodes} episode{w.affected_episodes === 1 ? '' : 's'} affected</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <a
+                    href={`/remaps?mode=season&src_uri=${encodeURIComponent(w.source_uri_id)}&src_season=${w.season}`}
+                    class="text-xs px-3 py-1.5 rounded-xl border bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25 transition-colors"
+                  >Remap</a>
+                  <button
+                    type="button"
+                    class="ep-to-movie-btn text-xs px-3 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40 cursor-pointer"
+                    data-show-uri={w.source_uri_id}
+                    data-season={w.season}
+                    data-show={w.show}
+                    title="These are films on TMDB, not episodes"
+                  >Match as Movies</button>
+                  <button
+                    type="button"
+                    class="dismiss-warning-btn p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+                    data-dismiss-key={w.dismiss_key}
+                    title="Dismiss — hide this from the unmatched list"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+            {unmatchedTitles.map((w: any) => (
+              <div class="flex items-center gap-3 px-5 py-3">
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm text-zinc-200 font-medium">{w.title}</span>
+                  <span class="ml-2 text-xs text-zinc-600">{w.media_type}</span>
+                  <span class="ml-2 text-[10px] font-black px-1.5 py-0.5 rounded border bg-sky-500/10 text-sky-400 border-sky-500/30">No {w.provider.toUpperCase()} match</span>
+                  <p class="text-xs text-zinc-500 mt-0.5">{w.reason}</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    class="unmatched-match-btn text-xs px-3 py-1.5 rounded-xl border bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25 cursor-pointer transition-colors"
+                    data-title={w.title}
+                    data-media-type={w.media_type}
+                  >Match</button>
+                  <button
+                    type="button"
+                    class="dismiss-warning-btn p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+                    data-dismiss-key={w.dismiss_key}
+                    title="Dismiss — hide this from the unmatched list"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {matchedShows.length === 0 && matchedMovies.length === 0 ? (
         <div class="flex flex-col items-center justify-center py-16 border border-zinc-800 bg-zinc-950/20 rounded-3xl backdrop-blur-md">
@@ -529,7 +676,7 @@ try {
           {/* Unmatched Movies */}
           {matchedMovies.map((m: any) => {
             const displayTitle = m.movie_title_matched || m.movie_title;
-            const targetHref = m.tmdb_id ? `/movie/${m.tmdb_id}` : '';
+            const targetHref = m.tmdb_id ? `/media/movie/tmdb:m:${m.tmdb_id}` : '';
             return (
               <div class="unmatched-map-row flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-zinc-900/20 border border-zinc-800 hover:border-zinc-700/80 rounded-2xl transition-all backdrop-blur-md" data-title={m.movie_title} data-matched-title={displayTitle} data-type="movie">
                 <div class="flex-1 min-w-0">
@@ -646,7 +793,7 @@ try {
                   {!!(showGroup.show_uri_id || showGroup.show_tmdb_id) && (
                     <div class="w-10 h-14 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 shadow-sm">
                       {showGroup.show_poster_path ? (
-                        <img src={showGroup.show_poster_path} alt="" class="w-full h-full object-cover" loading="lazy" />
+                        <img src={tmdbImageUrl(showGroup.show_poster_path, "w185")} alt="" class="w-full h-full object-cover" loading="lazy" />
                       ) : (
                         <div class="w-full h-full flex items-center justify-center text-[8px] text-zinc-600 font-bold bg-zinc-900">NO ART</div>
                       )}
@@ -658,7 +805,12 @@ try {
                       {showGroup.show_title}
                     </h3>
                     {!!(showGroup.show_uri_id || showGroup.show_tmdb_id) && (
-                      <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800 mt-1 inline-block">{showGroup.show_uri_id ?? ("TMDB ID: " + showGroup.show_tmdb_id)}</span>
+                      <>
+                        <span class="text-[10px] text-zinc-500 font-bold bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800 mt-1 inline-block">{showGroup.show_uri_id ?? ("TMDB ID: " + showGroup.show_tmdb_id)}</span>
+                        {showGroup.provider && (
+                          <span class={`ml-1.5 text-[10px] font-black px-2 py-0.5 rounded border mt-1 inline-block ${showGroup.provider === 'tvdb' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' : 'bg-sky-500/10 text-sky-400 border-sky-500/30'}`}>{showGroup.provider.toUpperCase()}</span>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -695,7 +847,14 @@ try {
                             {item.type === 'episode' && <span class="px-2 py-1 bg-orange-900/30 text-orange-400 rounded font-bold text-xs">Episode</span>}
                             {item.type === 'movie' && <span class="px-2 py-1 bg-blue-900/30 text-blue-400 rounded font-bold text-xs">Movie</span>}
                           </td>
-                          <td class="px-5 py-4 text-zinc-400">{item.context}</td>
+                          <td class="px-5 py-4 text-zinc-400">
+                            {item.context}
+                            {item.provider && (
+                              <span class={`ml-2 text-[9px] font-black px-1.5 py-0.5 rounded border align-middle ${item.provider === 'tvdb' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' : 'bg-sky-500/10 text-sky-400 border-sky-500/30'}`}>
+                                {item.provider.toUpperCase()}
+                              </span>
+                            )}
+                          </td>
                           <td class="px-5 py-4 text-zinc-500 line-through decoration-zinc-600">{item.original_title}</td>
                           <td class="px-5 py-4 text-zinc-200 font-bold">{item.custom_title}</td>
                           <td class="px-5 py-4 text-right">
@@ -729,6 +888,79 @@ try {
   </div>
 
   <!-- Wizard Modal -->
+  <!-- Episode -> movie modal -->
+  <div id="epmovie-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
+    <div class="relative w-full max-w-2xl bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+        <div class="min-w-0">
+          <h3 class="text-sm font-bold text-zinc-100">Match Episodes to Movies</h3>
+          <p id="epmovie-source" class="text-xs text-zinc-500 truncate"></p>
+        </div>
+        <button type="button" id="epmovie-close" class="p-2 text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="px-6 py-4 overflow-y-auto flex-1">
+        <p class="text-xs text-zinc-500 mb-4">Use this when a catalogue lists films as episodes. Converting keeps the item's collected status and watch history.</p>
+
+        <div id="epmovie-picker" class="hidden space-y-4 mb-5">
+          <div>
+            <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Show</label>
+            <div class="flex gap-2">
+              <input type="text" id="epmovie-show-search" placeholder="Search your shows by title or ID…" class="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:border-indigo-500 transition-all" />
+            </div>
+            <div id="epmovie-show-results" class="hidden mt-2 space-y-1 max-h-48 overflow-y-auto"></div>
+            <div id="epmovie-show-selected" class="hidden mt-2 flex items-center justify-between gap-3 p-2.5 bg-indigo-600/10 border border-indigo-500/30 rounded-xl">
+              <span id="epmovie-show-title" class="text-sm font-bold text-zinc-100 truncate"></span>
+              <button type="button" id="epmovie-show-change" class="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer shrink-0">Change</button>
+            </div>
+          </div>
+          <div id="epmovie-season-group" class="hidden">
+            <label class="block text-xs font-semibold text-zinc-400 mb-1.5">Season</label>
+            <div id="epmovie-season-buttons" class="flex flex-wrap gap-2"></div>
+          </div>
+        </div>
+
+        <div id="epmovie-list" class="space-y-2"></div>
+        <p id="epmovie-error" class="hidden text-xs text-red-400 mt-3"></p>
+      </div>
+      <div class="flex justify-end px-6 py-4 border-t border-zinc-800">
+        <button type="button" id="epmovie-done" class="px-5 py-2 text-zinc-400 hover:text-zinc-200 text-sm font-bold transition-colors cursor-pointer">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Match unmatched title modal -->
+  <div id="match-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
+    <div class="relative w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+        <div class="min-w-0">
+          <h3 class="text-sm font-bold text-zinc-100">Match Title</h3>
+          <p id="match-modal-source" class="text-xs text-zinc-500 truncate"></p>
+        </div>
+        <button type="button" id="match-modal-close" class="p-2 text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="px-6 py-5 space-y-4">
+        <div id="match-provider-tabs" class="flex gap-1 p-1 bg-zinc-950 rounded-xl">
+          <button type="button" data-match-tab="tvdb" class="flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer">TVDB</button>
+          <button type="button" data-match-tab="tmdb" class="flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer">TMDB</button>
+        </div>
+        <div class="flex gap-2">
+          <input type="text" id="match-search-input" placeholder="Show title…" class="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:border-indigo-500 transition-all" />
+          <button type="button" id="match-search-btn" class="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-sm font-medium rounded-xl transition-colors cursor-pointer shrink-0">Search</button>
+        </div>
+        <div id="match-results" class="space-y-1 max-h-64 overflow-y-auto"></div>
+        <p id="match-error" class="hidden text-xs text-red-400"></p>
+      </div>
+      <div class="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800">
+        <button type="button" id="match-cancel" class="px-5 py-2 text-zinc-400 hover:text-zinc-200 text-sm font-bold transition-colors cursor-pointer">Cancel</button>
+        <button type="button" id="match-save" disabled class="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors cursor-pointer">Match &amp; Apply</button>
+      </div>
+    </div>
+  </div>
+
   <div id="remap-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
     <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] backdrop-blur-xl">
       
@@ -776,6 +1008,13 @@ try {
               <div class="min-w-0">
                 <h4 id="source-selected-show-title" class="text-sm font-bold text-zinc-100 truncate"></h4>
                 <p id="source-selected-show-meta" class="text-[10px] text-zinc-500 font-bold mt-0.5"></p>
+                <div id="source-provider-toggle" class="hidden mt-2 flex items-center gap-1.5">
+                  <span class="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Use</span>
+                  <div class="flex rounded-lg border border-zinc-700 bg-zinc-950 p-0.5" role="group" aria-label="Source provider">
+                    <button type="button" data-source-provider="tmdb" class="rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer">TMDB</button>
+                    <button type="button" data-source-provider="tvdb" class="rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer">TVDB</button>
+                  </div>
+                </div>
               </div>
             </div>
             <button id="source-change-show-btn" class="p-2 text-zinc-500 hover:text-zinc-300 transition-colors">
@@ -840,7 +1079,7 @@ try {
                   <option value="tmdb">TMDB</option>
                   <option value="tvdb">TVDB</option>
                 </select>
-                <input type="number" id="target-show-tmdb-input" placeholder="e.g. 85937" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
+                <input type="text" id="target-show-tmdb-input" placeholder="e.g. 85937" class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-zinc-200 text-sm focus:border-blue-500 focus:outline-none transition" />
                 <button id="target-show-lookup-btn" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer">Lookup</button>
               </div>
             </div>
@@ -1029,6 +1268,13 @@ try {
                   <div class="min-w-0">
                     <div id="rename-selected-show-title" class="text-xs font-bold text-zinc-200 truncate"></div>
                     <div id="rename-selected-show-year" class="text-[10px] text-zinc-500 font-medium"></div>
+                    <div id="rename-provider-toggle" class="hidden mt-2 flex items-center gap-1.5">
+                      <span class="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Use</span>
+                      <div class="flex rounded-lg border border-zinc-700 bg-zinc-950 p-0.5" role="group" aria-label="Rename provider">
+                        <button type="button" data-rename-provider="tmdb" class="rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer">TMDB</button>
+                        <button type="button" data-rename-provider="tvdb" class="rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer">TVDB</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <button id="rename-change-show-btn" class="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-[10px] font-bold transition cursor-pointer shrink-0">Change</button>
@@ -1139,6 +1385,7 @@ try {
     const appData = document.getElementById("app-data");
     const token = appData?.dataset.token;
     if (!token) return;
+    const primarySource = appData?.dataset.primarySource === "tvdb" ? "tvdb" : "tmdb";
     // Modal Control Elements
     const remapModal = document.getElementById("remap-modal")!;
     const addRemapBtn = document.getElementById("add-remap-btn")!;
@@ -1237,6 +1484,31 @@ try {
       }
     }
 
+    // Match a picker query against a title or any provider id. Shows carry both a
+    // TMDB and a TVDB id (plus a uri_id like "tvdb:s:322191"), and pasting a TVDB
+    // id is the common case for remaps — matching only tmdb_id found nothing.
+    const matchesQuery = (item: any, q: string) => {
+      const haystack = [
+        item.title,
+        item.original_title,
+        item.tmdb_title,
+        item.uri_id,
+        item.tmdb_id,
+        item.tvdb_id,
+      ];
+      return haystack.some(v => v != null && String(v).toLowerCase().includes(q));
+    };
+
+    // Show every provider id we have — a title matched on both TMDB and TVDB was
+    // previously labelled with only the TMDB one, so a TVDB id looked "missing".
+    const idLabelFor = (item: any, long = false) => {
+      const parts: string[] = [];
+      if (item.tmdb_id) parts.push(`TMDB${long ? " ID" : ""}: ${item.tmdb_id}`);
+      const tvdb = item.tvdb_id ?? (item.uri_id?.startsWith("tvdb:") ? item.uri_id.split(":")[2] : null);
+      if (tvdb) parts.push(`TVDB${long ? " ID" : ""}: ${tvdb}`);
+      return parts.join(" • ") || (item.uri_id ?? "");
+    };
+
     // Season Remap Search
     const performSourceShowSearch = () => {
       const q = sourceShowSearch.value.trim().toLowerCase();
@@ -1244,10 +1516,7 @@ try {
         renderSourceShowResults(localShowsList);
         return;
       }
-      const filtered = localShowsList.filter(show => 
-        show.title.toLowerCase().includes(q) || 
-        show.tmdb_id?.toString().includes(q)
-      );
+      const filtered = localShowsList.filter(show => matchesQuery(show, q));
       renderSourceShowResults(filtered);
     };
 
@@ -1272,7 +1541,7 @@ try {
         }
 
         const year = show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A";
-        const idLabel = (show.uri_id?.startsWith('tvdb:') || (show.tvdb_id && !show.tmdb_id)) ? `TVDB: ${show.tvdb_id ?? show.uri_id?.split(':')[2]}` : `TMDB: ${show.tmdb_id}`;
+        const idLabel = idLabelFor(show);
         
         card.innerHTML = `
           ${posterHtml}
@@ -1288,13 +1557,49 @@ try {
       sourceShowResults.classList.remove("hidden");
     }
 
+    // Provider picker for a selected show. A title linked on both TMDB and TVDB
+    // can be remapped/renamed under either id; default to the user's Primary
+    // Metadata Source and let them switch when both are available.
+    function providerIdsFor(item: any) {
+      const tvdb = item.tvdb_id ?? (item.uri_id?.startsWith("tvdb:") ? item.uri_id.split(":")[2] : null);
+      const tmdb = item.tmdb_id ?? (item.uri_id?.startsWith("tmdb:") ? item.uri_id.split(":")[2] : null);
+      return { tmdb: tmdb ? String(tmdb) : null, tvdb: tvdb ? String(tvdb) : null };
+    }
+
+    function uriFor(item: any, provider: string, prefix = "s") {
+      const { tmdb, tvdb } = providerIdsFor(item);
+      if (provider === "tvdb" && tvdb) return `tvdb:${prefix}:${tvdb}`;
+      if (tmdb) return `tmdb:${prefix}:${tmdb}`;
+      if (tvdb) return `tvdb:${prefix}:${tvdb}`;
+      return item.uri_id ?? "";
+    }
+
+    const PROVIDER_ON = "rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer bg-blue-600 text-white";
+    const PROVIDER_OFF = "rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer text-zinc-400 hover:text-zinc-100";
+
+    function renderProviderToggle(container: HTMLElement | null, item: any, selected: string, attr: string) {
+      if (!container) return selected;
+      const { tmdb, tvdb } = providerIdsFor(item);
+      // Nothing to choose between unless the title carries both ids.
+      if (!tmdb || !tvdb) {
+        container.classList.add("hidden");
+        return tvdb && !tmdb ? "tvdb" : "tmdb";
+      }
+      container.classList.remove("hidden");
+      container.querySelectorAll<HTMLButtonElement>(`[data-${attr}]`).forEach(btn => {
+        const isActive = btn.dataset[attr === "source-provider" ? "sourceProvider" : "renameProvider"] === selected;
+        btn.className = isActive ? PROVIDER_ON : PROVIDER_OFF;
+      });
+      return selected;
+    }
+
     function selectSourceShow(show: any) {
       remapSelectedSourceShow = show;
       remapSelectedSourceSeason = null;
 
       sourceSelectedShowTitle.textContent = show.title;
       const year = show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A";
-      const idLabel = (show.uri_id?.startsWith('tvdb:') || (show.tvdb_id && !show.tmdb_id)) ? `TVDB ID: ${show.tvdb_id ?? show.uri_id?.split(':')[2]}` : `TMDB ID: ${show.tmdb_id}`;
+      const idLabel = idLabelFor(show, true);
       sourceSelectedShowMeta.textContent = `${year} • ${idLabel}`;
       if (show.poster_path) {
         sourceSelectedShowPoster.src = show.poster_path;
@@ -1310,12 +1615,34 @@ try {
       sourceManualGroup.classList.add("hidden");
       
       sourceSeasonSelectGroup.classList.remove("hidden");
-      renderSourceSeasonButtons(show.seasons_meta || []);
-      
-      sourceShowTmdbInput.value = show.uri_id ?? (show.tvdb_id ? `tvdb:s:${show.tvdb_id}` : `tmdb:s:${show.tmdb_id}`);
+
+      sourceProvider = renderProviderToggle(
+        document.getElementById("source-provider-toggle"), show, primarySource, "source-provider",
+      );
+      sourceShowTmdbInput.value = uriFor(show, sourceProvider);
+      seasonsFor(show, sourceProvider).then(renderSourceSeasonButtons);
 
       validateForm();
     }
+
+    let sourceProvider: string = primarySource;
+    document.getElementById("source-provider-toggle")?.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest("[data-source-provider]") as HTMLElement | null;
+      if (!btn || !remapSelectedSourceShow) return;
+      sourceProvider = btn.dataset.sourceProvider!;
+      renderProviderToggle(
+        document.getElementById("source-provider-toggle"),
+        remapSelectedSourceShow, sourceProvider, "source-provider",
+      );
+      sourceShowTmdbInput.value = uriFor(remapSelectedSourceShow, sourceProvider);
+      sourceSelectedShowMeta.textContent = sourceSelectedShowMeta.textContent!.split(" • ")[0]
+        + " • " + idLabelFor(remapSelectedSourceShow, true);
+      // Season numbering differs per provider — reset and reload the list.
+      remapSelectedSourceSeason = null;
+      sourceSeasonInput.value = "";
+      seasonsFor(remapSelectedSourceShow, sourceProvider).then(renderSourceSeasonButtons);
+      validateForm();
+    });
 
     sourceChangeShowBtn.addEventListener("click", () => {
       remapSelectedSourceShow = null;
@@ -1652,13 +1979,13 @@ try {
           renameSeasonSection.classList.remove("hidden");
           renameEpisodeSection.classList.add("hidden");
           if (renameSelectedShow) {
-            renderRenameSeasonButtons(renameSelectedShow.seasons_meta || []);
+            seasonsFor(renameSelectedShow, renameProvider).then(renderRenameSeasonButtons);
           }
         } else if (type === "episode") {
           renameSeasonSection.classList.remove("hidden");
           renameEpisodeSection.classList.remove("hidden");
           if (renameSelectedShow) {
-            renderRenameSeasonButtons(renameSelectedShow.seasons_meta || []);
+            seasonsFor(renameSelectedShow, renameProvider).then(renderRenameSeasonButtons);
           }
         }
       }
@@ -1682,16 +2009,8 @@ try {
         renderRenameShowResults([...localShowsList, ...localMoviesList]);
         return;
       }
-      const filteredShows = localShowsList.filter(show => 
-        show.title.toLowerCase().includes(q) || 
-        (show.original_title && show.original_title.toLowerCase().includes(q)) || 
-        show.tmdb_id?.toString().includes(q)
-      );
-      const filteredMovies = localMoviesList.filter(movie => 
-        movie.title.toLowerCase().includes(q) || 
-        (movie.tmdb_title && movie.tmdb_title.toLowerCase().includes(q)) || 
-        movie.tmdb_id?.toString().includes(q)
-      );
+      const filteredShows = localShowsList.filter(show => matchesQuery(show, q));
+      const filteredMovies = localMoviesList.filter(movie => matchesQuery(movie, q));
       renderRenameShowResults([...filteredShows, ...filteredMovies]);
     };
 
@@ -1724,7 +2043,7 @@ try {
         const year = (media.first_air_date || media.release_date) ? new Date(media.first_air_date || media.release_date).getFullYear() : "N/A";
         const typeLabel = isMovie ? "MOVIE" : "SHOW";
 
-        const idLabel = (media.uri_id?.startsWith('tvdb:') || (media.tvdb_id && !media.tmdb_id)) ? `TVDB: ${media.tvdb_id ?? media.uri_id?.split(':')[2]}` : `TMDB: ${media.tmdb_id}`;
+        const idLabel = idLabelFor(media);
         card.innerHTML = `
           ${posterHtml}
           <div class="min-w-0">
@@ -1740,6 +2059,54 @@ try {
       renameShowResults.classList.remove("hidden");
     }
 
+    // Season lists are provider-specific: TVDB and TMDB disagree about how a show
+    // is split (TVDB has The Terror S3 "Devil in Silver"; TMDB files it as its own
+    // show). The cached seasons_meta is TMDB-shaped, so fetch TVDB's own list when
+    // the user picks TVDB, rather than showing TMDB seasons under a TVDB id.
+    const seasonsCache = new Map<string, any[]>();
+
+    async function seasonsFor(item: any, provider: string): Promise<any[]> {
+      const { tmdb, tvdb } = providerIdsFor(item);
+      if (provider !== "tvdb" || !tvdb) return item.seasons_meta || [];
+
+      const key = `tvdb:${tvdb}`;
+      if (seasonsCache.has(key)) return seasonsCache.get(key)!;
+      try {
+        const res = await fetch(`/api/proxy/shows/tvdb/${tvdb}`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("lookup failed");
+        const data = await res.json();
+        const seasons = (data.seasons_meta || []).map((s: any) => ({
+          season_number: s.season_number,
+          name: s.name,
+        }));
+        seasonsCache.set(key, seasons);
+        return seasons;
+      } catch {
+        // Fall back to whatever we already had rather than showing nothing.
+        return item.seasons_meta || [];
+      }
+    }
+
+    let renameProvider: string = primarySource;
+    document.getElementById("rename-provider-toggle")?.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest("[data-rename-provider]") as HTMLElement | null;
+      if (!btn || !renameSelectedShow) return;
+      renameProvider = btn.dataset.renameProvider!;
+      renderProviderToggle(
+        document.getElementById("rename-provider-toggle"),
+        renameSelectedShow, renameProvider, "rename-provider",
+      );
+      // Season numbering differs per provider — reset and reload the list.
+      renameSelectedSeason = null;
+      renameSelectedEpisode = null;
+      if (renameType === "season" || renameType === "episode") {
+        seasonsFor(renameSelectedShow, renameProvider).then(renderRenameSeasonButtons);
+      }
+      validateRenameForm();
+    });
+
     function selectRenameShow(media: any) {
       renameSelectedShow = media;
       renameSelectedSeason = null;
@@ -1749,7 +2116,7 @@ try {
 
       renameSelectedShowTitle.textContent = media.title;
       const year = (media.first_air_date || media.release_date) ? new Date(media.first_air_date || media.release_date).getFullYear() : "N/A";
-      const idLabel = (media.uri_id?.startsWith('tvdb:') || (media.tvdb_id && !media.tmdb_id)) ? `TVDB ID: ${media.tvdb_id ?? media.uri_id?.split(':')[2]}` : `TMDB ID: ${media.tmdb_id}`;
+      const idLabel = idLabelFor(media, true);
       renameSelectedShowYear.textContent = `${year} • ${idLabel}`;
       if (media.poster_path) {
         renameSelectedShowPoster.src = media.poster_path;
@@ -1757,6 +2124,14 @@ try {
       } else {
         renameSelectedShowPoster.classList.add("hidden");
       }
+
+      // Movies have no TVDB counterpart here, so only shows get the choice.
+      renameProvider = isMovie
+        ? "tmdb"
+        : renderProviderToggle(
+            document.getElementById("rename-provider-toggle"), media, primarySource, "rename-provider",
+          );
+      if (isMovie) document.getElementById("rename-provider-toggle")?.classList.add("hidden");
 
       renameShowSearch.classList.add("hidden");
       renameShowSearchBtn.classList.add("hidden");
@@ -1821,7 +2196,7 @@ try {
           renameSelectedSeason = season.season_number;
           
           if (renameType === "episode") {
-            fetchRenameEpisodes(renameSelectedShow.uri_id ?? `tmdb:s:${renameSelectedShow.tmdb_id}`, season.season_number);
+            fetchRenameEpisodes(uriFor(renameSelectedShow, renameProvider), season.season_number);
           }
           validateRenameForm();
         });
@@ -2078,13 +2453,13 @@ try {
         }
       } else {
         if (renameType === "show") {
-          body.show_uri_id = renameSelectedShow.uri_id ?? (renameSelectedShow.tvdb_id ? `tvdb:s:${renameSelectedShow.tvdb_id}` : `tmdb:s:${renameSelectedShow.tmdb_id}`);
+          body.show_uri_id = uriFor(renameSelectedShow, renameProvider);
           body.custom_title = customTitle;
         } else if (renameType === "movie") {
           body.media_id = renameSelectedShow.id;
           body.custom_title = customTitle;
         } else if (renameType === "season") {
-          body.show_uri_id = renameSelectedShow.uri_id ?? (renameSelectedShow.tvdb_id ? `tvdb:s:${renameSelectedShow.tvdb_id}` : `tmdb:s:${renameSelectedShow.tmdb_id}`);
+          body.show_uri_id = uriFor(renameSelectedShow, renameProvider);
           body.season_number = renameSelectedSeason;
           body.season_custom_name = customTitle;
         } else if (renameType === "episode") {
@@ -3160,6 +3535,428 @@ try {
       });
     });
 
+    // ── Revert an episode -> movie conversion ─────────────────────────────────
+    document.querySelectorAll<HTMLElement>(".revert-conversion-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.conversionId;
+        if (!id) return;
+        if (!confirm("Put this back as an episode? Its collected status and watch history stay with it.")) return;
+        (btn as HTMLButtonElement).disabled = true;
+        try {
+          const res = await fetch(`/api/proxy/sync/episode-movie-conversions/${id}`, {
+            method: "DELETE",
+            headers: { "Authorization": `Bearer ${token}` },
+          });
+          if (!res.ok) throw new Error();
+          window.showToast?.("Reverted to episode", "success");
+          setTimeout(() => window.location.reload(), 600);
+        } catch {
+          window.showToast?.("Failed to revert", "error");
+          (btn as HTMLButtonElement).disabled = false;
+        }
+      });
+    });
+
+    // ── Dismiss a warning ─────────────────────────────────────────────────────
+    // Some rows can't be fixed (a film on one catalogue, missing upstream data).
+    // Dismissing hides them without pretending they were resolved.
+    document.querySelectorAll<HTMLElement>(".dismiss-warning-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const key = btn.dataset.dismissKey;
+        if (!key) return;
+        const row = btn.closest("div.flex.items-center") as HTMLElement | null;
+        (btn as HTMLButtonElement).disabled = true;
+        try {
+          const res = await fetch("/api/proxy/sync/warnings/dismiss", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ key }),
+          });
+          if (!res.ok) throw new Error("Failed to dismiss");
+          const wrapper = btn.closest(".flex.items-center.gap-3") as HTMLElement | null;
+          const target = wrapper ?? row;
+          if (target) {
+            target.style.transition = "all 0.25s ease";
+            target.style.opacity = "0";
+            setTimeout(() => target.remove(), 250);
+          }
+          window.showToast?.("Dismissed", "success");
+        } catch {
+          window.showToast?.("Failed to dismiss", "error");
+          (btn as HTMLButtonElement).disabled = false;
+        }
+      });
+    });
+
+    document.getElementById("restore-dismissed-btn")?.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/proxy/sync/warnings/dismiss", {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error();
+        window.showToast?.("Restored dismissed items", "success");
+        setTimeout(() => window.location.reload(), 500);
+      } catch {
+        window.showToast?.("Failed to restore", "error");
+      }
+    });
+
+    // ── Episode -> movie ──────────────────────────────────────────────────────
+    // Some catalogues file films as episodes of a series (TVDB lists the Sally
+    // Lockhart films that way; TMDB has them as standalone movies). A season
+    // remap can't express that, so convert the row's type instead.
+    const epMovieModal = document.getElementById("epmovie-modal")!;
+    const epMovieList = document.getElementById("epmovie-list")!;
+    const epMovieErr = document.getElementById("epmovie-error")!;
+
+    function closeEpMovieModal() {
+      epMovieModal.classList.add("opacity-0", "pointer-events-none");
+    }
+    document.getElementById("epmovie-close")?.addEventListener("click", closeEpMovieModal);
+    document.getElementById("epmovie-done")?.addEventListener("click", () => {
+      closeEpMovieModal();
+      window.location.reload();
+    });
+
+    async function convertEpisode(mediaId: number, tmdbId: number, row: HTMLElement) {
+      epMovieErr.classList.add("hidden");
+      try {
+        const res = await fetch("/api/proxy/sync/match-episode-to-movie", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ media_id: mediaId, uri_id: `tmdb:m:${tmdbId}` }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || "Conversion failed");
+        row.innerHTML = `<div class="flex items-center gap-2 px-3 py-2 text-xs text-green-400">
+          <span class="font-bold">✓</span> Converted to movie — ${data.title ?? ""}</div>`;
+        window.showToast?.("Converted to movie", "success");
+      } catch (e: any) {
+        epMovieErr.textContent = e.message ?? "Conversion failed";
+        epMovieErr.classList.remove("hidden");
+      }
+    }
+
+    async function searchMoviesFor(row: HTMLElement, mediaId: number, query: string) {
+      const resultsEl = row.querySelector<HTMLElement>("[data-ep-results]")!;
+      resultsEl.innerHTML = '<p class="text-xs text-zinc-500 py-1">Searching…</p>';
+      try {
+        const res = await fetch(`/api/proxy/media/search?q=${encodeURIComponent(query)}&type=movie&page=1`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("Search failed");
+        const rows = ((await res.json()).results ?? []).slice(0, 5);
+        if (!rows.length) {
+          resultsEl.innerHTML = '<p class="text-xs text-zinc-500 py-1">No movies found.</p>';
+          return;
+        }
+        resultsEl.innerHTML = "";
+        rows.forEach((r: any) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800 cursor-pointer text-left";
+          b.innerHTML = `<span class="text-xs text-zinc-200 truncate flex-1">${r.title ?? ""}</span>
+            <span class="text-[10px] text-zinc-500 shrink-0">${(r.release_date ?? "").slice(0, 4)} • TMDB ${r.tmdb_id}</span>`;
+          b.addEventListener("click", () => convertEpisode(mediaId, r.tmdb_id, row));
+          resultsEl.appendChild(b);
+        });
+      } catch (e: any) {
+        resultsEl.innerHTML = `<p class="text-xs text-red-400 py-1">${e.message ?? "Search failed"}</p>`;
+      }
+    }
+
+    async function loadEpisodesForConversion(showUri: string, season: string | number, includeMatched: boolean) {
+      epMovieList.innerHTML = '<p class="text-xs text-zinc-500">Loading…</p>';
+      try {
+        const res = await fetch(
+          `/api/proxy/sync/unmatched-episodes?show_uri_id=${encodeURIComponent(showUri)}`
+          + `&season_number=${season}&include_matched=${includeMatched}`,
+          { headers: { "Authorization": `Bearer ${token}` } },
+        );
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to load episodes");
+        const eps = (await res.json()).episodes ?? [];
+        if (!eps.length) {
+          epMovieList.innerHTML = `<p class="text-xs text-zinc-500">No ${includeMatched ? "" : "unmatched "}episodes in this season.</p>`;
+          return;
+        }
+        epMovieList.innerHTML = "";
+        eps.forEach((ep: any) => {
+          const row = document.createElement("div");
+          row.className = "border border-zinc-800 rounded-xl p-3 bg-zinc-950/40";
+          row.innerHTML = `
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-[10px] font-black text-zinc-500 shrink-0">E${ep.episode_number}</span>
+              <span class="text-sm text-zinc-200 truncate flex-1">${ep.title ?? ""}</span>
+              ${ep.matched ? '<span class="text-[9px] font-bold text-green-500 shrink-0">matched</span>' : ''}
+            </div>
+            <div class="flex gap-2">
+              <input type="text" data-ep-query class="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500" />
+              <button type="button" data-ep-search class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-medium rounded-lg cursor-pointer shrink-0">Search</button>
+            </div>
+            <div data-ep-results class="mt-1.5 space-y-0.5"></div>`;
+          const input = row.querySelector<HTMLInputElement>("[data-ep-query]")!;
+          input.value = ep.title ?? "";
+          const go = () => searchMoviesFor(row, ep.media_id, input.value.trim());
+          row.querySelector("[data-ep-search]")!.addEventListener("click", go);
+          input.addEventListener("keydown", e => {
+            if ((e as KeyboardEvent).key === "Enter") { e.preventDefault(); go(); }
+          });
+          epMovieList.appendChild(row);
+        });
+      } catch (e: any) {
+        epMovieList.innerHTML = "";
+        epMovieErr.textContent = e.message ?? "Failed to load episodes";
+        epMovieErr.classList.remove("hidden");
+      }
+    }
+
+    document.querySelectorAll<HTMLElement>(".ep-to-movie-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        (document.getElementById("epmovie-picker") as HTMLElement).classList.add("hidden");
+        (document.getElementById("epmovie-source") as HTMLElement).textContent =
+          `${btn.dataset.show ?? ""} — Season ${btn.dataset.season}`;
+        epMovieErr.classList.add("hidden");
+        epMovieModal.classList.remove("opacity-0", "pointer-events-none");
+        await loadEpisodesForConversion(btn.dataset.showUri!, btn.dataset.season!, false);
+      });
+    });
+
+    // ── Add a movie match from scratch ────────────────────────────────────────
+    // The per-season button only appears on unmatched rows, so once everything is
+    // matched there was no way in. This entry point works from any show/season.
+    const epMoviePicker = document.getElementById("epmovie-picker")!;
+    const epMovieShowSearch = document.getElementById("epmovie-show-search") as HTMLInputElement;
+    const epMovieShowResults = document.getElementById("epmovie-show-results")!;
+    const epMovieShowSelected = document.getElementById("epmovie-show-selected")!;
+    const epMovieSeasonGroup = document.getElementById("epmovie-season-group")!;
+    const epMovieSeasonButtons = document.getElementById("epmovie-season-buttons")!;
+    let epMovieShow: any = null;
+
+    function resetEpMoviePicker() {
+      epMovieShow = null;
+      epMovieShowSearch.value = "";
+      epMovieShowResults.innerHTML = "";
+      epMovieShowResults.classList.add("hidden");
+      epMovieShowSelected.classList.add("hidden");
+      epMovieShowSearch.parentElement!.classList.remove("hidden");
+      epMovieSeasonGroup.classList.add("hidden");
+      epMovieSeasonButtons.innerHTML = "";
+      epMovieList.innerHTML = "";
+      epMovieErr.classList.add("hidden");
+    }
+
+    function renderEpMovieShowResults(rows: any[]) {
+      epMovieShowResults.innerHTML = "";
+      if (!rows.length) {
+        epMovieShowResults.innerHTML = '<p class="text-xs text-zinc-500 py-1">No matching shows.</p>';
+        epMovieShowResults.classList.remove("hidden");
+        return;
+      }
+      rows.slice(0, 8).forEach(show => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800 cursor-pointer text-left";
+        b.innerHTML = `<span class="text-xs text-zinc-200 truncate flex-1">${show.title}</span>
+          <span class="text-[10px] text-zinc-500 shrink-0">${idLabelFor(show)}</span>`;
+        b.addEventListener("click", () => selectEpMovieShow(show));
+        epMovieShowResults.appendChild(b);
+      });
+      epMovieShowResults.classList.remove("hidden");
+    }
+
+    async function selectEpMovieShow(show: any) {
+      epMovieShow = show;
+      (document.getElementById("epmovie-show-title") as HTMLElement).textContent = show.title;
+      epMovieShowSearch.parentElement!.classList.add("hidden");
+      epMovieShowResults.classList.add("hidden");
+      epMovieShowSelected.classList.remove("hidden");
+      epMovieSeasonGroup.classList.remove("hidden");
+      epMovieSeasonButtons.innerHTML = "";
+      const seasons = await seasonsFor(show, show.tvdb_id && !show.tmdb_id ? "tvdb" : primarySource);
+      if (!seasons.length) {
+        epMovieSeasonButtons.innerHTML = '<span class="text-xs text-zinc-500">No seasons found.</span>';
+        return;
+      }
+      seasons.forEach((sea: any) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "px-3 py-1.5 border border-zinc-800 bg-zinc-900/40 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition";
+        b.textContent = sea.season_number === 0 ? "Specials" : `Season ${sea.season_number}`;
+        b.addEventListener("click", async () => {
+          epMovieSeasonButtons.querySelectorAll("button").forEach(x => {
+            x.className = "px-3 py-1.5 border border-zinc-800 bg-zinc-900/40 text-zinc-300 font-bold text-xs rounded-xl cursor-pointer transition";
+          });
+          b.className = "px-3 py-1.5 border border-indigo-500/40 bg-indigo-600/10 text-indigo-300 font-bold text-xs rounded-xl cursor-pointer transition shadow-md";
+          const uri = show.uri_id ?? (show.tmdb_id ? `tmdb:s:${show.tmdb_id}` : `tvdb:s:${show.tvdb_id}`);
+          await loadEpisodesForConversion(uri, sea.season_number, true);
+        });
+        epMovieSeasonButtons.appendChild(b);
+      });
+    }
+
+    document.getElementById("epmovie-show-change")?.addEventListener("click", resetEpMoviePicker);
+    epMovieShowSearch?.addEventListener("input", () => {
+      const q = epMovieShowSearch.value.trim().toLowerCase();
+      if (!q) { epMovieShowResults.classList.add("hidden"); return; }
+      renderEpMovieShowResults(localShowsList.filter(sh => matchesQuery(sh, q)));
+    });
+
+    document.getElementById("add-movie-match-btn")?.addEventListener("click", async () => {
+      await fetchLocalShows();
+      resetEpMoviePicker();
+      (document.getElementById("epmovie-source") as HTMLElement).textContent = "Pick the episode that is really a film";
+      epMoviePicker.classList.remove("hidden");
+      epMovieModal.classList.remove("opacity-0", "pointer-events-none");
+      epMovieShowSearch.focus();
+    });
+
+    // ── Match an unmatched title, in place ────────────────────────────────────
+    // Previously this linked to /settings, which meant leaving the page (and
+    // getting bounced to /login if the session check blipped mid-navigation).
+    const matchModal = document.getElementById("match-modal")!;
+    let matchTitle = "";
+    let matchMediaType = "series";
+    let matchProvider: "tvdb" | "tmdb" = "tvdb";
+    let matchPickedUri = "";
+
+    const matchResultsEl = document.getElementById("match-results")!;
+    const matchInput = document.getElementById("match-search-input") as HTMLInputElement;
+    const matchSaveBtn = document.getElementById("match-save") as HTMLButtonElement;
+    const matchErrEl = document.getElementById("match-error")!;
+
+    const MATCH_TAB_ON = "flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer bg-zinc-800 text-zinc-100";
+    const MATCH_TAB_OFF = "flex-1 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors cursor-pointer text-zinc-400 hover:text-zinc-200";
+
+    function setMatchProvider(p: "tvdb" | "tmdb") {
+      matchProvider = p;
+      matchPickedUri = "";
+      matchSaveBtn.disabled = true;
+      matchResultsEl.innerHTML = "";
+      document.querySelectorAll<HTMLElement>("[data-match-tab]").forEach(b => {
+        b.className = b.dataset.matchTab === p ? MATCH_TAB_ON : MATCH_TAB_OFF;
+      });
+      // Movies only exist on TMDB here.
+      const tvdbTab = document.querySelector<HTMLElement>('[data-match-tab="tvdb"]');
+      if (tvdbTab) tvdbTab.style.display = matchMediaType === "movie" ? "none" : "";
+      if (matchInput.value.trim()) runMatchSearch();
+    }
+
+    function closeMatchModal() {
+      matchModal.classList.add("opacity-0", "pointer-events-none");
+    }
+
+    async function runMatchSearch() {
+      const q = matchInput.value.trim();
+      if (!q) return;
+      matchErrEl.classList.add("hidden");
+      matchResultsEl.innerHTML = '<p class="text-xs text-zinc-500 py-2">Searching…</p>';
+      try {
+        let rows: any[] = [];
+        if (matchProvider === "tvdb") {
+          const res = await fetch("/api/proxy/sync/tvdb-search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ query: q }),
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "TVDB search failed");
+          rows = ((await res.json()).results ?? []).map((r: any) => ({
+            uri: `tvdb:s:${r.tvdb_id}`, title: r.name, year: r.year, poster: r.image, idLabel: `TVDB: ${r.tvdb_id}`,
+          }));
+        } else {
+          const type = matchMediaType === "movie" ? "movie" : "series";
+          const res = await fetch(`/api/proxy/media/search?q=${encodeURIComponent(q)}&type=${type}&page=1`, {
+            headers: { "Authorization": `Bearer ${token}` },
+          });
+          if (!res.ok) throw new Error("TMDB search failed");
+          rows = ((await res.json()).results ?? []).map((r: any) => ({
+            uri: `tmdb:${type === "movie" ? "m" : "s"}:${r.tmdb_id}`,
+            title: r.title, year: (r.release_date ?? "").slice(0, 4), poster: r.poster_path,
+            idLabel: `TMDB: ${r.tmdb_id}`,
+          }));
+        }
+        if (!rows.length) {
+          matchResultsEl.innerHTML = '<p class="text-xs text-zinc-500 py-2">No results.</p>';
+          return;
+        }
+        matchResultsEl.innerHTML = "";
+        rows.slice(0, 10).forEach(r => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 transition-colors cursor-pointer text-left";
+          btn.innerHTML = `
+            ${r.poster ? `<img src="${r.poster}" class="w-8 h-11 object-cover rounded bg-zinc-800 shrink-0" onerror="this.style.display='none'" />`
+                       : `<div class="w-8 h-11 rounded bg-zinc-800 shrink-0"></div>`}
+            <div class="min-w-0 flex-1">
+              <p class="text-sm text-zinc-100 truncate">${r.title ?? ""}</p>
+              <p class="text-xs text-zinc-500">${r.year ?? ""} • ${r.idLabel}</p>
+            </div>`;
+          btn.addEventListener("click", () => {
+            matchPickedUri = r.uri;
+            matchSaveBtn.disabled = false;
+            matchResultsEl.querySelectorAll("button").forEach(b => b.classList.remove("bg-indigo-600/20", "ring-1", "ring-indigo-500/40"));
+            btn.classList.add("bg-indigo-600/20", "ring-1", "ring-indigo-500/40");
+          });
+          matchResultsEl.appendChild(btn);
+        });
+      } catch (e: any) {
+        matchResultsEl.innerHTML = "";
+        matchErrEl.textContent = e.message ?? "Search failed";
+        matchErrEl.classList.remove("hidden");
+      }
+    }
+
+    document.querySelectorAll<HTMLElement>("[data-match-tab]").forEach(btn => {
+      btn.addEventListener("click", () => setMatchProvider(btn.dataset.matchTab as "tvdb" | "tmdb"));
+    });
+    document.getElementById("match-search-btn")?.addEventListener("click", runMatchSearch);
+    matchInput.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); runMatchSearch(); } });
+    document.getElementById("match-modal-close")?.addEventListener("click", closeMatchModal);
+    document.getElementById("match-cancel")?.addEventListener("click", closeMatchModal);
+
+    matchSaveBtn.addEventListener("click", async () => {
+      if (!matchPickedUri) return;
+      matchSaveBtn.disabled = true;
+      matchSaveBtn.textContent = "Matching…";
+      matchErrEl.classList.add("hidden");
+      try {
+        const isMovie = matchMediaType === "movie";
+        const endpoint = isMovie ? "/api/proxy/sync/match-unmatched-movie" : "/api/proxy/sync/match-unmatched-show";
+        const body = isMovie
+          ? { movie_title: matchTitle, uri_id: matchPickedUri }
+          : { show_title: matchTitle, uri_id: matchPickedUri };
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Match failed");
+        window.showToast?.("Matched successfully", "success");
+        setTimeout(() => window.location.reload(), 600);
+      } catch (e: any) {
+        matchErrEl.textContent = e.message ?? "Match failed";
+        matchErrEl.classList.remove("hidden");
+        matchSaveBtn.disabled = false;
+        matchSaveBtn.textContent = "Match & Apply";
+      }
+    });
+
+    document.querySelectorAll<HTMLElement>(".unmatched-match-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        matchTitle = btn.dataset.title ?? "";
+        matchMediaType = btn.dataset.mediaType ?? "series";
+        matchPickedUri = "";
+        matchSaveBtn.disabled = false;
+        matchSaveBtn.disabled = true;
+        matchSaveBtn.textContent = "Match & Apply";
+        matchErrEl.classList.add("hidden");
+        (document.getElementById("match-modal-source") as HTMLElement).textContent = `"${matchTitle}"`;
+        matchInput.value = matchTitle;
+        matchModal.classList.remove("opacity-0", "pointer-events-none");
+        setMatchProvider(matchMediaType === "movie" ? "tmdb" : "tvdb");
+      });
+    });
+
     // Auto-fill and Open Modals based on URL Query Parameters
     const params = new URLSearchParams(window.location.search);
     const mode = params.get('mode');
@@ -3171,6 +3968,18 @@ try {
       if (uri) {
         resetModalState();
         remapModal.classList.remove("opacity-0", "pointer-events-none");
+
+        // The source side defaults to the search picker with its manual fields
+        // hidden — reveal them, or the pre-filled id is invisible and the
+        // Lookup button the deep-link clicks appears to do nothing.
+        sourceManualGroup.classList.remove("hidden");
+        sourceManualToggle.classList.add("hidden");
+
+        const provider = uri.startsWith("tvdb:") ? "tvdb" : "tmdb";
+        const sourceType = document.getElementById("source-show-id-type") as HTMLSelectElement | null;
+        const targetType = document.getElementById("target-show-id-type") as HTMLSelectElement | null;
+        if (sourceType) sourceType.value = provider;
+        if (targetType) targetType.value = provider;
 
         sourceShowTmdbInput.value = uri;
         targetShowTmdbInput.value = uri;

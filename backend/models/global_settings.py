@@ -28,6 +28,8 @@ class GlobalSettings(Base):
     tvdb_api_key                 : Mapped[Optional[str]] = mapped_column(String(255))
     image_cache_enabled          : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="false")
     image_cache_limit_gb         : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Days before a cached image is evicted regardless of size limit. NULL/0 = never expire.
+    image_cache_expiry_days      : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # Admin setup wizard completed. New rows default False (needs setup);
     # existing rows backfill True via server_default so current installs aren't interrupted.
     setup_completed               : Mapped[bool]          = mapped_column(Boolean, nullable=False, default=False, server_default="true")

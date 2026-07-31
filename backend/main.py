@@ -322,6 +322,7 @@ async def lifespan(app: FastAPI):
 
     # Clean up stuck sync jobs and orphaned playback sessions on startup
     from db import async_sessionmaker
+    from models.users import User
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
         await db.execute(
@@ -330,6 +331,16 @@ async def lifespan(app: FastAPI):
             .values(status=SyncStatus.failed, error_message="Aborted due to server restart")
         )
         await db.execute(delete(PlaybackSession))
+
+        # Admin safety check: promote the oldest user to admin if no admin exists
+        admin_check = await db.execute(select(User).where(User.is_admin.is_(True)))
+        if not admin_check.scalars().first():
+            user_check = await db.execute(select(User).order_by(User.id.asc()))
+            first_user = user_check.scalars().first()
+            if first_user:
+                first_user.is_admin = True
+                print(f"Startup: Promoted user '{first_user.username}' (id={first_user.id}) to Admin.")
+
         await db.commit()
 
     scheduler_task = asyncio.create_task(_auto_sync_scheduler())

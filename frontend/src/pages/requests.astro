@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import { api, type MediaRequestItem } from "../lib/api";
+import { api, tmdbImageUrl, type MediaRequestItem } from "../lib/api";
 
 const { token, user } = Astro.locals;
 
@@ -65,7 +65,7 @@ const mediaTypeLabel = (r: MediaRequestItem) => {
             <div class="flex items-center gap-4 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3" data-request-id={r.id}>
               <a href={itemUrl(r)} class="flex items-center gap-4 flex-1 min-w-0 transition-all active:scale-95 active:opacity-70">
               {r.poster_path && (
-                <img src={r.poster_path} alt={r.title} class="w-10 h-14 rounded object-cover shrink-0" />
+                <img src={tmdbImageUrl(r.poster_path, "w185")} alt={r.title} class="w-10 h-14 rounded object-cover shrink-0" />
               )}
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-semibold text-zinc-100 truncate">{r.title}</p>
@@ -113,7 +113,7 @@ const mediaTypeLabel = (r: MediaRequestItem) => {
             <div class="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800/60 rounded-xl px-4 py-3 opacity-75">
               <a href={itemUrl(r)} class="flex items-center gap-4 flex-1 min-w-0 transition-all active:scale-95 active:opacity-70">
               {r.poster_path && (
-                <img src={r.poster_path} alt={r.title} class="w-8 h-12 rounded object-cover shrink-0" />
+                <img src={tmdbImageUrl(r.poster_path, "w185")} alt={r.title} class="w-8 h-12 rounded object-cover shrink-0" />
               )}
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-semibold text-zinc-300 truncate">{r.title}</p>
@@ -147,7 +147,7 @@ const mediaTypeLabel = (r: MediaRequestItem) => {
             <div class="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800/60 rounded-xl px-4 py-3 opacity-75" data-request-id={r.id}>
               <a href={itemUrl(r)} class="flex items-center gap-4 flex-1 min-w-0 transition-all active:scale-95 active:opacity-70">
               {r.poster_path && (
-                <img src={r.poster_path} alt={r.title} class="w-8 h-12 rounded object-cover shrink-0" />
+                <img src={tmdbImageUrl(r.poster_path, "w185")} alt={r.title} class="w-8 h-12 rounded object-cover shrink-0" />
               )}
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-semibold text-zinc-300 truncate">{r.title}</p>

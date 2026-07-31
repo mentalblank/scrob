@@ -34,8 +34,16 @@ class ListUpdate(BaseModel):
 
 
 class ListItemAdd(BaseModel):
-    tmdb_id: int
-    media_type: MediaType
+    # The frontend identifies everything by uri_id ("tmdb:m:1", "tvdb:s:2", …);
+    # tmdb_id stays accepted for older clients and internal callers.
+    tmdb_id: Optional[int] = None
+    uri_id: Optional[str] = None
+    # "season" arrives from season cards — lists store whole shows, so it is
+    # folded into the parent series rather than rejected.
+    media_type: str
+    show_uri_id: Optional[str] = None
+    season_number: Optional[int] = None
+    episode_number: Optional[int] = None
 
 
 def _format_list(lst: ListModel) -> dict:
@@ -416,24 +424,61 @@ async def add_list_item(
     if not lst:
         raise HTTPException(status_code=404, detail="List not found")
 
-    media_result = await db.execute(
-        select(Media)
-        .options(selectinload(Media.show))
-        .where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
-    )
-    media = media_result.scalar_one_or_none()
+    if body.tmdb_id is None and not body.uri_id:
+        raise HTTPException(status_code=400, detail="uri_id or tmdb_id is required")
 
-    from routers.media import get_user_tmdb_key
+    from routers.media import get_user_tmdb_key, resolve_media_by_uri, resolve_show_by_uri
     from core import tmdb
 
+    # A season entry stands in for its show, so resolve it as the parent series.
+    raw_type = body.media_type
+    if raw_type == "season":
+        media_type = MediaType.series
+        identifier = body.show_uri_id or body.uri_id
+    else:
+        try:
+            media_type = MediaType(raw_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Unsupported media type: {raw_type}")
+        identifier = body.uri_id
+
+    if media_type == MediaType.series:
+        show, tmdb_id = await resolve_show_by_uri(db, body.tmdb_id, identifier, user_id=current_user.id)
+        media_result = await db.execute(
+            select(Media)
+            .options(selectinload(Media.show))
+            .where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
+        ) if tmdb_id is not None else None
+        media = media_result.scalar_one_or_none() if media_result is not None else None
+        if not media and show and show.tmdb_id:
+            tmdb_id = show.tmdb_id
+    else:
+        media, tmdb_id = await resolve_media_by_uri(db, media_type, identifier, body.tmdb_id)
+        if media:
+            # resolve_media_by_uri doesn't eager-load the show relationship.
+            media_result = await db.execute(
+                select(Media)
+                .options(selectinload(Media.show))
+                .where(Media.id == media.id)
+            )
+            media = media_result.scalar_one()
+
+    if not media and tmdb_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail="This item has no TMDB match yet, so it can't be added to a list",
+        )
+
     api_key = await get_user_tmdb_key(db, current_user.id)
+    body_tmdb_id = tmdb_id
 
     if not media:
         try:
-            if body.media_type == MediaType.movie:
-                data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
+            if media_type == MediaType.movie:
+                data = await tmdb.get_movie(body_tmdb_id, api_key=api_key)
                 media = Media(
-                    tmdb_id=body.tmdb_id,
+                    tmdb_id=body_tmdb_id,
+                    uri_id=body.uri_id,
                     media_type=MediaType.movie,
                     title=data.get("title", "Unknown"),
                     poster_path=tmdb.poster_url(data.get("poster_path")),
@@ -443,19 +488,21 @@ async def add_list_item(
                     overview=data.get("overview"),
                     adult=data.get("adult", False),
                 )
-            elif body.media_type == MediaType.person:
-                data = await tmdb.get_person(body.tmdb_id, api_key=api_key)
+            elif media_type == MediaType.person:
+                data = await tmdb.get_person(body_tmdb_id, api_key=api_key)
                 media = Media(
-                    tmdb_id=body.tmdb_id,
+                    tmdb_id=body_tmdb_id,
+                    uri_id=body.uri_id,
                     media_type=MediaType.person,
                     title=data.get("name", "Unknown"),
                     poster_path=tmdb.poster_url(data.get("profile_path"), size="w185"),
                     overview=data.get("biography"),
                 )
             else:
-                data = await tmdb.get_show(body.tmdb_id, api_key=api_key)
+                data = await tmdb.get_show(body_tmdb_id, api_key=api_key)
                 media = Media(
-                    tmdb_id=body.tmdb_id,
+                    tmdb_id=body_tmdb_id,
+                    uri_id=body.uri_id if raw_type != "season" else None,
                     media_type=MediaType.series,
                     title=data.get("name", "Unknown"),
                     poster_path=tmdb.poster_url(data.get("poster_path")),
@@ -469,13 +516,13 @@ async def add_list_item(
             await db.flush()
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"Media not found: {e}")
-    elif not media.adult and body.media_type in (MediaType.movie, MediaType.series):
+    elif not media.adult and media_type in (MediaType.movie, MediaType.series) and media.tmdb_id:
         # Existing record may pre-date the adult flag — refresh from TMDB
         try:
-            if body.media_type == MediaType.movie:
-                data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
+            if media_type == MediaType.movie:
+                data = await tmdb.get_movie(media.tmdb_id, api_key=api_key)
             else:
-                data = await tmdb.get_show(body.tmdb_id, api_key=api_key)
+                data = await tmdb.get_show(media.tmdb_id, api_key=api_key)
             if data.get("adult", False):
                 media.adult = True
         except Exception:

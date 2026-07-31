@@ -20,6 +20,7 @@ from .playback_progress import PlaybackProgress
 from .follows import Follow
 from .global_settings import GlobalSettings
 from .blocklist import BlocklistItem
+from .episode_movie_conversion import EpisodeMovieConversion
 from .media_alias import MediaAlias
 from .season_override import ShowSeasonOverride, ShowEpisodeOverride
 from .media_request import MediaRequest
@@ -51,6 +52,7 @@ __all__ = [
     "Follow",
     "GlobalSettings",
     "BlocklistItem",
+    "EpisodeMovieConversion",
     "MediaAlias",
     "ShowSeasonOverride",
     "ShowEpisodeOverride",

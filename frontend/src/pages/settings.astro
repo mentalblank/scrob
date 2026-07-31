@@ -1486,8 +1486,10 @@ const COUNTRIES = (countriesRes || [])
                 </div>
                 <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
                   <div class="flex flex-wrap gap-2" onclick="event.stopPropagation()">
-                    {settings.mdblist_connected && (
+                    {settings.mdblist_connected ? (
                       <button type="button" id="mdblist-disconnect-btn" class="js-action-btn text-xs sm:text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer">Disconnect</button>
+                    ) : (
+                      <button type="button" id="mdblist-connect-btn" class="text-xs sm:text-sm bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border border-violet-500/30 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors cursor-pointer">Connect MDBList</button>
                     )}
                   </div>
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
@@ -4051,9 +4053,44 @@ const COUNTRIES = (countriesRes || [])
     }
     setupSimklAuth();
 
-    // MDBList disconnect
+    // MDBList connect / disconnect
     function setupMdblistAuth() {
+      const connectBtn = document.getElementById('mdblist-connect-btn');
       const disconnectBtn = document.getElementById('mdblist-disconnect-btn');
+
+      if (connectBtn) {
+        connectBtn.onclick = async () => {
+          // MDBList has no OAuth handshake — the API key is the credential, so
+          // "connect" means validate the key in the panel and store it.
+          const keyInput = document.getElementById('mdblist_api_key') as HTMLInputElement | null;
+          const apiKey = keyInput?.value.trim() || '';
+          if (!apiKey) {
+            showMessage('Enter your MDBList API key first (mdblist.com/preferences)', 'error');
+            document.getElementById('mdblist-body')?.classList.remove('hidden');
+            keyInput?.focus();
+            return;
+          }
+          connectBtn.disabled = true;
+          connectBtn.textContent = 'Connecting…';
+          try {
+            const res = await fetch('/api/proxy/mdblist/auth/connect', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ api_key: apiKey }),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              throw new Error(err.detail || 'Failed to connect MDBList');
+            }
+            window.location.reload();
+          } catch (e) {
+            showMessage(e.message || 'Failed to connect MDBList', 'error');
+            connectBtn.disabled = false;
+            connectBtn.textContent = 'Connect MDBList';
+          }
+        };
+      }
+
       if (disconnectBtn) {
         disconnectBtn.onclick = async () => {
           if (!confirm('Disconnect MDBList? This will remove your MDBList API key from Scrob.')) return;
@@ -5567,15 +5604,34 @@ const COUNTRIES = (countriesRes || [])
         if (!el.classList.contains('hidden')) expandedDetails.add(el.id);
       });
 
-      const [statusRes, overridesRes, matchedRes] = await Promise.all([
+      const [statusRes, overridesRes, matchedRes, unmatchedRes] = await Promise.all([
         fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } }),
         fetch('/api/proxy/sync/season-overrides', { headers: { 'Authorization': `Bearer ${token}` } }),
         fetch('/api/proxy/sync/matched-shows', { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch('/api/proxy/sync/unmatched-warnings', { headers: { 'Authorization': `Bearer ${token}` } }),
       ]);
       if (!statusRes.ok) return;
       const jobs: any[] = await statusRes.json();
       const overrides: any[] = overridesRes.ok ? await overridesRes.json() : [];
       const matchedShows: any[] = matchedRes.ok ? await matchedRes.json() : [];
+
+      // Stored job warnings are a snapshot from sync time — seasons since matched
+      // (or that never really failed) are still in there. The unmatched-warnings
+      // endpoint re-checks against current data, so use it as the source of truth
+      // for which warnings are still worth showing.
+      const stillUnmatched: { seasons: any[]; titles: any[] } =
+        unmatchedRes.ok ? await unmatchedRes.json() : { seasons: [], titles: [] };
+      const liveSeasonKeys = new Set(
+        stillUnmatched.seasons.map((x: any) => `${x.source_uri_id}:${x.season}`)
+      );
+      const liveSeasonCounts = new Map(
+        stillUnmatched.seasons.map((x: any) => [`${x.source_uri_id}:${x.season}`, x.affected_episodes])
+      );
+      const liveTitles = new Set(
+        stillUnmatched.titles.map((x: any) => String(x.title ?? '').toLowerCase())
+      );
+      // Dismissed rows are already filtered out of stillUnmatched, so anything
+      // missing from these sets is either resolved or deliberately hidden.
 
       // Build a lookup: lowercase show_title → matched show info
       // Used to overlay matched state onto SyncJob warnings that lack matched:true stamps
@@ -5601,23 +5657,43 @@ const COUNTRIES = (countriesRes || [])
         const date = new Date(_updatedAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
         const detailsId = `conn-warnings-details-${connId}`;
 
-        const enrichmentWarnings = warnings.filter((w: any) => w.tmdb_id !== undefined && w.season !== undefined);
-        const unmatchedWarnings = warnings.filter((w: any) => w.title !== undefined);
+        const enrichmentWarnings = warnings
+          .filter((w: any) => w.tmdb_id !== undefined && w.season !== undefined)
+          .filter((w: any) => liveSeasonKeys.has(`${w.source_uri_id ?? `tmdb:s:${w.tmdb_id}`}:${w.season}`))
+          .map((w: any) => ({
+            ...w,
+            affected_episodes:
+              liveSeasonCounts.get(`${w.source_uri_id ?? `tmdb:s:${w.tmdb_id}`}:${w.season}`)
+              ?? w.affected_episodes,
+          }));
+        // Warnings stamped matched:true have since been resolved — they are no
+        // longer "couldn't be synced", so they must not be listed or counted.
+        const unmatchedWarnings = warnings
+          .filter((w: any) => w.title !== undefined)
+          .filter((w: any) => !w.matched)
+          .filter((w: any) => liveTitles.has(String(w.series_name ?? w.title ?? '').toLowerCase()));
 
         const renderEnrichment = enrichmentWarnings.length > 0 ? `
           <div class="space-y-1">
-            <p class="text-xs text-zinc-500 mb-2">These seasons weren't found on TMDB — the show may be split into separate series there. Use "Remap" to point each season to the correct TMDB show.</p>
+            <p class="text-xs text-zinc-500 mb-2">These seasons couldn't be resolved against the provider shown on each row — the show is often split into separate series there. Use "Remap" to point each season at the correct show.</p>
             ${enrichmentWarnings.map((w: any) => {
-              const srcUri = `tmdb:s:${w.tmdb_id}`;
+              // Warnings record which catalogue the lookup failed against; older
+              // entries predate the field and were always TMDB.
+              const provider = (w.provider ?? 'tmdb').toLowerCase();
+              const providerLabel = provider === 'tvdb' ? 'TVDB' : 'TMDB';
+              const srcUri = w.source_uri_id ?? `${provider}:s:${w.tmdb_id}`;
               const key = `${srcUri}:${w.season}`;
               const existing = overrideMap.get(key);
-              const remapAttr = `data-src-uri="${srcUri}" data-src-season="${w.season}" data-src-title="${escapeHtml(w.show)}"`;
-              const _ = w; // unused tmdb_id below
+              const remapAttr = `data-src-uri="${srcUri}" data-src-season="${w.season}" data-src-title="${escapeHtml(w.show)}" data-src-provider="${provider}"`;
+              const badgeCls = provider === 'tvdb'
+                ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                : 'bg-sky-500/10 text-sky-400 border-sky-500/30';
               return `
               <div class="flex items-center gap-3 py-1.5 border-b border-zinc-800/60 last:border-0">
                 <div class="flex-1 min-w-0">
                   <span class="text-sm text-zinc-200 font-medium">${escapeHtml(w.show)}</span>
                   <span class="ml-2 text-xs text-zinc-500">Season ${w.season}</span>
+                  <span class="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded border ${badgeCls}" title="Not found on ${providerLabel}">No ${providerLabel} match</span>
                   ${existing ? `<span class="ml-2 text-xs text-green-500">→ remapped</span>` : ''}
                 </div>
                 <span class="text-xs text-zinc-600 shrink-0 mr-2">${w.affected_episodes} ep${w.affected_episodes !== 1 ? 's' : ''}</span>
@@ -5625,9 +5701,12 @@ const COUNTRIES = (countriesRes || [])
                   <button type="button" class="remap-season-btn text-xs px-2.5 py-1 rounded-xl border cursor-pointer transition-colors ${existing ? 'border-green-700/50 text-green-400 hover:bg-green-900/20' : 'bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60'}" ${remapAttr}>
                     ${existing ? 'Edit remap' : 'Remap'}
                   </button>
-                  <a href="/remaps?mode=season&src_uri=tmdb:s:${w.tmdb_id}&src_season=${w.season}" class="text-xs px-2.5 py-1 rounded-xl border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40" title="Advanced mapping on the overrides page">
+                  <a href="/remaps?mode=season&src_uri=${encodeURIComponent(srcUri)}&src_season=${w.season}" class="text-xs px-2.5 py-1 rounded-xl border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40" title="Advanced mapping on the overrides page">
                     Advanced
                   </a>
+                  <button type="button" class="dismiss-warning-btn p-1 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer" data-dismiss-key="${srcUri}:${w.season}" title="Dismiss">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  </button>
                 </div>
               </div>`;
             }).join('')}
@@ -5640,6 +5719,7 @@ const COUNTRIES = (countriesRes || [])
         type GroupEntry = {
           count: number;
           reason: string;
+          provider?: string;
           plex_guids: string[];
           matched: boolean;
           matched_tvdb_id?: number;
@@ -5654,6 +5734,8 @@ const COUNTRIES = (countriesRes || [])
             // Always overlay DB state — it reflects the current show linkage regardless of stamp age
             const dbMatch = matchedShowMap.get((w.series_name ?? '').toLowerCase());
             const isMatched = !!w.matched || !!dbMatch;
+            // Resolved shows aren't part of the "couldn't sync" set any more.
+            if (isMatched) continue;
             const existing = groupedEpisodeWarnings.get(w.series_name);
             if (existing) {
               existing.count++;
@@ -5669,6 +5751,7 @@ const COUNTRIES = (countriesRes || [])
               groupedEpisodeWarnings.set(w.series_name, {
                 count: 1,
                 reason: w.reason ?? 'unknown reason',
+                provider: w.provider ?? 'tmdb',
                 plex_guids: w.plex_guids ?? [],
                 matched: isMatched,
                 matched_tvdb_id: dbMatch?.tvdb_id ?? w.matched_tvdb_id,
@@ -5711,7 +5794,7 @@ const COUNTRIES = (countriesRes || [])
         const renderUnmatched = hasUnmatched ? `
           <div class="space-y-1 ${enrichmentWarnings.length > 0 ? 'mt-4 pt-4 border-t border-zinc-800/60' : ''}">
             <p class="text-xs text-zinc-500 mb-2">Items that couldn't be automatically matched:</p>
-            ${[...groupedEpisodeWarnings.entries()].map(([seriesName, {count, reason, plex_guids, matched, matched_tvdb_id, matched_show_id, matched_show_uri_id, matched_show_title}]) => {
+            ${[...groupedEpisodeWarnings.entries()].map(([seriesName, {count, reason, provider: groupProvider, plex_guids, matched, matched_tvdb_id, matched_show_id, matched_show_uri_id, matched_show_title}]) => {
               const isMatched = matched;
               const matchedTitle = matched_show_title ?? '';
               const matchHref = matched_show_uri_id ? `/show/${matched_show_uri_id}` : (matched_tvdb_id ? `/show/tvdb:s:${matched_tvdb_id}` : '');
@@ -5720,6 +5803,7 @@ const COUNTRIES = (countriesRes || [])
                 <div class="flex-1 min-w-0">
                   <span class="text-sm text-zinc-200 font-medium">${escapeHtml(seriesName)}</span>
                   <span class="ml-2 text-xs text-zinc-600">${count} episode${count !== 1 ? 's' : ''}</span>
+                  ${isMatched ? '' : `<span class="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded border bg-sky-500/10 text-sky-400 border-sky-500/30" title="No provider id found during sync">No ${(groupProvider ?? 'tmdb').toUpperCase()} match</span>`}
                   ${isMatched
                     ? `<span class="ml-2 text-xs text-green-500">→ matched${matchedTitle && matchedTitle.toLowerCase() !== seriesName.toLowerCase() ? ` as "${escapeHtml(matchedTitle)}"` : ''}</span>`
                     : `<p class="text-xs text-zinc-500 mt-0.5">${escapeHtml(reason)}</p>`
@@ -5734,6 +5818,9 @@ const COUNTRIES = (countriesRes || [])
                     : `<button type="button" class="match-show-btn text-xs px-2.5 py-1 rounded-xl border bg-amber-500/15 border-amber-500/40 text-amber-500 hover:bg-amber-500/25 hover:border-amber-500/60 cursor-pointer transition-colors"
                         data-series-name="${escapeHtml(seriesName)}">Match</button>`
                   }
+                  ${isMatched ? '' : `<button type="button" class="dismiss-warning-btn p-1 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer" data-dismiss-key="title:series:${escapeHtml(seriesName.toLowerCase())}" title="Dismiss">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  </button>`}
                 </div>
               </div>`;
             }).join('')}
@@ -5748,6 +5835,7 @@ const COUNTRIES = (countriesRes || [])
                 <div class="flex-1 min-w-0">
                   <span class="text-sm text-zinc-200 font-medium">${escapeHtml(w.title)}</span>
                   ${w.media_type ? `<span class="ml-2 text-xs text-zinc-600">${escapeHtml(w.media_type)}</span>` : ''}
+                  ${wMatched ? '' : `<span class="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded border bg-sky-500/10 text-sky-400 border-sky-500/30">No ${(w.provider ?? 'tmdb').toUpperCase()} match</span>`}
                   ${wMatched
                     ? `<span class="ml-2 text-xs text-green-500">→ matched${wMatchedTitle && wMatchedTitle.toLowerCase() !== (w.title ?? '').toLowerCase() ? ` as "${escapeHtml(wMatchedTitle)}"` : ''}</span>`
                     : `<p class="text-xs text-zinc-500 mt-0.5">${escapeHtml(w.reason ?? 'unknown reason')}</p>`
@@ -5767,6 +5855,14 @@ const COUNTRIES = (countriesRes || [])
             }).join('')}
           </div>
         ` : '';
+
+        // Everything in the stored warnings has since been resolved or dismissed —
+        // an empty "0 items couldn't be synced" banner is just noise.
+        if (displayCount === 0) {
+          container.classList.add('hidden');
+          container.innerHTML = '';
+          return;
+        }
 
         container.classList.remove('hidden');
         container.innerHTML = `
@@ -5806,6 +5902,26 @@ const COUNTRIES = (countriesRes || [])
               parseInt(el.dataset.srcSeason ?? '0'),
               el.dataset.srcTitle ?? '',
             );
+          });
+        });
+
+        container.querySelectorAll('.dismiss-warning-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const el = btn as HTMLButtonElement;
+            const key = el.dataset.dismissKey;
+            if (!key) return;
+            el.disabled = true;
+            try {
+              const res = await fetch('/api/proxy/sync/warnings/dismiss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ key }),
+              });
+              if (!res.ok) throw new Error();
+              loadSyncWarnings();
+            } catch {
+              el.disabled = false;
+            }
           });
         });
 
@@ -6210,7 +6326,7 @@ const COUNTRIES = (countriesRes || [])
       }
 
       // Remap mode
-      if (!targetTmdbId || !targetSeasonNumber) return;
+      if ((!targetTmdbId && !targetTvdbId) || !targetSeasonNumber) return;
       saveBtn.textContent = 'Saving…';
       try {
         const createRes = await fetch('/api/proxy/sync/season-overrides', {
@@ -6219,7 +6335,7 @@ const COUNTRIES = (countriesRes || [])
           body: JSON.stringify({
             source_show_uri_id: srcUri ?? `tmdb:s:${srcTmdbId}`,
             source_season_number: srcSeason,
-            target_show_uri_id: `tmdb:s:${targetTmdbId}`,
+            target_show_uri_id: targetTvdbId ? `tvdb:s:${targetTvdbId}` : `tmdb:s:${targetTmdbId}`,
             target_season_number: targetSeasonNumber,
           }),
         });
@@ -6251,13 +6367,17 @@ const COUNTRIES = (countriesRes || [])
       (document.getElementById('remap-modal-title') as HTMLElement).textContent = 'Remap Season';
       (document.getElementById('remap-source-label') as HTMLElement).textContent = `"${title}" — Season ${season}`;
       (document.getElementById('remap-tmdb-label') as HTMLElement).textContent = 'Search for the correct TMDB show';
-      (document.getElementById('remap-tmdb-section') as HTMLElement).classList.remove('hidden');
-      (document.getElementById('remap-tvdb-section') as HTMLElement).classList.add('hidden');
       (document.getElementById('remap-seasons-area') as HTMLElement).classList.remove('hidden');
       (document.getElementById('remap-save') as HTMLButtonElement).textContent = 'Save & Apply';
+      // A season can be split on either catalogue, so let the target be looked up
+      // on TVDB as well — default to whichever provider the source uri names.
+      (document.getElementById('match-tab-bar') as HTMLElement).classList.remove('hidden');
+      const srcProvider = String(uriOrTmdbId).startsWith('tvdb:') ? 'tvdb' : 'tmdb';
+      (document.getElementById('remap-tvdb-input') as HTMLInputElement).value = title;
+      (document.getElementById('remap-search-input') as HTMLInputElement).value = title;
       modal.classList.remove('hidden');
       modal.classList.add('flex');
-      searchInput.focus();
+      setMatchTab(srcProvider as 'tvdb' | 'tmdb');
     };
 
     window["openMatchModal"] = (seriesName: string) => {

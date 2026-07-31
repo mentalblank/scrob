@@ -1,7 +1,7 @@
 ---
 import MediaCard from "../../components/MediaCard.astro";
 import ActionBar from "../../components/ActionBar.astro";
-import { api } from "../../lib/api";
+import { api, tmdbImageUrl } from "../../lib/api";
 import { mediaUrl } from "../../lib/urls";
 
 export const prerender = false;
@@ -27,9 +27,7 @@ const episodeLabel = hero.season_number != null && hero.episode_number != null
   ? `S${String(hero.season_number).padStart(2, '0')}E${String(hero.episode_number).padStart(2, '0')}`
   : null;
 const rawBackdrop = hero.backdrop_path || hero.show_backdrop_path;
-const heroBackdrop = rawBackdrop
-  ? (rawBackdrop.startsWith('http') ? rawBackdrop : `https://image.tmdb.org/t/p/w1280${rawBackdrop}`)
-  : null;
+const heroBackdrop = tmdbImageUrl(rawBackdrop, "w1280");
 ---
 
 <section class="relative md:-mt-8 mb-16" id="dashboard-next-up">

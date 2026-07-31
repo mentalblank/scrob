@@ -2,6 +2,52 @@ from core import tmdb
 from models.media import Media, MediaType
 
 
+def extract_movie_certification(data: dict, country: str = "US") -> str | None:
+    """Age certification from a TMDB movie payload, for `country` then US then any."""
+    results = (data.get("release_dates") or {}).get("results", [])
+
+    def _for(code: str) -> str | None:
+        for entry in results:
+            if entry.get("iso_3166_1") != code:
+                continue
+            for rd in entry.get("release_dates", []):
+                cert = (rd.get("certification") or "").strip()
+                if cert:
+                    return cert
+        return None
+
+    for preferred in (country, "US"):
+        cert = _for(preferred)
+        if cert:
+            return cert
+    for entry in results:
+        for rd in entry.get("release_dates", []):
+            cert = (rd.get("certification") or "").strip()
+            if cert:
+                return cert
+    return None
+
+
+def extract_show_content_rating(data: dict, country: str = "US") -> str | None:
+    """US content rating (TV-Y/TV-G/TV-14/TV-MA…) from a TMDB show detail payload.
+
+    Falls back to the first rating of any country so non-US-rated titles still
+    get a value to filter on.
+    """
+    results = (data.get("content_ratings") or {}).get("results", [])
+    for preferred in (country, "US"):
+        for entry in results:
+            if entry.get("iso_3166_1") == preferred:
+                rating = (entry.get("rating") or "").strip()
+                if rating:
+                    return rating
+    for entry in results:
+        rating = (entry.get("rating") or "").strip()
+        if rating:
+            return rating
+    return None
+
+
 def _extract_release_dates(results: list) -> dict:
     us_entry = next((e for e in results if e.get("iso_3166_1") == "US"), None)
     digital = physical = None
@@ -84,6 +130,7 @@ async def enrich_media(
                 "adult": data.get("adult", False),
                 "release_dates": _extract_release_dates(data.get("release_dates", {}).get("results", [])),
             }
+            media.content_rating = extract_movie_certification(data)
             media.adult = data.get("adult", False)
 
         elif media.media_type == MediaType.series:
@@ -107,6 +154,7 @@ async def enrich_media(
                 "status": data.get("status"),
                 "adult": data.get("adult", False),
             }
+            media.content_rating = extract_show_content_rating(data)
             media.adult = data.get("adult", False)
 
             # Pref=TVDB: override artwork only, keep TMDB metadata
@@ -125,7 +173,7 @@ async def enrich_media(
             if is_tvdb and tvdb_api_key and series_tvdb_id:
                 try:
                     from core import tvdb as tvdb_client
-                    raw_eps = await tvdb_client.get_series_episodes(series_tvdb_id, media.season_number, tvdb_api_key, lang=tvdb_lang)
+                    raw_eps = await tvdb_client.get_series_episodes(series_tvdb_id, media.season_number, tvdb_api_key, language=tvdb_lang)
                     ep = next((e for e in raw_eps if e.get("number") == media.episode_number), None)
                     if ep:
                         tvdb_ep_id = ep.get("id")

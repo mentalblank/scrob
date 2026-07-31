@@ -3,12 +3,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_PATTERN = re.compile(r'^([a-z]+):([sme]):(\d+)$')
+_PATTERN = re.compile(r'^([a-z]+):([smep]):(\d+)$')
 
 TYPE_PREFIX_TO_MEDIA_TYPE: dict[str, str] = {
     's': 'series',
     'm': 'movie',
     'e': 'episode',
+    'p': 'person',
 }
 
 MEDIA_TYPE_TO_PREFIX: dict[str, str] = {v: k for k, v in TYPE_PREFIX_TO_MEDIA_TYPE.items()}
@@ -17,7 +18,7 @@ MEDIA_TYPE_TO_PREFIX: dict[str, str] = {v: k for k, v in TYPE_PREFIX_TO_MEDIA_TY
 @dataclass(frozen=True)
 class MediaURI:
     provider: str
-    type_prefix: str  # 's' = series, 'm' = movie, 'e' = episode
+    type_prefix: str  # 's' = series, 'm' = movie, 'e' = episode, 'p' = person
     id: str
 
     @property
@@ -49,3 +50,7 @@ class MediaURI:
     @classmethod
     def for_episode(cls, provider: str, external_id: int) -> MediaURI:
         return cls(provider=provider, type_prefix='e', id=str(external_id))
+
+    @classmethod
+    def for_person(cls, provider: str, external_id: int) -> MediaURI:
+        return cls(provider=provider, type_prefix='p', id=str(external_id))

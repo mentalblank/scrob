@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, case, or_
+from sqlalchemy import func, case, or_, update as sa_update, delete as sa_delete
 from sqlalchemy.orm import aliased
 from datetime import date as DateType, timedelta as TimeDelta
 from typing import Optional
@@ -97,10 +97,31 @@ async def update_profile(
         profile = UserProfileData(user_id=current_user.id)
         db.add(profile)
 
-    for field, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+    country_changed = (
+        "country" in updates
+        and (updates["country"] or "").upper() != (profile.country or "").upper()
+    )
+
+    for field, value in updates.items():
         setattr(profile, field, value)
 
     await db.commit()
+
+    # Certifications are region-specific, so a region change invalidates every
+    # stored rating. Clear them and let the normal on-demand lookup (or the admin
+    # backfill) repopulate for the new region.
+    if country_changed:
+        from models.show import Show as ShowModel
+        from models.media import Media as MediaModel
+        from models.provider_cache import ProviderCache
+
+        await db.execute(sa_update(ShowModel).values(content_rating=None))
+        await db.execute(sa_update(MediaModel).values(content_rating=None))
+        await db.execute(sa_delete(ProviderCache))
+        await db.commit()
+        db.info.pop(f"user_country_{current_user.id}", None)
+
     await db.refresh(profile)
     return profile
 

@@ -47,7 +47,11 @@ async function request<T>(
       const errorJson = await res.json();
       errorDetail = errorJson.detail || JSON.stringify(errorJson);
     } catch (e) { }
-    throw new Error(`API ${res.status}: ${path} ${errorDetail}`);
+    const err = new Error(`API ${res.status}: ${path} ${errorDetail}`);
+    // Callers need to tell "your session is invalid" apart from "the backend
+    // hiccuped" — the middleware must not log a user out over a 502.
+    (err as any).status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -365,6 +369,7 @@ export interface GlobalSettings {
   sonarr_require_approval: boolean;
   image_cache_enabled: boolean;
   image_cache_limit_gb: number | null;
+  image_cache_expiry_days: number | null;
   setup_completed: boolean;
 }
 
@@ -850,7 +855,9 @@ export interface ContentFilters {
   blocked_regexes: string[];
   filter_languages: string[];
   language_filter_mode: "blacklist" | "whitelist";
+  blocked_ratings: string[];
   available_genres: string[];
+  available_ratings: string[];
 }
 
 export interface UserSearchResult {
@@ -1351,6 +1358,10 @@ export const api = {
 
     getMatchedShows: (token: string) =>
       get<any[]>("/sync/matched-shows", undefined, token),
+    getEpisodeMovieConversions: (token: string) =>
+      get<{ conversions: any[] }>("/sync/episode-movie-conversions", undefined, token),
+    getUnmatchedWarnings: (token: string) =>
+      get<{ seasons: any[]; titles: any[] }>("/sync/unmatched-warnings", undefined, token),
     getMatchedMovies: (token: string) =>
       get<any[]>("/sync/matched-movies", undefined, token),
     unmatchShow: (body: { show_title: string }, token: string) =>
@@ -1425,6 +1436,8 @@ export const api = {
       get<ContentFilters>("/media/content-filters", undefined, token),
     putGenres: (genres: string[], token: string) =>
       put<{ status: string; blocked_genres: string[] }>("/media/content-filters/genres", { genres }, token),
+    putRatings: (ratings: string[], token: string) =>
+      put<{ status: string; blocked_ratings: string[] }>("/media/content-filters/ratings", { ratings }, token),
     putKeywords: (keywords: string[], token: string) =>
       put<{ status: string; blocked_keywords: string[] }>("/media/content-filters/keywords", { keywords }, token),
     putRegexes: (regexes: string[], token: string) =>

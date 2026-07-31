@@ -13,7 +13,7 @@ import ProgressStrip from "../../components/ProgressStrip.astro";
 import VideoPlayer from "../../components/VideoPlayer.astro";
 import TrailerButton from "../../components/TrailerButton.astro";
 import EpisodeOrderSelector from "../../components/EpisodeOrderSelector.astro";
-import { api, type Show, type MediaItem } from "../../lib/api";
+import { api, tmdbImageUrl, type Show, type MediaItem } from "../../lib/api";
 import { parseShowId } from "../../lib/normalize";
 import { personUrl } from "../../lib/urls";
 export const prerender = false;
@@ -34,6 +34,9 @@ let error = "";
 // into the right backend path here — this page's own routing/URLs stay uri_id-based.
 const showFetchPath = (p: "tmdb" | "tvdb", numId: number) => (p === "tvdb" ? `tvdb/${numId}` : String(numId));
 
+const isExplicitTmdbUrl = id?.startsWith("tmdb:s:");
+const isExplicitTvdbUrl = id?.startsWith("tvdb:s:");
+
 let hasTvdbKey = false;
 try {
   const settings = await api.auth.getSettings(token!);
@@ -42,12 +45,12 @@ try {
 
 try {
   show = await api.shows.get(showFetchPath(provider, resolvedShowId), token);
-  // Refetch TVDB-shaped data when either the global "primary metadata source"
-  // preference or this show's own per-show episode-order choice says TVDB.
+  // Redirect to TVDB-shaped URL when TVDB is requested, unless per-show episode order is explicitly set to TMDB.
+  const perShowOrder = (show as any)?.episode_order;
   const wantsTvdbData = show && provider !== "tvdb" && show.tvdb_id &&
-    (primaryMetadataSource === "tvdb" || (show as any)?.episode_order === "tvdb");
+    (perShowOrder === "tvdb" || (!isExplicitTmdbUrl && perShowOrder !== "tmdb" && primaryMetadataSource === "tvdb"));
   if (wantsTvdbData) {
-    show = await api.shows.get(showFetchPath("tvdb", show!.tvdb_id!), token);
+    return Astro.redirect(`/show/tvdb:s:${show!.tvdb_id}`);
   }
 } catch (e: any) {
   const status = (e as any)?.status ?? (e as any)?.response?.status;
@@ -65,6 +68,11 @@ if (!show && !error) {
 const resolvedTmdbId = (show as any)?.tmdb_id ?? (show as any)?.tmdb_id_cross ?? (show as any)?.tvdb_id ?? resolvedShowId;
 const resolvedUriId = show?.uri_id ?? (provider === "tvdb" ? `tvdb:s:${resolvedShowId}` : `tmdb:s:${resolvedShowId}`);
 const isTvdbResponse = provider === "tvdb" || ((show as any)?.tvdb_id && !(show as any)?.tmdb_id);
+
+// Seasons/episodes below must stay on the provider this page is pinned to. The
+// redirect above already honours the global preference, so reaching here on a
+// TMDB url means TMDB was chosen deliberately.
+const pageProviderIsTvdb = provider === "tvdb";
 
 // Per-show (falling back to the global default) TVDB-vs-TMDB episode ordering.
 // episode-order/{tmdbId} endpoints are keyed by the real TMDB id, so don't fall
@@ -108,6 +116,24 @@ const activeSeasons = rawSeasonsMeta.filter((s) => {
   return totalEpisodes > 0;
 });
 
+// Neither show endpoint populates `seasons`, so a show with a single season would
+// render an empty episode grid. Fetch that one season's episodes here — multi-season
+// shows are fine, since they render season cards that link out to the season page.
+if (show && activeSeasons.length === 1) {
+  const onlySeason = activeSeasons[0].season_number;
+  const loaded = show.seasons?.[`season_${onlySeason}`] ?? [];
+  if (loaded.length === 0) {
+    try {
+      const seasonData = await api.shows.getSeason(fetchKey, onlySeason, token);
+      if (seasonData?.episodes?.length) {
+        show.seasons = { ...(show.seasons ?? {}), [`season_${onlySeason}`]: seasonData.episodes };
+      }
+    } catch {
+      // Leave the grid empty rather than failing the whole page.
+    }
+  }
+}
+
 // Progress stats
 const watchedEpisodesCount = show?.watched_episodes_count ?? 0;
 const totalEpisodesCount = show?.total_episodes_count ?? 0;
@@ -148,7 +174,7 @@ const activeButtonsCount = [
         <div class="absolute -top-20 md:-top-32 left-1/2 -translate-x-1/2 w-screen h-[600px] lg:h-[700px] xl:h-[780px] 2xl:h-[880px] overflow-hidden" style="mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%);" data-adult-backdrop={show.adult ? "true" : undefined}>
           <div class="absolute inset-0 bg-gradient-to-t from-[var(--color-hero-fade)] via-[var(--color-hero-fade)]/40 to-transparent z-10"></div>
           <img
-            src={show.backdrop_path}
+            src={tmdbImageUrl(show.backdrop_path, "w1280")}
             alt=""
             class="w-full h-full object-cover opacity-50 blur-[1px]"
             loading="eager"
@@ -169,7 +195,7 @@ const activeButtonsCount = [
           {logoPath ? (
             <div class="mb-4 flex flex-col items-center md:items-start">
               <img
-                src={logoPath}
+                src={tmdbImageUrl(logoPath, "w500")}
                 alt={show.title}
                 class="max-h-20 md:max-h-28 max-w-xs md:max-w-sm object-contain drop-shadow-2xl mx-auto md:mx-0"
                 loading="eager"
@@ -199,7 +225,7 @@ const activeButtonsCount = [
                 {show.poster_path ? (
                   <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${show.title}`}>
                     <img
-                      src={show.poster_path}
+                      src={tmdbImageUrl(show.poster_path, "w500")}
                       alt={show.title}
                       class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
                       loading="eager"
@@ -274,7 +300,7 @@ const activeButtonsCount = [
               <EpisodeOrderSelector
                 tmdbId={episodeOrderTmdbId as number}
                 tvdbId={show.tvdb_id as number}
-                selected={selectedEpisodeOrder}
+                selected={isTvdbResponse ? "tvdb" : selectedEpisodeOrder}
                 token={token}
               />
             )}
@@ -320,7 +346,7 @@ const activeButtonsCount = [
                             const content = (
                               <>
                                 {s.logo ? (
-                                  <img src={s.logo} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
+                                  <img src={tmdbImageUrl(s.logo, "w92")} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
                                 ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
                                   <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-6 h-6 rounded-md object-contain shadow-lg" />
                                 ) : (
@@ -369,7 +395,7 @@ const activeButtonsCount = [
                             const content = (
                               <>
                                 {s.logo ? (
-                                  <img src={s.logo} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                                  <img src={tmdbImageUrl(s.logo, "w92")} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
                                 ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
                                   <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-4 h-4 rounded-sm object-contain opacity-70 group-hover:opacity-100 transition-opacity" />
                                 ) : (
@@ -471,7 +497,7 @@ const activeButtonsCount = [
                     <div class="pt-3 border-t border-zinc-800/60 flex flex-col gap-1.5">
                       <span class="text-zinc-500 text-[10px]">Network</span>
                       <div class="flex items-center gap-2">
-                        <img src={n.logo_path!} alt={n.name} title={n.name} class="h-4 max-w-[90px] object-contain opacity-70" />
+                        <img src={tmdbImageUrl(n.logo_path, "w154")} alt={n.name} title={n.name} class="h-4 max-w-[90px] object-contain opacity-70" />
                         <span class="text-zinc-300 text-[11px] font-medium">{n.name}</span>
                       </div>
                     </div>
@@ -540,7 +566,7 @@ const activeButtonsCount = [
                     collection_pct: ep.in_library ? 100 : 0,
                     library: null,
                   };
-                  return <EpisodeCard item={item} />;
+                  return <EpisodeCard item={item} preferTvdb={pageProviderIsTvdb} />;
                 })}
               </div>
             </div>
@@ -552,117 +578,41 @@ const activeButtonsCount = [
               <VisibilityFilters />
             </div>
             
-            {isTvdbResponse ? (
-              <div class="grid grid-cols-2 min-[480px]:grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-3 md:gap-4">
-                {activeSeasons.map((s) => {
-                  const seasonNum = s.season_number;
-                  const episodes = show.seasons?.[`season_${seasonNum}`] || [];
-                  const poster = s.poster_path || show.poster_path;
-                  const seasonState = show.season_states?.[seasonNum] ?? { watched: false, in_library: episodes.length > 0, collection_pct: 0, user_rating: null };
-                  const totalEpisodes = seasonState.total_episodes_count || s.episode_count || episodes.length;
-                  const watchedCount = typeof seasonState.watched_episodes_count === 'number' ? seasonState.watched_episodes_count : episodes.filter(e => e.watched).length;
+            <div class="grid grid-cols-2 min-[480px]:grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-3 md:gap-4">
+              {activeSeasons.map((s) => {
+                const seasonNum = s.season_number;
+                const episodes = show.seasons?.[`season_${seasonNum}`] || [];
+                const poster = s.poster_path || show.poster_path;
+                const seasonState = show.season_states?.[seasonNum] ?? { watched: false, in_library: episodes.length > 0, collection_pct: 0, user_rating: null };
+                const totalEpisodes = seasonState.total_episodes_count || s.episode_count || episodes.length;
+                const watchedCount = typeof seasonState.watched_episodes_count === 'number' ? seasonState.watched_episodes_count : episodes.filter(e => e.watched).length;
 
-                  const item: MediaItem = {
-                    id: null,
-                    tmdb_id: show.tmdb_id ?? show.tmdb_id_cross ?? null,
-                    type: "season",
-                    title: s.name || `Season ${seasonNum}`,
-                    show_title: show.title,
-                    poster_path: poster,
-                    total_episodes_count: totalEpisodes,
-                    watched_episodes_count: watchedCount,
-                    show_tmdb_id: show.tmdb_id ?? show.tmdb_id_cross ?? null,
-                    show_tvdb_id: show.tvdb_id || (provider === "tvdb" ? resolvedShowId : undefined),
-                    season_number: seasonNum,
-                    watched: seasonState.watched,
-                    in_library: seasonState.in_library,
-                    collection_pct: seasonState.collection_pct,
-                    in_lists: seasonState.in_lists ?? [],
-                    library: null,
-                  };
+                const item: MediaItem = {
+                  id: null,
+                  tmdb_id: show.tmdb_id ?? show.tmdb_id_cross ?? null,
+                  tvdb_id: show.tvdb_id ?? null,
+                  type: "season",
+                  title: s.name || `Season ${seasonNum}`,
+                  show_title: show.title,
+                  poster_path: poster,
+                  total_episodes_count: totalEpisodes,
+                  watched_episodes_count: watchedCount,
+                  show_tmdb_id: show.tmdb_id ?? show.tmdb_id_cross ?? null,
+                  show_tvdb_id: show.tvdb_id || (provider === "tvdb" ? resolvedShowId : undefined),
+                  show_uri_id: resolvedUriId,
+                  season_number: seasonNum,
+                  watched: seasonState.watched,
+                  in_library: seasonState.in_library,
+                  collection_pct: seasonState.collection_pct,
+                  in_lists: seasonState.in_lists ?? [],
+                  library: null,
+                };
 
-                  return (
-                    <MediaCard item={item} />
-                  );
-                })}
-              </div>
-            ) : (
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 2xl:grid-cols-3 gap-8">
-                {activeSeasons.map((s) => {
-                  const seasonNum = s.season_number;
-                  const episodes = show.seasons?.[`season_${seasonNum}`] || [];
-                  const poster = s.poster_path || show.poster_path;
-                  const seasonState = show.season_states?.[seasonNum] ?? { watched: false, in_library: episodes.length > 0, collection_pct: 0, user_rating: null };
-                  const totalEpisodes = seasonState.total_episodes_count || s.episode_count || episodes.length;
-                  const watchedCount = typeof seasonState.watched_episodes_count === 'number' ? seasonState.watched_episodes_count : episodes.filter(e => e.watched).length;
-
-                  return (
-                    <div
-                      class="group/season bg-zinc-900/50 border border-zinc-800 rounded-3xl p-5 hover:bg-zinc-800/60 hover:border-blue-500/50 transition-all duration-300 hover:shadow-2xl hover:shadow-blue-900/10"
-                      data-card
-                      data-uri-id={resolvedUriId}
-                      data-tmdb-id={resolvedTmdbId ? String(resolvedTmdbId) : ""}
-                      data-media-type="season"
-                      data-season={String(seasonNum)}
-                      data-show-uri-id={resolvedUriId}
-                      data-watched={String(seasonState.watched)}
-                      data-collected={String(seasonState.in_library)}
-                      data-listed={String((seasonState.in_lists ?? []).length > 0)}
-                      data-dvr="false"
-                      data-partial-watched={String(!seasonState.watched && watchedCount > 0)}
-                      data-partial-collected={String(seasonState.collection_pct > 0 && seasonState.collection_pct < 100)}
-                    >
-                      <a href={`/show/${resolvedUriId}/season/${seasonNum}`} class="flex flex-col sm:flex-row gap-6 block mb-4 active:opacity-70 transition-opacity duration-100">
-                          <div class="w-28 sm:w-28 shrink-0 mx-auto sm:mx-0">
-                              <div class="aspect-[2/3] rounded-2xl overflow-hidden border border-zinc-800 shadow-lg group-hover/season:ring-2 group-hover/season:ring-blue-500/50 transition-all duration-500">
-                                  {poster ? (
-                                      <img src={poster} alt={s.name} class="w-full h-full object-cover group-hover/season:scale-110 transition-transform duration-700" />
-                                  ) : (
-                                      <div class="w-full h-full bg-zinc-900 flex flex-col items-center justify-center text-zinc-500 gap-1">
-                                          <span class="text-3xl">📺</span>
-                                          <span class="text-[10px] font-bold uppercase tracking-widest">No Poster</span>
-                                      </div>
-                                  )}
-                              </div>
-                          </div>
-                          <div class="flex-1 py-2 min-w-0 text-center sm:text-left">
-                              <div class="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-4 mb-1">
-                                  <h3 class="text-xl font-black text-zinc-100 group-hover/season:text-blue-400 transition-colors truncate w-full">{s.name || `Season ${seasonNum}`}</h3>
-                                  {s.tmdb_rating != null && s.tmdb_rating > 0 && (
-                                      <div class="bg-zinc-950 border border-zinc-800 px-2 py-1 rounded-xl flex items-center gap-1.5 shrink-0 shadow-sm">
-                                          <span class="text-yellow-400 text-xs">★</span>
-                                          <span class="text-zinc-100 text-xs font-bold">{s.tmdb_rating.toFixed(1)}</span>
-                                      </div>
-                                  )}
-                              </div>
-                              <div class="flex items-center justify-center sm:justify-start gap-2 mb-3">
-                                  <span class="text-[10px] font-black text-zinc-500 uppercase tracking-widest bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">
-                                      {s.episode_count || episodes.length} Episodes
-                                  </span>
-                              </div>
-                              <p class="text-xs text-zinc-400 line-clamp-3 leading-relaxed opacity-80">{s.overview || "No overview available."}</p>
-                          </div>
-                      </a>
-                      <ActionBar
-                        uriId={resolvedUriId}
-                        tmdbId={resolvedTmdbId ?? undefined}
-                        mediaType="series"
-                        watched={seasonState.watched}
-                        inLists={seasonState.in_lists ?? []}
-                        inLibrary={seasonState.in_library}
-                        collectionPct={seasonState.collection_pct}
-                        watchPct={seasonState.watch_pct ?? 0}
-                        seasonNumber={seasonNum}
-                        hideRequest={true}
-                        userRating={seasonState.user_rating ?? null}
-                        episodeOrder="tmdb"
-                        tvdbId={show.tvdb_id ?? undefined}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                return (
+                  <MediaCard item={item} preferTvdb={pageProviderIsTvdb} />
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -678,7 +628,7 @@ const activeButtonsCount = [
                   <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
                     {person.profile_path ? (
                       <img
-                        src={person.profile_path}
+                        src={tmdbImageUrl(person.profile_path, "w185")}
                         alt={person.name}
                         class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
                         loading="lazy"

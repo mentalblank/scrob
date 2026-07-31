@@ -299,6 +299,21 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
           <p class="text-xs text-zinc-500">Set a maximum storage limit in GB. Oldest accessed images will be pruned when the limit is exceeded. Set to 0 or leave empty for unlimited.</p>
         </div>
 
+        <!-- Expiration -->
+        <div class="space-y-2 max-w-md">
+          <label for="image_cache_expiry_days" class="block text-sm font-medium text-zinc-400">Image Cache Expiration (Days)</label>
+          <input
+            type="number"
+            name="image_cache_expiry_days"
+            id="image_cache_expiry_days"
+            min="0"
+            placeholder="0 (Never expire)"
+            value={globalSettings.image_cache_expiry_days ?? ""}
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+          />
+          <p class="text-xs text-zinc-500">Discard cached images older than this many days so refreshed artwork is picked up again. Set to 0 or leave empty to keep images until the size limit evicts them.</p>
+        </div>
+
         <!-- Cache Usage -->
         <div id="cache-stats-widget" class="hidden p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2.5">
           <div class="flex items-center justify-between gap-2">
@@ -431,6 +446,16 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
           <button id="admin-heal-btn"
             class="shrink-0 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
             Run Heal
+          </button>
+        </div>
+        <div class="p-6 flex flex-col sm:flex-row sm:items-center gap-4 border-t border-zinc-800">
+          <div class="flex-1">
+            <h3 class="font-semibold text-zinc-100 mb-1">Backfill content ratings</h3>
+            <p class="text-sm text-zinc-400">Fetch the age certification (TV-MA, R, …) for every show and movie that doesn't have one stored. Content-rating blocks on the Blocklist page only apply to titles with a stored rating.</p>
+          </div>
+          <button id="admin-ratings-btn"
+            class="shrink-0 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+            Backfill Ratings
           </button>
         </div>
         <div id="admin-heal-progress" class="hidden border-t border-zinc-800 px-6 py-3">
@@ -873,6 +898,8 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
     body['image_cache_enabled'] = fd.get('image_cache_enabled') === 'true';
     const cacheLimit = ((fd.get('image_cache_limit_gb') as string) ?? '').trim();
     body['image_cache_limit_gb'] = cacheLimit ? parseInt(cacheLimit) : null;
+    const cacheExpiry = ((fd.get('image_cache_expiry_days') as string) ?? '').trim();
+    body['image_cache_expiry_days'] = cacheExpiry ? parseInt(cacheExpiry) : null;
 
     try {
       const res = await fetch('/api/proxy/admin/settings', {
@@ -1210,6 +1237,25 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       if (job && (job.status === 'pending' || job.status === 'running')) startAdminHealPoller();
     } catch { /* non-fatal */ }
   })();
+
+  const adminRatingsBtn = document.getElementById('admin-ratings-btn') as HTMLButtonElement | null;
+  adminRatingsBtn?.addEventListener('click', async () => {
+    adminRatingsBtn.disabled = true;
+    adminRatingsBtn.textContent = 'Starting…';
+    try {
+      const res = await fetch('/api/proxy/admin/maintenance/backfill-content-ratings', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to start backfill');
+      window.showToast?.('Content rating backfill started', 'success');
+      adminRatingsBtn.textContent = 'Running…';
+    } catch (err) {
+      window.showToast?.(err.message || 'Failed to start backfill', 'error');
+      adminRatingsBtn.disabled = false;
+      adminRatingsBtn.textContent = 'Backfill Ratings';
+    }
+  });
 
   document.getElementById('admin-heal-confirm-btn')?.addEventListener('click', async () => {
     adminHealModal.classList.add('hidden');

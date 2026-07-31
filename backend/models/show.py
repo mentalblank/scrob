@@ -22,6 +22,7 @@ class Show(Base):
     overview             : Mapped[Optional[str]]   = mapped_column(Text)
     poster_path          : Mapped[Optional[str]]   = mapped_column(String(500))
     backdrop_path        : Mapped[Optional[str]]   = mapped_column(String(500))
+    content_rating       : Mapped[Optional[str]]   = mapped_column(String(16))
     tmdb_rating          : Mapped[Optional[float]] = mapped_column(Float)
     status               : Mapped[Optional[str]]   = mapped_column(String(100))
     tagline              : Mapped[Optional[str]]   = mapped_column(Text)

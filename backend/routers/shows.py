@@ -19,7 +19,7 @@ from models.show import Show as ShowModel
 from models.sync import SyncJob, SyncStatus
 from models.users import User, UserSettings
 from models.episode_order import EpisodeOrderMapping, UserShowEpisodeOrder
-from routers.media import format_media, get_user_tmdb_key, check_tmdb_key, enrich_with_state, refresh_technical_data, _extract_show_content_rating, get_where_to_watch, _effective_sonarr, _get_global_settings
+from routers.media import format_media, get_user_tmdb_key, get_user_country, check_tmdb_key, enrich_with_state, refresh_technical_data, _extract_show_content_rating, get_where_to_watch, _effective_sonarr, _get_global_settings
 
 from dependencies import get_current_user
 from core import tmdb
@@ -47,6 +47,22 @@ async def get_user_tvdb_key(db: AsyncSession, user_id: int) -> str | None:
     gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
     gs = gs_result.scalar_one_or_none()
     return gs.tvdb_api_key if gs else None
+
+
+async def _persist_content_rating(db: AsyncSession, show, rating: str | None) -> None:
+    """Store the rating a show page displays so blocklist rating filters can match it.
+
+    Providers return region-specific values and fall back across countries, so the
+    only value guaranteed to match what the user sees is the one actually rendered.
+    """
+    rating = (rating or "").strip()
+    if not show or not rating or show.content_rating == rating:
+        return
+    show.content_rating = rating[:16]
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
 
 
 async def _enrich_tvdb_seasons(
@@ -166,6 +182,7 @@ def format_show(show: ShowModel) -> dict:
         "poster_path": show.poster_path,
         "backdrop_path": show.backdrop_path,
         "tmdb_rating": show.tmdb_rating,
+        "content_rating": show.content_rating,
         "status": show.status,
         "tagline": show.tagline,
         "first_air_date": show.first_air_date,
@@ -291,7 +308,7 @@ async def list_shows(
 
     result = await db.execute(q.limit(page_size).offset(offset))
     results = [format_show(s) for s in result.scalars().all()]
-    await enrich_with_state(db, current_user.id, results)
+    await enrich_with_state(db, current_user.id, results, hide_blocked=True)
     lang = await get_user_metadata_language(db, current_user.id)
     if lang:
         show_ids = [r["id"] for r in results if r.get("id")]
@@ -449,48 +466,142 @@ async def get_episode_order_job(
     return job
 
 
+def parse_show_id_or_uri(series_id: str | int) -> tuple[str, int, str]:
+    """Parse a show identifier parameter which could be:
+    - An integer or integer string: (5920 or "5920") -> ("tmdb", 5920, "tmdb:s:5920")
+    - A TMDB URI string: "tmdb:s:5920" -> ("tmdb", 5920, "tmdb:s:5920")
+    - A TVDB URI string: "tvdb:s:82459" -> ("tvdb", 82459, "tvdb:s:82459")
+    - A TVDB path string: "tvdb/82459" -> ("tvdb", 82459, "tvdb:s:82459")
+    """
+    if isinstance(series_id, int):
+        return ("tmdb", series_id, f"tmdb:s:{series_id}")
+    raw = str(series_id).strip()
+    if raw.startswith("tvdb:s:"):
+        parts = raw.split(":")
+        num_id = int(parts[2])
+        return ("tvdb", num_id, f"tvdb:s:{num_id}")
+    if raw.startswith("tmdb:s:"):
+        parts = raw.split(":")
+        num_id = int(parts[2])
+        return ("tmdb", num_id, f"tmdb:s:{num_id}")
+    if raw.startswith("tvdb/"):
+        num_id = int(raw.split("/")[1])
+        return ("tvdb", num_id, f"tvdb:s:{num_id}")
+    try:
+        num_id = int(raw)
+        return ("tmdb", num_id, f"tmdb:s:{num_id}")
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid show identifier: {series_id}")
+
+
 @router.post("/{series_tmdb_id}/episode-order")
 async def set_show_episode_order(
-    series_tmdb_id: int,
+    series_tmdb_id: str,
     body: EpisodeOrderRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    provider, numeric_id, _ = parse_show_id_or_uri(series_tmdb_id)
+    series_tmdb_id = numeric_id
+    if provider == "tvdb":
+        show_q = await db.execute(select(ShowModel.tmdb_id).where(ShowModel.tvdb_id == numeric_id))
+        real_tmdb_id = show_q.scalar_one_or_none()
+        if real_tmdb_id:
+            series_tmdb_id = int(real_tmdb_id)
     try:
         selected_order = validate_episode_order(body.episode_order)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     if selected_order == "tvdb":
-        # Building the TVDB mapping fans out one TMDB request per episode and can
-        # take minutes for long-running shows — always run it in the background so
-        # the request never risks hitting the reverse proxy's read timeout.
-        tmdb_api_key, tvdb_api_key = await asyncio.gather(
-            get_user_tmdb_key(db, current_user.id),
-            get_user_tvdb_key(db, current_user.id),
+        # If mapping already exists in DB and force_refresh is False, return immediately without re-mapping.
+        existing_result = await db.execute(
+            select(EpisodeOrderMapping).where(
+                EpisodeOrderMapping.series_tmdb_id == series_tmdb_id
+            )
         )
-        if not check_tmdb_key(tmdb_api_key):
-            raise HTTPException(status_code=400, detail="TMDB API key not configured")
-        if not tvdb_api_key:
-            raise HTTPException(status_code=400, detail="TVDB API key not configured")
+        existing = list(existing_result.scalars().all())
 
-        job = SyncJob(
-            user_id=current_user.id,
-            source=CollectionSource.tmdb,
-            job_type="episode_order",
-            status=SyncStatus.pending,
-            stats={"series_tmdb_id": series_tmdb_id},
+        tvdb_id = None
+        show_q = await db.execute(
+            select(ShowModel.tvdb_id).where(ShowModel.tmdb_id == series_tmdb_id, ShowModel.tvdb_id.isnot(None))
         )
-        db.add(job)
+        tvdb_id = show_q.scalar_one_or_none()
+        if not tvdb_id:
+            try:
+                tmdb_key = await get_user_tmdb_key(db, current_user.id)
+                tmdb_data = await tmdb.get_show(series_tmdb_id, api_key=tmdb_key)
+                raw_tvdb = (tmdb_data.get("external_ids") or {}).get("tvdb_id")
+                if raw_tvdb:
+                    tvdb_id = int(raw_tvdb)
+            except Exception:
+                pass
+
+        # Knowing both ids is enough to render the TVDB-ordered pages, so an
+        # already-matched show just switches over. The episode mapping is only
+        # built when there's no TVDB id to navigate to, or on an explicit
+        # refresh — it exists to translate watch state between the two
+        # numberings, and the season/episode routes already fall back to
+        # matching by raw position when it's absent.
+        needs_mapping = body.force_refresh or (not existing and not tvdb_id)
+        mapping_job_id = None
+
+        if needs_mapping:
+            tmdb_api_key, tvdb_api_key = await asyncio.gather(
+                get_user_tmdb_key(db, current_user.id),
+                get_user_tvdb_key(db, current_user.id),
+            )
+            # Without a TVDB id there is no TVDB page to send the user to, so the
+            # mapping run is the only way forward and missing keys are fatal.
+            if not tvdb_id:
+                if not check_tmdb_key(tmdb_api_key):
+                    raise HTTPException(status_code=400, detail="TMDB API key not configured")
+                if not tvdb_api_key:
+                    raise HTTPException(status_code=400, detail="TVDB API key not configured")
+
+            if check_tmdb_key(tmdb_api_key) and tvdb_api_key:
+                job = SyncJob(
+                    user_id=current_user.id,
+                    source=CollectionSource.tmdb,
+                    job_type="episode_order",
+                    status=SyncStatus.pending,
+                    stats={"series_tmdb_id": series_tmdb_id},
+                )
+                db.add(job)
+                await db.commit()
+                await db.refresh(job)
+                mapping_job_id = job.id
+                background_tasks.add_task(
+                    _run_episode_order_mapping,
+                    current_user.id, job.id, series_tmdb_id, tmdb_api_key, tvdb_api_key, body.force_refresh,
+                )
+
+        preference = await get_episode_order(db, current_user.id, series_tmdb_id)
+        if preference:
+            preference.episode_order = "tvdb"
+            if tvdb_id:
+                preference.tvdb_id = tvdb_id
+        else:
+            db.add(UserShowEpisodeOrder(
+                user_id=current_user.id,
+                series_tmdb_id=series_tmdb_id,
+                episode_order="tvdb",
+                tvdb_id=tvdb_id,
+            ))
         await db.commit()
-        await db.refresh(job)
 
-        background_tasks.add_task(
-            _run_episode_order_mapping,
-            current_user.id, job.id, series_tmdb_id, tmdb_api_key, tvdb_api_key, body.force_refresh,
-        )
-        return {"status": "started", "job_id": job.id}
+        # No TVDB id means nowhere to redirect — fall back to blocking on the job.
+        if not tvdb_id:
+            return {"status": "started", "job_id": mapping_job_id}
+
+        return {
+            "episode_order": "tvdb",
+            "series_tmdb_id": series_tmdb_id,
+            "tvdb_id": tvdb_id,
+            "mapping_job_id": mapping_job_id,
+            "redirect": f"/show/tvdb:s:{tvdb_id}",
+        }
 
     preference = await get_episode_order(db, current_user.id, series_tmdb_id)
     if preference:
@@ -509,18 +620,19 @@ async def set_show_episode_order(
         "series_tmdb_id": series_tmdb_id,
         "tvdb_id": None,
         "mapping": None,
-        "redirect": f"/show/{series_tmdb_id}",
+        "redirect": f"/show/tmdb:s:{series_tmdb_id}",
     }
 
 
 @router.get("/{series_tmdb_id}/episode-order/job")
 async def get_active_episode_order_job(
-    series_tmdb_id: int,
+    series_tmdb_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Look up an in-flight TVDB mapping job for this show, if any — lets the
     page recover its progress after a refresh instead of losing track of it."""
+    provider, series_tmdb_id, _ = parse_show_id_or_uri(series_tmdb_id)
     result = await db.execute(
         select(SyncJob)
         .where(
@@ -537,24 +649,46 @@ async def get_active_episode_order_job(
 
 @router.get("/{series_tmdb_id}")
 async def get_show(
-    series_tmdb_id: int,
+    series_tmdb_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    provider, numeric_id, _ = parse_show_id_or_uri(series_tmdb_id)
+    if provider == "tvdb":
+        return await get_tvdb_show(tvdb_id=numeric_id, db=db, current_user=current_user)
+
+    series_tmdb_id = numeric_id
     # 1. Try to find locally
     show_result = await db.execute(
         select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id)
     )
     show = show_result.scalar_one_or_none()
-    # Explicit query — current_user.settings is a lazy relationship and would
-    # raise MissingGreenlet if touched outside the loading session.
     user_settings_q = await db.execute(
         select(UserSettings).where(UserSettings.user_id == current_user.id)
     )
     user_settings = user_settings_q.scalar_one_or_none()
     default_order = (user_settings.default_episode_order if user_settings and user_settings.default_episode_order else "tmdb")
+    primary_source = (user_settings.preferences or {}).get("primary_metadata_source") if (user_settings and user_settings.preferences) else "tmdb"
+    
     order_preference = await get_episode_order(db, current_user.id, series_tmdb_id)
     selected_episode_order = order_preference.episode_order if order_preference else default_order
+
+    if selected_episode_order == "tvdb" and order_preference and order_preference.tvdb_id:
+        return await get_tvdb_show(tvdb_id=order_preference.tvdb_id, db=db, current_user=current_user)
+
+    if primary_source == "tvdb" and selected_episode_order != "tmdb":
+        tvdb_id = show.tvdb_id if show else None
+        if not tvdb_id:
+            try:
+                tmdb_key = await get_user_tmdb_key(db, current_user.id)
+                tmdb_data = await tmdb.get_show(series_tmdb_id, api_key=tmdb_key)
+                raw_tvdb = (tmdb_data.get("external_ids") or {}).get("tvdb_id")
+                if raw_tvdb:
+                    tvdb_id = int(raw_tvdb)
+            except Exception:
+                tvdb_id = None
+        if tvdb_id:
+            return await get_tvdb_show(tvdb_id=int(tvdb_id), db=db, current_user=current_user)
 
     if show:
         # Fetch local episodes
@@ -623,7 +757,7 @@ async def get_show(
                         :12
                     ]
                 ]
-                await enrich_with_state(db, current_user.id, recommendations)
+                await enrich_with_state(db, current_user.id, recommendations, hide_blocked=True)
                 cast = [
                     {
                         "tmdb_id": c.get("id"),
@@ -780,6 +914,10 @@ async def get_show(
                 if val:
                     show_dict[field] = val
 
+        user_country = await get_user_country(db, current_user.id)
+        tmdb_age_rating = _extract_show_content_rating(tmdb_extra, user_country) if tmdb_extra else None
+        await _persist_content_rating(db, show, tmdb_age_rating)
+
         return {
             **show_dict,
             "episode_order": selected_episode_order,
@@ -790,7 +928,7 @@ async def get_show(
             ),
             "seasons_meta": enhanced_seasons_meta,
             "original_language": (show.tmdb_data or {}).get("original_language") or (tmdb_extra or {}).get("original_language"),
-            "age_rating": _extract_show_content_rating(tmdb_extra) if tmdb_extra else None,
+            "age_rating": tmdb_age_rating,
             "imdb_id": (tmdb_extra or show.tmdb_data or {}).get("external_ids", {}).get("imdb_id"),
             "adult": (tmdb_extra or show.tmdb_data or {}).get("adult", False),
             "in_library": state_item.get("collection_pct", 0) > 0 if state_item else False,
@@ -872,7 +1010,7 @@ async def get_show(
             "last_air_date": data.get("last_air_date"),
             "genres": [g["name"] for g in data.get("genres", [])],
             "original_language": data.get("original_language"),
-            "age_rating": _extract_show_content_rating(data),
+            "age_rating": _extract_show_content_rating(data, await get_user_country(db, current_user.id)),
             "imdb_id": data.get("external_ids", {}).get("imdb_id"),
             "adult": data.get("adult", False),
             "in_library": state_item_tmdb.get("collection_pct", 0) > 0,
@@ -911,11 +1049,24 @@ async def get_show(
 
 @router.get("/{series_tmdb_id}/recommendations")
 async def get_show_recommendations(
-    series_tmdb_id: int,
+    series_tmdb_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Fetch series recommendations from TMDB and enrich with state."""
+    provider, numeric_id, _ = parse_show_id_or_uri(series_tmdb_id)
+    if provider == "tvdb":
+        show_res = await db.execute(select(ShowModel).where(ShowModel.tvdb_id == numeric_id))
+        show = show_res.scalar_one_or_none()
+        if show and show.tmdb_id:
+            numeric_id = show.tmdb_id
+        else:
+            from utils.alias_lookup import get_provider_id_for_uri
+            t_id = await get_provider_id_for_uri(db, f"tvdb:s:{numeric_id}", "tmdb")
+            if t_id:
+                numeric_id = int(t_id)
+
+    series_tmdb_id = numeric_id
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(tmdb_key):
         return {"results": []}
@@ -938,7 +1089,7 @@ async def get_show_recommendations(
             }
             for r in recs_raw
         ]
-        await enrich_with_state(db, current_user.id, recommendations)
+        await enrich_with_state(db, current_user.id, recommendations, hide_blocked=True)
         return {"results": recommendations}
     except Exception:
         return {"results": []}
@@ -946,11 +1097,16 @@ async def get_show_recommendations(
 
 @router.get("/{series_tmdb_id}/season/{season_number}")
 async def get_show_season(
-    series_tmdb_id: int,
+    series_tmdb_id: str,
     season_number: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    provider, numeric_id, _ = parse_show_id_or_uri(series_tmdb_id)
+    if provider == "tvdb":
+        return await get_tvdb_season(tvdb_id=numeric_id, season_number=season_number, db=db, current_user=current_user)
+
+    series_tmdb_id = numeric_id
     # 1. Try to find show and local episodes for this season
     show_result = await db.execute(
         select(ShowModel).where(ShowModel.tmdb_id == series_tmdb_id)
@@ -1288,12 +1444,23 @@ async def get_show_season(
 
 @router.get("/{series_tmdb_id}/season/{season_number}/{episode_number}")
 async def get_episode_detail(
-    series_tmdb_id: int,
+    series_tmdb_id: str,
     season_number: int,
     episode_number: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    provider, numeric_id, _ = parse_show_id_or_uri(series_tmdb_id)
+    if provider == "tvdb":
+        return await get_tvdb_episode(
+            tvdb_id=numeric_id,
+            season_number=season_number,
+            episode_number=episode_number,
+            db=db,
+            current_user=current_user,
+        )
+
+    series_tmdb_id = numeric_id
     api_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(api_key):
         raise HTTPException(status_code=404, detail="TMDB API Key not configured")
@@ -1442,10 +1609,15 @@ async def get_episode_detail(
 
 @router.post("/{series_tmdb_id}/refresh")
 async def refresh_show_metadata(
-    series_tmdb_id: int,
+    series_tmdb_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    provider, numeric_id, _ = parse_show_id_or_uri(series_tmdb_id)
+    if provider == "tvdb":
+        return await refresh_tvdb_show_metadata(tvdb_id=numeric_id, db=db, current_user=current_user)
+
+    series_tmdb_id = numeric_id
     api_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(api_key):
         raise HTTPException(status_code=400, detail="TMDB API key not configured")
@@ -1571,10 +1743,12 @@ async def refresh_show_metadata(
 
 @router.get("/tvdb/{tvdb_id}")
 async def get_tvdb_show(
-    tvdb_id: int,
+    tvdb_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _, numeric_tvdb_id, _ = parse_show_id_or_uri(tvdb_id)
+    tvdb_id = numeric_tvdb_id
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
@@ -1587,20 +1761,23 @@ async def get_tvdb_show(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
-    show_data = tvdb_client.format_series(raw, language=tvdb_lang)
+    show_data = tvdb_client.format_series(
+        raw, language=tvdb_lang, country=await get_user_country(db, current_user.id)
+    )
     cast = tvdb_client.format_cast(raw)
 
     series_tmdb_id = show_data.get("tmdb_id_cross")
     series_tmdb_id = int(series_tmdb_id) if series_tmdb_id else None
-    show_result = await db.execute(
-        select(ShowModel).where(
-            or_(
-                ShowModel.tvdb_id == tvdb_id,
-                ShowModel.tmdb_id == series_tmdb_id,
-            )
-        )
-    )
-    show = show_result.scalar_one_or_none()
+    # Guard the OR: comparing a column to None renders as `IS NULL`, which would
+    # match every show without a TMDB id. Also use first() — a TVDB id and a TMDB
+    # id can legitimately resolve to two different rows.
+    _show_match = [ShowModel.tvdb_id == tvdb_id]
+    if series_tmdb_id is not None:
+        _show_match.append(ShowModel.tmdb_id == series_tmdb_id)
+    show_result = await db.execute(select(ShowModel).where(or_(*_show_match)))
+    show = show_result.scalars().first()
+    if show and show.tmdb_id and not series_tmdb_id:
+        series_tmdb_id = show.tmdb_id
 
     mapping_result = await db.execute(
         select(EpisodeOrderMapping).where(
@@ -1764,9 +1941,13 @@ async def get_tvdb_show(
     networks = [{"id": None, "name": n.get("name"), "logo_path": None, "origin_country": None}
                 for n in (raw.get("networks") or []) if n.get("name")]
 
+    await _persist_content_rating(db, show, show_data.get("age_rating"))
+
     return {
         **show_data,
         "id": show.id if show else None,
+        "tvdb_id": tvdb_id,
+        "uri_id": f"tvdb:s:{tvdb_id}",
         "tmdb_id": series_tmdb_id,
         "type": "series",
         "tagline": None,
@@ -1795,11 +1976,13 @@ async def get_tvdb_show(
 
 @router.get("/tvdb/{tvdb_id}/season/{season_number}")
 async def get_tvdb_season(
-    tvdb_id: int,
+    tvdb_id: str,
     season_number: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _, numeric_tvdb_id, _ = parse_show_id_or_uri(tvdb_id)
+    tvdb_id = numeric_tvdb_id
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
@@ -1816,19 +1999,18 @@ async def get_tvdb_season(
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
     show_data = tvdb_client.format_series(raw_series, language=tvdb_lang)
-    eps = [tvdb_client.format_episode(e) for e in raw_episodes]
+    eps = [tvdb_client.format_episode(e, language=tvdb_lang) for e in raw_episodes]
 
     series_tmdb_id = show_data.get("tmdb_id_cross")
     series_tmdb_id = int(series_tmdb_id) if series_tmdb_id else None
-    show_result = await db.execute(
-        select(ShowModel).where(
-            or_(
-                ShowModel.tvdb_id == tvdb_id,
-                ShowModel.tmdb_id == series_tmdb_id,
-            )
-        )
-    )
-    show = show_result.scalar_one_or_none()
+    # Guard the OR: comparing a column to None renders as `IS NULL`, which would
+    # match every show without a TMDB id. Also use first() — a TVDB id and a TMDB
+    # id can legitimately resolve to two different rows.
+    _show_match = [ShowModel.tvdb_id == tvdb_id]
+    if series_tmdb_id is not None:
+        _show_match.append(ShowModel.tmdb_id == series_tmdb_id)
+    show_result = await db.execute(select(ShowModel).where(or_(*_show_match)))
+    show = show_result.scalars().first()
 
     mapping_result = await db.execute(
         select(EpisodeOrderMapping).where(
@@ -2010,12 +2192,14 @@ async def get_tvdb_season(
 
 @router.get("/tvdb/{tvdb_id}/season/{season_number}/episode/{episode_number}")
 async def get_tvdb_episode(
-    tvdb_id: int,
+    tvdb_id: str,
     season_number: int,
     episode_number: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _, numeric_tvdb_id, _ = parse_show_id_or_uri(tvdb_id)
+    tvdb_id = numeric_tvdb_id
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")
@@ -2032,22 +2216,28 @@ async def get_tvdb_episode(
         raise HTTPException(status_code=502, detail=f"TVDB fetch failed: {e}")
 
     show_data = tvdb_client.format_series(raw_series, language=tvdb_lang)
-    eps = [tvdb_client.format_episode(e) for e in raw_episodes]
-    ep_data = next((e for e in eps if e.get("episode_number") == episode_number), None)
+    eps = [tvdb_client.format_episode(e, language=tvdb_lang) for e in raw_episodes]
+    ep_data = next(
+        (
+            e for e in eps
+            if e.get("episode_number") == episode_number
+            and e.get("season_number") == season_number
+        ),
+        None,
+    )
     if not ep_data:
         raise HTTPException(status_code=404, detail="Episode not found")
 
     series_tmdb_id = show_data.get("tmdb_id_cross")
     series_tmdb_id = int(series_tmdb_id) if series_tmdb_id else None
-    show_result = await db.execute(
-        select(ShowModel).where(
-            or_(
-                ShowModel.tvdb_id == tvdb_id,
-                ShowModel.tmdb_id == series_tmdb_id,
-            )
-        )
-    )
-    show = show_result.scalar_one_or_none()
+    # Guard the OR: comparing a column to None renders as `IS NULL`, which would
+    # match every show without a TMDB id. Also use first() — a TVDB id and a TMDB
+    # id can legitimately resolve to two different rows.
+    _show_match = [ShowModel.tvdb_id == tvdb_id]
+    if series_tmdb_id is not None:
+        _show_match.append(ShowModel.tmdb_id == series_tmdb_id)
+    show_result = await db.execute(select(ShowModel).where(or_(*_show_match)))
+    show = show_result.scalars().first()
     mapping_result = await db.execute(
         select(EpisodeOrderMapping).where(
             EpisodeOrderMapping.series_tmdb_id == series_tmdb_id,
@@ -2168,10 +2358,12 @@ async def get_tvdb_episode(
 
 @router.post("/tvdb/{tvdb_id}/refresh")
 async def refresh_tvdb_show_metadata(
-    tvdb_id: int,
+    tvdb_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _, numeric_tvdb_id, _ = parse_show_id_or_uri(tvdb_id)
+    tvdb_id = numeric_tvdb_id
     api_key = await get_user_tvdb_key(db, current_user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="TVDB API key not configured")

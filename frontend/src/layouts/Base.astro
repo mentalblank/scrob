@@ -432,7 +432,7 @@ const bottomNavItem = (active: boolean) =>
       const t = item?.type;
       
       if (preferTvdb) {
-        if (t === 'series' && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+        if ((t === 'series' || t === 'show') && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
         if (t === 'person' && item.tvdb_id) return `/person/tvdb:p:${item.tvdb_id}`;
       }
 
@@ -440,7 +440,7 @@ const bottomNavItem = (active: boolean) =>
         const p = item.uri_id.split(':');
         if (p.length === 3) {
           const [prov, pfx, numId] = p;
-          if (preferTvdb && pfx === 's' && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+          if (preferTvdb && (pfx === 's' || t === 'series' || t === 'show') && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
           if (preferTvdb && pfx === 'p' && item.tvdb_id) return `/person/tvdb:p:${item.tvdb_id}`;
           
           if (pfx === 's') return `/show/${prov}:s:${numId}`;
@@ -453,7 +453,7 @@ const bottomNavItem = (active: boolean) =>
         if (item.tmdb_id) return `/media/movie/tmdb:m:${item.tmdb_id}`;
         return '/';
       }
-      if (t === 'series') {
+      if (t === 'series' || t === 'show') {
         if (preferTvdb && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
         if (item.tmdb_id) return `/show/tmdb:s:${item.tmdb_id}`;
         if (item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
@@ -1586,6 +1586,18 @@ const bottomNavItem = (active: boolean) =>
       let uriId = card.dataset.uriId || '';
       const mediaId = card.dataset.id || '';
       let mediaType = card.dataset.mediaType!;
+
+      // Season cards render as data-media-type="season", but every downstream
+      // branch is written against 'series' + a season number. Without this the
+      // watched handler matches no branch at all (silently doing nothing) and
+      // collect posts media_type=season, which the API rejects as an invalid enum.
+      if (mediaType === 'season') {
+        mediaType = 'series';
+        const showUriId = card.dataset.showUriId || '';
+        if (showUriId) uriId = showUriId;
+        const showTmdbId = card.dataset.showTmdbId || '';
+        if (showTmdbId) tmdbId = showTmdbId;
+      }
 
       const isBlockAction = ['block', 'block-item', 'drop', 'unified-block'].includes(action);
       if ((isBlockAction || action === 'request') && mediaType === 'episode') {

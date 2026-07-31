@@ -5,7 +5,7 @@ import MediaCard from "../../components/MediaCard.astro";
 import CommentsSection from "../../components/CommentsSection.astro";
 import Pagination from "../../components/Pagination.astro";
 import InfiniteScroll from "../../components/InfiniteScroll.astro";
-import { api, type MediaItem } from "../../lib/api";
+import { api, tmdbImageUrl, type MediaItem } from "../../lib/api";
 export const prerender = false;
 
 const { id } = Astro.params;
@@ -55,7 +55,7 @@ const personUri = (person as any).uri_id ?? fetchKey;
           <div class="relative w-full aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl mb-6 group/photo">
             <button id="poster-zoom-btn" class="w-full h-full block cursor-zoom-in" aria-label={`Enlarge photo of ${person.name}`}>
               <img
-                src={person.profile_path}
+                src={tmdbImageUrl(person.profile_path, "w185")}
                 alt={person.name}
                 class="w-full h-full object-cover transition-transform duration-300 group-hover/photo:scale-105"
                 loading="eager"

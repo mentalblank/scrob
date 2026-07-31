@@ -14,7 +14,7 @@ let blockedItems: MediaItem[] = [];
 let droppedItems: MediaItem[] = [];
 let blockedItemsCount = 0;
 let droppedItemsCount = 0;
-let filters: ContentFilters = { blocked_genres: [], blocked_keywords: [], blocked_regexes: [], filter_languages: [], language_filter_mode: "blacklist", available_genres: [] };
+let filters: ContentFilters = { blocked_genres: [], blocked_keywords: [], blocked_regexes: [], filter_languages: [], language_filter_mode: "blacklist", blocked_ratings: [], available_genres: [], available_ratings: [] };
 let error = "";
 
 try {
@@ -90,6 +90,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
       { id: "dropped",   label: "Dropped Shows",       icon: "M19 14l-7 7-7-7" },
       { id: "genres",    label: "Genre Filters",       icon: "M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17" },
       { id: "languages", label: "Language Filters",    icon: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-18a8 8 0 1 1 0 16 8 8 0 0 1 0-16z M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" },
+      { id: "ratings",   label: "Rating Filters",      icon: "M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.3 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8L12 2z" },
       { id: "keywords",  label: "Keywords & Regex",    icon: "m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" },
     ].map(t => (
       <a
@@ -109,6 +110,9 @@ const LANGUAGE_NAMES: Record<string, string> = {
         )}
         {t.id === "languages" && (filters.filter_languages || []).length > 0 && (
           <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{(filters.filter_languages || []).length}</span>
+        )}
+        {t.id === "ratings" && filters.blocked_ratings.length > 0 && (
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{filters.blocked_ratings.length}</span>
         )}
         {t.id === "keywords" && (filters.blocked_keywords.length + filters.blocked_regexes.length) > 0 && (
           <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{filters.blocked_keywords.length + filters.blocked_regexes.length}</span>
@@ -208,6 +212,62 @@ const LANGUAGE_NAMES: Record<string, string> = {
       ))}
 
       <div id="genre-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
+    </div>
+  )}
+
+  <!-- ── Tab: Content Rating Filters ────────────────────── -->
+  {tab === "ratings" && (
+    <div id="rating-panel">
+      <p class="text-sm text-zinc-400 mb-6">
+        Click a rating to block it. Anything carrying a blocked certification is hidden from browsing, search and discovery. Ratings are region-specific (<span class="text-zinc-300">MA15+</span>, <span class="text-zinc-300">TV-MA</span>, <span class="text-zinc-300">+18</span>…) — the list below shows what's in your library plus common values, and you can add any other. Changes are saved automatically.
+      </p>
+
+      <div class="mb-6">
+        <h2 class="text-xs font-black uppercase tracking-widest text-zinc-500 mb-3">Ratings</h2>
+        <div id="rating-chips" class="flex flex-wrap gap-2">
+          {[...new Set([...filters.available_ratings, ...filters.blocked_ratings])].map(rating => {
+            const isBlocked = filters.blocked_ratings.includes(rating);
+            return (
+              <button
+                data-action="toggle-rating"
+                data-rating={rating}
+                class={`rating-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none ${
+                  isBlocked
+                    ? "bg-rose-600/20 border-rose-500/50 text-rose-300 hover:bg-rose-600/30"
+                    : "bg-zinc-900/60 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                }`}
+              >
+                {isBlocked && (
+                  <svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                )}
+                {rating}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div class="mb-4 max-w-md">
+        <h2 class="text-xs font-black uppercase tracking-widest text-zinc-500 mb-3">Add another rating</h2>
+        <div class="flex gap-2">
+          <input
+            type="text"
+            id="rating-custom-input"
+            maxlength="16"
+            placeholder="e.g. MA15+, R18+, 15"
+            class="flex-1 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
+          />
+          <button
+            id="rating-custom-add"
+            class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
+          >
+            Block
+          </button>
+        </div>
+        <p class="text-xs text-zinc-500 mt-2">Use the exact value shown on the title's page, e.g. "Content Rating MA15+".</p>
+      </div>
+
+      <div id="rating-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
     </div>
   )}
 
@@ -443,6 +503,96 @@ const LANGUAGE_NAMES: Record<string, string> = {
         btn.innerHTML = `<svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>${genre}`;
       }
       await saveGenres();
+    });
+  }
+
+  // ── Content rating toggle ─────────────────────────────────────────────────
+  const ratingPanel = document.getElementById('rating-panel');
+  if (ratingPanel) {
+    const token = (document.getElementById('app-data') as HTMLElement)?.dataset.token;
+    const status = document.getElementById('rating-save-status');
+    const blockedRatings: Set<string> = new Set(
+      Array.from(document.querySelectorAll('.rating-chip[data-rating]'))
+        .filter(el => el.classList.contains('bg-rose-600/20'))
+        .map(el => (el as HTMLElement).dataset.rating!)
+    );
+
+    function setRatingStatus(msg: string, ok = true) {
+      if (!status) return;
+      status.textContent = msg;
+      status.className = `text-xs mt-2 h-4 transition-opacity ${ok ? 'text-emerald-400' : 'text-red-400'}`;
+      setTimeout(() => { status.textContent = ''; }, 2000);
+    }
+
+    async function saveRatings() {
+      try {
+        const res = await fetch('/api/proxy/media/content-filters/ratings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ ratings: Array.from(blockedRatings) }),
+        });
+        if (!res.ok) throw new Error();
+        setRatingStatus(`✓ Saved — ${blockedRatings.size} rating${blockedRatings.size !== 1 ? 's' : ''} blocked`);
+      } catch {
+        setRatingStatus('✗ Failed to save', false);
+      }
+    }
+
+    const chipsEl = document.getElementById('rating-chips');
+    const customInput = document.getElementById('rating-custom-input') as HTMLInputElement | null;
+
+    function makeChip(rating: string, blocked: boolean) {
+      const btn = document.createElement('button');
+      btn.dataset.action = 'toggle-rating';
+      btn.dataset.rating = rating;
+      btn.className = `rating-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none ${
+        blocked
+          ? 'bg-rose-600/20 border-rose-500/50 text-rose-300 hover:bg-rose-600/30'
+          : 'bg-zinc-900/60 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100'
+      }`;
+      btn.innerHTML = blocked
+        ? `<svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>${rating}`
+        : rating;
+      return btn;
+    }
+
+    async function addCustomRating() {
+      const raw = (customInput?.value ?? '').trim().toUpperCase().slice(0, 16);
+      if (!raw) return;
+      if (customInput) customInput.value = '';
+      if (blockedRatings.has(raw)) return;
+      blockedRatings.add(raw);
+      const existing = chipsEl?.querySelector(`[data-rating="${CSS.escape(raw)}"]`);
+      if (existing) {
+        existing.replaceWith(makeChip(raw, true));
+      } else {
+        chipsEl?.appendChild(makeChip(raw, true));
+      }
+      await saveRatings();
+    }
+
+    document.getElementById('rating-custom-add')?.addEventListener('click', addCustomRating);
+    customInput?.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter') {
+        e.preventDefault();
+        addCustomRating();
+      }
+    });
+
+    ratingPanel.addEventListener('click', async (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-action="toggle-rating"]') as HTMLElement;
+      if (!btn) return;
+      const rating = btn.dataset.rating!;
+      if (blockedRatings.has(rating)) {
+        blockedRatings.delete(rating);
+        btn.className = 'rating-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none bg-zinc-900/60 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100';
+        btn.innerHTML = rating;
+      } else {
+        blockedRatings.add(rating);
+        btn.className = 'rating-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none bg-rose-600/20 border-rose-500/50 text-rose-300 hover:bg-rose-600/30';
+        btn.innerHTML = `<svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>${rating}`;
+      }
+      await saveRatings();
     });
   }
 </script>

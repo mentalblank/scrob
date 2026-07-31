@@ -29,10 +29,20 @@ class _ExistingResult(_EmptyResult):
 
 
 class _ScalarOneResult:
+    """Stands in for a single-row Result. Supports both the scalar_one_or_none
+    and scalars().first() access styles, since callers use whichever is safe for
+    the query they issued."""
+
     def __init__(self, item):
         self.item = item
 
     def scalar_one_or_none(self):
+        return self.item
+
+    def scalars(self):
+        return self
+
+    def first(self):
         return self.item
 
 

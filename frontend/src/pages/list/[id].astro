@@ -174,6 +174,36 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
               >{list.description || ""}</textarea>
             </div>
 
+            <div>
+              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3 text-center">Privacy</label>
+              <div class="grid grid-cols-3 gap-2">
+                <label class="relative flex flex-col items-center p-3 rounded-xl border border-zinc-800 bg-zinc-950/40 cursor-pointer transition-all hover:bg-zinc-900/40 group">
+                  <input type="radio" name="edit-privacy" value="private" checked={list.privacy_level === "private"} class="sr-only peer" />
+                  <div class="absolute inset-0 rounded-xl border-2 border-transparent peer-checked:border-blue-600 transition-all"></div>
+                  <span class="text-[10px] font-black uppercase tracking-widest peer-checked:text-blue-400 mb-1 text-zinc-400">Private</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 peer-checked:text-blue-500 text-zinc-400">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+                  </svg>
+                </label>
+                <label class="relative flex flex-col items-center p-3 rounded-xl border border-zinc-800 bg-zinc-950/40 cursor-pointer transition-all hover:bg-zinc-900/40 group">
+                  <input type="radio" name="edit-privacy" value="friends_only" checked={list.privacy_level === "friends_only"} class="sr-only peer" />
+                  <div class="absolute inset-0 rounded-xl border-2 border-transparent peer-checked:border-blue-600 transition-all"></div>
+                  <span class="text-[10px] font-black uppercase tracking-widest peer-checked:text-blue-400 mb-1 text-zinc-400">Friends</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 peer-checked:text-blue-500 text-zinc-400">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.998 5.998 0 0 0-12 0" />
+                  </svg>
+                </label>
+                <label class="relative flex flex-col items-center p-3 rounded-xl border border-zinc-800 bg-zinc-950/40 cursor-pointer transition-all hover:bg-zinc-900/40 group">
+                  <input type="radio" name="edit-privacy" value="public" checked={list.privacy_level === "public"} class="sr-only peer" />
+                  <div class="absolute inset-0 rounded-xl border-2 border-transparent peer-checked:border-blue-600 transition-all"></div>
+                  <span class="text-[10px] font-black uppercase tracking-widest peer-checked:text-blue-400 mb-1 text-zinc-400">Public</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 peer-checked:text-blue-500 text-zinc-400">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582" />
+                  </svg>
+                </label>
+              </div>
+            </div>
+
             <div id="edit-error" class="hidden text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"></div>
             <div class="flex justify-end gap-3 pt-4 border-t border-zinc-800/50 mt-6">
               <button type="button" id="edit-cancel-btn" class="px-6 py-2.5 text-zinc-500 hover:text-zinc-300 font-bold transition-all text-sm cursor-pointer">Cancel</button>
@@ -552,6 +582,9 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
     if (path.startsWith('http://') || path.startsWith('https://')) {
       const m = /image\.tmdb\.org\/t\/p\/([^/]+)(\/.+)$/.exec(path);
       if (m) return `/api/proxy/media/image/${m[1]}${m[2]}`;
+      // TVDB artwork caches under the pseudo-size "tvdb"
+      const t = /artworks\.thetvdb\.com(\/[^?#]+)/.exec(path);
+      if (t) return `/api/proxy/media/image/tvdb${t[1]}`;
       return path;
     }
     return `/api/proxy/media/image/${size}${path.startsWith('/') ? path : '/' + path}`;
@@ -885,7 +918,9 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
     e.preventDefault();
     const name = document.getElementById('edit-name').value.trim();
     const description = document.getElementById('edit-desc').value.trim() || null;
-    const privacyLevel = document.querySelector('input[name="edit-privacy"]:checked').value;
+    // Omit privacy entirely if the radios aren't rendered, rather than letting a
+    // null lookup throw and silently abandon the whole save.
+    const privacyLevel = document.querySelector('input[name="edit-privacy"]:checked')?.value ?? null;
 
     editSubmitBtn.disabled = true;
     editSubmitBtn.textContent = 'Saving...';
@@ -895,7 +930,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
       const res = await fetch(`/api/proxy/lists/${listId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ name, description, privacy_level: privacyLevel }),
+        body: JSON.stringify(privacyLevel ? { name, description, privacy_level: privacyLevel } : { name, description }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -1124,7 +1159,7 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
           <p class="text-sm font-bold text-zinc-300 truncate group-hover:text-zinc-100 transition-colors leading-snug">${esc(item.title)}</p>
           <p class="text-xs text-zinc-500 mt-0.5">${esc(meta) || (isPerson ? 'Person' : '')}</p>
         `;
-        el.addEventListener('click', () => addItem(item.uri_id, item.type, el, item));
+        el.addEventListener('click', () => addItem(item.uri_id, item.type, el, item, item.tmdb_id));
         searchResults.appendChild(el);
       });
     } catch (err) {
@@ -1259,7 +1294,9 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
       </div>`;
   }
 
-  async function addItem(uriId, mediaType, btn, searchItem) {
+  // Search results for titles that aren't in the local library yet have no
+  // uri_id, so carry the tmdb_id through as the fallback identifier.
+  async function addItem(uriId, mediaType, btn, searchItem, tmdbId) {
     btn.disabled = true;
     const overlay = btn.querySelector('.add-overlay');
     if (overlay) {
@@ -1271,7 +1308,11 @@ const sonarrUrl = `${origin}/api/proxy/sonarr-compat/${list?.id}/api/v3/series`;
       const res = await fetch(`/api/proxy/lists/${listId}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ uri_id: uriId, media_type: mediaType }),
+        body: JSON.stringify({
+          uri_id: uriId ?? (tmdbId != null ? `tmdb:${mediaType === 'movie' ? 'm' : mediaType === 'person' ? 'p' : 's'}:${tmdbId}` : null),
+          tmdb_id: tmdbId ?? null,
+          media_type: mediaType,
+        }),
       });
 
       if (res.status === 409) {

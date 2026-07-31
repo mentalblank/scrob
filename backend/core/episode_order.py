@@ -128,13 +128,13 @@ async def ensure_episode_order_mapping(
             }
         )
 
-    tmdb_seasons, tvdb_seasons = await asyncio.gather(
+    # One un-filtered fetch covers every season — TVDB returns the whole series
+    # per request, so asking per-season would just repeat the same download.
+    tmdb_seasons, all_tvdb_episodes = await asyncio.gather(
         asyncio.gather(
             *(tmdb.get_season(series_tmdb_id, number, api_key=tmdb_api_key) for number in tmdb_season_numbers)
         ),
-        asyncio.gather(
-            *(tvdb.get_series_episodes(tvdb_id, number, tvdb_api_key) for number in tvdb_season_numbers)
-        ),
+        tvdb.get_series_episodes(tvdb_id, None, tvdb_api_key),
     )
 
     tmdb_episodes = [
@@ -143,7 +143,11 @@ async def ensure_episode_order_mapping(
         for episode in season.get("episodes") or []
         if episode.get("season_number") is not None and episode.get("episode_number") is not None
     ]
-    tvdb_episodes = [episode for season in tvdb_seasons for episode in season]
+    wanted_seasons = set(tvdb_season_numbers)
+    tvdb_episodes = [
+        episode for episode in all_tvdb_episodes
+        if episode.get("seasonNumber") in wanted_seasons
+    ]
     tvdb_by_id = {
         int(episode["id"]): episode
         for episode in tvdb_episodes

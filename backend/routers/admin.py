@@ -160,6 +160,7 @@ async def get_cache_stats(
         "total_size_bytes": total_size,
         "entry_count": count,
         "limit_gb": gs.image_cache_limit_gb if gs else None,
+        "expiry_days": gs.image_cache_expiry_days if gs else None,
     }
 
 
@@ -190,6 +191,76 @@ async def admin_heal_metadata(
     await db.refresh(job)
     background_tasks.add_task(run_admin_heal, gs.tmdb_api_key, current_user.id, job.id)
     return {"status": "started", "message": "Server-wide metadata heal is running in the background"}
+
+
+@router.post("/maintenance/backfill-content-ratings")
+async def admin_backfill_content_ratings(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Fill in content_rating for shows/movies that predate the column.
+
+    TMDB only returns certifications on detail fetches, so rating filters can't
+    match anything until each title has been looked up once.
+    """
+    gs = await _get_or_create_global_settings(db)
+    if not gs.tmdb_api_key:
+        raise HTTPException(status_code=400, detail="A global TMDB API key is required")
+    from routers.media import get_user_country
+    country = await get_user_country(db, current_user.id)
+    background_tasks.add_task(run_content_rating_backfill, gs.tmdb_api_key, country)
+    return {"status": "started", "message": "Content rating backfill is running in the background"}
+
+
+async def run_content_rating_backfill(api_key: str, country: str = "US") -> None:
+    import asyncio
+    from models.show import Show
+    from core import tmdb as tmdb_client
+    from core.enrichment import extract_movie_certification, extract_show_content_rating
+
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        semaphore = asyncio.Semaphore(8)
+
+        async def _fetch(kind: str, tmdb_id: int):
+            async with semaphore:
+                try:
+                    if kind == "movie":
+                        data = await tmdb_client.get_movie(tmdb_id, api_key=api_key)
+                        return extract_movie_certification(data, country)
+                    data = await tmdb_client.get_show(tmdb_id, api_key=api_key)
+                    return extract_show_content_rating(data, country)
+                except Exception:
+                    return None
+
+        shows_q = await db.execute(
+            select(Show).where(Show.content_rating.is_(None), Show.tmdb_id.isnot(None))
+        )
+        shows = list(shows_q.scalars().all())
+        for i in range(0, len(shows), 50):
+            chunk = shows[i:i + 50]
+            ratings = await asyncio.gather(*[_fetch("series", s.tmdb_id) for s in chunk])
+            for show, rating in zip(chunk, ratings):
+                if rating:
+                    show.content_rating = rating
+            await db.commit()
+
+        movies_q = await db.execute(
+            select(Media).where(
+                Media.content_rating.is_(None),
+                Media.media_type == MediaType.movie,
+                Media.tmdb_id.isnot(None),
+            )
+        )
+        movies = list(movies_q.scalars().all())
+        for i in range(0, len(movies), 50):
+            chunk = movies[i:i + 50]
+            ratings = await asyncio.gather(*[_fetch("movie", m.tmdb_id) for m in chunk])
+            for movie, rating in zip(chunk, ratings):
+                if rating:
+                    movie.content_rating = rating
+            await db.commit()
 
 
 async def run_admin_heal(api_key: str, user_id: int | None = None, job_id: int | None = None):

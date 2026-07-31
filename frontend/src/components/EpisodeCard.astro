@@ -8,9 +8,12 @@ interface Props {
   item: MediaItem;
   showDismiss?: boolean;
   hideActionBar?: boolean;
+  /** Override the global metadata-source preference — pages that are already
+   *  pinned to one provider must keep their children on the same provider. */
+  preferTvdb?: boolean;
 }
 
-const { item, showDismiss = false, hideActionBar = false } = Astro.props;
+const { item, showDismiss = false, hideActionBar = false, preferTvdb: preferTvdbProp } = Astro.props;
 
 const sxe =
   item.season_number != null && item.episode_number != null
@@ -20,7 +23,7 @@ const sxe =
 const isSeries = item.type === "series";
 
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
-const preferTvdb = primaryMetadataSource === "tvdb";
+const preferTvdb = preferTvdbProp ?? (primaryMetadataSource === "tvdb");
 const href = mediaUrl(item, preferTvdb) || null;
 
 // Episodes: use episode still, fall back to show backdrop then show poster. Movies/Series: use backdrop.
@@ -28,7 +31,7 @@ const rawImage = isSeries
   ? (item.backdrop_path ?? item.poster_path)
   : item.type === "movie"
     ? (item.backdrop_path ?? item.poster_path)
-    : (item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
+    : (item.still_path ?? item.image_url ?? item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
 const imageUrl = tmdbImageUrl(rawImage, "w780");
 
 const watched = item.watched ?? false;

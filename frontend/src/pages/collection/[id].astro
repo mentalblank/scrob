@@ -3,7 +3,7 @@ import Base from "../../layouts/Base.astro";
 import ErrorState from "../../components/ErrorState.astro";
 import MediaCard from "../../components/MediaCard.astro";
 import PosterModal from "../../components/PosterModal.astro";
-import { api, type CollectionDetail } from "../../lib/api";
+import { api, tmdbImageUrl, type CollectionDetail } from "../../lib/api";
 import { personUrl } from "../../lib/urls";
 export const prerender = false;
 
@@ -36,7 +36,7 @@ if (!collection && !error) {
         <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[500px] overflow-hidden" style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);">
           <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent z-10"></div>
           <img
-            src={collection.backdrop_path}
+            src={tmdbImageUrl(collection.backdrop_path, "w1280")}
             alt=""
             class="w-full h-full object-cover opacity-50 blur-[1px]"
             loading="eager"
@@ -57,7 +57,7 @@ if (!collection && !error) {
               {collection.poster_path ? (
                 <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${collection.name}`}>
                   <img
-                    src={collection.poster_path}
+                    src={tmdbImageUrl(collection.poster_path, "w500")}
                     alt={collection.name}
                     class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
                     loading="eager"
@@ -135,7 +135,7 @@ if (!collection && !error) {
                     <div class="aspect-square w-full rounded-2xl overflow-hidden mb-5 ring-1 ring-white/5 group-hover/cast:ring-blue-500/30 transition-all duration-500 shadow-lg">
                       {person.profile_path ? (
                         <img
-                          src={person.profile_path}
+                          src={tmdbImageUrl(person.profile_path, "w185")}
                           alt={person.name}
                           class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
                           loading="lazy"

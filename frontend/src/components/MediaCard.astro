@@ -10,9 +10,12 @@ interface Props {
   hideRating?: boolean;
   hideActionBar?: boolean;
   hideShowTitle?: boolean;
+  /** Override the global metadata-source preference — pages that are already
+   *  pinned to one provider must keep their children on the same provider. */
+  preferTvdb?: boolean;
 }
 
-const { item, hideBlock = false, hideRating = false, hideActionBar = false, hideShowTitle = false } = Astro.props;
+const { item, hideBlock = false, hideRating = false, hideActionBar = false, hideShowTitle = false, preferTvdb: preferTvdbProp } = Astro.props;
 
 const isPerson = item.type === "person";
 const isCollection = item.type === "collection";
@@ -26,7 +29,7 @@ const sxe = isEpisode && item.season_number != null && item.episode_number != nu
   : null;
 
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
-const preferTvdb = primaryMetadataSource === "tvdb";
+const preferTvdb = preferTvdbProp ?? (primaryMetadataSource === "tvdb");
 const href = mediaUrl(item, preferTvdb) || null;
 
 const posterPath = tmdbImageUrl(

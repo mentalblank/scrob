@@ -29,6 +29,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
       const user = await api.auth.me(token);
       context.locals.user = user;
       context.locals.token = token;
+
+      // Sync primary_metadata_source cookie from user preferences
+      const userPref = (user as any)?.preferences?.primary_metadata_source || (user as any)?.settings?.preferences?.primary_metadata_source;
+      if (userPref && context.cookies.get("primary_metadata_source")?.value !== userPref) {
+        context.cookies.set("primary_metadata_source", userPref, {
+          path: "/",
+          maxAge: 31536000,
+          sameSite: "lax",
+        });
+      }
       
       // If logged in and trying to access login/register, redirect to home
       if (pathname === "/login" || pathname === "/register") {
@@ -52,10 +62,19 @@ export const onRequest = defineMiddleware(async (context, next) => {
         }
       }
     } catch (e) {
-      // Token invalid or expired
-      context.cookies.delete("token", { path: "/" });
-      if (!isPublicRoute) {
-        return context.redirect("/login", 302);
+      // Only an auth rejection means the session is actually dead. A network
+      // blip or backend restart used to delete the cookie and bounce the user
+      // to /login mid-click, which looked like a random logout.
+      const status = (e as any)?.status;
+      const isAuthFailure = status === 401 || status === 403;
+      if (isAuthFailure) {
+        context.cookies.delete("token", { path: "/" });
+        if (!isPublicRoute) {
+          return context.redirect("/login", 302);
+        }
+      } else if (!isPublicRoute) {
+        // Keep the session and let the page render its own error state.
+        context.locals.token = token;
       }
     }
   } else {

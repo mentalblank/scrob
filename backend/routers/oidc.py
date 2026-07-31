@@ -117,6 +117,9 @@ async def oidc_exchange(
         )
         username = str(raw_username)[:100]
 
+        count_result = await db.execute(select(func.count()).select_from(User))
+        is_first_user = count_result.scalar_one() == 0
+
         base = username
         counter = 1
         while True:
@@ -131,6 +134,8 @@ async def oidc_exchange(
             username=username,
             password_hash=None,
             api_key=secrets.token_urlsafe(32),
+            is_admin=is_first_user,
+            email_confirmed=True,
         )
         db.add(user)
         await db.commit()

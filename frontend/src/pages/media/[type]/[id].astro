@@ -10,7 +10,7 @@ import VideoPlayer from "../../../components/VideoPlayer.astro";
 import ManualScrobble from "../../../components/ManualScrobble.astro";
 import TrailerButton from "../../../components/TrailerButton.astro";
 import ProgressStrip from "../../../components/ProgressStrip.astro";
-import { api, type MediaItem } from "../../../lib/api";
+import { api, tmdbImageUrl, type MediaItem } from "../../../lib/api";
 import { personUrl } from "../../../lib/urls";
 export const prerender = false;
 
@@ -86,7 +86,7 @@ const activeButtonsCount = [
         <div class="absolute -top-20 md:-top-32 left-1/2 -translate-x-1/2 w-screen h-[600px] lg:h-[700px] xl:h-[780px] 2xl:h-[880px] overflow-hidden" style="mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%);" data-adult-backdrop={item.adult ? "true" : undefined}>
           <div class="absolute inset-0 bg-gradient-to-t from-[var(--color-hero-fade)] via-[var(--color-hero-fade)]/40 to-transparent z-10"></div>
           <img
-            src={item.backdrop_path}
+            src={tmdbImageUrl(item.backdrop_path, "w1280")}
             alt=""
             class="w-full h-full object-cover opacity-50 blur-[1px]"
             loading="eager"
@@ -117,7 +117,7 @@ const activeButtonsCount = [
           {logoPath ? (
             <div class="mb-4 flex flex-col items-center md:items-start">
               <img
-                src={logoPath}
+                src={tmdbImageUrl(logoPath, "w500")}
                 alt={item.title}
                 class="max-h-20 md:max-h-28 max-w-xs md:max-w-sm object-contain drop-shadow-2xl mx-auto md:mx-0"
                 loading="eager"
@@ -145,7 +145,7 @@ const activeButtonsCount = [
                 {item.poster_path ? (
                   <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${item.title}`}>
                     <img
-                      src={item.poster_path}
+                      src={tmdbImageUrl(item.poster_path, "w500")}
                       alt={item.title}
                       class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
                       loading="eager"
@@ -298,7 +298,7 @@ const activeButtonsCount = [
                           const content = (
                             <>
                               {s.logo ? (
-                                <img src={s.logo} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
+                                <img src={tmdbImageUrl(s.logo, "w92")} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
                               ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
                                 <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-6 h-6 rounded-md object-contain shadow-lg" />
                               ) : (
@@ -347,7 +347,7 @@ const activeButtonsCount = [
                           const content = (
                             <>
                               {s.logo ? (
-                                <img src={s.logo} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                                <img src={tmdbImageUrl(s.logo, "w92")} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
                               ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
                                 <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-4 h-4 rounded-sm object-contain opacity-70 group-hover:opacity-100 transition-opacity" />
                               ) : (
@@ -448,7 +448,7 @@ const activeButtonsCount = [
                   <div class="pt-3 border-t border-zinc-800/60 flex flex-col gap-1.5">
                     <span class="text-zinc-500 text-[10px]">Studio</span>
                     <div class="flex items-center gap-2">
-                      <img src={productionCompany.logo_path} alt={productionCompany.name} title={productionCompany.name} class="h-4 max-w-[90px] object-contain opacity-70" />
+                      <img src={tmdbImageUrl(productionCompany.logo_path, "w154")} alt={productionCompany.name} title={productionCompany.name} class="h-4 max-w-[90px] object-contain opacity-70" />
                       <span class="text-zinc-300 text-[11px] font-medium">{productionCompany.name}</span>
                     </div>
                   </div>
@@ -525,7 +525,7 @@ const activeButtonsCount = [
                 )}
                 {productionCompany && (
                   <span class="flex items-center" title={productionCompany.name}>
-                    <img src={productionCompany.logo_path} alt={productionCompany.name} class="h-4 max-w-[80px] object-contain opacity-80" loading="lazy" />
+                    <img src={tmdbImageUrl(productionCompany.logo_path, "w154")} alt={productionCompany.name} class="h-4 max-w-[80px] object-contain opacity-80" loading="lazy" />
                   </span>
                 )}
               </div>
@@ -582,7 +582,7 @@ const activeButtonsCount = [
                       <div class="aspect-square w-full rounded-xl overflow-hidden mb-3 ring-1 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-300 shadow-md">
                         {person.profile_path ? (
                           <img
-                            src={person.profile_path}
+                            src={tmdbImageUrl(person.profile_path, "w185")}
                             alt={person.name}
                             class="w-full h-full object-cover group-hover/cast:scale-105 transition-transform duration-500"
                             loading="lazy"

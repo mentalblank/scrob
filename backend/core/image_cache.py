@@ -18,8 +18,14 @@ from models.global_settings import GlobalSettings
 
 logger = logging.getLogger(__name__)
 
-# Valid TMDB image sizes to prevent traversal / arbitrary requests
-ALLOWED_SIZES = {"w92", "w154", "w185", "w342", "w500", "w780", "w1280", "original"}
+# Valid TMDB image sizes to prevent traversal / arbitrary requests.
+# Covers every configured size across TMDB's poster/backdrop/still/profile/logo
+# sets — profiles use w45/h632 and backdrops/stills use w300, so omitting them
+# made those requests 400 instead of caching.
+ALLOWED_SIZES = {
+    "w45", "w92", "w154", "w185", "w300", "w342",
+    "w500", "w780", "w1280", "h632", "original",
+}
 
 # Pseudo-size used as the cache key namespace for TVDB artwork.
 # TVDB URLs have no size/path structure, so the full path under
@@ -162,6 +168,38 @@ async def _prune_type(db, image_type: str, total_size: int, limit_bytes: int) ->
     return total_size
 
 
+async def expire_stale_images(db, expiry_days: int | None) -> int:
+    """Delete cached images older than expiry_days. Returns the number removed."""
+    if not expiry_days or expiry_days <= 0:
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=expiry_days)
+    rows = (await db.execute(
+        select(ImageCache.id, ImageCache.size, ImageCache.path)
+        .where(ImageCache.created_at < cutoff)
+    )).all()
+    if not rows:
+        return 0
+
+    ids_to_delete = []
+    for row in rows:
+        local_path = settings.data_dir / "image_cache" / row.size / row.path.lstrip("/")
+        try:
+            if local_path.exists():
+                local_path.unlink()
+        except Exception as e:
+            logger.error(f"Failed to delete expired cached image {local_path}: {e}")
+        ids_to_delete.append(row.id)
+
+    for i in range(0, len(ids_to_delete), _MAX_IN_PARAMS):
+        chunk = ids_to_delete[i : i + _MAX_IN_PARAMS]
+        await db.execute(sa_delete(ImageCache).where(ImageCache.id.in_(chunk)))
+    await db.commit()
+
+    logger.info(f"Expired {len(ids_to_delete)} cached images older than {expiry_days} day(s).")
+    return len(ids_to_delete)
+
+
 async def prune_cache(db, limit_gb: int):
     """Evict images from cache when exceeding the limit. Prunes on-demand first, then collected."""
     if not limit_gb or limit_gb <= 0:
@@ -182,16 +220,17 @@ async def prune_cache(db, limit_gb: int):
     await db.commit()
 
 
-async def prune_cache_bg(limit_gb: int):
-    """Throttled background prune: runs at most once every 5 minutes."""
+async def prune_cache_bg(limit_gb: int, expiry_days: int | None = None):
+    """Throttled background maintenance: expiry sweep then size prune, at most every 5 minutes."""
     global _last_prune_at
-    if not limit_gb or limit_gb <= 0:
+    if (not limit_gb or limit_gb <= 0) and (not expiry_days or expiry_days <= 0):
         return
     now = datetime.now(timezone.utc)
     if now - _last_prune_at < _PRUNE_INTERVAL:
         return
     _last_prune_at = now
     async with AsyncSessionLocal() as db:
+        await expire_stale_images(db, expiry_days)
         await prune_cache(db, limit_gb)
 
 
@@ -259,11 +298,16 @@ async def pre_cache_all_collected_bg():
     """Run pre-caching in the background with a dedicated session."""
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
-            select(GlobalSettings.image_cache_enabled, GlobalSettings.image_cache_limit_gb)
+            select(
+                GlobalSettings.image_cache_enabled,
+                GlobalSettings.image_cache_limit_gb,
+                GlobalSettings.image_cache_expiry_days,
+            )
             .where(GlobalSettings.id == 1)
         )).one_or_none()
         if not row or not row.image_cache_enabled:
             return
+        await expire_stale_images(db, row.image_cache_expiry_days)
         await pre_cache_all_collected(db)
         if row.image_cache_limit_gb:
             await prune_cache(db, row.image_cache_limit_gb)

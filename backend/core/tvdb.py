@@ -46,8 +46,11 @@ _TVDB_LANG: dict[str, str] = {
 def tvdb_language(metadata_language: str | None) -> str | None:
     """Convert a BCP 47 metadata_language code to the ISO 639-3 code TVDB expects."""
     if not metadata_language:
-        return None
-    return _TVDB_LANG.get(metadata_language)
+        return "eng"
+    if metadata_language in _TVDB_LANG:
+        return _TVDB_LANG[metadata_language]
+    short_lang = metadata_language.split("-")[0]
+    return _TVDB_LANG.get(short_lang, "eng")
 
 
 def _image_url(path: str | None) -> str | None:
@@ -86,10 +89,13 @@ async def _get_token(api_key: str) -> str:
 
 async def _get(path: str, api_key: str, params: dict | None = None) -> dict:
     token = await _get_token(api_key)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    if params and params.get("language"):
+        headers["Accept-Language"] = str(params["language"])
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         r = await client.get(
             f"{TVDB_BASE}{path}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            headers=headers,
             params=params or {},
         )
         r.raise_for_status()
@@ -170,31 +176,43 @@ def format_season(raw: dict, language: str | None = None) -> dict:
     }
 
 
-async def get_series_episodes(tvdb_id: int, season_number: int, api_key: str, language: str | None = None) -> list[dict]:
-    """Fetch episodes for a specific season (season_type=official)."""
+async def get_series_episodes(tvdb_id: int, season_number: int | None, api_key: str, language: str | None = None) -> list[dict]:
+    """Fetch episodes for a series (season_type=official), optionally filtered to one season.
+
+    TVDB v4 ignores the ``season`` query parameter unless ``episodeNumber`` is also
+    supplied, so it always returns every episode of the series. Filter client-side
+    instead, otherwise callers see specials and other seasons mixed in.
+    """
     episodes = []
     page = 0
+    lang = language or "eng"
     while True:
-        params: dict = {"page": page, "season": season_number}
-        if language:
-            params["language"] = language
         data = await _get(
-            f"/series/{tvdb_id}/episodes/official",
+            f"/series/{tvdb_id}/episodes/official/{lang}",
             api_key,
-            params=params,
+            params={"page": page},
         )
         batch = (data.get("data") or {}).get("episodes") or []
         if not batch:
             break
         episodes.extend(batch)
-        # TVDB paginates at 500; if we got fewer, we're done
-        if len(batch) < 500:
+        if not (data.get("links") or {}).get("next"):
             break
         page += 1
+    if season_number is not None:
+        episodes = [e for e in episodes if e.get("seasonNumber") == season_number]
     return episodes
 
 
-def format_series(raw: dict, language: str | None = None) -> dict:
+_COUNTRY_TO_TVDB = {
+    "US": "usa", "AU": "aus", "GB": "gbr", "CA": "can", "NZ": "nzl",
+    "DE": "deu", "FR": "fra", "ES": "esp", "IT": "ita", "NL": "nld",
+    "SE": "swe", "NO": "nor", "DK": "dnk", "FI": "fin", "IE": "irl",
+    "BR": "bra", "MX": "mex", "JP": "jpn", "KR": "kor",
+}
+
+
+def format_series(raw: dict, language: str | None = None, country: str | None = None) -> dict:
     """Normalise TVDB extended series data into a frontend-friendly dict."""
     image = raw.get("image") or ""
     poster = _image_url(image) if image else None
@@ -250,15 +268,23 @@ def format_series(raw: dict, language: str | None = None) -> dict:
         if n.get("primaryLanguage") == "eng" or not network:
             network = n.get("name")
 
+    # Prefer the viewer's own region, then US, then whatever exists — ratings are
+    # region-specific, so an AU user should get MA15+ where a US user gets TV-MA.
     age_rating = None
-    for cr in raw.get("contentRatings") or []:
-        if cr.get("country") == "usa" and cr.get("contentType") == "TV":
-            age_rating = cr.get("name")
+    ratings = raw.get("contentRatings") or []
+    preferred_codes = [c for c in (_COUNTRY_TO_TVDB.get((country or "").upper()), "usa") if c]
+    for code in preferred_codes:
+        for cr in ratings:
+            if cr.get("country") == code and cr.get("name"):
+                age_rating = cr["name"]
+                break
+        if age_rating:
             break
     if not age_rating:
-        for cr in raw.get("contentRatings") or []:
-            age_rating = cr.get("name")
-            break
+        for cr in ratings:
+            if cr.get("name"):
+                age_rating = cr["name"]
+                break
 
     imdb_id = None
     tmdb_id_cross = None
@@ -299,7 +325,9 @@ def format_cast(raw: dict) -> list[dict]:
     return [
         {
             "tmdb_id": None,
-            "person_id": c.get("personId"),
+            "tvdb_id": c.get("peopleId") or c.get("personId"),
+            "person_id": c.get("peopleId") or c.get("personId"),
+            "id": c.get("peopleId") or c.get("personId"),
             "name": c.get("personName") or "",
             "character": c.get("name") or "",
             "profile_path": _image_url(c.get("image")),
@@ -309,16 +337,51 @@ def format_cast(raw: dict) -> list[dict]:
     ]
 
 
-def format_episode(raw: dict) -> dict:
+def format_episode(raw: dict, language: str | None = None) -> dict:
+    translations = raw.get("translations") or {}
+    name_trans = translations.get("nameTranslations") or []
+    overview_trans = translations.get("overviewTranslations") or []
+
+    translated_name = None
+    translated_overview = None
+
+    if language:
+        for t in name_trans:
+            if isinstance(t, dict) and t.get("language") == language:
+                translated_name = t.get("name")
+                break
+        for t in overview_trans:
+            if isinstance(t, dict) and t.get("language") == language:
+                translated_overview = t.get("overview")
+                break
+
+    if not translated_name:
+        for t in name_trans:
+            if isinstance(t, dict) and t.get("language") == "eng":
+                translated_name = t.get("name")
+                break
+
+    if not translated_overview:
+        for t in overview_trans:
+            if isinstance(t, dict) and t.get("language") == "eng":
+                translated_overview = t.get("overview")
+                break
+
+    ep_name = translated_name or raw.get("name")
+    ep_overview = translated_overview or raw.get("overview")
+
+    img_url = _image_url(raw.get("image"))
     return {
         "tvdb_id": raw.get("id"),
         "season_number": raw.get("seasonNumber"),
         "episode_number": raw.get("number"),
-        "name": raw.get("name"),
-        "overview": raw.get("overview"),
+        "name": ep_name,
+        "title": ep_name,
+        "overview": ep_overview,
         "air_date": raw.get("aired"),
         "runtime": raw.get("runtime"),
-        "image_url": _image_url(raw.get("image")),
+        "image_url": img_url,
+        "still_path": img_url,
     }
 
 

@@ -408,6 +408,19 @@ function skeletonWide() {
 <script define:vars={{ token, watchRegion, hasProfileData, topMovieGenres, topShowGenres, userServices, canPick }}>
   const esc = window.esc;
 
+  // Route artwork through the local image cache instead of hitting TMDB/TVDB direct.
+  function cachedImageUrl(path, size = 'w500') {
+    if (!path) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      const m = /image\.tmdb\.org\/t\/p\/([^/]+)(\/.+)$/.exec(path);
+      if (m) return `/api/proxy/media/image/${m[1]}${m[2]}`;
+      const t = /artworks\.thetvdb\.com(\/[^?#]+)/.exec(path);
+      if (t) return `/api/proxy/media/image/tvdb${t[1]}`;
+      return path;
+    }
+    return `/api/proxy/media/image/${size}${path.startsWith('/') ? path : '/' + path}`;
+  }
+
   function itemUrl(item) {
     const primarySource = document.cookie.match(/primary_metadata_source=([^;]+)/)?.[1] || 'tmdb';
     return window.buildItemUrl?.(item, primarySource === 'tvdb') || '/';
@@ -453,7 +466,7 @@ function skeletonWide() {
       <a href="${esc(href)}" class="block">
         <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
           ${item.poster_path
-            ? `<img src="${esc(item.poster_path)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" decoding="async" />`
+            ? `<img src="${esc(cachedImageUrl(item.poster_path, 'w500'))}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" decoding="async" />`
             : `<div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center"><span class="text-3xl mb-2 opacity-30">🎬</span><span class="text-xs font-bold uppercase tracking-widest">${esc(item.title)}</span></div>`
           }
           <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
