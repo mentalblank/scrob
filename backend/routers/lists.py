@@ -11,6 +11,7 @@ from models.lists import List as ListModel, ListItem
 from models.media import Media
 from models.base import MediaType, PrivacyLevel
 from models.show import Show as ShowModel
+from models.media_request import MediaRequest, RequestStatus
 from models.users import UserSettings
 from dependencies import get_current_user
 from models.users import User
@@ -31,6 +32,18 @@ class ListUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     privacy_level: Optional[PrivacyLevel] = None
+    radarr_auto_add: Optional[bool] = None
+    radarr_root_folder: Optional[str] = None
+    radarr_quality_profile: Optional[int] = None
+    radarr_tags: Optional[list[int]] = None
+    radarr_monitor: Optional[str] = None
+    sonarr_auto_add: Optional[bool] = None
+    sonarr_root_folder: Optional[str] = None
+    sonarr_quality_profile: Optional[int] = None
+    sonarr_tags: Optional[list[int]] = None
+    sonarr_series_type: Optional[str] = None
+    sonarr_season_folder: Optional[bool] = None
+    sonarr_monitor: Optional[str] = None
 
 
 class ListItemAdd(BaseModel):
@@ -224,6 +237,18 @@ async def get_list(
 
     return {
         **_format_list(lst),
+        "radarr_auto_add": lst.radarr_auto_add,
+        "radarr_root_folder": lst.radarr_root_folder,
+        "radarr_quality_profile": lst.radarr_quality_profile,
+        "radarr_tags": lst.radarr_tags or [],
+        "radarr_monitor": lst.radarr_monitor,
+        "sonarr_auto_add": lst.sonarr_auto_add,
+        "sonarr_root_folder": lst.sonarr_root_folder,
+        "sonarr_quality_profile": lst.sonarr_quality_profile,
+        "sonarr_tags": lst.sonarr_tags or [],
+        "sonarr_series_type": lst.sonarr_series_type,
+        "sonarr_season_folder": lst.sonarr_season_folder,
+        "sonarr_monitor": lst.sonarr_monitor,
         "items": formatted_items,
         "is_owner": lst.user_id == current_user.id,
     }
@@ -249,6 +274,16 @@ async def update_list(
         lst.description = body.description
     if body.privacy_level is not None:
         lst.privacy_level = body.privacy_level
+
+    supplied = body.model_dump(exclude_unset=True)
+    for field in (
+        "radarr_auto_add", "radarr_root_folder", "radarr_quality_profile",
+        "radarr_tags", "radarr_monitor",
+        "sonarr_auto_add", "sonarr_root_folder", "sonarr_quality_profile",
+        "sonarr_tags", "sonarr_series_type", "sonarr_season_folder", "sonarr_monitor",
+    ):
+        if field in supplied:
+            setattr(lst, field, supplied[field])
 
     await db.commit()
 
@@ -410,6 +445,140 @@ async def _push_list_item_to_mdblist(
         )
 
 
+async def _queue_request_if_approval_required(
+    db: AsyncSession,
+    user: User,
+    media: Media,
+    media_type_str: str,
+    *,
+    uses_global: bool,
+    require_approval: bool,
+) -> bool:
+    """Queue a pending request instead of adding. Returns True if the caller should stop."""
+    if not (uses_global and require_approval):
+        return False
+
+    req_uri = f"tmdb:{'m' if media_type_str == 'movie' else 's'}:{media.tmdb_id}"
+    existing_q = await db.execute(
+        select(MediaRequest).where(
+            MediaRequest.user_id == user.id,
+            MediaRequest.uri_id == req_uri,
+            MediaRequest.media_type == media_type_str,
+        )
+    )
+    existing = existing_q.scalar_one_or_none()
+    if existing:
+        if existing.status != RequestStatus.approved:
+            existing.status = RequestStatus.pending
+    else:
+        db.add(MediaRequest(
+            user_id=user.id,
+            uri_id=req_uri,
+            media_type=media_type_str,
+            title=media.title or "",
+            poster_path=media.poster_path,
+            status=RequestStatus.pending,
+        ))
+    await db.commit()
+    logger.info(
+        "Auto-add for %r queued for admin approval (user %s)", media.title, user.id
+    )
+    return True
+
+
+async def _auto_add_to_arr(
+    db: AsyncSession,
+    user: User,
+    lst: ListModel,
+    media: Media,
+) -> None:
+    from routers.media import _effective_radarr, _effective_sonarr, _get_global_settings
+
+    is_movie = media.media_type == MediaType.movie
+    is_series = media.media_type == MediaType.series
+    is_admin = bool(getattr(user, "is_admin", False))
+    if not (is_movie or is_series):
+        return
+    if is_movie and not lst.radarr_auto_add:
+        return
+    if is_series and not lst.sonarr_auto_add:
+        return
+    if not media.tmdb_id:
+        return
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    user_settings = settings_result.scalar_one_or_none()
+    global_settings = await _get_global_settings(db)
+
+    if is_movie:
+        cfg = _effective_radarr(user_settings, global_settings)
+        if not cfg:
+            logger.warning("List %s has Radarr auto-add on but Radarr isn't configured", lst.id)
+            return
+        # Same gate as the Request button, so auto-add can't sidestep approval.
+        if await _queue_request_if_approval_required(
+            db, user, media, "movie",
+            uses_global=(global_settings is not None and cfg is global_settings and not is_admin),
+            require_approval=bool(global_settings and global_settings.radarr_require_approval),
+        ):
+            return
+        from core import radarr as radarr_client
+        try:
+            await radarr_client.add_movie(
+                url=cfg.radarr_url,
+                token=cfg.radarr_token,
+                tmdb_id=media.tmdb_id,
+                title=media.title or "",
+                root_folder=lst.radarr_root_folder or cfg.radarr_root_folder,
+                quality_profile_id=lst.radarr_quality_profile or cfg.radarr_quality_profile,
+                tags=lst.radarr_tags if lst.radarr_tags is not None else cfg.radarr_tags,
+                monitor=lst.radarr_monitor or "movieOnly",
+            )
+        except Exception as exc:
+            logger.warning("Radarr auto-add failed for %r (list %s): %s", media.title, lst.id, exc)
+        return
+
+    show_result = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == media.tmdb_id))
+    show = show_result.scalars().first()
+    tvdb_id = show.tvdb_id if show else None
+    if not tvdb_id:
+        logger.warning(
+            "Sonarr auto-add skipped for %r (list %s): no TVDB id known for TMDB %s",
+            media.title, lst.id, media.tmdb_id,
+        )
+        return
+
+    cfg = _effective_sonarr(user_settings, global_settings)
+    if not cfg:
+        logger.warning("List %s has Sonarr auto-add on but Sonarr isn't configured", lst.id)
+        return
+    if await _queue_request_if_approval_required(
+        db, user, media, "series",
+        uses_global=(global_settings is not None and cfg is global_settings and not is_admin),
+        require_approval=bool(global_settings and global_settings.sonarr_require_approval),
+    ):
+        return
+    from core import sonarr as sonarr_client
+    try:
+        await sonarr_client.add_series(
+            url=cfg.sonarr_url,
+            token=cfg.sonarr_token,
+            tvdb_id=tvdb_id,
+            root_folder=lst.sonarr_root_folder or cfg.sonarr_root_folder,
+            quality_profile_id=lst.sonarr_quality_profile or cfg.sonarr_quality_profile,
+            tags=lst.sonarr_tags if lst.sonarr_tags is not None else cfg.sonarr_tags,
+            season_folder=(
+                lst.sonarr_season_folder
+                if lst.sonarr_season_folder is not None
+                else cfg.sonarr_season_folder
+            ),
+            series_type=lst.sonarr_series_type or "standard",
+            monitor=lst.sonarr_monitor or "all",
+        )
+    except Exception as exc:
+        logger.warning("Sonarr auto-add failed for %r (list %s): %s", media.title, lst.id, exc)
+
+
 @router.post("/{list_id}/items", status_code=201)
 async def add_list_item(
     list_id: int,
@@ -547,6 +716,8 @@ async def add_list_item(
         await _push_list_item_to_mdblist(
             db, current_user.id, lst.mdblist_slug, media, remove=False
         )
+
+    await _auto_add_to_arr(db, current_user, lst, media)
 
     item_result = await db.execute(
         select(ListItem)
