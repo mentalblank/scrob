@@ -696,18 +696,18 @@ async def get_next_up(
     next_up = [next_per_show[sid] for sid in ranked_show_ids if sid in next_per_show]
 
     # Drop episodes that haven't aired yet — "next up" is what you can watch now,
-    # not a countdown. Episodes with no known air date are kept, since a missing
-    # date usually means incomplete metadata rather than a future release.
+    # not a countdown. Episodes with no usable air date are dropped too: an unknown
+    # date most often means an unreleased placeholder episode, not a watchable one.
     today = datetime.now(timezone.utc).date()
 
     def _has_aired(media: Media) -> bool:
         raw = (media.release_date or "").strip()
         if not raw:
-            return True
+            return False
         try:
             return datetime.strptime(raw[:10], "%Y-%m-%d").date() <= today
         except ValueError:
-            return True
+            return False
 
     next_up = [m for m in next_up if _has_aired(m)]
 
