@@ -12,18 +12,35 @@ from core.config import settings
 from core.security import ALGORITHM
 import schemas
 
+from fastapi import Header, Query
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
-    token: str = Depends(oauth2_scheme)
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    x_api_key: Optional[str] = Header(None, alias="X-Api-Key"),
+    apikey: Optional[str] = Query(None),
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    api_key_val = x_api_key or apikey
+    if api_key_val:
+        query = select(User).where(User.api_key == api_key_val).options(selectinload(User.profile))
+        res = await db.execute(query)
+        user = res.scalar_one_or_none()
+        if user:
+            return user
+        raise credentials_exception
+
+    if not token:
+        raise credentials_exception
+
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
         if payload.get("type") == "2fa_pending":

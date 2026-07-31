@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from db import engine, Base
 import models # noqa: F401
-from routers import webhooks, media, history, ratings, sync, shows, auth, lists, oidc, plex_auth, profile, trakt, simkl, mdblist, comments, admin, compat
+from routers import webhooks, media, history, ratings, sync, shows, auth, lists, oidc, plex_auth, profile, trakt, simkl, mdblist, comments, admin, compat, stremio
 
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -400,6 +400,7 @@ app.include_router(simkl.router, prefix="/simkl", tags=["simkl"])
 app.include_router(mdblist.router, prefix="/mdblist", tags=["mdblist"])
 app.include_router(comments.router, prefix="/comments", tags=["comments"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
+app.include_router(stremio.router, prefix="/stremio", tags=["stremio"])
 app.include_router(compat.router, tags=["compat"])
 
 @app.get("/health")

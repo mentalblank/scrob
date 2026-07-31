@@ -89,7 +89,7 @@ const COUNTRIES = (countriesRes || [])
 ---
 
 <Base title="Settings">
-  <div id="app-data" data-token={token} data-preferences={JSON.stringify(settings.preferences || {})} class="hidden" aria-hidden="true"></div>
+  <div id="app-data" data-token={token} data-api-key={me.api_key || settings.api_key} data-preferences={JSON.stringify(settings.preferences || {})} class="hidden" aria-hidden="true"></div>
   <div class="max-w-4xl mx-auto">
     <h1 class="page-title mb-8">Settings</h1>
 
@@ -1593,6 +1593,41 @@ const COUNTRIES = (countriesRes || [])
 
           <!-- Tab Panel: Integrations -->
           <div data-settings-tab="integrations" class="space-y-6 hidden">
+            <!-- Stremio Addon collapsible row -->
+            <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="collapsible-header flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="stremio-body">
+                <div class="flex items-center gap-3 pointer-events-none w-full sm:w-auto">
+                  <span class="w-2.5 h-2.5 bg-purple-500 rounded-full shrink-0"></span>
+                  <div class="flex flex-col gap-0.5 min-w-0">
+                    <span class="font-medium text-zinc-200">Stremio Addon</span>
+                    <span class="text-xs text-zinc-500">Sync Scrob watchlists & history directly to Stremio</span>
+                  </div>
+                </div>
+                <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="collapsible-chevron w-4 h-4 text-zinc-500 transition-transform pointer-events-none shrink-0">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </div>
+              </div>
+              <div id="stremio-body" class="border-t border-zinc-800 hidden px-6 py-6 space-y-4">
+                <p class="text-sm text-zinc-400">
+                  Scrob includes a built-in Stremio Addon server. Use the button below to install your Scrob Watchlist, Watched History, and Custom Lists directly into Stremio over HTTPS.
+                </p>
+                <div class="space-y-2">
+                  <label class="block text-xs font-semibold uppercase tracking-wider text-zinc-500">Stremio Addon Manifest URL</label>
+                  <div class="flex gap-2">
+                    <input type="text" id="stremio-manifest-url" readonly class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-200 focus:outline-none" />
+                    <button type="button" id="copy-stremio-btn" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2.5 rounded-xl text-xs font-medium border border-zinc-700 transition-colors cursor-pointer">Copy</button>
+                  </div>
+                </div>
+                <div class="pt-2">
+                  <a id="install-stremio-link" href="#" class="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white font-medium text-sm px-5 py-2.5 rounded-xl transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    Install Addon in Stremio
+                  </a>
+                </div>
+              </div>
+            </div>
             <!-- Radarr collapsible row -->
             <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div class="collapsible-header flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target="radarr-body">
@@ -6638,6 +6673,32 @@ const COUNTRIES = (countriesRes || [])
       }
     });
   }
+
+  // ── Stremio Addon Setup ─────────────────────────────────────────
+  function setupStremioAddon() {
+    const appDataEl = document.getElementById('app-data');
+    const userApiKey = appDataEl?.dataset.apiKey || (window as any).currentUserApiKey || '';
+    const stremioManifestInput = document.getElementById('stremio-manifest-url') as HTMLInputElement | null;
+    const installStremioLink = document.getElementById('install-stremio-link') as HTMLAnchorElement | null;
+    const copyStremioBtn = document.getElementById('copy-stremio-btn');
+
+    if (stremioManifestInput && userApiKey) {
+      const httpUrl = `${window.location.origin}/stremio/${userApiKey}/manifest.json`;
+      const stremioUrl = `stremio://${window.location.host}/stremio/${userApiKey}/manifest.json`;
+      stremioManifestInput.value = httpUrl;
+      if (installStremioLink) installStremioLink.href = stremioUrl;
+    }
+    if (copyStremioBtn && stremioManifestInput) {
+      copyStremioBtn.addEventListener('click', () => {
+        if (!stremioManifestInput.value) return;
+        navigator.clipboard.writeText(stremioManifestInput.value);
+        showMessage('Stremio manifest URL copied to clipboard!', 'success');
+      });
+    }
+  }
+
+  setupStremioAddon();
+  document.addEventListener('astro:after-swap', setupStremioAddon);
 
   setup2fa();
   document.addEventListener('astro:after-swap', setup2fa);

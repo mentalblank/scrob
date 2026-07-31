@@ -2,7 +2,7 @@ import { defineMiddleware } from "astro:middleware";
 import { api } from "./lib/api";
 
 const PUBLIC_ROUTES = ["/login", "/register", "/logout", "/oidc-callback", "/oidc-start", "/plex-start", "/plex-callback", "/site.webmanifest", "/favicon.ico", "/favicon.svg", "/apple-touch-icon.png", "/sw.js", "/offline.html"];
-const PUBLIC_PREFIXES = ["/auth/activate/", "/forgot-password", "/reset-password/", "/api/proxy/webhooks/", "/api/proxy/auth/has-users", "/api/proxy/auth/bootstrap-restore", "/api/proxy/media/stream/", "/api/proxy/radarr-compat/", "/api/proxy/sonarr-compat/"];
+const PUBLIC_PREFIXES = ["/auth/activate/", "/forgot-password", "/reset-password/", "/api/proxy/webhooks/", "/api/proxy/auth/has-users", "/api/proxy/auth/bootstrap-restore", "/api/proxy/media/stream/", "/api/proxy/radarr-compat/", "/api/proxy/sonarr-compat/", "/stremio/"];
 
 // Security headers added to every response.
 // CSP is intentionally omitted — Astro's define:vars emits inline <script>
@@ -20,8 +20,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
   
   // Skip auth for static assets and public routes
   const isStaticAsset = /\.(js|css|woff2?|ico|png|svg|webp|jpg|jpeg|webmanifest|json|xml)$/.test(pathname);
+  const hasApiKey = Boolean(
+    context.request.headers.get("x-api-key") ||
+    context.url.searchParams.get("apikey") ||
+    pathname.startsWith("/api/proxy/")
+  );
+
   const isPublicRoute =
-    isStaticAsset || PUBLIC_ROUTES.includes(pathname) || PUBLIC_PREFIXES.some(p => pathname.startsWith(p));
+    isStaticAsset || hasApiKey || PUBLIC_ROUTES.includes(pathname) || PUBLIC_PREFIXES.some(p => pathname.startsWith(p));
 
   if (token) {
     try {
