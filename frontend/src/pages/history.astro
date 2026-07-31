@@ -4,6 +4,8 @@ import HistoryCard from "../components/HistoryCard.astro";
 import Pagination from "../components/Pagination.astro";
 import InfiniteScroll from "../components/InfiniteScroll.astro";
 import { api, type WatchEvent } from "../lib/api";
+import { seasonLabel } from "../lib/media-format";
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
 
 const { token } = Astro.locals;
 const profile = await api.profile.get(token!);
@@ -34,7 +36,7 @@ const groupedHistory = history.results.reduce<Record<string, WatchEvent[]>>((acc
       : event.media.title;
   } else if (groupBy === "season") {
     key = event.media.type === 'episode'
-      ? `${event.media.show_title || event.media.title} - ${event.media.season_name || `Season ${event.media.season_number}`}`
+      ? `${event.media.show_title || event.media.title} - ${event.media.season_name || seasonLabel(event.media.season_number, specialsLabel)}`
       : 'Movies';
   } else if (groupBy === "type") {
     key = event.media.type === 'episode' ? 'TV Shows' : 'Movies';

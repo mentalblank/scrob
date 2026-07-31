@@ -95,6 +95,45 @@ async def get_remapped_episodes(
     return remapped
 
 
+def overall_show_progress(
+    season_states: dict,
+    season_ep_counts: dict,
+    collected_positions: dict,
+    watched_positions: dict,
+    include_specials: bool = False,
+) -> dict:
+    """Collected/watched totals for a show, counted in episodes.
+
+    Averaging season percentages gave every season equal weight, so a season that
+    has not aired yet — episode_count 0, and so permanently 0% — dragged a fully
+    watched show down, and a 3-episode season counted as much as a 20-episode one.
+    """
+    counted = [
+        sn for sn in season_states
+        if (include_specials or sn != 0) and season_ep_counts.get(sn, 0) > 0
+    ]
+    total = sum(season_ep_counts.get(sn, 0) for sn in counted)
+    collected = sum(len(collected_positions.get(sn, set())) for sn in counted)
+    watched = sum(len(watched_positions.get(sn, set())) for sn in counted)
+    in_library_seasons = [season_states[sn] for sn in counted if season_states[sn]["in_library"]]
+
+    return {
+        "total_episodes": total,
+        "collected_episodes": collected,
+        "watched_episodes": watched,
+        "collection_pct": min(100, int((collected / total) * 100)) if total else 0,
+        "watch_pct": min(100, int((watched / total) * 100)) if total else 0,
+        "watched": bool(in_library_seasons) and all(v["watched"] for v in in_library_seasons),
+    }
+
+
+async def _include_specials(db: AsyncSession, user_id: int) -> bool:
+    """Whether Season 0 counts toward a show's progress ("Include specials in counts")."""
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    row = result.scalar_one_or_none()
+    return bool(((row.preferences or {}) if row else {}).get("include_specials"))
+
+
 async def get_user_tvdb_key(db: AsyncSession, user_id: int) -> str | None:
     from models.global_settings import GlobalSettings
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
@@ -2016,14 +2055,18 @@ async def get_tvdb_show(
 
     in_library = bool(season_states and any(v["in_library"] for v in season_states.values()))
 
-    # Derive overall watched / collection_pct from season states (skip season 0 specials)
-    lib_seasons = [v for sn, v in season_states.items() if sn != 0 and v["in_library"]]
-    watched_overall = bool(lib_seasons) and all(v["watched"] for v in lib_seasons)
-    total_pct = sum(v["collection_pct"] for sn, v in season_states.items() if sn != 0)
-    non_special_seasons = len([sn for sn in season_states if sn != 0])
-    collection_pct = int(total_pct / non_special_seasons) if non_special_seasons else 0
-    total_watch_pct = sum(v["watch_pct"] for sn, v in season_states.items() if sn != 0)
-    watch_pct = int(total_watch_pct / non_special_seasons) if non_special_seasons else 0
+    progress = overall_show_progress(
+        season_states,
+        season_ep_counts,
+        collected_positions,
+        watched_positions,
+        include_specials=await _include_specials(db, current_user.id),
+    )
+    collection_pct = progress["collection_pct"]
+    watch_pct = progress["watch_pct"]
+    watched_episodes = progress["watched_episodes"]
+    total_episodes = progress["total_episodes"]
+    watched_overall = progress["watched"]
 
     # Sonarr state
     gs = await _get_global_settings(db)
@@ -2085,6 +2128,9 @@ async def get_tvdb_show(
         "in_lists": [],
         "collection_pct": collection_pct,
         "watch_pct": watch_pct,
+        # The progress strip reads these; without them a TVDB show showed no counts.
+        "watched_episodes_count": watched_episodes,
+        "total_episodes_count": total_episodes,
         "is_monitored": is_monitored,
         "request_enabled": request_enabled,
         "request_status": None,

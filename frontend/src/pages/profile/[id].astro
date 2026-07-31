@@ -4,6 +4,8 @@ import ListCard from "../../components/ListCard.astro";
 import MediaCard from "../../components/MediaCard.astro";
 import EpisodeCard from "../../components/EpisodeCard.astro";
 import { api, type PublicProfile, type ProfileListItem, type ProfileFollowEntry, type MediaItem, tmdbImageUrl } from "../../lib/api";
+import { episodeCode, seasonLabel } from "../../lib/media-format";
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
 
 export const prerender = false;
 
@@ -92,9 +94,9 @@ function commentUrl(item: { media_type: string; tmdb_id?: number | null; uri_id?
 
 function commentLabel(item: { media_type: string; season_number: number | null; season_name?: string | null; episode_number: number | null; title: string | null }): string {
   if (item.media_type === "season" && item.season_number != null)
-    return `${item.title ?? "Unknown"} — ${item.season_name || `Season ${item.season_number}`}`;
+    return `${item.title ?? "Unknown"} — ${item.season_name || seasonLabel(item.season_number, specialsLabel)}`;
   if (item.media_type === "episode" && item.season_number != null && item.episode_number != null)
-    return `${item.title ?? "Unknown"} — S${String(item.season_number).padStart(2, "0")}E${String(item.episode_number).padStart(2, "0")}`;
+    return `${item.title ?? "Unknown"} — ${episodeCode(item.season_number, item.episode_number, specialsLabel)}`;
   return item.title ?? "Unknown";
 }
 

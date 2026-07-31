@@ -1425,6 +1425,70 @@ async def search_tvdb(
     return results
 
 
+async def _library_show_matches(
+    db: AsyncSession,
+    user_id: int,
+    q: str,
+    exclude_tmdb_ids: set[int] | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Local shows matching a title query, for results TMDB cannot produce.
+
+    A show matched to TVDB alone has no TMDB id and no series Media row, so neither
+    the TMDB search nor the local Media fallback can ever surface it.
+    """
+    shows_q = (
+        select(ShowModel)
+        .where(or_(ShowModel.title.ilike(f"%{q}%"), ShowModel.original_title.ilike(f"%{q}%")))
+        .order_by(ShowModel.title)
+        .limit(limit)
+    )
+    if exclude_tmdb_ids:
+        # NULL NOT IN (...) is NULL, which would drop the very rows this is for.
+        shows_q = shows_q.where(
+            or_(ShowModel.tmdb_id.is_(None), ShowModel.tmdb_id.notin_(exclude_tmdb_ids))
+        )
+    shows = (await db.execute(shows_q)).scalars().all()
+    if not shows:
+        return []
+
+    collected_q = await db.execute(
+        select(Media.show_id, func.count(Media.id))
+        .join(Collection, Collection.media_id == Media.id)
+        .where(
+            Collection.user_id == user_id,
+            Media.show_id.in_([show.id for show in shows]),
+            Media.media_type == MediaType.episode,
+        )
+        .group_by(Media.show_id)
+    )
+    collected_counts = dict(collected_q.all())
+
+    results = []
+    for show in shows:
+        uri_id = show.uri_id or (
+            f"tmdb:s:{show.tmdb_id}" if show.tmdb_id
+            else f"tvdb:s:{show.tvdb_id}" if show.tvdb_id else None
+        )
+        results.append({
+            "id": show.id,
+            "tmdb_id": show.tmdb_id,
+            "tvdb_id": show.tvdb_id,
+            "uri_id": uri_id,
+            "type": "series",
+            "title": show.title,
+            "original_title": show.original_title,
+            "overview": show.overview,
+            "poster_path": show.poster_path,
+            "backdrop_path": show.backdrop_path,
+            "release_date": show.first_air_date,
+            "tmdb_rating": show.tmdb_rating,
+            "in_library": collected_counts.get(show.id, 0) > 0,
+            "adult": (show.tmdb_data or {}).get("adult", False),
+        })
+    return results
+
+
 @router.get("/search")
 async def search_media(
     q: str = Query(..., min_length=2),
@@ -1541,6 +1605,13 @@ async def search_media(
         formatted = [format_media(m) for m in items]
         for item in formatted:
             item["in_library"] = True
+        if page == 1 and (not type or type == MediaType.series):
+            show_matches = [
+                show for show in await _library_show_matches(db, current_user.id, q)
+                if show["in_library"]
+            ]
+            formatted = show_matches + formatted
+            total += len(show_matches)
         return {
             "page": page,
             "total_pages": max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE),
@@ -1567,6 +1638,8 @@ async def search_media(
         formatted = [format_media(m) for m in items]
         for item in formatted:
             item["in_library"] = True
+        if not type or type == MediaType.series:
+            formatted = await _library_show_matches(db, current_user.id, q) + formatted
         return {"page": 1, "total_pages": 1, "total_results": len(formatted), "results": formatted}
 
     # 1. Search TMDB (primary source for ordering)
@@ -1736,8 +1809,19 @@ async def search_media(
             item = format_media(m)
             item["in_library"] = True
             enriched.append(item)
+            if m.tmdb_id:
+                seen_tmdb_ids.add(m.tmdb_id)
+
+    # Held back until after enrichment: state there is keyed on a TMDB id, so a
+    # TVDB-only show would come back out marked as absent from the library.
+    show_matches = (
+        await _library_show_matches(db, current_user.id, q, seen_tmdb_ids)
+        if page == 1 and (not type or type == MediaType.series)
+        else []
+    )
 
     await enrich_with_state(db, current_user.id, enriched, hide_blocked=True)
+    enriched.extend(show_matches)
     return {
         "page": page,
         "total_pages": total_pages,

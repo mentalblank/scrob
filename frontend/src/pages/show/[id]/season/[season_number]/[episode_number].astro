@@ -11,6 +11,7 @@ import ProgressStrip from "../../../../../components/ProgressStrip.astro";
 import { api, tmdbImageUrl, type EpisodeDetail } from "../../../../../lib/api";
 import { parseShowId } from "../../../../../lib/normalize";
 import { personUrl } from "../../../../../lib/urls";
+import { episodeCode, seasonDisplayName } from "../../../../../lib/media-format";
 
 export const prerender = false;
 
@@ -40,7 +41,9 @@ if (!episode && !error) {
 
 const show = episode?.show;
 const currentSeason = show?.seasons_meta?.find(s => s.season_number === Number(season_number));
-const seasonName = currentSeason?.name || `Season ${season_number}`;
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
+const seasonName = seasonDisplayName(Number(season_number), currentSeason?.name, specialsLabel);
+const episodeLabel = episodeCode(Number(season_number), Number(episode_number), specialsLabel);
 const rating = episode?.tmdb_rating ? episode.tmdb_rating.toFixed(1) : null;
 const thumbnail = episode?.still_path || show?.poster_path || null;
 
@@ -274,7 +277,7 @@ const activeButtonsCount = [
             <div class="flex flex-wrap items-center gap-3">
               <p class="accent-label text-lg text-blue-400 font-bold tracking-wide uppercase">{show?.title}</p>
               <span class="season-pill px-3 py-1 bg-blue-600/20 border border-blue-600/30 text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">
-                S{String(season_number).padStart(2, '0')}E{String(episode_number).padStart(2, '0')}
+                {episodeLabel}
               </span>
             </div>
 

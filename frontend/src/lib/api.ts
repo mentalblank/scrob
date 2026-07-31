@@ -479,6 +479,7 @@ export interface UserPreferences {
   explore_filters?: ExploreFilters;
   unified_filters?: boolean;
   show_bio?: boolean;
+  specials_label?: boolean;
 }
 
 export interface UserSettings {

@@ -3,6 +3,7 @@ import type { MediaItem } from "../lib/api";
 import { tmdbImageUrl } from "../lib/api";
 import CardActionBar from "./CardActionBar.astro";
 import { mediaUrl } from "../lib/urls";
+import { episodeCode } from "../lib/media-format";
 
 interface Props {
   item: MediaItem;
@@ -24,9 +25,8 @@ const rating = !hideRating && item.tmdb_rating ? item.tmdb_rating.toFixed(1) : n
 const isEpisode = item.type === "episode";
 const isSeries = item.type === "series" || (item.type === "episode" && !item.season_number && !item.id);
 const isSeason = item.type === "season";
-const sxe = isEpisode && item.season_number != null && item.episode_number != null
-  ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
-  : null;
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
+const sxe = isEpisode ? episodeCode(item.season_number, item.episode_number, specialsLabel) : null;
 
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
 const preferTvdb = preferTvdbProp ?? (primaryMetadataSource === "tvdb");

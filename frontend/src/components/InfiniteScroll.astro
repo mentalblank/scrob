@@ -139,12 +139,17 @@ const {
         const showTitle = card.getAttribute('data-show-title') || '';
         const seasonNumber = card.getAttribute('data-season-number') || '';
         
+        // Must match the season heading the server rendered for page 1, or the
+        // appended rows start a duplicate group under a differently-worded title.
+        const specialsLabel = document.cookie.includes('specials_label=true');
+        const seasonHeading = specialsLabel && seasonNumber === '0' ? 'Specials' : `Season ${seasonNumber}`;
+
         let groupStr = '';
         if (groupBy === 'show_movie') {
           groupStr = mediaType === 'episode' ? (showTitle || mediaTitle) : mediaTitle;
         } else if (groupBy === 'season') {
           groupStr = mediaType === 'episode'
-            ? `${showTitle || mediaTitle} - Season ${seasonNumber}`
+            ? `${showTitle || mediaTitle} - ${seasonHeading}`
             : 'Movies';
         } else if (groupBy === 'type') {
           groupStr = mediaType === 'episode' ? 'TV Shows' : 'Movies';

@@ -25,6 +25,9 @@ class User(UserBase):
     created_at: datetime
     needs_setup: bool = False        # admin only — global setup wizard not yet completed
     needs_onboarding: bool = False   # personal-prefs wizard not yet completed
+    # Display preferences the frontend middleware mirrors into cookies so
+    # server-rendered pages can read them without a second round trip.
+    preferences: Optional[dict] = None
 
     class Config:
         from_attributes = True

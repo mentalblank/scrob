@@ -3,6 +3,7 @@ import MediaCard from "../../components/MediaCard.astro";
 import ActionBar from "../../components/ActionBar.astro";
 import { api, tmdbImageUrl } from "../../lib/api";
 import { mediaUrl } from "../../lib/urls";
+import { episodeCode } from "../../lib/media-format";
 
 export const prerender = false;
 
@@ -23,9 +24,8 @@ if (nextUp.length === 0) {
 const hero = nextUp[0];
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
 const heroHref = mediaUrl(hero, primaryMetadataSource === "tvdb");
-const episodeLabel = hero.season_number != null && hero.episode_number != null
-  ? `S${String(hero.season_number).padStart(2, '0')}E${String(hero.episode_number).padStart(2, '0')}`
-  : null;
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
+const episodeLabel = episodeCode(hero.season_number, hero.episode_number, specialsLabel);
 const rawBackdrop = hero.backdrop_path || hero.show_backdrop_path;
 const heroBackdrop = tmdbImageUrl(rawBackdrop, "w1280");
 ---

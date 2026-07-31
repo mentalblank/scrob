@@ -15,6 +15,7 @@ import TrailerButton from "../../components/TrailerButton.astro";
 import EpisodeOrderSelector from "../../components/EpisodeOrderSelector.astro";
 import { api, tmdbImageUrl, type Show, type MediaItem } from "../../lib/api";
 import { parseShowId } from "../../lib/normalize";
+import { seasonDisplayName, seasonLabel } from "../../lib/media-format";
 import { personUrl } from "../../lib/urls";
 export const prerender = false;
 
@@ -26,6 +27,7 @@ Astro.response.headers.set("Cache-Control", "no-store");
 // Accept URI (tmdb:s:X / tvdb:s:Y) or raw integer.
 const { provider, numericId: resolvedShowId, uri: fetchKey } = parseShowId(id);
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
 let show: Show | null = null;
 let error = "";
 
@@ -93,7 +95,7 @@ const seasons = Object.entries(show?.seasons ?? {}).sort(
 
 const rawSeasonsMeta = show?.seasons_meta || seasons.map(([k]) => ({ 
   season_number: Number(k.replace("season_","")), 
-  name: `Season ${k.replace("season_","")}`, 
+  name: seasonLabel(Number(k.replace("season_","")), specialsLabel), 
   overview: null, 
   poster_path: null, 
   episode_count: 0, 
@@ -592,7 +594,7 @@ const activeButtonsCount = [
                   tmdb_id: show.tmdb_id ?? show.tmdb_id_cross ?? null,
                   tvdb_id: show.tvdb_id ?? null,
                   type: "season",
-                  title: s.name || `Season ${seasonNum}`,
+                  title: seasonDisplayName(seasonNum, s.name, specialsLabel),
                   show_title: show.title,
                   poster_path: poster,
                   total_episodes_count: totalEpisodes,

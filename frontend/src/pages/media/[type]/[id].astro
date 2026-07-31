@@ -12,6 +12,8 @@ import TrailerButton from "../../../components/TrailerButton.astro";
 import ProgressStrip from "../../../components/ProgressStrip.astro";
 import { api, tmdbImageUrl, type MediaItem } from "../../../lib/api";
 import { personUrl } from "../../../lib/urls";
+import { seasonLabel } from "../../../lib/media-format";
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
 export const prerender = false;
 
 const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
@@ -110,7 +112,7 @@ const activeButtonsCount = [
         <div class="mb-10 text-center md:text-left">
           {isEpisode && (
             <div class="inline-flex items-center justify-center gap-2 px-3 py-1 bg-purple-600/10 border border-purple-600/30 text-purple-400 text-xs font-bold rounded-full mb-4 uppercase tracking-wider">
-              Season {item.season_number} · Episode {item.episode_number}
+              {seasonLabel(item.season_number, specialsLabel)} · Episode {item.episode_number}
             </div>
           )}
 

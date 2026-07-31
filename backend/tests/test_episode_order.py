@@ -9,7 +9,7 @@ from models.media import Media
 from models.ratings import Rating
 from models.show import Show as ShowModel
 from routers.ratings import RatingIn, submit_rating
-from routers.shows import _enrich_tvdb_seasons, get_tvdb_season
+from routers.shows import _enrich_tvdb_seasons, get_tvdb_season, overall_show_progress
 
 
 class _EmptyResult:
@@ -425,6 +425,59 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(validate_episode_order("tvdb"), "tvdb")
         with self.assertRaisesRegex(ValueError, "Unsupported episode order"):
             validate_episode_order("absolute")
+
+
+class OverallShowProgressTests(unittest.TestCase):
+    """Regression: a show whose aired seasons were all fully watched reported 75%,
+    because progress averaged season percentages and an unaired season sat in the
+    denominator at a permanent 0%."""
+
+    def setUp(self) -> None:
+        self.states = {
+            0: {"in_library": False, "watched": False},
+            1: {"in_library": True, "watched": True},
+            2: {"in_library": True, "watched": True},
+            3: {"in_library": True, "watched": True},
+            4: {"in_library": False, "watched": False},   # not aired yet
+        }
+        self.counts = {0: 4, 1: 7, 2: 8, 3: 7, 4: 0}
+        self.collected = {1: set(range(1, 8)), 2: set(range(1, 9)), 3: set(range(1, 8))}
+        self.watched = dict(self.collected)
+
+    def _progress(self, include_specials=False):
+        return overall_show_progress(
+            self.states, self.counts, self.collected, self.watched,
+            include_specials=include_specials,
+        )
+
+    def test_unaired_season_does_not_dilute_progress(self):
+        p = self._progress()
+        self.assertEqual(p["total_episodes"], 22)
+        self.assertEqual(p["watch_pct"], 100)
+        self.assertEqual(p["collection_pct"], 100)
+        self.assertTrue(p["watched"])
+
+    def test_specials_are_excluded_by_default(self):
+        # Season 0's 4 episodes stay out of the denominator.
+        self.assertEqual(self._progress()["total_episodes"], 22)
+
+    def test_specials_count_when_the_setting_is_on(self):
+        p = self._progress(include_specials=True)
+        self.assertEqual(p["total_episodes"], 26)
+        self.assertEqual(p["watched_episodes"], 22)
+        self.assertEqual(p["watch_pct"], 84)
+
+    def test_longer_seasons_carry_more_weight(self):
+        # 1 of 10 watched in a long season is 10%, not half of a two-season average.
+        p = overall_show_progress(
+            {1: {"in_library": True, "watched": False}, 2: {"in_library": False, "watched": False}},
+            {1: 10, 2: 10}, {1: {1}}, {1: {1}},
+        )
+        self.assertEqual(p["watch_pct"], 5)
+
+    def test_show_with_nothing_aired_is_zero_not_a_crash(self):
+        p = overall_show_progress({1: {"in_library": False, "watched": False}}, {1: 0}, {}, {})
+        self.assertEqual((p["watch_pct"], p["collection_pct"], p["total_episodes"]), (0, 0, 0))
 
 
 if __name__ == "__main__":

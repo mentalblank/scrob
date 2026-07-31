@@ -352,6 +352,7 @@ async def read_users_me(
     resp = schemas.User.model_validate(current_user)
     resp.needs_onboarding = needs_onboarding
     resp.needs_setup = needs_setup
+    resp.preferences = (user_settings.preferences or {}) if user_settings else {}
     return resp
 
 @router.delete("/me")

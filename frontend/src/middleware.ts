@@ -31,6 +31,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
       context.locals.token = token;
 
       // Sync primary_metadata_source cookie from user preferences
+      const prefs = (user as any)?.preferences ?? (user as any)?.settings?.preferences ?? {};
       const userPref = (user as any)?.preferences?.primary_metadata_source || (user as any)?.settings?.preferences?.primary_metadata_source;
       if (userPref && context.cookies.get("primary_metadata_source")?.value !== userPref) {
         context.cookies.set("primary_metadata_source", userPref, {
@@ -38,6 +39,20 @@ export const onRequest = defineMiddleware(async (context, next) => {
           maxAge: 31536000,
           sameSite: "lax",
         });
+      }
+
+      // Server-rendered cards read this to label Season 0 as Specials. Only write
+      // it when the payload actually carried preferences — otherwise a response
+      // without them resets the cookie the settings page just set.
+      if ("specials_label" in prefs) {
+        const specialsLabel = prefs.specials_label === true ? "true" : "false";
+        if (context.cookies.get("specials_label")?.value !== specialsLabel) {
+          context.cookies.set("specials_label", specialsLabel, {
+            path: "/",
+            maxAge: 31536000,
+            sameSite: "lax",
+          });
+        }
       }
       
       // If logged in and trying to access login/register, redirect to home
