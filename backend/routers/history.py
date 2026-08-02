@@ -1386,7 +1386,9 @@ async def _resolve_media_id(
         row = await db.execute(
             select(Media.id).where(Media.uri_id == uri_id, Media.media_type == media_type)
         )
-        return row.scalar_one_or_none()
+        # A library can hold the same episode twice (two numbering schemes), so
+        # take the first match rather than raising on the duplicate.
+        return row.scalars().first()
 
     if show_uri_id and season_number is not None and episode_number is not None:
         # Almost no show row carries a uri_id, so match the provider id the uri

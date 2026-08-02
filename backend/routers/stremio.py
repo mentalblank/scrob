@@ -1018,7 +1018,7 @@ async def get_stremio_meta(request: Request, api_key: str, type: str, id: str, d
         clean_imdb = id.split(":")[0].lstrip("t")
         if type == "series":
             res = await db.execute(select(Show).where(Show.uri_id == f"imdb:s:{clean_imdb}").limit(1))
-            item = res.scalar_one_or_none()
+            item = res.scalars().first()
         if not item:
             res = await db.execute(select(Media).where(Media.uri_id == f"imdb:m:{clean_imdb}").limit(1))
             item = res.scalar_one_or_none()

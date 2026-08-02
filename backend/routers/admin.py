@@ -508,7 +508,7 @@ async def approve_request(
                     .options(selectinload(Media.show))
                     .where(Media.uri_id == req.uri_id, Media.media_type == MediaType.episode)
                 )
-                ep_media = ep_media_q.scalar_one_or_none()
+                ep_media = ep_media_q.scalars().first()
                 if ep_media and ep_media.show:
                     tvdb_id = ep_media.show.tvdb_id
                     _req_tmdb_id = ep_media.show.tmdb_id
