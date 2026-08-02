@@ -1489,6 +1489,7 @@ async def sync_items(
     media_by_episode: dict[tuple, Media] = {}   # (show_id, season, ep) → Media
     media_by_tmdb: dict[tuple, Media] = {}       # (tmdb_id, media_type) → Media
 
+    show_tmdb_ids: dict[int, int] = {}
     if media_type == MediaType.episode:
         show_ids = list(set(show_map.values()))
         if show_ids:
@@ -1499,6 +1500,13 @@ async def sync_items(
             )
             for m in episodes:
                 media_by_episode[(m.show_id, m.season_number, m.episode_number)] = m
+            # Needed to translate TVDB-numbered items onto TMDB-numbered rows.
+            show_rows = await _select_in_chunks(
+                db,
+                lambda chunk: select(Show.id, Show.tmdb_id).where(Show.id.in_(chunk)),
+                show_ids,
+            )
+            show_tmdb_ids = {row[0]: row[1] for row in show_rows if row[1]}
         # Also pre-load orphaned episode rows (show_id=None, created by webhook before first sync)
         # so they can be deduplicated by TMDB ID instead of creating a second row.
         ep_tmdb_ids: set[int] = set()
@@ -1695,6 +1703,24 @@ async def sync_items(
                     # Look up existing media from pre-loaded dicts (O(1), no DB query)
                     if media_type == MediaType.episode and show_id:
                         media = media_by_episode.get((show_id, season_num, episode_num))
+                        if not media and season_num is not None and episode_num is not None:
+                            # The server may number episodes the TVDB way while the
+                            # row is stored under TMDB numbering. Translate before
+                            # deciding this is a new episode, or the sync recreates
+                            # the duplicate rows a merge just cleaned up.
+                            show_tmdb_id = show_tmdb_ids.get(show_id)
+                            if show_tmdb_id:
+                                from core.episode_order import get_mapping_by_tvdb_position
+
+                                mapping = await get_mapping_by_tvdb_position(
+                                    db, show_tmdb_id, season_num, episode_num
+                                )
+                                if mapping:
+                                    media = media_by_episode.get((
+                                        show_id,
+                                        mapping.tmdb_season_number,
+                                        mapping.tmdb_episode_number,
+                                    ))
                         if not media and tmdb_id:
                             # Fallback: catch orphaned rows created by webhook without show_id
                             media = media_by_tmdb.get((tmdb_id, media_type))
