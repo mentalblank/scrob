@@ -5437,7 +5437,6 @@ async def run_merge_duplicate_episodes(user_id: int, job_id: int | None = None):
         try:
             await _update_job(status=SyncStatus.running, processed_items=0, total_items=0)
             groups = await _duplicate_episode_groups(db, user_id)
-            await _update_job(total_items=len(groups))
 
             # Deleting the TVDB-numbered rows leaves TVDB browsing blank unless
             # the show can translate between the two orders, so build the
@@ -5447,23 +5446,32 @@ async def run_merge_duplicate_episodes(user_id: int, job_id: int | None = None):
             tmdb_key = await _get_effective_tmdb_key(db, settings)
             tvdb_key = await get_user_tvdb_key(db, user_id)
 
+            show_ids = sorted({g["show_id"] for g in groups})
+            mapping_steps = len(show_ids)
+            await _update_job(total_items=mapping_steps + len(groups), stats={"phase": "mapping"})
+
             mapped_shows: set[int] = set()
             skipped_shows: set[int] = set()
-            for show_id in {g["show_id"] for g in groups}:
+            for index, show_id in enumerate(show_ids, start=1):
+                await _raise_if_cancelled(db, job_id)
                 show_q = await db.execute(select(Show).where(Show.id == show_id))
                 show = show_q.scalars().first()
                 if not show or not show.tmdb_id or not tmdb_key or not tvdb_key:
                     skipped_shows.add(show_id)
-                    continue
-                try:
-                    await ensure_episode_order_mapping(db, show.tmdb_id, tmdb_key, tvdb_key)
-                    mapped_shows.add(show_id)
-                except Exception:
-                    skipped_shows.add(show_id)
-            await db.commit()
+                else:
+                    try:
+                        await ensure_episode_order_mapping(db, show.tmdb_id, tmdb_key, tvdb_key)
+                        # Commit per show: each mapping costs several provider calls
+                        # and an interrupted run should not have to fetch them again.
+                        await db.commit()
+                        mapped_shows.add(show_id)
+                    except Exception:
+                        await db.rollback()
+                        skipped_shows.add(show_id)
+                await _update_job(processed_items=index)
 
             groups = [g for g in groups if g["show_id"] in mapped_shows]
-            await _update_job(total_items=len(groups))
+            await _update_job(total_items=mapping_steps + len(groups), stats={"phase": "merging"})
 
             deleted = 0
             for index, group in enumerate(groups, start=1):
@@ -5500,12 +5508,12 @@ async def run_merge_duplicate_episodes(user_id: int, job_id: int | None = None):
 
                 if index % 25 == 0:
                     await db.commit()
-                    await _update_job(processed_items=index)
+                    await _update_job(processed_items=mapping_steps + index)
 
             await db.commit()
             await _update_job(
                 status=SyncStatus.completed,
-                processed_items=len(groups),
+                processed_items=mapping_steps + len(groups),
                 stats={
                     "groups": len(groups),
                     "rows_deleted": deleted,

@@ -2662,14 +2662,15 @@ const COUNTRIES = (countriesRes || [])
       bar.className = `h-1.5 rounded-full transition-all duration-500 ${failed ? 'bg-red-600' : 'bg-blue-600'}${pct === 0 && !done ? ' animate-pulse' : ''}`;
       bar.style.width = done ? '100%' : `${Math.max(pct, 2)}%`;
     }
-    if (label) label.textContent = done ? 'Merge complete' : failed ? 'Merge failed' : 'Merging duplicates…';
+    const mapping = job.stats?.phase === 'mapping';
+    if (label) label.textContent = done ? 'Merge complete' : failed ? 'Merge failed' : mapping ? 'Building episode order maps…' : 'Merging duplicates…';
     if (pctEl) pctEl.textContent = done ? '100%' : pct > 0 ? `${pct}%` : '';
     if (items) {
       const deleted = job.stats?.rows_deleted;
       const skipped = job.stats?.shows_skipped;
       items.textContent = done && typeof deleted === 'number'
         ? `${deleted} row${deleted === 1 ? '' : 's'} merged${skipped ? `, ${skipped} show${skipped === 1 ? '' : 's'} skipped` : ''}`
-        : job.total_items > 0 ? `${job.processed_items} / ${job.total_items} groups` : '';
+        : job.total_items > 0 ? `${job.processed_items} / ${job.total_items} steps` : '';
     }
   }
 
