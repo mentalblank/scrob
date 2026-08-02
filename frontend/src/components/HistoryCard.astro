@@ -39,14 +39,14 @@ const showProgress = !event.completed && progressPct > 0;
 ---
 
 <div 
-  class="group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
+  class="history-card group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
   data-watched-at={watched_at}
   data-media-type={media.type}
   data-media-title={title}
   data-show-title={showTitle || ""}
   data-season-number={media.season_number || ""}
 >
-  <a href={href} class="block">
+  <a href={href} class="history-card-media block">
     <!-- Backdrop/Still container: 3:2 -->
     <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
       {imageUrl ? (
@@ -91,7 +91,7 @@ const showProgress = !event.completed && progressPct > 0;
   </a>
 
   <!-- Info -->
-  <a href={href} class="block p-3 bg-transparent flex-1">
+  <a href={href} class="history-card-info block p-3 bg-transparent flex-1">
     {showTitle && (
       <p class="text-xs font-medium text-zinc-400 truncate mb-0.5">{showTitle}</p>
     )}
