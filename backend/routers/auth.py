@@ -1,3 +1,4 @@
+import re
 import secrets
 import pyotp
 import logging
@@ -34,6 +35,8 @@ from fastapi import File, UploadFile
 from sqlalchemy.orm.attributes import flag_modified
 
 logger = logging.getLogger(__name__)
+
+USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._-]{3,32}")
 
 
 def _generate_backup_code() -> str:
@@ -711,6 +714,35 @@ async def change_password(
     current_user.password_hash = get_password_hash(password_in.new_password)
     await db.commit()
     return {"status": "password updated"}
+
+@router.post("/change-username", response_model=schemas.User)
+async def change_username(
+    body: schemas.UsernameUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    username = body.username.strip()
+    if not USERNAME_PATTERN.fullmatch(username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Usernames must be 3-32 characters using letters, numbers, dots, dashes or underscores",
+        )
+
+    if username.lower() != current_user.username.lower():
+        taken = await db.execute(
+            select(User.id).where(func.lower(User.username) == username.lower())
+        )
+        if taken.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="That username is already taken",
+            )
+
+    current_user.username = username
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
 
 @router.post("/api-key/regenerate", response_model=schemas.User)
 async def regenerate_api_key(

@@ -141,6 +141,20 @@ const COUNTRIES = (countriesRes || [])
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div class="space-y-2">
+                <label for="username" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Username</label>
+                <input
+                  type="text"
+                  id="username"
+                  name="username"
+                  value={me.username}
+                  minlength={3}
+                  maxlength={32}
+                  pattern="[A-Za-z0-9._\-]{3,32}"
+                  class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                />
+                <p class="text-xs text-zinc-500">Used to sign in. Letters, numbers, dots, dashes and underscores.</p>
+              </div>
+              <div class="space-y-2">
                 <label for="display_name" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Display Name</label>
                 <input
                   type="text"
@@ -153,7 +167,7 @@ const COUNTRIES = (countriesRes || [])
                 />
                 <p class="text-xs text-zinc-500">Shown instead of your username where your name appears.</p>
               </div>
-              <div class={`space-y-2 ${settings.preferences?.show_bio === false ? 'hidden' : ''}`} id="settings-bio-container">
+              <div class={`space-y-2 md:col-span-2 ${settings.preferences?.show_bio === false ? 'hidden' : ''}`} id="settings-bio-container">
                 <label for="bio" class="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">Bio</label>
                 <textarea
                   id="bio"
@@ -4868,6 +4882,16 @@ const COUNTRIES = (countriesRes || [])
           body: JSON.stringify({ ...settings, ...syncPrefs, default_episode_order, preferences: updatedPreferences }),
         }));
 
+        const usernameInput = document.getElementById('username') as HTMLInputElement | null;
+        const newUsername = usernameInput?.value.trim() || '';
+        if (usernameInput && newUsername && newUsername !== usernameInput.defaultValue) {
+          saves.push(fetch('/api/proxy/auth/change-username', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: newUsername }),
+          }));
+        }
+
         // Save profile preferences
         saves.push(fetch('/api/proxy/profile/me', {
           method: 'PATCH',
@@ -4895,6 +4919,8 @@ const COUNTRIES = (countriesRes || [])
           const data = await failed.json();
           throw new Error(data.detail || 'Failed to update settings');
         }
+
+        if (usernameInput && newUsername) usernameInput.defaultValue = newUsername;
 
         showMessage('Settings updated successfully!');
       } catch (e: any) {

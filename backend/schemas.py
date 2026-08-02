@@ -36,6 +36,9 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+class UsernameUpdate(BaseModel):
+    username: str
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
