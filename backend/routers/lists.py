@@ -770,3 +770,59 @@ async def remove_list_item(
         )
 
     return {"message": "Item removed"}
+
+
+@router.post("/{list_id}/items/cleanup-collection")
+async def cleanup_list_collection(
+    list_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ListModel)
+        .options(
+            selectinload(ListModel.items)
+            .selectinload(ListItem.media)
+            .selectinload(Media.show)
+        )
+        .where(ListModel.id == list_id, ListModel.user_id == current_user.id)
+    )
+    lst = result.scalar_one_or_none()
+    if not lst:
+        raise HTTPException(status_code=404, detail="List not found")
+
+    items = sorted(lst.items, key=lambda x: (x.sort_order, x.added_at))
+    if not items:
+        return {"removed_count": 0}
+
+    states = [_format_item(item)["media"] for item in items]
+    await enrich_with_state(db, current_user.id, states)
+
+    removed_media: list[Media] = []
+    for item, state in zip(items, states):
+        # A series only counts as collected once every aired episode is present.
+        if state.get("type") in (MediaType.series, "series"):
+            collected = state.get("collection_pct", 0) >= 100
+        else:
+            collected = bool(state.get("in_library"))
+        if not collected:
+            continue
+        removed_media.append(item.media)
+        await db.delete(item)
+
+    if not removed_media:
+        return {"removed_count": 0}
+
+    await db.commit()
+
+    for media in removed_media:
+        if lst.trakt_slug and media:
+            await _push_list_item_to_trakt(db, current_user.id, lst.trakt_slug, media, remove=True)
+            if lst.trakt_slug == "__plex_watchlist__":
+                await _push_list_item_to_plex_watchlist(db, current_user.id, media, remove=True)
+        if lst.mdblist_slug and media:
+            await _push_list_item_to_mdblist(
+                db, current_user.id, lst.mdblist_slug, media, remove=True
+            )
+
+    return {"removed_count": len(removed_media)}
