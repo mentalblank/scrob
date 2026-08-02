@@ -1159,22 +1159,40 @@ async def mark_as_watched(
     media = None
     show = None
     api_key = None
+    # The show can arrive as a TMDB id or as a uri ("tvdb:s:123"); episode pages
+    # routed by uri only ever send the latter.
     episode_has_context = (
         event_in.media_type == MediaType.episode
-        and event_in.series_tmdb_id is not None
+        and (event_in.series_tmdb_id is not None or event_in.show_uri_id)
         and event_in.season_number is not None
         and event_in.episode_number is not None
     )
+    series_tmdb_id = event_in.series_tmdb_id
 
     if episode_has_context:
         from routers.media import get_user_tmdb_key
+        from routers.media import resolve_show_by_uri
         from routers.webhooks import _find_or_create_show
 
         api_key = await get_user_tmdb_key(db, current_user.id)
-        try:
-            show = await _find_or_create_show(db, event_in.series_tmdb_id, api_key)
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
+        if series_tmdb_id is not None:
+            try:
+                show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            except Exception as e:
+                raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
+        else:
+            show, series_tmdb_id = await resolve_show_by_uri(
+                db, None, event_in.show_uri_id, user_id=current_user.id
+            )
+            if not show and series_tmdb_id is not None:
+                try:
+                    show = await _find_or_create_show(db, series_tmdb_id, api_key)
+                except Exception as e:
+                    raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found for this episode")
+            if series_tmdb_id is None:
+                series_tmdb_id = show.tmdb_id
 
         # Link this show to TVDB right away if the client already knows the id
         # (e.g. a Next Up/list card carrying show_tvdb_id) — don't require the
@@ -1249,8 +1267,8 @@ async def mark_as_watched(
                 ep_data = None
                 try:
                     ep_data = await tmdb.get_episode(
-                        event_in.series_tmdb_id, event_in.season_number, event_in.episode_number, api_key=api_key
-                    )
+                        series_tmdb_id, event_in.season_number, event_in.episode_number, api_key=api_key
+                    ) if series_tmdb_id else None
                 except Exception:
                     ep_data = None
 
@@ -1265,7 +1283,7 @@ async def mark_as_watched(
                     )
                     db.add(media)
                     await db.flush()
-                    await enrich_media(media, api_key=api_key, series_tmdb_id=event_in.series_tmdb_id)
+                    await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
                 elif show.tvdb_id:
                     # Not on TMDB (e.g. TMDB is sparse for this show, see #101)
                     # — fall back to TVDB, which this show is also linked to.
@@ -1360,8 +1378,22 @@ async def _resolve_media_id(
         return row.scalar_one_or_none()
 
     if show_uri_id and season_number is not None and episode_number is not None:
+        # Almost no show row carries a uri_id, so match the provider id the uri
+        # names as well — otherwise every uri-routed episode resolves to nothing.
         show_q = await db.execute(select(Show.id).where(Show.uri_id == show_uri_id))
         show_id = show_q.scalar_one_or_none()
+        if show_id is None:
+            try:
+                parsed = MediaURI.parse(show_uri_id)
+            except ValueError:
+                return None
+            column = Show.tvdb_id if parsed.provider == "tvdb" else Show.tmdb_id
+            try:
+                provider_id = int(parsed.id)
+            except (TypeError, ValueError):
+                return None
+            show_q = await db.execute(select(Show.id).where(column == provider_id))
+            show_id = show_q.scalars().first()
         if show_id is None:
             return None
         row = await db.execute(
