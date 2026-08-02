@@ -1106,6 +1106,46 @@ const COUNTRIES = (countriesRes || [])
               <div id="dupe-history-result" class="hidden border-t border-zinc-800 px-6 py-4 text-xs text-zinc-400"></div>
             </div>
 
+            <!-- Duplicate episode rows -->
+            <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div>
+                  <h3 class="text-lg font-bold text-zinc-100 mb-1">Duplicate episode rows</h3>
+                  <p class="text-zinc-400 text-sm">Shows tracked in both TMDB and TVDB numbering end up with two rows per episode, which splits watch counts. Merges them onto the TMDB-numbered row and moves plays, ratings and collection state across.</p>
+                </div>
+                <div class="flex flex-col gap-2 w-full md:w-auto md:shrink-0">
+                  <button
+                    id="dupe-episodes-check-btn"
+                    type="button"
+                    class="px-6 py-3 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-center"
+                  >
+                    Check
+                  </button>
+                  <button
+                    id="dupe-episodes-merge-btn"
+                    type="button"
+                    disabled
+                    class="px-6 py-3 rounded-xl text-sm font-bold transition-all cursor-pointer disabled:opacity-50 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-center"
+                  >
+                    Merge
+                  </button>
+                </div>
+              </div>
+              <div id="dupe-episodes-result" class="hidden border-t border-zinc-800 px-6 py-4 text-xs text-zinc-400 space-y-2"></div>
+              <div id="dedupe-progress" class="hidden border-t border-zinc-800 px-6 py-4">
+                <div class="flex justify-between items-center mb-1.5">
+                  <span id="dedupe-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
+                  <span id="dedupe-job-pct" class="text-xs font-bold text-zinc-400"></span>
+                </div>
+                <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                  <div id="dedupe-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-blue-600 animate-pulse" style="width: 100%"></div>
+                </div>
+                <div class="flex justify-between text-xs text-zinc-500 mt-1">
+                  <span id="dedupe-job-items"></span>
+                </div>
+              </div>
+            </div>
+
             <!-- Heal unmatched show titles -->
             <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div>
@@ -2597,6 +2637,144 @@ const COUNTRIES = (countriesRes || [])
     });
   }
 
+  // ── Duplicate episode rows ────────────────────────────────────────────────
+  let dedupePoller: ReturnType<typeof setTimeout> | null = null;
+
+  function renderDedupeProgress(job: any) {
+    const strip = document.getElementById('dedupe-progress');
+    const bar   = document.getElementById('dedupe-job-bar');
+    const pctEl = document.getElementById('dedupe-job-pct');
+    const label = document.getElementById('dedupe-job-label');
+    const items = document.getElementById('dedupe-job-items');
+    if (!strip) return;
+
+    if (!job) {
+      strip.classList.add('hidden');
+      return;
+    }
+    strip.classList.remove('hidden');
+
+    const done = job.status === 'completed';
+    const failed = job.status === 'failed' || job.status === 'cancelled';
+    const pct = job.total_items > 0 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100)) : 0;
+
+    if (bar) {
+      bar.className = `h-1.5 rounded-full transition-all duration-500 ${failed ? 'bg-red-600' : 'bg-blue-600'}${pct === 0 && !done ? ' animate-pulse' : ''}`;
+      bar.style.width = done ? '100%' : `${Math.max(pct, 2)}%`;
+    }
+    if (label) label.textContent = done ? 'Merge complete' : failed ? 'Merge failed' : 'Merging duplicates…';
+    if (pctEl) pctEl.textContent = done ? '100%' : pct > 0 ? `${pct}%` : '';
+    if (items) {
+      const deleted = job.stats?.rows_deleted;
+      const skipped = job.stats?.shows_skipped;
+      items.textContent = done && typeof deleted === 'number'
+        ? `${deleted} row${deleted === 1 ? '' : 's'} merged${skipped ? `, ${skipped} show${skipped === 1 ? '' : 's'} skipped` : ''}`
+        : job.total_items > 0 ? `${job.processed_items} / ${job.total_items} groups` : '';
+    }
+  }
+
+  async function pollDedupeJob() {
+    try {
+      const res = await fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) return;
+      const jobs: any[] = await res.json();
+      const job = jobs.find((j: any) => j.job_type === 'dedupe');
+      const active = job && (job.status === 'pending' || job.status === 'running');
+      const recent = job && ['completed', 'failed', 'cancelled'].includes(job.status)
+        && new Date(job.updated_at).getTime() > Date.now() - 10000;
+      renderDedupeProgress(active || recent ? job : null);
+      dedupePoller = active ? setTimeout(pollDedupeJob, 2000) : null;
+    } catch {
+      dedupePoller = null;
+    }
+  }
+
+  function setupDuplicateEpisodes() {
+    const checkBtn = document.getElementById('dupe-episodes-check-btn') as HTMLButtonElement | null;
+    const mergeBtn = document.getElementById('dupe-episodes-merge-btn') as HTMLButtonElement | null;
+    const result = document.getElementById('dupe-episodes-result');
+    if (!checkBtn || !mergeBtn || !result) return;
+
+    checkBtn.addEventListener('click', async () => {
+      checkBtn.disabled = true;
+      const original = checkBtn.textContent;
+      checkBtn.textContent = 'Checking…';
+      try {
+        const res = await fetch('/api/proxy/sync/duplicate-episodes', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Could not check for duplicate episodes');
+        const data = await res.json();
+        result.classList.remove('hidden');
+        result.innerHTML = '';
+
+        if (!data.groups) {
+          result.textContent = 'No duplicate episode rows found.';
+          mergeBtn.disabled = true;
+          return;
+        }
+
+        const moves = data.rows_to_move || {};
+        const moved = Object.entries(moves)
+          .filter(([, count]) => Number(count) > 0)
+          .map(([label, count]) => `${count} ${label.replace(/_/g, ' ')}`)
+          .join(', ');
+        const top = (data.shows || []).slice(0, 5).map((s: any) => `${s.title} (${s.groups})`).join(', ');
+
+        const lines = [
+          `${data.groups} duplicate episode${data.groups === 1 ? '' : 's'} across ${(data.shows || []).length} show${(data.shows || []).length === 1 ? '' : 's'} — ${data.rows_to_delete} row${data.rows_to_delete === 1 ? '' : 's'} would be removed.`,
+        ];
+        if (moved) lines.push(`Moved onto the surviving row: ${moved}.`);
+        if (top) lines.push(`Most affected: ${top}.`);
+        if (data.shows_needing_mapping?.length) {
+          lines.push(`${data.shows_needing_mapping.length} show${data.shows_needing_mapping.length === 1 ? '' : 's'} have no episode order mapping yet — the merge builds one first and skips any it cannot map.`);
+        }
+        for (const line of lines) {
+          const p = document.createElement('p');
+          p.textContent = line;
+          result.appendChild(p);
+        }
+        mergeBtn.disabled = false;
+      } catch (e: any) {
+        showMessage(e.message, 'error');
+      } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = original;
+      }
+    });
+
+    mergeBtn.addEventListener('click', async () => {
+      const ok = await showConfirmModal(
+        'Merge duplicate episodes?',
+        'Duplicate rows are deleted and their plays, ratings and collection state are moved onto the TMDB-numbered episode. This cannot be undone — back up your database first.',
+        'Merge',
+      );
+      if (!ok) return;
+
+      mergeBtn.disabled = true;
+      const original = mergeBtn.textContent;
+      mergeBtn.textContent = 'Starting…';
+      try {
+        const res = await fetch('/api/proxy/sync/duplicate-episodes/merge', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Could not start merge');
+        }
+        if (dedupePoller != null) clearTimeout(dedupePoller);
+        pollDedupeJob();
+        showMessage('Duplicate episode merge started.');
+      } catch (e: any) {
+        showMessage(e.message, 'error');
+        mergeBtn.disabled = false;
+      } finally {
+        mergeBtn.textContent = original;
+      }
+    });
+  }
+
   function setupHealButton() {
     const btn = document.getElementById('heal-btn');
     const modal = document.getElementById('heal-modal');
@@ -2903,7 +3081,8 @@ const COUNTRIES = (countriesRes || [])
     setupHealButton();
     setupLinkProvidersButton();
     setupDuplicateHistory();
-  setupDuplicateHistory();
+    setupDuplicateEpisodes();
+    pollDedupeJob();
     setupExportData();
     setupClearSessionsButton();
   }
