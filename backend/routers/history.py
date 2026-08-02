@@ -485,6 +485,121 @@ def _format_media_item(media: Media) -> dict:
     return data
 
 
+def _aired_episode_total(show: Show, include_specials: bool) -> int:
+    """Episodes of a show that have aired, from its stored TMDB metadata."""
+    data = show.tmdb_data or {}
+    seasons = data.get("seasons", [])
+    last_ep = data.get("last_episode_to_air") or {}
+    last_season = last_ep.get("season_number")
+    last_number = last_ep.get("episode_number")
+
+    total = 0
+    for season in seasons:
+        season_number = season.get("season_number", 0)
+        if season_number == 0 and not include_specials:
+            continue
+        count = season.get("episode_count", 0) or 0
+        if last_season is not None and season_number > last_season:
+            continue
+        if last_season is not None and season_number == last_season and last_number:
+            count = min(count, last_number)
+        total += count
+    return total
+
+
+@router.get("/progress")
+async def get_show_progress(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    sort: str = Query("recent"),
+):
+    """Watched-episode progress for every show the user has started."""
+    settings_result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )
+    settings_row = settings_result.scalar_one_or_none()
+    include_specials = bool(((settings_row.preferences or {}) if settings_row else {}).get("include_specials"))
+
+    watched_filters = [
+        WatchEvent.user_id == current_user.id,
+        WatchEvent.completed == True,
+        Media.media_type == MediaType.episode,
+        Media.show_id.isnot(None),
+        Media.season_number.isnot(None),
+        Media.episode_number.isnot(None),
+    ]
+    if not include_specials:
+        watched_filters.append(Media.season_number != 0)
+
+    # Deduplicate first: the same episode watched twice is still one episode of progress.
+    watched_sq = (
+        select(Media.show_id.label("show_id"), Media.season_number, Media.episode_number)
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(*watched_filters)
+        .group_by(Media.show_id, Media.season_number, Media.episode_number)
+        .subquery()
+    )
+    counts_result = await db.execute(
+        select(watched_sq.c.show_id, func.count()).group_by(watched_sq.c.show_id)
+    )
+    watched_counts = {row[0]: row[1] for row in counts_result.all()}
+    if not watched_counts:
+        return {"results": []}
+
+    last_watched_result = await db.execute(
+        select(Media.show_id, func.max(WatchEvent.watched_at))
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(*watched_filters)
+        .group_by(Media.show_id)
+    )
+    last_watched = {row[0]: row[1] for row in last_watched_result.all()}
+
+    hidden_show_ids = await _hidden_next_up_show_ids(db, current_user.id)
+    shows_result = await db.execute(
+        select(Show).where(Show.id.in_([sid for sid in watched_counts if sid not in hidden_show_ids]))
+    )
+
+    results = []
+    for show in shows_result.scalars().all():
+        watched = watched_counts.get(show.id, 0)
+        total = _aired_episode_total(show, include_specials)
+        watched = min(watched, total) if total else watched
+        watched_at = last_watched.get(show.id)
+        results.append({
+            "id": show.id,
+            "tmdb_id": show.tmdb_id,
+            "tvdb_id": show.tvdb_id,
+            "uri_id": show.uri_id,
+            "type": "series",
+            "title": show.title,
+            "poster_path": show.poster_path,
+            "status": show.status,
+            "watched_episodes": watched,
+            "total_episodes": total,
+            "remaining_episodes": max(0, total - watched),
+            "watch_pct": min(100, int((watched / total) * 100)) if total else 0,
+            "last_watched_at": watched_at.isoformat() if watched_at else None,
+        })
+
+    lang = await get_user_metadata_language(db, current_user.id)
+    if lang:
+        from core.translations import get_show_translations, apply_show_translations
+
+        translations = await get_show_translations(db, [r["id"] for r in results], lang)
+        apply_show_translations(results, translations)
+
+    if sort == "title":
+        results.sort(key=lambda r: (r["title"] or "").lower())
+    elif sort == "progress":
+        results.sort(key=lambda r: r["watch_pct"], reverse=True)
+    elif sort == "remaining":
+        results.sort(key=lambda r: r["remaining_episodes"])
+    else:
+        results.sort(key=lambda r: (r["last_watched_at"] or ""), reverse=True)
+
+    return {"results": results}
+
+
 async def _hidden_next_up_show_ids(db: AsyncSession, user_id: int) -> set[int]:
     """Local Show.id values the user has dropped or blocked, so Next Up can skip them."""
     from models.blocklist import BlocklistItem

@@ -770,6 +770,22 @@ export interface ContinueWatchingItem {
   completed: boolean;
 }
 
+export interface ShowProgress {
+  id: number;
+  tmdb_id: number | null;
+  tvdb_id: number | null;
+  uri_id: string | null;
+  type: "series";
+  title: string;
+  poster_path: string | null;
+  status: string | null;
+  watched_episodes: number;
+  total_episodes: number;
+  remaining_episodes: number;
+  watch_pct: number;
+  last_watched_at: string | null;
+}
+
 export interface CollectionDetail {
   id: number;
   name: string;
@@ -1288,6 +1304,9 @@ export const api = {
 
     deleteEvent: (eventId: number, token: string) =>
       del<{ status: string; remaining_count: number }>(`/history/event/${eventId}`, undefined, token),
+
+    progress: (params?: { sort?: string }, token?: string) =>
+      get<{ results: ShowProgress[] }>("/history/progress", params, token),
   },
 
   lists: {

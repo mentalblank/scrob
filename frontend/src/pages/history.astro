@@ -72,7 +72,16 @@ const baseUrl = `/history${urlParams.toString() ? `?${urlParams.toString()}` : "
 
 <Base title="Watch History">
   <div>
-    <h1 class="page-title mb-8">Watch History</h1>
+    <div class="flex items-center justify-between gap-4 mb-8">
+      <h1 class="page-title">Watch History</h1>
+      <a
+        href="/progress"
+        class="shrink-0 flex items-center gap-2 px-4 py-2 text-sm font-bold text-zinc-400 bg-zinc-900/40 hover:bg-zinc-900/60 border border-zinc-800/50 rounded-xl hover:border-zinc-600 hover:text-zinc-200 transition-all active:scale-95"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
+        Progress
+      </a>
+    </div>
 
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 bg-zinc-900/40 p-4 rounded-2xl border border-zinc-800/80 backdrop-blur-sm">
       <!-- Type Filter Toggles -->

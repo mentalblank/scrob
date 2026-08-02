@@ -22,9 +22,10 @@ const pathname = Astro.url.pathname;
 const activeMovies = pathname.startsWith('/movies') || pathname.startsWith('/collection/movies') || pathname.startsWith('/trending/movies') || pathname.startsWith('/media/movie');
 const activeShows  = pathname.startsWith('/shows') || pathname.startsWith('/collection/shows') || pathname.startsWith('/show') || pathname.startsWith('/trending/shows');
 const activeHistory = pathname.startsWith('/history') || pathname === '/next-up';
+const activeProgress = pathname.startsWith('/progress');
 const activeLists  = pathname.startsWith('/lists') || pathname.startsWith('/list/');
 const activeDiscover = pathname.startsWith('/discover');
-const activeHome   = !activeMovies && !activeShows && !activeHistory && !activeLists && !activeDiscover;
+const activeHome   = !activeMovies && !activeShows && !activeHistory && !activeLists && !activeDiscover && !activeProgress;
 
 const navLink = (active: boolean) =>
   active
@@ -161,6 +162,7 @@ const bottomNavItem = (active: boolean) =>
             <a href="/discover" class={navLink(activeDiscover)}>Discover</a>
             <a href="/lists" class={navLink(activeLists)}>Lists</a>
             <a href="/history" class={navLink(activeHistory)}>History</a>
+            <a href="/progress" class={navLink(activeProgress)}>Progress</a>
           </div>
           <!-- Desktop search -->
           <div class="relative hidden md:block" id="desktop-search-wrapper">

@@ -1,0 +1,117 @@
+---
+import Base from "../layouts/Base.astro";
+import ProgressStrip from "../components/ProgressStrip.astro";
+import { api, tmdbImageUrl, type ShowProgress } from "../lib/api";
+import { showUrl } from "../lib/urls";
+
+export const prerender = false;
+
+const { token } = Astro.locals;
+Astro.response.headers.set("Cache-Control", "no-store");
+
+const SORTS: [string, string][] = [
+  ["recent", "Recently watched"],
+  ["progress", "Most complete"],
+  ["remaining", "Fewest left"],
+  ["title", "Title"],
+];
+
+const sort = Astro.url.searchParams.get("sort") || "recent";
+const preferTvdb = Astro.cookies.get("primary_metadata_source")?.value === "tvdb";
+
+let shows: ShowProgress[] = [];
+let error = "";
+
+try {
+  const data = await api.history.progress({ sort }, token);
+  shows = data?.results ?? [];
+} catch (e: unknown) {
+  error = e instanceof Error ? e.message : "Failed to load";
+}
+
+const inProgress = shows.filter((s) => s.watch_pct < 100);
+const finished = shows.filter((s) => s.watch_pct >= 100);
+---
+
+<Base title="Progress">
+  <div class="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+    <div>
+      <h1 class="page-title mb-2">Progress</h1>
+      <p class="text-zinc-500">Every show you have started, and how far through it you are</p>
+    </div>
+    <form method="GET" class="flex items-center gap-2 shrink-0">
+      <label for="sort" class="text-xs font-bold uppercase tracking-widest text-zinc-500">Sort</label>
+      <select
+        id="sort"
+        name="sort"
+        onchange="this.form.submit()"
+        class="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-bold text-zinc-300 focus:outline-none focus:border-blue-500/50 transition cursor-pointer"
+      >
+        {SORTS.map(([value, label]) => (
+          <option value={value} selected={sort === value}>{label}</option>
+        ))}
+      </select>
+    </form>
+  </div>
+
+  {error && (
+    <div class="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded-xl mb-8">
+      {error}
+    </div>
+  )}
+
+  {shows.length === 0 && !error ? (
+    <div class="bg-zinc-900/50 rounded-2xl p-12 text-center">
+      <div class="text-zinc-500 mb-2">No shows in progress</div>
+      <a href="/shows" class="text-blue-500 hover:text-blue-400 font-medium transition-colors">Browse your shows</a>
+    </div>
+  ) : (
+    <div class="space-y-10">
+      {[["In Progress", inProgress], ["Completed", finished]].map(([label, group]) => (
+        (group as ShowProgress[]).length > 0 && (
+          <section>
+            <h2 class="section-headline mb-4">{label}</h2>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {(group as ShowProgress[]).map((show) => (
+                <a
+                  href={showUrl(show.uri_id, show.tvdb_id, show.tmdb_id, preferTvdb)}
+                  class="group flex items-center gap-4 p-3 rounded-2xl glass-card hover:border-zinc-700 transition-all active:scale-[0.99]"
+                >
+                  <div class="w-12 shrink-0 aspect-[2/3] rounded-xl overflow-hidden bg-zinc-950 ring-1 ring-white/5">
+                    {show.poster_path ? (
+                      <img
+                        src={tmdbImageUrl(show.poster_path, "w185")}
+                        alt={show.title}
+                        loading="lazy"
+                        decoding="async"
+                        class="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div class="w-full h-full flex items-center justify-center text-lg opacity-30">📺</div>
+                    )}
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-baseline justify-between gap-3 mb-1.5">
+                      <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors">{show.title}</h3>
+                      <span class="text-[11px] font-bold text-zinc-400 tabular-nums shrink-0">
+                        {show.watched_episodes} / {show.total_episodes} eps
+                      </span>
+                    </div>
+                    <ProgressStrip
+                      title="Watched"
+                      watchedEpisodesCount={show.watched_episodes}
+                      totalEpisodesCount={show.total_episodes}
+                      progressPct={show.watch_pct}
+                      leftLabel={`${show.watched_episodes} / ${show.total_episodes} Watched`}
+                      rightLabel={show.remaining_episodes > 0 ? `${show.remaining_episodes} Remaining` : "Complete"}
+                    />
+                  </div>
+                </a>
+              ))}
+            </div>
+          </section>
+        )
+      ))}
+    </div>
+  )}
+</Base>
