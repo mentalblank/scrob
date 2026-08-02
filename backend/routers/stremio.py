@@ -608,7 +608,7 @@ async def resolve_media_item(
 async def stremio_configure_root():
     # No key in the path means there is nothing to configure yet — the manifest URL
     # that carries the key is issued from the app's own integrations settings.
-    return RedirectResponse(url="/settings#tab-integrations", status_code=302)
+    return RedirectResponse(url="/connections#tab-integrations", status_code=302)
 
 
 class StremioConfigBody(BaseModel):
@@ -845,7 +845,7 @@ async def get_stremio_manifest(request: Request, api_key: Optional[str] = None, 
             # Stremio opens this from its own origin, so it has to be absolute.
             "configurationURL": (
                 f"{get_base_url(request)}/stremio/{api_key}/configure" if api_key
-                else f"{get_base_url(request)}/settings#tab-integrations"
+                else f"{get_base_url(request)}/connections#tab-integrations"
             ),
         }
     }

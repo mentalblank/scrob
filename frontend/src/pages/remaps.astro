@@ -2775,7 +2775,7 @@ try {
       button.addEventListener("click", () => {
         const title = button.getAttribute("data-show-title");
         if (title) {
-          window.location.href = `/settings?match_show=${encodeURIComponent(title)}#tab-media-servers`;
+          window.location.href = `/connections?match_show=${encodeURIComponent(title)}#tab-media-servers`;
         }
       });
     });
@@ -2784,7 +2784,7 @@ try {
       button.addEventListener("click", () => {
         const title = button.getAttribute("data-movie-title");
         if (title) {
-          window.location.href = `/settings?match_movie=${encodeURIComponent(title)}#tab-media-servers`;
+          window.location.href = `/connections?match_movie=${encodeURIComponent(title)}#tab-media-servers`;
         }
       });
     });
