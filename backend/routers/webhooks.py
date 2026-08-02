@@ -261,6 +261,13 @@ async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: s
         )
         db.add(show)
         await db.flush()
+        # Record the provider link so uri lookups resolve without a fallback.
+        from utils.alias_lookup import upsert_alias
+
+        if show.tmdb_id:
+            await upsert_alias(db, show.id, "series", "tmdb", str(show.tmdb_id))
+        if show.tvdb_id:
+            await upsert_alias(db, show.id, "series", "tvdb", str(show.tvdb_id))
     return show
 
 

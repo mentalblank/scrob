@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file. This projec
 
 ### Added
 
+- **Link TVDB Ids**: Maintenance action that finds the TVDB id for shows that only have a TMDB one, so episode numbering can be reconciled between providers.
+- **Duplicate Play Cleanup**: Maintenance action that finds plays logged more than once for the same episode — usually the same watch imported from two providers — and keeps the earliest.
+- **Duplicate Episode Merge**: Maintenance action that merges episode rows stored twice under different numbering schemes onto the TMDB-numbered row, after building the episode-order mapping needed to keep TVDB browsing intact.
 - **Stremio Account Sync**: Connect a Stremio account from Connections, authorising by code or QR without sharing a password. Supports reconnecting in place and a full resync that reconciles removals made in Stremio.
 - **Bulk Watch Dates**: Marking a season or a whole show watched now opens the play-history modal, so the plays can be logged now, on a chosen date, or with no date at all.
 - **Connections Page**: Media servers, trackers and integrations moved out of Settings onto a dedicated `/connections` page with its own tabs and save button.
@@ -35,6 +38,9 @@ All notable changes to this project will be documented in this file. This projec
 - **Drop Show**: Added the ability to drop/resume shows from the Next Up list without losing history.
 - **User Data Visibility**: Added global settings to toggle the visibility of comments and ratings.
 - **Streaming Providers**: Display streaming availability on media detail pages using TMDB.
+- **Show Identity**: Shows and media rows created by webhooks, Trakt, Simkl and mark-as-watched never received a `uri_id`, so uri-based lookups silently missed. Every row now gets one at creation, existing rows are backfilled, and uri resolution falls back through the provider id columns.
+- **Episode Counts**: Progress and show pages counted episodes stored under two numbering schemes twice, which could report more watched episodes than a show has.
+- **Media Server Sync**: A TVDB-numbered episode from a media server now maps onto the existing TMDB-numbered row instead of creating a second one.
 - **Clean List Action**: Added a list cleanup tool to automatically remove already-collected items from custom lists.
 - **Collection Reset**: Added a "Clear Collection" action to the settings panel.
 - **Integrations**: Integrated Radarr/Sonarr to automatically add media from personal lists.
