@@ -101,6 +101,7 @@ const COUNTRIES = (countriesRes || [])
       <button type="button" data-settings-tab-btn="trackers" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Trackers</button>
       <button type="button" data-settings-tab-btn="integrations" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Integrations</button>
       <button type="button" data-settings-tab-btn="security" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Security & API Keys</button>
+      <button type="button" data-settings-tab-btn="maintenance" class="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60 cursor-pointer shrink-0">Maintenance & Data</button>
     </div>
 
     <div class="space-y-12">
@@ -2242,6 +2243,29 @@ const COUNTRIES = (countriesRes || [])
           </div>
         </section>
 
+        <!-- Danger Zone -->
+        <section class="bg-red-950/20 border border-red-500/20 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-red-500/20 pb-2">
+            <h2 class="text-2xl font-black text-red-500 tracking-tight">Danger Zone</h2>
+          </div>
+          <div class="bg-red-950/30 border border-red-500/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div>
+              <h3 class="text-lg font-bold text-zinc-100 mb-1">Delete Account</h3>
+              <p class="text-zinc-400 text-sm">Once you delete your account, there is no going back. All your data will be permanently removed.</p>
+            </div>
+            <button
+              type="button"
+              id="delete-account-btn"
+              class="px-6 py-3 bg-red-600 hover:bg-red-500 text-zinc-100 font-bold rounded-xl transition-all shadow-lg shadow-red-600/20 active:scale-95 whitespace-nowrap cursor-pointer text-center"
+            >
+              Delete Account
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- Tab Panel: Maintenance & Data -->
+      <div data-settings-tab="maintenance" class="space-y-12 hidden">
         <!-- Maintenance -->
         <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
           <div class="mb-4 border-b border-zinc-800 pb-2">
@@ -2358,26 +2382,6 @@ const COUNTRIES = (countriesRes || [])
                 Clear Collection
               </button>
             </div>
-          </div>
-        </section>
-
-        <!-- Danger Zone -->
-        <section class="bg-red-950/20 border border-red-500/20 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
-          <div class="mb-4 border-b border-red-500/20 pb-2">
-            <h2 class="text-2xl font-black text-red-500 tracking-tight">Danger Zone</h2>
-          </div>
-          <div class="bg-red-950/30 border border-red-500/10 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div>
-              <h3 class="text-lg font-bold text-zinc-100 mb-1">Delete Account</h3>
-              <p class="text-zinc-400 text-sm">Once you delete your account, there is no going back. All your data will be permanently removed.</p>
-            </div>
-            <button
-              type="button"
-              id="delete-account-btn"
-              class="px-6 py-3 bg-red-600 hover:bg-red-500 text-zinc-100 font-bold rounded-xl transition-all shadow-lg shadow-red-600/20 active:scale-95 whitespace-nowrap cursor-pointer text-center"
-            >
-              Delete Account
-            </button>
           </div>
         </section>
       </div>
