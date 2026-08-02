@@ -675,26 +675,27 @@ async def stremio_configure(request: Request, api_key: str, db: AsyncSession = D
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Scrob — Configure Addon</title>
     <meta name="color-scheme" content="dark light" />
+    {_FONT_LINKS}
     <style>{_PAGE_CSS}
         .shell {{ max-width: 560px; }}
         h1 {{ margin-bottom: 4px; }}
         .group {{ margin-top: 22px; }}
-        .group > label.section {{ display: block; color: var(--text-muted); font-size: 0.66rem;
-          font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 8px; }}
+        .group > label.section {{ display: block; color: var(--text-dim); font-size: 0.625rem;
+          font-weight: 700; text-transform: uppercase; letter-spacing: 0.2em; margin-bottom: 8px; }}
         .toggle {{ display: flex; align-items: flex-start; gap: 11px; padding: 12px 13px;
           background: var(--field-bg); border: 1px solid var(--glass-border);
-          border-radius: 14px; margin-bottom: 7px; cursor: pointer;
+          border-radius: 16px; margin-bottom: 7px; cursor: pointer;
           -webkit-tap-highlight-color: transparent; }}
-        .toggle input {{ margin-top: 1px; width: 18px; height: 18px; flex-shrink: 0;
+        .toggle input {{ margin-top: 1px; width: 20px; height: 20px; flex-shrink: 0; border-radius: 8px;
           accent-color: var(--accent); cursor: pointer; }}
         .toggle-text {{ min-width: 0; }}
         .toggle-text strong {{ display: block; font-size: 0.88rem; font-weight: 650; overflow-wrap: anywhere; }}
         .toggle-text small {{ display: block; color: var(--text-muted); font-size: 0.76rem; margin-top: 2px; }}
         .empty {{ color: var(--text-dim); font-size: 0.8rem; text-align: left; }}
         .limit {{ display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 11px 13px;
-          background: var(--field-bg); border: 1px solid var(--glass-border); border-radius: 14px; }}
+          background: var(--field-bg); border: 1px solid var(--glass-border); border-radius: 16px; }}
         .limit input {{ width: 92px; min-height: 40px; background: var(--bg-page);
-          border: 1px solid var(--glass-border); color: var(--text); border-radius: 10px;
+          border: 1px solid var(--glass-border); color: var(--text); border-radius: 12px;
           padding: 7px 10px; font-family: inherit; font-size: 16px; }}
         .limit span {{ font-size: 0.84rem; color: var(--text-muted); }}
         .url {{ display: flex; flex-wrap: wrap; gap: 8px; }}
@@ -1201,12 +1202,19 @@ async def _describe_media(db: AsyncSession, media: Media) -> dict:
 # Mirrors the app's own tokens (frontend/src/styles/global.css) so these pages,
 # which Stremio opens in a plain browser tab outside the Astro app, still look
 # like Scrob rather than a bare error page.
+_FONT_LINKS = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700'
+    '&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet">'
+)
+
 _PAGE_CSS = """
     :root {
       --bg-page: #09090b; --bg-card: #18181b;
       --glass-bg: rgba(24, 24, 27, 0.4); --glass-border: rgba(255, 255, 255, 0.05);
       --text: #f4f4f5; --text-muted: #a1a1aa; --text-dim: #71717a;
-      --accent: #3b82f6; --ok: #10b981; --warn: #f59e0b;
+      --accent: #2563eb; --accent-hover: #3b82f6; --ok: #10b981; --warn: #f59e0b;
       --field-bg: rgba(9, 9, 11, 0.6);
     }
     /* Dark is the default; the bootstrap script adds .light when the user has
@@ -1220,7 +1228,7 @@ _PAGE_CSS = """
     * { box-sizing: border-box; }
     html { -webkit-text-size-adjust: 100%; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
       background: var(--bg-page); color: var(--text);
       display: flex;
       min-height: 100vh;
@@ -1245,7 +1253,8 @@ _PAGE_CSS = """
     }
     .brand { display: flex; align-items: center; gap: 8px; justify-content: center; margin-bottom: 18px; }
     .brand span { font-size: 0.7rem; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-dim); }
-    h1 { font-size: 1.3rem; margin: 0 0 6px; text-align: center; letter-spacing: -0.01em; }
+    h1 { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; font-size: 1.3rem; font-weight: 800;
+      margin: 0 0 6px; text-align: center; letter-spacing: -0.02em; }
     h1.ok { color: var(--ok); }
     h1.warn { color: var(--warn); }
     p { color: var(--text-muted); font-size: 0.9rem; line-height: 1.5; margin: 6px 0; text-align: center; }
@@ -1262,7 +1271,7 @@ _PAGE_CSS = """
     .subtitle { color: var(--text-muted); font-size: 0.85rem; margin: 0; overflow-wrap: anywhere; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
     .btn { flex: 1 1 140px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-      min-height: 44px; padding: 11px 14px; border-radius: 14px; font-size: 0.85rem; font-weight: 700;
+      min-height: 44px; padding: 11px 14px; border-radius: 12px; font-size: 0.85rem; font-weight: 700;
       border: 1px solid var(--glass-border); background: var(--field-bg); color: var(--text);
       text-decoration: none; cursor: pointer; transition: all 0.2s ease; font-family: inherit;
       -webkit-tap-highlight-color: transparent; }
@@ -1271,7 +1280,7 @@ _PAGE_CSS = """
     /* Hover lift only where there is a real pointer — on touch it sticks after a tap. */
     @media (hover: hover) {
       .btn:hover { border-color: rgba(59, 130, 246, 0.4); transform: translateY(-1px); }
-      .btn.primary:hover { background: #60a5fa; }
+      .btn.primary:hover { background: var(--accent-hover); }
       .btn:disabled:hover { transform: none; }
     }
     .btn:active { transform: scale(0.98); }
@@ -1388,6 +1397,7 @@ def _result_page(
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
     <title>{html_lib.escape(title)}</title>
+    {_FONT_LINKS}
     <style>{_PAGE_CSS}</style>
     {_THEME_BOOTSTRAP}
 </head>
@@ -1462,6 +1472,7 @@ def _unmatched_html(
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Scrob — Link This Title</title>
     <meta name="color-scheme" content="dark light" />
+    {_FONT_LINKS}
     <style>{_PAGE_CSS}
         .shell {{ max-width: 480px; }}
         h1 {{ color: var(--warn); }}
