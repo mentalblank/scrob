@@ -109,6 +109,24 @@ const hasVisible = items.some((i) => !isHidden(i));
     justify-content: center;
     padding: 0.5rem 0.875rem;
     min-width: 0;
+    order: 2;
+  }
+  /* The action bar is a full-width strip on a poster card; in a row it has to
+     become a narrow column of icons at the end instead. */
+  .next-up-compact .card-action-bar {
+    order: 3;
+    align-self: stretch;
+    grid-template-columns: repeat(3, 2.25rem);
+    border-top: 0;
+    border-left: 1px solid var(--color-glass-border);
+    background-color: transparent;
+  }
+  .next-up-compact .card-action-btn {
+    padding: 0;
+    gap: 0;
+  }
+  .next-up-compact .card-action-btn span {
+    display: none;
   }
 </style>
 
