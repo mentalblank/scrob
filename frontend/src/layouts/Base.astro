@@ -357,7 +357,7 @@ const bottomNavItem = (active: boolean) =>
             <circle cx="12" cy="12" r="10"/>
             <polyline points="12 6 12 12 16 14"/>
           </svg>
-          Play History
+          <span id="watch-history-modal-title">Play History</span>
         </h3>
         <button id="watch-history-modal-close" class="p-1 rounded-xl hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition cursor-pointer shrink-0" aria-label="Close">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -370,7 +370,7 @@ const bottomNavItem = (active: boolean) =>
         <button id="watch-history-unwatch-btn" class="hidden w-full px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none">
           Mark as unwatched
         </button>
-        <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Log a new play</p>
+        <p id="watch-history-log-label" class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Log a new play</p>
         <div class="flex gap-2">
           <button id="watch-history-now-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white">Just now</button>
           <button id="watch-history-custom-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Custom</button>
@@ -1311,6 +1311,10 @@ const bottomNavItem = (active: boolean) =>
     };
     const toUTC = (d: Date) => d.toISOString().slice(0, 16);
 
+    // Set when the modal is marking a whole season or show watched, rather than
+    // logging one item's play — the backend takes the same watched_at either way.
+    let _watchHistoryBulk: { kind: 'season' | 'show'; showUri: string; season: string; btn: HTMLElement } | null = null;
+
     let _watchHistoryMediaId: string | null = null;
     let _watchHistoryUriId: string | null = null;
     let _watchHistoryShowUri: string | null = null;
@@ -1332,6 +1336,11 @@ const bottomNavItem = (active: boolean) =>
       // dataset values can be the literal strings "null"/"undefined"/"" — normalise to null.
       const _clean = (v: string | null): string | null =>
         (v && v !== 'null' && v !== 'undefined' && v.trim() !== '') ? v : null;
+      _watchHistoryBulk = null;
+      document.getElementById('watch-history-modal-title')!.textContent = 'Play History';
+      document.getElementById('watch-history-modal-events')!.classList.remove('hidden');
+      document.getElementById('watch-history-log-label')!.textContent = 'Log a new play';
+      document.getElementById('watch-history-log-btn')!.textContent = 'Log play';
       _watchHistoryTmdbId = null;
       _watchHistoryUriId = _clean(uriIdForHistory);
       _watchHistoryMediaType = mediaType;
@@ -1358,6 +1367,49 @@ const bottomNavItem = (active: boolean) =>
       document.getElementById('watch-history-modal')!.classList.remove('hidden');
       document.body.style.overflow = 'hidden';
       await loadWatchHistoryEvents();
+    }
+
+    function openBulkWatchModal(btn: HTMLElement, kind: 'season' | 'show', showUri: string, season: string) {
+      _watchHistoryBulk = { kind, showUri, season, btn };
+
+      document.getElementById('watch-history-modal-title')!.textContent =
+        kind === 'season' ? 'Mark Season Watched' : 'Mark Show Watched';
+      document.getElementById('watch-history-modal-events')!.classList.add('hidden');
+      document.getElementById('watch-history-unwatch-btn')!.classList.add('hidden');
+      document.getElementById('watch-history-log-label')!.textContent = 'Watched on';
+      document.getElementById('watch-history-log-btn')!.textContent = 'Mark as watched';
+
+      _watchHistoryDateMode = 'now';
+      const activeClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white';
+      const inactiveClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700';
+      document.getElementById('watch-history-now-btn')!.className = activeClass;
+      document.getElementById('watch-history-custom-btn')!.className = inactiveClass;
+      document.getElementById('watch-history-unknown-btn')!.className = inactiveClass;
+      const dateInput = document.getElementById('watch-history-date-input') as HTMLInputElement;
+      dateInput.classList.add('hidden');
+      dateInput.value = toLocal(new Date());
+      dateInput.max = toLocal(new Date());
+
+      document.getElementById('watch-history-modal')!.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function applyBulkWatchedUI(btn: HTMLElement, kind: 'season' | 'show', showUri: string, season: string) {
+      updateWatchedButtonUI(btn, true);
+      if (!showUri) return;
+      const uri = CSS.escape(showUri);
+      const mark = (selector: string) => {
+        document.querySelectorAll(selector).forEach(c => {
+          const b = c.querySelector('[data-action="watched"]');
+          if (b) updateWatchedButtonUI(b as HTMLElement, true);
+        });
+      };
+      if (kind === 'show') {
+        mark(`[data-card][data-media-type="series"][data-uri-id="${uri}"][data-season]:not([data-season=""])`);
+        mark(`[data-card][data-media-type="episode"][data-show-uri-id="${uri}"]`);
+      } else {
+        mark(`[data-card][data-media-type="episode"][data-show-uri-id="${uri}"][data-season="${season}"]`);
+      }
     }
 
     async function loadWatchHistoryEvents() {
@@ -1503,6 +1555,32 @@ const bottomNavItem = (active: boolean) =>
             : toUTC(new Date(input.value || toLocal(new Date())));
         const logBtn = document.getElementById('watch-history-log-btn') as HTMLButtonElement;
         logBtn.disabled = true;
+
+        if (_watchHistoryBulk) {
+          const { kind, showUri, season, btn } = _watchHistoryBulk;
+          logBtn.textContent = 'Marking…';
+          try {
+            if (kind === 'season') {
+              await apiFetch('/history/season', 'POST', {
+                show_uri_id: showUri,
+                season_number: Number(season),
+                watched_at: watchedAt,
+              });
+            } else {
+              await apiFetch('/history/show-all', 'POST', {
+                show_uri_id: showUri,
+                watched_at: watchedAt,
+              });
+            }
+            applyBulkWatchedUI(btn, kind, showUri, season);
+            closeWatchHistoryModal();
+          } catch {
+            logBtn.textContent = 'Mark as watched';
+          }
+          logBtn.disabled = false;
+          return;
+        }
+
         logBtn.textContent = 'Logging…';
         try {
           await apiFetch('/history', 'POST', {
@@ -1888,37 +1966,36 @@ const bottomNavItem = (active: boolean) =>
           return;
         }
 
+        // The bulk modal below doubles as the confirmation when marking watched,
+        // so only unwatching asks first.
         let confirmed = true;
-        if (mediaType === 'series' && season) {
+        if (mediaType === 'series' && season && isWatched) {
           confirmed = await showConfirm(
-            isWatched ? 'Mark season as unwatched?' : 'Mark season as watched?',
-            isWatched
-              ? 'This will remove all watch events for every episode in this season.'
-              : 'This will add a watch event for every episode in your library for this season.'
+            'Mark season as unwatched?',
+            'This will remove all watch events for every episode in this season.'
           );
-        } else if (mediaType === 'series' && !isWatched) {
-          confirmed = await showConfirm('Mark all episodes as watched?', 'This will add a watch event for every episode in your library for this show.');
         } else if (mediaType === 'series' && isWatched) {
           confirmed = await showConfirm('Remove all watch history?', 'This will remove all watch events for every episode of this show.');
         }
         if (!confirmed) return;
 
+        // Marking a season or show watched goes through the modal so the user can
+        // pick the date; unwatching stays immediate.
+        if (mediaType === 'series' && !isWatched) {
+          const showUri = season ? (uriId || card.dataset.showUriId) : uriId;
+          if (!showUri) { alert('Missing show URI'); return; }
+          openBulkWatchModal(btn, season ? 'season' : 'show', showUri, season || '');
+          return;
+        }
+
         try {
           if (mediaType === 'series' && season) {
             const showUri = uriId || card.dataset.showUriId;
             if (!showUri) { alert('Missing show URI'); return; }
-            if (isWatched) {
-              await apiFetch(`/history/season?show_uri_id=${encodeURIComponent(showUri)}&season_number=${season}`, 'DELETE');
-            } else {
-              await apiFetch('/history/season', 'POST', { show_uri_id: showUri, season_number: Number(season) });
-            }
+            await apiFetch(`/history/season?show_uri_id=${encodeURIComponent(showUri)}&season_number=${season}`, 'DELETE');
           } else if (mediaType === 'series') {
             if (!uriId) { alert('Missing show URI'); return; }
-            if (isWatched) {
-              await apiFetch(`/history/show-all?show_uri_id=${encodeURIComponent(uriId)}`, 'DELETE');
-            } else {
-              await apiFetch('/history/show-all', 'POST', { show_uri_id: uriId });
-            }
+            await apiFetch(`/history/show-all?show_uri_id=${encodeURIComponent(uriId)}`, 'DELETE');
           }
           const nowWatched = !isWatched;
           
