@@ -1,5 +1,6 @@
 ---
 import MediaCard from "../../components/MediaCard.astro";
+import EpisodeCard from "../../components/EpisodeCard.astro";
 import ActionBar from "../../components/ActionBar.astro";
 import { api, tmdbImageUrl } from "../../lib/api";
 import { mediaUrl } from "../../lib/urls";
@@ -9,10 +10,23 @@ export const prerender = false;
 
 const { token } = Astro.locals;
 let nextUp = [];
+let settings: any = null;
 
 try {
-  const data = await api.history.nextUp(token, 10);
+  const [data, userSettings] = await Promise.all([
+    api.history.nextUp(token, 10),
+    api.auth.getSettings(token!).catch(() => null),
+  ]);
   nextUp = data?.next_up ?? [];
+  settings = userSettings;
+  // Same ordering rule as the dashboard itself, so a refresh after marking an
+  // episode watched doesn't silently drop the user's Next Up preferences.
+  if (settings?.shuffle_next_up) {
+    for (let i = nextUp.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [nextUp[i], nextUp[j]] = [nextUp[j], nextUp[i]];
+    }
+  }
 } catch (e) {
   console.error("Failed to fetch next up for partial:", e);
 }
@@ -29,6 +43,22 @@ const episodeLabel = episodeCode(hero.season_number, hero.episode_number, specia
 const rawBackdrop = hero.backdrop_path || hero.show_backdrop_path;
 const heroBackdrop = tmdbImageUrl(rawBackdrop, "w1280");
 ---
+
+{settings?.minimalist_next_up ? (
+  <section class="mb-16" id="dashboard-next-up">
+    <div class="flex items-center justify-between mb-8">
+      <h2 class="section-headline">Next Up</h2>
+      <a href="/next-up" class="text-sm font-bold uppercase tracking-widest text-zinc-500 hover:text-blue-400 transition-colors group/all">
+        See All <span class="group-hover/all:translate-x-1 transition-transform">→</span>
+      </a>
+    </div>
+    <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
+      {nextUp.map((item: any) => (
+        <div class="flex-shrink-0 w-56"><EpisodeCard item={item} /></div>
+      ))}
+    </div>
+  </section>
+) : (
 
 <section class="relative md:-mt-8 mb-16" id="dashboard-next-up">
   <div class="absolute -top-20 md:-top-32 left-1/2 -translate-x-1/2 w-screen h-[600px] lg:h-[700px] xl:h-[780px] 2xl:h-[880px] overflow-hidden pointer-events-none" style="mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%);" data-adult-backdrop={hero.adult ? "true" : undefined}>
@@ -100,3 +130,4 @@ const heroBackdrop = tmdbImageUrl(rawBackdrop, "w1280");
     {nextUp.map((item) => <div class="flex-shrink-0 w-40"><MediaCard item={item} /></div>)}
   </div>
 </section>
+)}

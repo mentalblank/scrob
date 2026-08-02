@@ -462,28 +462,6 @@ const COUNTRIES = (countriesRes || [])
               </div>
             </div>
 
-            <!-- Next Up Row -->
-            <div class="space-y-4 pt-2">
-              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Next Up Row</label>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label class="flex items-start justify-between gap-4 p-4 rounded-xl border border-zinc-800 bg-zinc-950/40 cursor-pointer transition-all hover:bg-zinc-900/50">
-                  <span class="min-w-0">
-                    <span class="block font-semibold text-zinc-100">Shuffle Next Up</span>
-                    <span class="block text-xs text-zinc-500 leading-relaxed mt-0.5">Randomise the order of the Next Up row. When off, shows are ordered by most recently watched.</span>
-                  </span>
-                  <input type="checkbox" name="shuffle_next_up" id="shuffle_next_up" checked={settings.shuffle_next_up === true} class="w-5 h-5 mt-0.5 shrink-0 rounded-lg border-zinc-800 bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer" />
-                </label>
-
-                <label class="flex items-start justify-between gap-4 p-4 rounded-xl border border-zinc-800 bg-zinc-950/40 cursor-pointer transition-all hover:bg-zinc-900/50">
-                  <span class="min-w-0">
-                    <span class="block font-semibold text-zinc-100">Minimalist Next Up</span>
-                    <span class="block text-xs text-zinc-500 leading-relaxed mt-0.5">Show the Next Up row like any other row, without the large banner and title text.</span>
-                  </span>
-                  <input type="checkbox" name="minimalist_next_up" id="minimalist_next_up" checked={settings.minimalist_next_up === true} class="w-5 h-5 mt-0.5 shrink-0 rounded-lg border-zinc-800 bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer" />
-                </label>
-              </div>
-            </div>
-
             <!-- Visibility Filters Behavior -->
             <div class="space-y-4 pt-2">
               <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Visibility Filters Behavior</label>
@@ -554,6 +532,8 @@ const COUNTRIES = (countriesRes || [])
                   { id: 'media-server-enrichment-toggle', name: 'media_server_enrichment', label: 'Media server enrichment', desc: 'Fetch metadata (resolution, languages) from media servers (Plex, Jellyfin, Emby) during sync. If disabled, only TMDB metadata will be used.', checked: settings.preferences?.media_server_enrichment !== false },
                   { id: 'include-specials-toggle', name: 'include_specials', label: 'Include specials in counts', desc: 'Include Specials (Season 0) when calculating show and season watch/collection progress.', checked: settings.preferences?.include_specials === true },
                   { id: 'specials-label-toggle', name: 'specials_label', label: 'Label Season 0 as Specials', desc: 'Show Season 0 as "Specials", and its episodes as SP01 rather than S00E01.', checked: settings.preferences?.specials_label === true },
+                  { id: 'shuffle-next-up-toggle', name: 'shuffle_next_up', label: 'Shuffle Next Up', desc: 'Randomise the order of the Next Up row. When off, shows are ordered by most recently watched.', checked: settings.shuffle_next_up === true },
+                  { id: 'minimalist-next-up-toggle', name: 'minimalist_next_up', label: 'Minimalist Next Up', desc: 'Show Next Up as a plain row of episode cards, without the large hero banner.', checked: settings.minimalist_next_up === true },
                   { id: 'use-hls-player-toggle', name: 'use_hls_player', label: 'HLS player (Experimental)', desc: 'Use the HLS-based player for Plex and Jellyfin/Emby sources. Enables transcoding if your browser doesn\'t natively support the file\'s codecs. Disable this if playback is broken.', checked: settings.use_hls_player === true },
                 ].map(({ id, name, label, desc, checked }) => (
                   <div class="flex items-start justify-between gap-6 p-4 bg-zinc-950/40 rounded-2xl border border-zinc-800">
