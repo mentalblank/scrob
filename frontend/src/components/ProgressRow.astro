@@ -1,0 +1,118 @@
+---
+import ProgressStrip from "./ProgressStrip.astro";
+import { tmdbImageUrl, type ShowProgress } from "../lib/api";
+import { showUrl } from "../lib/urls";
+
+interface Props {
+  show: ShowProgress;
+  preferTvdb?: boolean;
+}
+
+const { show, preferTvdb = false } = Astro.props;
+
+const href = showUrl(show.uri_id, show.tvdb_id, show.tmdb_id, preferTvdb);
+const uriId = show.uri_id || (show.tmdb_id ? `tmdb:s:${show.tmdb_id}` : show.tvdb_id ? `tvdb:s:${show.tvdb_id}` : "");
+
+// One segment per episode stays readable up to about a hundred; past that the
+// bar is bucketed so a 2000-episode show doesn't render 2000 nodes.
+const MAX_SEGMENTS = 100;
+const episodes = show.episodes ?? [];
+let segments: { watched: boolean; partial: number }[] = [];
+if (episodes.length && episodes.length <= MAX_SEGMENTS) {
+  segments = episodes.map((e) => ({ watched: e.watched, partial: e.watched ? 1 : 0 }));
+} else if (episodes.length) {
+  const bucketSize = episodes.length / MAX_SEGMENTS;
+  segments = Array.from({ length: MAX_SEGMENTS }, (_, i) => {
+    const slice = episodes.slice(Math.floor(i * bucketSize), Math.floor((i + 1) * bucketSize));
+    const watched = slice.filter((e) => e.watched).length;
+    const ratio = slice.length ? watched / slice.length : 0;
+    return { watched: ratio === 1, partial: ratio };
+  });
+}
+
+function formatMinutes(total: number): string {
+  if (!total) return "0m";
+  const days = Math.floor(total / 1440);
+  const hours = Math.floor((total % 1440) / 60);
+  const minutes = total % 60;
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+---
+
+<div
+  class="progress-row group flex items-center gap-4 p-3 rounded-2xl glass-card hover:border-zinc-700 transition-all"
+  data-progress-row
+  data-uri-id={uriId}
+  data-show-id={String(show.id)}
+>
+  <a href={href} class="w-12 shrink-0 aspect-[2/3] rounded-xl overflow-hidden bg-zinc-950 ring-1 ring-white/5">
+    {show.poster_path ? (
+      <img
+        src={tmdbImageUrl(show.poster_path, "w185")}
+        alt={show.title}
+        loading="lazy"
+        decoding="async"
+        class="w-full h-full object-cover"
+      />
+    ) : (
+      <div class="w-full h-full flex items-center justify-center text-lg opacity-30">📺</div>
+    )}
+  </a>
+
+  <div class="flex-1 min-w-0">
+    <div class="flex items-baseline justify-between gap-3 mb-1.5">
+      <a href={href} class="min-w-0">
+        <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors">{show.title}</h3>
+      </a>
+      <span class="text-[11px] font-bold text-zinc-400 tabular-nums shrink-0">
+        {show.watched_episodes} / {show.total_episodes} eps
+      </span>
+    </div>
+
+    {segments.length > 0 ? (
+      <div class="flex flex-col gap-1.5">
+        <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+          <span>Watched</span>
+          <span class="text-zinc-300 tabular-nums">{show.watch_pct}%</span>
+        </div>
+        <div class="flex gap-[2px] h-1.5" role="img" aria-label={`${show.watch_pct}% watched`}>
+          {segments.map((seg) => (
+            <span
+              class={`flex-1 rounded-[2px] ${seg.watched ? "bg-blue-500" : seg.partial > 0 ? "bg-blue-500/50" : "bg-zinc-800"}`}
+            ></span>
+          ))}
+        </div>
+        <div class="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">
+          <span>{formatMinutes(show.watched_minutes)} watched{show.replay_minutes > 0 ? ` · ${formatMinutes(show.replay_minutes)} replays` : ""}</span>
+          <span class="text-zinc-400">{show.remaining_episodes > 0 ? `${show.remaining_episodes} Remaining` : "Complete"}</span>
+        </div>
+      </div>
+    ) : (
+      <ProgressStrip
+        title="Watched"
+        watchedEpisodesCount={show.watched_episodes}
+        totalEpisodesCount={show.total_episodes}
+        progressPct={show.watch_pct}
+        leftLabel={`${formatMinutes(show.watched_minutes)} watched`}
+        rightLabel={show.remaining_episodes > 0 ? `${show.remaining_episodes} Remaining` : "Complete"}
+      />
+    )}
+  </div>
+
+  <div class="flex flex-col gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <button
+      type="button"
+      data-progress-action="drop"
+      title="Drop this show — hides it from Next Up"
+      class="px-2.5 py-1.5 rounded-xl text-[11px] font-bold border border-zinc-800 text-zinc-400 hover:text-amber-300 hover:border-amber-600/50 hover:bg-amber-950/30 transition-colors cursor-pointer"
+    >Drop</button>
+    <button
+      type="button"
+      data-progress-action="block"
+      title="Block this show — hides it everywhere"
+      class="px-2.5 py-1.5 rounded-xl text-[11px] font-bold border border-zinc-800 text-zinc-400 hover:text-red-300 hover:border-red-600/50 hover:bg-red-950/30 transition-colors cursor-pointer"
+    >Block</button>
+  </div>
+</div>

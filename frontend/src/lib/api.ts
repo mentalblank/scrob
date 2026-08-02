@@ -786,11 +786,21 @@ export interface ShowProgress {
   title: string;
   poster_path: string | null;
   status: string | null;
+  genres: string[];
   watched_episodes: number;
   total_episodes: number;
   remaining_episodes: number;
   watch_pct: number;
+  watched_minutes: number;
+  replay_minutes: number;
   last_watched_at: string | null;
+  episodes: { season: number; episode: number; watched: boolean }[];
+}
+
+export interface ProgressTotals {
+  watched_minutes: number;
+  replay_minutes: number;
+  watched_episodes: number;
 }
 
 export interface CollectionDetail {
@@ -1327,8 +1337,17 @@ export const api = {
     deleteEvent: (eventId: number, token: string) =>
       del<{ status: string; remaining_count: number }>(`/history/event/${eventId}`, undefined, token),
 
-    progress: (params?: { sort?: string }, token?: string) =>
-      get<{ results: ShowProgress[] }>("/history/progress", params, token),
+    progress: (
+      params?: { sort?: string; status?: string; genre?: string[]; search?: string; page?: number; page_size?: number },
+      token?: string,
+    ) =>
+      get<{
+        results: ShowProgress[];
+        page: number;
+        total_pages: number;
+        total_results: number;
+        totals: ProgressTotals;
+      }>("/history/progress", params, token),
   },
 
   lists: {
