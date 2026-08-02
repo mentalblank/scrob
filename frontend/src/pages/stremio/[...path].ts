@@ -29,6 +29,9 @@ export const ALL: APIRoute = async ({ params, request }) => {
       method: request.method,
       headers: forwardHeaders,
       body,
+      // The addon's keyless routes answer with a redirect to the app's own pages;
+      // following it here would resolve against the backend, which has no such route.
+      redirect: "manual",
     });
 
     const responseHeaders = new Headers(res.headers);
