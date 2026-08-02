@@ -556,6 +556,14 @@ try {
                 <a href={`/media/movie/tmdb:m:${c.movie_tmdb_id}`} class="text-xs px-3 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors bg-zinc-900/40">View</a>
                 <button
                   type="button"
+                  class="edit-conversion-btn text-xs px-3 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:bg-zinc-800/60 transition-colors cursor-pointer"
+                  data-conversion-id={c.id}
+                  data-media-id={c.media_id}
+                  data-movie-title={c.movie_title ?? ""}
+                  title="Point this episode at a different movie"
+                >Edit</button>
+                <button
+                  type="button"
                   class="revert-conversion-btn text-xs px-3 py-1.5 rounded-xl border border-rose-900/40 text-rose-400 hover:bg-rose-950/30 hover:border-rose-900/70 transition-colors cursor-pointer"
                   data-conversion-id={c.id}
                   title="Put this back as an episode"
@@ -937,6 +945,31 @@ try {
           </div>
         </div>
       )}
+    </div>
+  </div>
+
+  <!-- Re-point an existing episode -> movie match -->
+  <div id="conv-edit-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
+    <div class="relative w-full max-w-lg bg-zinc-900/85 border border-zinc-800/85 rounded-3xl shadow-2xl backdrop-blur-xl overflow-hidden max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+        <div class="min-w-0">
+          <h3 class="text-sm font-bold text-zinc-100">Change Movie Match</h3>
+          <p id="conv-edit-source" class="text-xs text-zinc-500 truncate"></p>
+        </div>
+        <button type="button" id="conv-edit-close" class="p-2 text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer" aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="px-6 py-5 space-y-3 overflow-y-auto">
+        <input
+          type="text"
+          id="conv-edit-search"
+          placeholder="Search TMDB for the correct film…"
+          class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+        />
+        <div id="conv-edit-results" class="space-y-1 max-h-72 overflow-y-auto"></div>
+        <p id="conv-edit-error" class="hidden text-xs text-red-400"></p>
+      </div>
     </div>
   </div>
 
@@ -3585,6 +3618,102 @@ try {
         targetShowLookupBtn.click();
 
         validateForm();
+      });
+    });
+
+    // ── Re-point an existing episode -> movie match ───────────────────────────
+    // The backend has no update route, so an edit is a revert followed by a
+    // fresh match against the same episode row.
+    const convEditModal = document.getElementById("conv-edit-modal")!;
+    const convEditSearch = document.getElementById("conv-edit-search") as HTMLInputElement;
+    const convEditResults = document.getElementById("conv-edit-results")!;
+    const convEditError = document.getElementById("conv-edit-error")!;
+    let convEditTarget: { conversionId: string; mediaId: string } | null = null;
+    let convEditTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function closeConvEditModal() {
+      convEditModal.classList.add("opacity-0", "pointer-events-none");
+      convEditTarget = null;
+    }
+    document.getElementById("conv-edit-close")?.addEventListener("click", closeConvEditModal);
+    convEditModal.addEventListener("click", (e) => {
+      if (e.target === convEditModal) closeConvEditModal();
+    });
+
+    async function applyConvEdit(tmdbId: number) {
+      if (!convEditTarget) return;
+      convEditError.classList.add("hidden");
+      try {
+        const revertRes = await fetch(`/api/proxy/sync/episode-movie-conversions/${convEditTarget.conversionId}`, {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (!revertRes.ok) {
+          const data = await revertRes.json().catch(() => ({}));
+          throw new Error(data.detail || "Could not release the current match");
+        }
+        const res = await fetch("/api/proxy/sync/match-episode-to-movie", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ media_id: Number(convEditTarget.mediaId), uri_id: `tmdb:m:${tmdbId}` }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || "Could not match that movie");
+        window.showToast?.("Movie match updated", "success");
+        window.location.reload();
+      } catch (e: any) {
+        convEditError.textContent = e.message ?? "Could not update the match";
+        convEditError.classList.remove("hidden");
+      }
+    }
+
+    async function searchConvEdit(query: string) {
+      convEditResults.innerHTML = '<p class="text-xs text-zinc-500 py-1">Searching…</p>';
+      try {
+        const res = await fetch(`/api/proxy/media/search?q=${encodeURIComponent(query)}&type=movie&page=1`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        const data = await res.json();
+        const results = (data.results ?? []).slice(0, 12);
+        if (!results.length) {
+          convEditResults.innerHTML = '<p class="text-xs text-zinc-500 py-1">No films found.</p>';
+          return;
+        }
+        convEditResults.innerHTML = results.map((m: any) => `
+          <button type="button" data-tmdb-id="${m.tmdb_id}" class="conv-edit-pick w-full flex items-center gap-3 px-3 py-2 rounded-xl border border-transparent hover:border-zinc-700 hover:bg-zinc-800/60 transition-colors cursor-pointer text-left">
+            <span class="text-sm text-zinc-100 truncate">${(m.title ?? "").replace(/</g, "&lt;")}</span>
+            <span class="text-xs text-zinc-500 ml-auto shrink-0">${(m.release_date ?? "").slice(0, 4)}</span>
+          </button>
+        `).join("");
+        convEditResults.querySelectorAll<HTMLElement>(".conv-edit-pick").forEach(btn => {
+          btn.addEventListener("click", () => applyConvEdit(Number(btn.dataset.tmdbId)));
+        });
+      } catch {
+        convEditResults.innerHTML = '<p class="text-xs text-red-400 py-1">Search failed.</p>';
+      }
+    }
+
+    convEditSearch?.addEventListener("input", () => {
+      const q = convEditSearch.value.trim();
+      if (convEditTimer) clearTimeout(convEditTimer);
+      if (!q) { convEditResults.innerHTML = ""; return; }
+      convEditTimer = setTimeout(() => searchConvEdit(q), 300);
+    });
+
+    document.querySelectorAll<HTMLElement>(".edit-conversion-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const conversionId = btn.dataset.conversionId;
+        const mediaId = btn.dataset.mediaId;
+        if (!conversionId || !mediaId) return;
+        convEditTarget = { conversionId, mediaId };
+        convEditError.classList.add("hidden");
+        convEditResults.innerHTML = "";
+        convEditSearch.value = btn.dataset.movieTitle ?? "";
+        (document.getElementById("conv-edit-source") as HTMLElement).textContent =
+          `Currently matched to ${btn.dataset.movieTitle || "a film"}`;
+        convEditModal.classList.remove("opacity-0", "pointer-events-none");
+        convEditSearch.focus();
+        if (convEditSearch.value.trim()) searchConvEdit(convEditSearch.value.trim());
       });
     });
 
