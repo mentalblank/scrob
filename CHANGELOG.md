@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file. This projec
 
 ### Added
 
+- **Stremio Account Sync**: Connect a Stremio account from Connections, authorising by code or QR without sharing a password. Supports reconnecting in place and a full resync that reconciles removals made in Stremio.
+- **Bulk Watch Dates**: Marking a season or a whole show watched now opens the play-history modal, so the plays can be logged now, on a chosen date, or with no date at all.
 - **Connections Page**: Media servers, trackers and integrations moved out of Settings onto a dedicated `/connections` page with its own tabs and save button.
 - **Data Import**: Import a Scrob data export or a Trakt export zip from Connections → Import.
 - **Data Export**: Download watch history, ratings, collection, lists and comments as a zip from Settings → Maintenance & Data.
