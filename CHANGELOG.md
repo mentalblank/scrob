@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file. This projec
 
 ### Added
 
+- **Connections Page**: Media servers, trackers and integrations moved out of Settings onto a dedicated `/connections` page with its own tabs and save button.
+- **Data Import**: Import a Scrob data export or a Trakt export zip from Connections → Import.
+- **Data Export**: Download watch history, ratings, collection, lists and comments as a zip from Settings → Maintenance & Data.
+- **Next Up Display Options**: Shuffle the Next Up row, or render it as a plain row without the banner.
 - **Series Progress Page**: A `/progress` page listing every show you have started, with watched/aired episode counts and a progress bar, sortable by recency, completeness, episodes remaining or title.
 - **Compact Watch History**: Toggle the history page between card and compact list views; the choice is remembered per browser.
 - **Change Username**: Usernames can be edited from Profile settings, with uniqueness and format validation.
