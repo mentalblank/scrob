@@ -621,25 +621,26 @@ async def get_show_progress(
     )
     last_watched = {row[0]: row[1] for row in last_watched_result.all()}
 
-    # Aired episode positions per show, so unaired and undated episodes never
-    # inflate a denominator.
-    aired_result = await db.execute(
-        select(Media.show_id, Media.season_number, Media.episode_number, Media.runtime)
+    # Local rows only cover what the library holds, so runtimes come from them
+    # but the episode totals come from the show's own season metadata below.
+    local_result = await db.execute(
+        select(Media.show_id, Media.season_number, Media.episode_number, Media.runtime, Media.release_date)
         .where(
             Media.media_type == MediaType.episode,
             Media.show_id.in_(list(watched_positions.keys())),
             Media.season_number.isnot(None),
             Media.season_number != 0,
             Media.episode_number.isnot(None),
-            Media.release_date.isnot(None),
-            Media.release_date != "",
-            Media.release_date <= today,
         )
     )
-    aired_positions: dict[int, set[tuple[int, int]]] = {}
+    local_aired_seasons: dict[int, set[int]] = {}
+    local_aired_counts: dict[tuple[int, int], int] = {}
     runtime_samples: dict[int, list[int]] = {}
-    for show_id, season_number, episode_number, runtime in aired_result.all():
-        aired_positions.setdefault(show_id, set()).add((season_number, episode_number))
+    for show_id, season_number, episode_number, runtime, release_date in local_result.all():
+        if release_date and release_date <= today:
+            local_aired_seasons.setdefault(show_id, set()).add(season_number)
+            key = (show_id, season_number)
+            local_aired_counts[key] = local_aired_counts.get(key, 0) + 1
         if runtime:
             runtime_samples.setdefault(show_id, []).append(runtime)
 
@@ -651,9 +652,50 @@ async def get_show_progress(
     results = []
     for show in shows_result.scalars().all():
         watched_pos = watched_positions.get(show.id, set())
-        aired_pos = aired_positions.get(show.id, set())
-        # A watched episode counts as aired even if its own row lost its date.
-        countable = aired_pos | watched_pos
+
+        # Count every episode of a season that has started, from the show's own
+        # metadata — the library often holds only part of a season, and counting
+        # local rows made the denominator smaller than the season really is.
+        seasons_meta = (show.tmdb_data or {}).get("seasons", [])
+        # Some shows carry no season air dates at all; for those, fall back to
+        # the show's own first air date so a dateless season still counts.
+        any_season_dated = any((m.get("air_date") or "").strip() for m in seasons_meta)
+        show_started = bool((show.first_air_date or "").strip() and (show.first_air_date or "") <= today)
+        aired_seasons = local_aired_seasons.get(show.id, set())
+
+        countable: set[tuple[int, int]] = set()
+        for meta in seasons_meta:
+            season_number = meta.get("season_number")
+            air_date = (meta.get("air_date") or "").strip()
+            if not season_number or season_number == 0:
+                continue
+            if air_date:
+                started = air_date <= today
+            else:
+                started = season_number in aired_seasons or (not any_season_dated and show_started)
+            if not started:
+                continue
+
+            episode_count = meta.get("episode_count") or 0
+            # Only episodes that have aired count. The library knows the real
+            # dates for episodes it holds; for the rest, a weekly cadence from
+            # the season's air date is the closest estimate available without
+            # fetching every season from TMDB.
+            aired = local_aired_counts.get((show.id, season_number), 0)
+            if air_date:
+                try:
+                    weeks = (date.fromisoformat(today) - date.fromisoformat(air_date)).days // 7
+                    aired = max(aired, weeks + 1)
+                except ValueError:
+                    aired = max(aired, episode_count)
+            else:
+                aired = max(aired, episode_count)
+            aired = min(aired, episode_count) if episode_count else aired
+
+            for episode_number in range(1, aired + 1):
+                countable.add((season_number, episode_number))
+        # Anything already watched counts even if metadata is behind.
+        countable |= watched_pos
         total = len(countable)
         watched = len(watched_pos & countable)
         watched_at = last_watched.get(show.id)

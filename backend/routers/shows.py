@@ -1044,6 +1044,10 @@ async def get_show(
                 "collection_pct": min(100, int((collected / total) * 100)) if total > 0 else 0,
                 "watched": watched >= total if total > 0 else False,
                 "watch_pct": min(100, int((watched / total) * 100)) if total > 0 else 0,
+                # Season cards draw their bar from these two, so send the real
+                # numbers rather than letting the page guess from local rows.
+                "watched_episodes_count": watched,
+                "total_episodes_count": total,
                 "user_rating": season_ratings.get(sn),
             }
 
@@ -2097,6 +2101,22 @@ async def get_tvdb_show(
                 season_ratings = dict(rating_result.all())
 
     season_states: dict = {}
+    # Drop seasons that have not started: no air date of their own and no
+    # episode of theirs dated on or before today.
+    _today = datetime.now().date().isoformat()
+
+    def _tvdb_season_started(season: dict) -> bool:
+        air_date = (season.get("air_date") or "").strip()
+        if air_date:
+            return air_date <= _today
+        return any(
+            (ep.get("air_date") or ep.get("release_date") or "").strip() <= _today
+            and (ep.get("air_date") or ep.get("release_date") or "").strip()
+            for ep in (season.get("episodes") or [])
+        )
+
+    show_data["seasons"] = [s for s in show_data["seasons"] if _tvdb_season_started(s)]
+
     season_ep_counts = {
         season["season_number"]: season.get("episode_count", 0)
         for season in show_data["seasons"]
@@ -2115,6 +2135,8 @@ async def get_tvdb_show(
             "collection_pct": min(100, int((collected / effective_total) * 100)) if effective_total > 0 else 0,
             "watched": watched >= effective_total if effective_total > 0 else False,
             "watch_pct": min(100, int((watched / effective_total) * 100)) if effective_total > 0 else 0,
+            "watched_episodes_count": watched,
+            "total_episodes_count": effective_total,
             "user_rating": season_ratings.get(season_number_value),
         }
 
