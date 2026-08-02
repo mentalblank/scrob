@@ -41,8 +41,8 @@ const TABS: [string, string][] = [
             <!-- Connections list (server-side rendered, managed client-side) -->
             <div id="connections-list" class="space-y-3">
             {connections.map((conn) => {
-              const typeColor = conn.type === "jellyfin" ? "bg-purple-500" : conn.type === "emby" ? "bg-green-500" : conn.type === "plex" ? "bg-yellow-500" : "bg-cyan-500";
-              const typeLabel = conn.type === "jellyfin" ? "Jellyfin" : conn.type === "emby" ? "Emby" : conn.type === "plex" ? "Plex" : "Nuvio";
+              const typeColor = conn.type === "jellyfin" ? "bg-purple-500" : conn.type === "emby" ? "bg-green-500" : conn.type === "plex" ? "bg-yellow-500" : conn.type === "stremio" ? "bg-blue-500" : "bg-cyan-500";
+              const typeLabel = conn.type === "jellyfin" ? "Jellyfin" : conn.type === "emby" ? "Emby" : conn.type === "plex" ? "Plex" : conn.type === "stremio" ? "Stremio" : "Nuvio";
               return (
               <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden" data-connection-id={conn.id}>
                 <div class="collapsible-header flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-4 hover:bg-zinc-900/40 cursor-pointer transition-colors select-none" data-target={`conn-body-${conn.id}`}>
@@ -53,7 +53,7 @@ const TABS: [string, string][] = [
                         {conn.name}
                         <span id={`conn-status-${conn.id}`} class="hidden text-xs font-normal px-1.5 py-0.5 rounded pointer-events-auto"></span>
                       </span>
-                      <span class="text-xs text-zinc-500 break-all">{typeLabel} · {conn.url}</span>
+                      <span class="text-xs text-zinc-500 break-all">{conn.type === "stremio" ? typeLabel : `${typeLabel} · ${conn.url}`}</span>
                     </div>
                   </div>
                   <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
@@ -103,17 +103,17 @@ const TABS: [string, string][] = [
                         <label class="block text-sm font-medium text-zinc-400">Display Name</label>
                         <input type="text" class="conn-name-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.name} data-conn-id={conn.id} />
                       </div>
-                      <div class="space-y-2">
+                      <div class={`space-y-2 ${conn.type === "stremio" ? "hidden" : ""}`}>
                         <label class="block text-sm font-medium text-zinc-400">{conn.type === "nuvio" ? "Cloud API URL" : "Server URL"}</label>
                         <input type="url" class="conn-url-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-70" value={conn.url} data-conn-id={conn.id} disabled={conn.type === "nuvio"} />
                       </div>
-                      <div class="space-y-2">
+                      <div class={`space-y-2 ${conn.type === "stremio" ? "hidden" : ""}`}>
                         <label class="block text-sm font-medium text-zinc-400">
                           External Server URL <span class="text-xs text-zinc-600">(Optional)</span>
                         </label>
                         <input type="url" class="conn-external-url-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.external_server_url || ""} data-conn-id={conn.id} />
                       </div>
-                      <div class="space-y-2">
+                      <div class={`space-y-2 ${conn.type === "stremio" ? "hidden" : ""}`}>
                         <label class="block text-sm font-medium text-zinc-400">{conn.type === "plex" ? "X-Plex-Token" : conn.type === "nuvio" ? "Refresh Token" : "API Token"}</label>
                         <div class="relative">
                           <input type="password" class="conn-token-input w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.token} data-conn-id={conn.id} />
@@ -123,6 +123,30 @@ const TABS: [string, string][] = [
                           </button>
                         </div>
                       </div>
+                      {conn.type === "stremio" && (
+                        <div class="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 space-y-1">
+                          <p class="text-sm font-medium text-zinc-200">Connected Stremio account</p>
+                          <p class="text-sm text-zinc-400">{conn.server_username || "Account connected"}</p>
+                          <p class="text-xs text-zinc-500">The account key is stored server-side and is never exposed here.</p>
+                        </div>
+                      )}
+                      {conn.type === "stremio" && (
+                        <div class="stremio-reauth hidden space-y-2" data-conn-id={conn.id}>
+                          <button type="button" class="stremio-reauth-toggle text-sm text-blue-400 hover:text-blue-300 cursor-pointer transition-colors">
+                            Disconnected? Reconnect Stremio
+                          </button>
+                          <div class="stremio-reauth-panel hidden space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                            <p class="text-xs text-zinc-500">Reconnecting replaces the stored account key and keeps your existing sync settings.</p>
+                            <button type="button" class="stremio-reauth-start text-sm bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition-colors cursor-pointer">Reconnect Stremio</button>
+                            <div class="stremio-reauth-details hidden space-y-3">
+                              <a class="stremio-reauth-url block text-sm text-blue-400 hover:text-blue-300 underline" href="#" target="_blank" rel="noopener noreferrer">Open Stremio authorization</a>
+                              <p class="text-sm text-zinc-400">Code: <strong class="stremio-reauth-code font-mono text-zinc-100"></strong></p>
+                              <img class="stremio-reauth-qr w-40 h-40 rounded-lg bg-white p-2" alt="Stremio authorization QR code" />
+                              <p class="stremio-reauth-status text-xs text-zinc-500">Waiting for authorization…</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {conn.type === "nuvio" ? (
                         <div class="space-y-2">
                           <label class="block text-sm font-medium text-zinc-400">Nuvio Profile</label>
@@ -130,7 +154,7 @@ const TABS: [string, string][] = [
                             <option value={conn.server_user_id || ""}>{conn.server_username || `Profile ${conn.server_user_id}`} (#{conn.server_user_id})</option>
                           </select>
                         </div>
-                      ) : conn.type !== "plex" && (
+                      ) : conn.type !== "plex" && conn.type !== "stremio" && (
                         <div class="space-y-2">
                           <label class="block text-sm font-medium text-zinc-400">User ID</label>
                           <input type="text" class="conn-user-id-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_user_id || ""} data-conn-id={conn.id} />
@@ -143,7 +167,7 @@ const TABS: [string, string][] = [
                           <input type="text" class="conn-username-input w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" value={conn.server_username || ""} data-conn-id={conn.id} />
                         </div>
                       )}
-                      {conn.type !== "nuvio" && (
+                      {conn.type !== "nuvio" && conn.type !== "stremio" && (
                         <>
                           <div class="space-y-2">
                             <label class="block text-sm font-medium text-zinc-400">Libraries to sync</label>
@@ -174,7 +198,7 @@ const TABS: [string, string][] = [
                         {[
                           { key: "sync_collection", label: "Collection status" },
                           { key: "sync_watched", label: "Watched status" },
-                          ...(conn.type === "nuvio" ? [] : [{ key: "sync_ratings", label: "Ratings" }]),
+                          ...(conn.type === "nuvio" || conn.type === "stremio" ? [] : [{ key: "sync_ratings", label: "Ratings" }]),
                           { key: "sync_playback", label: conn.type === "nuvio" ? "Playback progress" : "Playback events" },
                           ...(conn.type === "plex" ? [{ key: "plex_sync_watchlist", label: "Watchlist" }] : []),
                         ].map(({ key, label }) => (
@@ -186,19 +210,25 @@ const TABS: [string, string][] = [
                         <div class="flex items-center gap-3">
                           <button type="button" data-action="sync_connection" data-conn-id={conn.id} data-conn-type={conn.type} data-conn-name={conn.name}
                             disabled={!hasTmdbKey}
-                            title={!hasTmdbKey ? "TMDB API Key is required for sync" : conn.type === "nuvio" ? "Sync Nuvio library, watch history, and playback progress" : `Pull from ${conn.name}`}
+                            title={!hasTmdbKey ? "TMDB API Key is required for sync" : conn.type === "nuvio" || conn.type === "stremio" ? "Sync Nuvio library, watch history, and playback progress" : `Pull from ${conn.name}`}
                             class={`js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${hasTmdbKey ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700" : "bg-zinc-800 text-zinc-400 border border-zinc-700 opacity-50"}`}
-                          >{conn.type === "nuvio" ? "Sync now" : "Pull"}</button>
+                          >{conn.type === "nuvio" || conn.type === "stremio" ? "Sync now" : "Pull"}</button>
+                          {conn.type === "stremio" && (
+                            <button type="button" data-action="full_resync_connection" data-conn-id={conn.id} data-conn-name={conn.name}
+                              disabled={!hasTmdbKey}
+                              class="js-action-btn text-sm px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700"
+                            >Full resync</button>
+                          )}
                           <span id={`${conn.type}-last-sync`} class="hidden text-xs text-zinc-500"></span>
                         </div>
                       </div>
                       <div class="bg-zinc-950 rounded-xl p-4 space-y-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Scrob → {typeLabel}</p>
                         {[
-                          ...(conn.type === "nuvio" ? [{ key: "push_collection", label: "Collection status" }] : []),
+                          ...(conn.type === "nuvio" || conn.type === "stremio" ? [{ key: "push_collection", label: "Collection status" }] : []),
                           { key: "push_watched", label: "Watched status" },
-                          ...(conn.type === "nuvio" ? [{ key: "push_playback", label: "Playback progress" }] : []),
-                          ...(conn.type === "nuvio" ? [] : [{ key: "push_ratings", label: "Ratings" }]),
+                          ...(conn.type === "nuvio" || conn.type === "stremio" ? [{ key: "push_playback", label: "Playback progress" }] : []),
+                          ...(conn.type === "nuvio" || conn.type === "stremio" ? [] : [{ key: "push_ratings", label: "Ratings" }]),
                           ...(conn.type === "plex" ? [{ key: "plex_push_watchlist", label: "Watchlist" }] : []),
                         ].map(({ key, label }) => (
                           <label class="flex items-center gap-3 cursor-pointer group">
@@ -333,6 +363,7 @@ const TABS: [string, string][] = [
                         <option value="emby">Emby</option>
                         <option value="plex">Plex</option>
                         <option value="nuvio">Nuvio</option>
+                        <option value="stremio">Stremio</option>
                       </select>
                     </div>
                     <div id="new-conn-url-row" class="space-y-2">
@@ -369,6 +400,16 @@ const TABS: [string, string][] = [
                       <select id="new-nuvio-profile" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer">
                         <option value="">Sign in to load profiles</option>
                       </select>
+                    </div>
+                    <div id="new-stremio-link-row" class="hidden rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 space-y-3">
+                      <p class="text-sm text-zinc-300">Authorize Scrob from Stremio without sharing your password.</p>
+                      <button type="button" id="connect-stremio-btn" class="text-sm bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl transition-colors cursor-pointer">Connect Stremio</button>
+                      <div id="stremio-link-details" class="hidden space-y-3">
+                        <a id="stremio-link-url" href="#" target="_blank" rel="noopener noreferrer" class="block text-sm text-blue-400 hover:text-blue-300 underline">Open Stremio authorization</a>
+                        <p class="text-sm text-zinc-400">Code: <strong id="stremio-link-code" class="font-mono text-zinc-100"></strong></p>
+                        <img id="stremio-link-qr" alt="Stremio authorization QR code" class="w-40 h-40 rounded-lg bg-white p-2" />
+                        <p id="stremio-link-status" class="text-xs text-zinc-500">Waiting for authorization…</p>
+                      </div>
                     </div>
                     <div id="new-conn-username-row" class="space-y-2 hidden">
                       <label for="new-conn-username" class="block text-sm font-medium text-zinc-400">Plex Username</label>
@@ -2093,6 +2134,7 @@ const TABS: [string, string][] = [
       }
       for (const cs of (data.connections ?? [])) {
         setConnStatus(`conn-status-${cs.id}`, cs.connected ? 'connected' : 'disconnected');
+        document.querySelector(`.stremio-reauth[data-conn-id="${cs.id}"]`)?.classList.toggle('hidden', cs.connected);
         if (cs.token) {
           const card = document.querySelector(`[data-connection-id="${cs.id}"]`);
           const tokenInput = card?.querySelector('.conn-token-input') as HTMLInputElement | null;
@@ -2421,6 +2463,18 @@ const TABS: [string, string][] = [
           } else if (action === 'scan_libraries') {
             const connId = newBtn.getAttribute('data-conn-id');
             url = `/api/proxy/sync/connection/${connId}/scan`;
+          } else if (action === 'full_resync_connection') {
+            const connId = newBtn.getAttribute('data-conn-id');
+            const connName = newBtn.getAttribute('data-conn-name') || 'Stremio';
+            const ok = await showConfirmModal(
+              `Full resync from ${connName}?`,
+              'This reads the complete Stremio library and reconciles removals made there. Items collected from other sources are preserved.',
+              'Full resync',
+            );
+            if (!ok) return;
+            renderConnProgress(connId, { status: 'pending', job_type: 'pull', processed_items: 0, total_items: 0, updated_at: new Date().toISOString() });
+            url = `/api/proxy/sync/connection/${connId}?full=true`;
+            syncConnId = connId;
           } else if (action === 'sync_connection') {
             const connId = newBtn.getAttribute('data-conn-id');
             const connName = newBtn.getAttribute('data-conn-name') || 'this server';
@@ -3235,7 +3289,18 @@ const TABS: [string, string][] = [
       });
     }
     if (cancelBtn && addForm) {
-      cancelBtn.addEventListener('click', () => addForm.classList.add('hidden'));
+      cancelBtn.addEventListener('click', () => {
+        addForm.classList.add('hidden');
+        if (stremioPollTimer !== null) {
+          window.clearTimeout(stremioPollTimer);
+          stremioPollTimer = null;
+        }
+        document.getElementById('stremio-link-details')?.classList.add('hidden');
+        if (connectStremioBtn) {
+          connectStremioBtn.disabled = false;
+          connectStremioBtn.textContent = 'Connect Stremio';
+        }
+      });
     }
 
     // Provider-specific fields for a new connection
@@ -3249,6 +3314,10 @@ const TABS: [string, string][] = [
     const tokenInput = document.getElementById('new-conn-token') as HTMLInputElement | null;
     const tokenLabel = document.getElementById('new-conn-token-label');
     const nuvioProfileSelect = document.getElementById('new-nuvio-profile') as HTMLSelectElement | null;
+    const stremioLinkRow = document.getElementById('new-stremio-link-row');
+    const connectStremioBtn = document.getElementById('connect-stremio-btn') as HTMLButtonElement | null;
+    const urlRow = document.getElementById('new-conn-url-row');
+    let stremioPollTimer: number | null = null;
     let pendingNuvioRefreshToken = '';
     let previousType = typeSelect?.value ?? 'jellyfin';
 
@@ -3256,16 +3325,26 @@ const TABS: [string, string][] = [
       const type = typeSelect?.value ?? 'jellyfin';
       const isPlex = type === 'plex';
       const isNuvio = type === 'nuvio';
-      userIdRow?.classList.toggle('hidden', isPlex || isNuvio);
+      const isStremio = type === 'stremio';
+      const isCloud = isNuvio || isStremio;
+      userIdRow?.classList.toggle('hidden', isPlex || isCloud);
       usernameRow?.classList.toggle('hidden', !isPlex);
       nuvioEmailRow?.classList.toggle('hidden', !isNuvio);
       nuvioProfileRow?.classList.toggle('hidden', !isNuvio);
+      stremioLinkRow?.classList.toggle('hidden', !isStremio);
+      urlRow?.classList.toggle('hidden', isStremio);
+      tokenInput?.closest('.space-y-2')?.classList.toggle('hidden', isStremio);
+      document.getElementById('create-connection-btn')?.classList.toggle('hidden', isStremio);
+      document.getElementById('test-new-connection-btn')?.classList.toggle('hidden', isStremio);
       if (urlInput) {
         if (isNuvio) {
           urlInput.value = 'https://api.nuvio.tv';
           urlInput.disabled = true;
+        } else if (isStremio) {
+          urlInput.value = 'https://api.strem.io';
+          urlInput.disabled = true;
         } else {
-          if (previousType === 'nuvio' && urlInput.value === 'https://api.nuvio.tv') urlInput.value = '';
+          if (previousType === 'nuvio' || previousType === 'stremio') urlInput.value = '';
           urlInput.disabled = false;
         }
       }
@@ -3275,26 +3354,122 @@ const TABS: [string, string][] = [
       const syncRatings = document.getElementById('new-sync-ratings') as HTMLInputElement | null;
       const pushRatings = document.getElementById('new-push-ratings') as HTMLInputElement | null;
       const pushPlayback = document.getElementById('new-push-playback') as HTMLInputElement | null;
-      pushPlayback?.closest('label')?.classList.toggle('hidden', !isNuvio);
-      if (pushPlayback) pushPlayback.disabled = !isNuvio;
+      pushPlayback?.closest('label')?.classList.toggle('hidden', !isCloud);
+      if (pushPlayback) pushPlayback.disabled = !isCloud;
       const pushCollection = document.getElementById('new-push-collection') as HTMLInputElement | null;
-      pushCollection?.closest('label')?.classList.toggle('hidden', !isNuvio);
-      if (pushCollection) pushCollection.disabled = !isNuvio;
+      pushCollection?.closest('label')?.classList.toggle('hidden', !isCloud);
+      if (pushCollection) pushCollection.disabled = !isCloud;
       for (const checkbox of [syncRatings, pushRatings]) {
-        checkbox?.closest('label')?.classList.toggle('hidden', isNuvio);
-        if (checkbox) checkbox.disabled = isNuvio;
+        checkbox?.closest('label')?.classList.toggle('hidden', isCloud);
+        if (checkbox) checkbox.disabled = isCloud;
       }
       const playbackLabel = document.getElementById('new-sync-playback-label');
-      if (playbackLabel) playbackLabel.textContent = isNuvio ? 'Playback progress' : 'Playback events';
+      if (playbackLabel) playbackLabel.textContent = isCloud ? 'Playback progress' : 'Playback events';
       const pullHeading = document.getElementById('new-pull-heading');
       const pushHeading = document.getElementById('new-push-heading');
-      if (pullHeading) pullHeading.textContent = isNuvio ? 'Nuvio → Scrob' : 'Server → Scrob';
-      if (pushHeading) pushHeading.textContent = isNuvio ? 'Scrob → Nuvio' : 'Scrob → Server';
-      if (type !== previousType) pendingNuvioRefreshToken = '';
+      const providerName = isNuvio ? 'Nuvio' : isStremio ? 'Stremio' : 'Server';
+      if (pullHeading) pullHeading.textContent = `${providerName} → Scrob`;
+      if (pushHeading) pushHeading.textContent = `Scrob → ${providerName}`;
+      if (type !== previousType) {
+        pendingNuvioRefreshToken = '';
+        if (stremioPollTimer !== null) {
+          window.clearTimeout(stremioPollTimer);
+          stremioPollTimer = null;
+          document.getElementById('stremio-link-details')?.classList.add('hidden');
+        }
+      }
       previousType = type;
     };
     typeSelect?.addEventListener('change', updateTypeFields);
     updateTypeFields();
+
+  connectStremioBtn?.addEventListener('click', async () => {
+    const name = (document.getElementById('new-conn-name') as HTMLInputElement | null)?.value.trim() || '';
+    if (!name) {
+      showMessage('Choose a name for the Stremio connection.', 'error');
+      return;
+    }
+    if (stremioPollTimer !== null) {
+      window.clearTimeout(stremioPollTimer);
+      stremioPollTimer = null;
+    }
+    connectStremioBtn.disabled = true;
+    const originalLabel = connectStremioBtn.textContent;
+    connectStremioBtn.textContent = 'Creating link…';
+    try {
+      const response = await fetch('/api/proxy/auth/stremio/link/start', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const link = await response.json();
+      if (!response.ok) throw new Error(link.detail || 'Could not create the Stremio link.');
+      const details = document.getElementById('stremio-link-details');
+      const linkUrl = document.getElementById('stremio-link-url') as HTMLAnchorElement | null;
+      const code = document.getElementById('stremio-link-code');
+      const qr = document.getElementById('stremio-link-qr') as HTMLImageElement | null;
+      const status = document.getElementById('stremio-link-status');
+      details?.classList.remove('hidden');
+      if (linkUrl) linkUrl.href = link.link;
+      if (code) code.textContent = link.code;
+      if (qr) qr.src = link.qrcode;
+      if (status) status.textContent = 'Waiting for authorization…';
+      window.open(link.link, '_blank', 'noopener,noreferrer');
+      const linkExpiresAt = Date.now() + 10 * 60 * 1000;
+
+      const poll = async () => {
+        try {
+          if (Date.now() >= linkExpiresAt) {
+            throw new Error('Stremio authorization expired. Create a new link and try again.');
+          }
+          const pollResponse = await fetch('/api/proxy/auth/stremio/link/poll', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code: link.code,
+              name,
+              sync_collection: (document.getElementById('new-sync-collection') as HTMLInputElement)?.checked ?? true,
+              sync_watched: (document.getElementById('new-sync-watched') as HTMLInputElement)?.checked ?? true,
+              sync_playback: (document.getElementById('new-sync-playback') as HTMLInputElement)?.checked ?? true,
+              push_collection: (document.getElementById('new-push-collection') as HTMLInputElement)?.checked ?? false,
+              push_watched: (document.getElementById('new-push-watched') as HTMLInputElement)?.checked ?? false,
+              push_playback: (document.getElementById('new-push-playback') as HTMLInputElement)?.checked ?? false,
+              auto_sync_interval: (() => {
+                const value = (document.getElementById('new-auto-sync') as HTMLSelectElement)?.value;
+                return value ? parseFloat(value) : null;
+              })(),
+              auto_push_interval: (() => {
+                const value = (document.getElementById('new-auto-push') as HTMLSelectElement)?.value;
+                return value ? parseFloat(value) : null;
+              })(),
+            }),
+          });
+          const result = await pollResponse.json();
+          if (!pollResponse.ok) throw new Error(result.detail || 'Stremio authorization failed.');
+          if (result.status === 'connected') {
+            stremioPollTimer = null;
+            if (status) status.textContent = 'Connected. Reloading…';
+            showMessage('Stremio connected.');
+            window.location.reload();
+            return;
+          }
+          stremioPollTimer = window.setTimeout(poll, 2000);
+        } catch (error: any) {
+          stremioPollTimer = null;
+          if (status) status.textContent = error.message;
+          showMessage(error.message, 'error');
+          connectStremioBtn.disabled = false;
+          connectStremioBtn.textContent = originalLabel;
+        }
+      };
+      stremioPollTimer = window.setTimeout(poll, 1500);
+      connectStremioBtn.textContent = 'Waiting…';
+    } catch (error: any) {
+      stremioPollTimer = null;
+      showMessage(error.message, 'error');
+      connectStremioBtn.disabled = false;
+      connectStremioBtn.textContent = originalLabel;
+    }
+  });
 
     const authenticateNuvio = async () => {
       const email = (document.getElementById('new-nuvio-email') as HTMLInputElement | null)?.value.trim() || '';
@@ -3431,6 +3606,82 @@ const TABS: [string, string][] = [
         }
       });
     }
+  }
+
+  function setupStremioReauth() {
+  document.querySelectorAll<HTMLElement>('.stremio-reauth').forEach(block => {
+    const connId = block.getAttribute('data-conn-id');
+    const toggleBtn = block.querySelector('.stremio-reauth-toggle');
+    const panel = block.querySelector('.stremio-reauth-panel');
+    const startBtn = block.querySelector('.stremio-reauth-start') as HTMLButtonElement | null;
+    const details = block.querySelector('.stremio-reauth-details');
+    const urlLink = block.querySelector('.stremio-reauth-url') as HTMLAnchorElement | null;
+    const codeEl = block.querySelector('.stremio-reauth-code');
+    const qrImg = block.querySelector('.stremio-reauth-qr') as HTMLImageElement | null;
+    const statusEl = block.querySelector('.stremio-reauth-status');
+    let pollTimer: number | null = null;
+
+    toggleBtn?.addEventListener('click', () => {
+      panel?.classList.toggle('hidden');
+    });
+
+    startBtn?.addEventListener('click', async () => {
+      if (pollTimer !== null) { window.clearTimeout(pollTimer); pollTimer = null; }
+      startBtn.disabled = true;
+      const originalLabel = startBtn.textContent;
+      startBtn.textContent = 'Creating link…';
+      try {
+        const response = await fetch('/api/proxy/auth/stremio/link/start', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        const link = await response.json();
+        if (!response.ok) throw new Error(link.detail || 'Could not create the Stremio link.');
+        details?.classList.remove('hidden');
+        if (urlLink) urlLink.href = link.link;
+        if (codeEl) codeEl.textContent = link.code;
+        if (qrImg) qrImg.src = link.qrcode;
+        if (statusEl) statusEl.textContent = 'Waiting for authorization…';
+        window.open(link.link, '_blank', 'noopener,noreferrer');
+        const linkExpiresAt = Date.now() + 10 * 60 * 1000;
+
+        const poll = async () => {
+          try {
+            if (Date.now() >= linkExpiresAt) {
+              throw new Error('Stremio authorization expired. Try again.');
+            }
+            const pollResponse = await fetch('/api/proxy/auth/stremio/link/poll', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code: link.code, connection_id: connId ? parseInt(connId) : undefined }),
+            });
+            const result = await pollResponse.json();
+            if (!pollResponse.ok) throw new Error(result.detail || 'Stremio authorization failed.');
+            if (result.status === 'connected') {
+              pollTimer = null;
+              if (statusEl) statusEl.textContent = 'Connected. Reloading…';
+              showMessage('Stremio reconnected.');
+              window.location.reload();
+              return;
+            }
+            pollTimer = window.setTimeout(poll, 2000);
+          } catch (error: any) {
+            pollTimer = null;
+            if (statusEl) statusEl.textContent = error.message;
+            showMessage(error.message, 'error');
+            startBtn.disabled = false;
+            startBtn.textContent = originalLabel;
+          }
+        };
+        pollTimer = window.setTimeout(poll, 1500);
+        startBtn.textContent = 'Waiting…';
+      } catch (error: any) {
+        showMessage(error.message, 'error');
+        startBtn.disabled = false;
+        startBtn.textContent = originalLabel;
+      }
+    });
+  });
   }
 
   function setupScrobbleConnections() {
@@ -5012,6 +5263,7 @@ const TABS: [string, string][] = [
   }
 
   setupConnTabs();
+  setupStremioReauth();
   setupImportTabs();
   setupTraktExportImport();
   setupScrobExportImport();
@@ -5028,6 +5280,7 @@ const TABS: [string, string][] = [
 
   document.addEventListener('astro:after-swap', () => {
     setupConnTabs();
+    setupStremioReauth();
     setupImportTabs();
     setupTraktExportImport();
     setupScrobExportImport();
