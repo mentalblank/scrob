@@ -114,8 +114,14 @@ def overall_show_progress(
         if (include_specials or sn != 0) and season_ep_counts.get(sn, 0) > 0
     ]
     total = sum(season_ep_counts.get(sn, 0) for sn in counted)
-    collected = sum(len(collected_positions.get(sn, set())) for sn in counted)
-    watched = sum(len(watched_positions.get(sn, set())) for sn in counted)
+    # Clamp per season: a library holding the same run under two numbering
+    # schemes would otherwise report more watched episodes than the show has.
+    collected = sum(
+        min(len(collected_positions.get(sn, set())), season_ep_counts.get(sn, 0)) for sn in counted
+    )
+    watched = sum(
+        min(len(watched_positions.get(sn, set())), season_ep_counts.get(sn, 0)) for sn in counted
+    )
     in_library_seasons = [season_states[sn] for sn in counted if season_states[sn]["in_library"]]
 
     return {
@@ -1039,6 +1045,11 @@ async def get_show(
 
             # Use distinct (season, episode) from user's collection for calculation
             # to be consistent with how total is calculated (unique episodes in season).
+            # A library can hold the same run twice under two numbering schemes,
+            # so clamp to the season length rather than reporting 36 of 25.
+            if total > 0:
+                collected = min(collected, total)
+                watched = min(watched, total)
             season_states[sn] = {
                 "in_library": collected > 0,
                 "collection_pct": min(100, int((collected / total) * 100)) if total > 0 else 0,
@@ -2130,6 +2141,9 @@ async def get_tvdb_show(
         watched = len(watched_positions.get(season_number_value, set()))
         total = season_ep_counts.get(season_number_value, 0)
         effective_total = total if total > 0 else collected
+        if effective_total > 0:
+            collected = min(collected, effective_total)
+            watched = min(watched, effective_total)
         season_states[season_number_value] = {
             "in_library": collected > 0,
             "collection_pct": min(100, int((collected / effective_total) * 100)) if effective_total > 0 else 0,

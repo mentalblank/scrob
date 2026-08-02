@@ -694,8 +694,19 @@ async def get_show_progress(
 
             for episode_number in range(1, aired + 1):
                 countable.add((season_number, episode_number))
-        # Anything already watched counts even if metadata is behind.
-        countable |= watched_pos
+        # Only count watched positions that exist in a known season. A library
+        # can hold the same episodes twice under two numbering schemes (TVDB
+        # splits a run into two seasons where TMDB has one); counting the extra
+        # rows would push the watched total past the episode count.
+        known_seasons = {
+            m.get("season_number")
+            for m in seasons_meta
+            if m.get("season_number") and m.get("season_number") != 0
+        }
+        if known_seasons:
+            countable |= {pos for pos in watched_pos if pos[0] in known_seasons}
+        else:
+            countable |= watched_pos
         total = len(countable)
         watched = len(watched_pos & countable)
         watched_at = last_watched.get(show.id)
