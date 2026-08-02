@@ -5182,6 +5182,99 @@ async def get_sync_status(
     return jobs
 
 
+@router.post("/link-providers")
+async def link_providers(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fill in missing TVDB ids for shows that only carry a TMDB id."""
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+    effective_key = await _get_effective_tmdb_key(db, settings)
+    if not effective_key:
+        raise HTTPException(status_code=400, detail="TMDB API key required")
+
+    job = SyncJob(user_id=current_user.id, source=CollectionSource.tmdb, job_type="link", status=SyncStatus.pending)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    background_tasks.add_task(run_link_providers, current_user.id, effective_key, job.id)
+    return {"status": "started", "message": "Provider linking is running in the background"}
+
+
+async def run_link_providers(user_id: int, api_key: str, job_id: int | None = None):
+    """Resolve TVDB ids via TMDB's external_ids and record the links.
+
+    Shows created from TMDB never learn their TVDB id, which is what leaves a
+    library holding the same episodes under two unlinked numbering schemes.
+    """
+    from models.show import Show
+    from utils.alias_lookup import upsert_alias
+
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        async def _update_job(**kwargs):
+            if job_id is None:
+                return
+            await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(updated_at=func.now(), **kwargs))
+            await db.commit()
+
+        try:
+            await _update_job(status=SyncStatus.running, processed_items=0, total_items=0)
+            await _raise_if_cancelled(db, job_id)
+
+            shows_q = await db.execute(
+                select(Show).where(Show.tmdb_id.isnot(None), Show.tvdb_id.is_(None))
+            )
+            shows = shows_q.scalars().all()
+            await _update_job(total_items=len(shows))
+
+            linked = 0
+            processed = 0
+            semaphore = asyncio.Semaphore(5)
+
+            async def _external_ids(show: Show) -> tuple[Show, dict | None]:
+                async with semaphore:
+                    try:
+                        return show, await tmdb.get_external_ids(show.tmdb_id, "tv", api_key=api_key)
+                    except Exception:
+                        return show, None
+
+            BATCH = 25
+            for start in range(0, len(shows), BATCH):
+                await _raise_if_cancelled(db, job_id)
+                batch = shows[start:start + BATCH]
+                for show, ids in await asyncio.gather(*[_external_ids(s) for s in batch]):
+                    processed += 1
+                    tvdb_id = (ids or {}).get("tvdb_id")
+                    if not tvdb_id:
+                        continue
+                    # tvdb_id is unique, so skip a value another show already claims.
+                    taken = await db.execute(
+                        select(Show.id).where(Show.tvdb_id == int(tvdb_id), Show.id != show.id)
+                    )
+                    if taken.scalars().first():
+                        continue
+                    show.tvdb_id = int(tvdb_id)
+                    await upsert_alias(db, show.id, "series", "tvdb", str(tvdb_id))
+                    if show.tmdb_id:
+                        await upsert_alias(db, show.id, "series", "tmdb", str(show.tmdb_id))
+                    linked += 1
+                await db.commit()
+                await _update_job(processed_items=processed)
+
+            await _update_job(
+                status=SyncStatus.completed,
+                processed_items=processed,
+                stats={"shows_checked": processed, "shows_linked": linked},
+            )
+        except SyncCancelled:
+            await _update_job(status=SyncStatus.cancelled)
+        except Exception as e:
+            await _update_job(status=SyncStatus.failed, error_message=str(e)[:500])
+
+
 @router.post("/heal")
 async def heal_metadata(
     background_tasks: BackgroundTasks,

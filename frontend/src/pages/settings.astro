@@ -1038,6 +1038,37 @@ const COUNTRIES = (countriesRes || [])
               </div>
             </div>
 
+            <!-- Link provider ids -->
+            <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div class="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div>
+                  <h3 class="text-lg font-bold text-zinc-100 mb-1">Link TVDB ids</h3>
+                  <p class="text-zinc-400 text-sm">Finds the TVDB id for shows that only have a TMDB one, so episode numbering can be reconciled between the two providers.</p>
+                </div>
+                <button
+                  id="link-providers-btn"
+                  type="button"
+                  disabled={!hasTmdbKey}
+                  title={!hasTmdbKey ? "TMDB API Key is required" : ""}
+                  class="w-full md:w-auto md:shrink-0 px-6 py-3 rounded-xl text-sm font-bold transition-all cursor-pointer disabled:opacity-50 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-center"
+                >
+                  Link
+                </button>
+              </div>
+              <div id="link-progress" class="hidden border-t border-zinc-800 px-6 py-4">
+                <div class="flex justify-between items-center mb-1.5">
+                  <span id="link-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
+                  <span id="link-job-pct" class="text-xs font-bold text-zinc-400"></span>
+                </div>
+                <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                  <div id="link-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-blue-600 animate-pulse" style="width: 100%"></div>
+                </div>
+                <div class="flex justify-between text-xs text-zinc-500 mt-1">
+                  <span id="link-job-items"></span>
+                </div>
+              </div>
+            </div>
+
             <!-- Heal unmatched show titles -->
             <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div>
@@ -2380,6 +2411,93 @@ const COUNTRIES = (countriesRes || [])
     });
   }
 
+  // ── Link TVDB ids ─────────────────────────────────────────────────────────
+  let linkPoller: ReturnType<typeof setTimeout> | null = null;
+
+  function renderLinkProgress(job: any) {
+    const strip = document.getElementById('link-progress');
+    const bar   = document.getElementById('link-job-bar');
+    const pctEl = document.getElementById('link-job-pct');
+    const label = document.getElementById('link-job-label');
+    const items = document.getElementById('link-job-items');
+    if (!strip) return;
+
+    if (!job) {
+      strip.classList.add('hidden');
+      return;
+    }
+    strip.classList.remove('hidden');
+
+    const done = job.status === 'completed';
+    const failed = job.status === 'failed' || job.status === 'cancelled';
+    const pct = job.total_items > 0 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100)) : 0;
+
+    if (bar) {
+      bar.className = `h-1.5 rounded-full transition-all duration-500 ${failed ? 'bg-red-600' : 'bg-blue-600'}${pct === 0 && !done ? ' animate-pulse' : ''}`;
+      bar.style.width = done ? '100%' : `${Math.max(pct, 2)}%`;
+    }
+    if (label) label.textContent = done ? 'Linking complete' : failed ? 'Linking failed' : 'Linking shows…';
+    if (pctEl) pctEl.textContent = done ? '100%' : pct > 0 ? `${pct}%` : '';
+    if (items) {
+      const linked = job.stats?.shows_linked;
+      items.textContent = done && typeof linked === 'number'
+        ? `${linked} show${linked === 1 ? '' : 's'} linked`
+        : job.total_items > 0 ? `${job.processed_items} / ${job.total_items} shows` : '';
+    }
+  }
+
+  async function pollLinkJob() {
+    try {
+      const res = await fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) return;
+      const jobs: any[] = await res.json();
+      const job = jobs.find((j: any) => j.source === 'tmdb' && j.job_type === 'link');
+      const active = job && (job.status === 'pending' || job.status === 'running');
+      const recent = job && ['completed', 'failed', 'cancelled'].includes(job.status)
+        && new Date(job.updated_at).getTime() > Date.now() - 10000;
+      renderLinkProgress(active || recent ? job : null);
+      linkPoller = active ? setTimeout(pollLinkJob, 2000) : null;
+    } catch {
+      linkPoller = null;
+    }
+  }
+
+  function setupLinkProvidersButton() {
+    const btn = document.getElementById('link-providers-btn') as HTMLButtonElement | null;
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+      const ok = await showConfirmModal(
+        'Link TVDB ids?',
+        'Scrob will ask TMDB for the TVDB id of every show that lacks one. It runs in the background and only adds links — nothing is overwritten.',
+        'Link',
+      );
+      if (!ok) return;
+
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = 'Starting…';
+      try {
+        const res = await fetch('/api/proxy/sync/link-providers', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Could not start linking');
+        }
+        if (linkPoller != null) clearTimeout(linkPoller);
+        pollLinkJob();
+        showMessage('Provider linking started.');
+      } catch (e: any) {
+        showMessage(e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    });
+  }
+
   function setupHealButton() {
     const btn = document.getElementById('heal-btn');
     const modal = document.getElementById('heal-modal');
@@ -2684,6 +2802,7 @@ const COUNTRIES = (countriesRes || [])
     setupProfileAndPreferences();
     setupApiKey();
     setupHealButton();
+    setupLinkProvidersButton();
     setupExportData();
     setupClearSessionsButton();
   }
