@@ -77,10 +77,14 @@ function formatMinutes(total: number): string {
           <span>Watched</span>
           <span class="text-zinc-300 tabular-nums">{show.watch_pct}%</span>
         </div>
-        <div class="flex gap-[2px] h-1.5" role="img" aria-label={`${show.watch_pct}% watched`}>
+        <div
+          class="flex h-1.5 w-full rounded-full overflow-hidden bg-zinc-950/60 border border-zinc-800/80"
+          role="img"
+          aria-label={`${show.watch_pct}% watched`}
+        >
           {segments.map((seg) => (
             <span
-              class={`flex-1 rounded-[2px] ${seg.watched ? "bg-blue-500" : seg.partial > 0 ? "bg-blue-500/50" : "bg-zinc-800"}`}
+              class={`flex-1 ${seg.watched ? "bg-blue-500" : seg.partial > 0 ? "bg-blue-500/50" : "bg-transparent"}`}
             ></span>
           ))}
         </div>
@@ -101,7 +105,9 @@ function formatMinutes(total: number): string {
     )}
   </div>
 
-  <div class="flex flex-col gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+  <!-- Hidden until hover so the row doesn't reserve a blank column; always
+       visible on touch, where there is no hover to reveal them. -->
+  <div class="flex md:hidden md:group-hover:flex md:group-focus-within:flex flex-col gap-1.5 shrink-0">
     <button
       type="button"
       data-progress-action="drop"
