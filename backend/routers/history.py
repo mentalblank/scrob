@@ -569,13 +569,14 @@ async def get_show_progress(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     sort: str = Query("recent"),
+    status: str = Query("all"),
+    genre: list[str] = Query(default=[]),
+    search: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(60, ge=1, le=200),
 ):
-    """Watched-episode progress for every show the user has started."""
-    settings_result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == current_user.id)
-    )
-    settings_row = settings_result.scalar_one_or_none()
-    include_specials = bool(((settings_row.preferences or {}) if settings_row else {}).get("include_specials"))
+    """Watched progress per show, counted against aired episodes only."""
+    today = datetime.now(timezone.utc).date().isoformat()
 
     watched_filters = [
         WatchEvent.user_id == current_user.id,
@@ -583,25 +584,34 @@ async def get_show_progress(
         Media.media_type == MediaType.episode,
         Media.show_id.isnot(None),
         Media.season_number.isnot(None),
+        Media.season_number != 0,
         Media.episode_number.isnot(None),
     ]
-    if not include_specials:
-        watched_filters.append(Media.season_number != 0)
 
-    # Deduplicate first: the same episode watched twice is still one episode of progress.
+    # One row per episode, whatever the play count, plus the runtime used for
+    # the time-watched totals.
     watched_sq = (
-        select(Media.show_id.label("show_id"), Media.season_number, Media.episode_number)
+        select(
+            Media.show_id.label("show_id"),
+            Media.season_number.label("season_number"),
+            Media.episode_number.label("episode_number"),
+            func.max(func.coalesce(Media.runtime, 0)).label("runtime"),
+            func.count(WatchEvent.id).label("plays"),
+        )
         .join(WatchEvent, WatchEvent.media_id == Media.id)
         .where(*watched_filters)
         .group_by(Media.show_id, Media.season_number, Media.episode_number)
         .subquery()
     )
-    counts_result = await db.execute(
-        select(watched_sq.c.show_id, func.count()).group_by(watched_sq.c.show_id)
-    )
-    watched_counts = {row[0]: row[1] for row in counts_result.all()}
-    if not watched_counts:
-        return {"results": []}
+    watched_rows = (await db.execute(select(watched_sq))).all()
+    if not watched_rows:
+        return {"results": [], "page": page, "total_pages": 1, "total_results": 0, "totals": {"watched_minutes": 0, "replay_minutes": 0, "watched_episodes": 0}}
+
+    watched_positions: dict[int, set[tuple[int, int]]] = {}
+    watched_plays: dict[int, list[tuple[int, int]]] = {}
+    for row in watched_rows:
+        watched_positions.setdefault(row.show_id, set()).add((row.season_number, row.episode_number))
+        watched_plays.setdefault(row.show_id, []).append((row.runtime or 0, row.plays))
 
     last_watched_result = await db.execute(
         select(Media.show_id, func.max(WatchEvent.watched_at))
@@ -611,17 +621,53 @@ async def get_show_progress(
     )
     last_watched = {row[0]: row[1] for row in last_watched_result.all()}
 
+    # Aired episode positions per show, so unaired and undated episodes never
+    # inflate a denominator.
+    aired_result = await db.execute(
+        select(Media.show_id, Media.season_number, Media.episode_number, Media.runtime)
+        .where(
+            Media.media_type == MediaType.episode,
+            Media.show_id.in_(list(watched_positions.keys())),
+            Media.season_number.isnot(None),
+            Media.season_number != 0,
+            Media.episode_number.isnot(None),
+            Media.release_date.isnot(None),
+            Media.release_date != "",
+            Media.release_date <= today,
+        )
+    )
+    aired_positions: dict[int, set[tuple[int, int]]] = {}
+    runtime_samples: dict[int, list[int]] = {}
+    for show_id, season_number, episode_number, runtime in aired_result.all():
+        aired_positions.setdefault(show_id, set()).add((season_number, episode_number))
+        if runtime:
+            runtime_samples.setdefault(show_id, []).append(runtime)
+
     hidden_show_ids = await _hidden_next_up_show_ids(db, current_user.id)
     shows_result = await db.execute(
-        select(Show).where(Show.id.in_([sid for sid in watched_counts if sid not in hidden_show_ids]))
+        select(Show).where(Show.id.in_([sid for sid in watched_positions if sid not in hidden_show_ids]))
     )
 
     results = []
     for show in shows_result.scalars().all():
-        watched = watched_counts.get(show.id, 0)
-        total = _aired_episode_total(show, include_specials)
-        watched = min(watched, total) if total else watched
+        watched_pos = watched_positions.get(show.id, set())
+        aired_pos = aired_positions.get(show.id, set())
+        # A watched episode counts as aired even if its own row lost its date.
+        countable = aired_pos | watched_pos
+        total = len(countable)
+        watched = len(watched_pos & countable)
         watched_at = last_watched.get(show.id)
+
+        # Episodes with no stored runtime borrow this show's average, so a few
+        # gaps don't silently drop time from the total.
+        plays = watched_plays.get(show.id, [])
+        samples = [r for r, _ in plays if r] or (runtime_samples.get(show.id) or [])
+        average_runtime = round(sum(samples) / len(samples)) if samples else 0
+        # Episode time counts each episode once; replays are reported separately
+        # so imports that logged the same play twice can't inflate the headline.
+        minutes = sum(runtime or average_runtime for runtime, _ in plays)
+        replay_minutes = sum((runtime or average_runtime) * max(0, count - 1) for runtime, count in plays)
+
         results.append({
             "id": show.id,
             "tmdb_id": show.tmdb_id,
@@ -631,11 +677,19 @@ async def get_show_progress(
             "title": show.title,
             "poster_path": show.poster_path,
             "status": show.status,
+            "genres": [g["name"] if isinstance(g, dict) else g for g in (show.tmdb_data or {}).get("genres", [])],
             "watched_episodes": watched,
             "total_episodes": total,
             "remaining_episodes": max(0, total - watched),
             "watch_pct": min(100, int((watched / total) * 100)) if total else 0,
+            "watched_minutes": minutes,
+            "replay_minutes": replay_minutes,
             "last_watched_at": watched_at.isoformat() if watched_at else None,
+            # Sorted watched positions let the UI draw one segment per episode.
+            "episodes": [
+                {"season": season, "episode": episode, "watched": (season, episode) in watched_pos}
+                for season, episode in sorted(countable)
+            ],
         })
 
     lang = await get_user_metadata_language(db, current_user.id)
@@ -645,16 +699,46 @@ async def get_show_progress(
         translations = await get_show_translations(db, [r["id"] for r in results], lang)
         apply_show_translations(results, translations)
 
+    if status == "in_progress":
+        results = [r for r in results if 0 < r["watch_pct"] < 100]
+    elif status == "completed":
+        results = [r for r in results if r["watch_pct"] >= 100]
+    elif status == "unfinished":
+        results = [r for r in results if r["watch_pct"] < 100]
+    if genre:
+        wanted = {g.lower() for g in genre}
+        results = [r for r in results if wanted & {g.lower() for g in r["genres"]}]
+    if search:
+        needle = search.strip().lower()
+        results = [r for r in results if needle in (r["title"] or "").lower()]
+
     if sort == "title":
         results.sort(key=lambda r: (r["title"] or "").lower())
     elif sort == "progress":
         results.sort(key=lambda r: r["watch_pct"], reverse=True)
     elif sort == "remaining":
         results.sort(key=lambda r: r["remaining_episodes"])
+    elif sort == "time":
+        results.sort(key=lambda r: r["watched_minutes"], reverse=True)
     else:
         results.sort(key=lambda r: (r["last_watched_at"] or ""), reverse=True)
 
-    return {"results": results}
+    totals = {
+        "watched_minutes": sum(r["watched_minutes"] for r in results),
+        "replay_minutes": sum(r["replay_minutes"] for r in results),
+        "watched_episodes": sum(r["watched_episodes"] for r in results),
+    }
+    total_results = len(results)
+    total_pages = max(1, (total_results + page_size - 1) // page_size)
+    offset = (page - 1) * page_size
+
+    return {
+        "results": results[offset:offset + page_size],
+        "page": page,
+        "total_pages": total_pages,
+        "total_results": total_results,
+        "totals": totals,
+    }
 
 
 async def _hidden_next_up_show_ids(db: AsyncSession, user_id: int) -> set[int]:
