@@ -31,7 +31,6 @@ const tab = params.get("tab") || "all";
 const sort = params.get("sort") || "recent";
 const search = params.get("search") || "";
 const genre = params.getAll("genre").filter(Boolean);
-const view = params.get("view") || "infinite";
 const page = Number(params.get("page") || 1);
 const preferTvdb = Astro.cookies.get("primary_metadata_source")?.value === "tvdb";
 
@@ -42,8 +41,10 @@ let totalPages = 1;
 let totalResults = 0;
 let error = "";
 
+let paginationType = "infinite_scroll";
+
 try {
-  const [data, blocklist] = await Promise.all([
+  const [data, blocklist, profile] = await Promise.all([
     api.history.progress(
       {
         page,
@@ -55,7 +56,9 @@ try {
       token,
     ),
     api.media.getBlocklistEnriched(token!).catch(() => []),
+    api.profile.get(token!).catch(() => null),
   ]);
+  paginationType = profile?.pagination_type ?? "infinite_scroll";
   shows = data?.results ?? [];
   totals = data?.totals ?? totals;
   totalPages = data?.total_pages ?? 1;
@@ -95,24 +98,13 @@ const baseUrl = withParams({});
 <Base title="Progress">
   <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
 
-  <div class="mb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+  <div class="mb-6">
     <div>
       <h1 class="page-title mb-2">Progress</h1>
       <p class="text-zinc-500">
         {formatMinutes(totals.watched_minutes)} watched across {totals.watched_episodes.toLocaleString()} episodes
         {totals.replay_minutes > 0 && <span class="text-zinc-600"> · {formatMinutes(totals.replay_minutes)} in replays</span>}
       </p>
-    </div>
-
-    <div class="flex gap-1 p-1 bg-zinc-950/60 border border-zinc-800/50 rounded-xl shrink-0">
-      {[["infinite", "Scroll"], ["pagination", "Pages"]].map(([mode, label]) => (
-        <a
-          href={withParams({ view: mode })}
-          class={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-            view === mode ? "bg-zinc-100 text-zinc-900" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
-          }`}
-        >{label}</a>
-      ))}
     </div>
   </div>
 
@@ -137,7 +129,6 @@ const baseUrl = withParams({});
   {tab !== "dropped" && (
     <form method="GET" class="flex flex-wrap items-center gap-3 mb-8">
       <input type="hidden" name="tab" value={tab} />
-      <input type="hidden" name="view" value={view} />
       <input
         type="search"
         name="search"
@@ -167,7 +158,7 @@ const baseUrl = withParams({});
         class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all active:scale-95 cursor-pointer"
       >Apply</button>
       {(search || genre.length > 0 || sort !== "recent") && (
-        <a href={`/progress?tab=${tab}&view=${view}`} class="text-xs font-bold text-zinc-500 hover:text-zinc-300 transition-colors">Reset</a>
+        <a href={`/progress?tab=${tab}`} class="text-xs font-bold text-zinc-500 hover:text-zinc-300 transition-colors">Reset</a>
       )}
     </form>
   )}
@@ -214,7 +205,7 @@ const baseUrl = withParams({});
         {shows.map((show) => <ProgressRow show={show} preferTvdb={preferTvdb} />)}
       </div>
 
-      {view === "pagination" ? (
+      {paginationType === "pagination" ? (
         <Pagination currentPage={page} totalPages={totalPages} baseUrl={baseUrl} />
       ) : (
         <InfiniteScroll
