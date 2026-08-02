@@ -1586,6 +1586,7 @@ async def mark_season_watched(
         data = await tmdb.get_show(tmdb_id_val, api_key=api_key)
         show = Show(
             tmdb_id=tmdb_id_val,
+            uri_id=f"tmdb:s:{tmdb_id_val}" if tmdb_id_val else None,
             title=data.get("name") or "Unknown",
             poster_path=tmdb.poster_url(data.get("poster_path")),
             backdrop_path=tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
@@ -1889,6 +1890,7 @@ async def mark_show_watched(
         data = await tmdb.get_show(tmdb_id_val, api_key=api_key)
         show = Show(
             tmdb_id=tmdb_id_val,
+            uri_id=f"tmdb:s:{tmdb_id_val}" if tmdb_id_val else None,
             title=data.get("name") or "Unknown",
             poster_path=tmdb.poster_url(data.get("poster_path")),
             backdrop_path=tmdb.poster_url(data.get("backdrop_path"), size="w1280"),

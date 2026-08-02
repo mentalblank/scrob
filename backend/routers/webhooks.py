@@ -234,6 +234,7 @@ async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: s
         show_data = await tmdb.get_show(series_tmdb_id, api_key=api_key)
         show = Show(
             tmdb_id=series_tmdb_id,
+            uri_id=f"tmdb:s:{series_tmdb_id}" if series_tmdb_id else None,
             title=show_data.get("name", ""),
             original_title=show_data.get("original_name"),
             overview=show_data.get("overview"),
