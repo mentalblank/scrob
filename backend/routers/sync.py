@@ -5182,6 +5182,254 @@ async def get_sync_status(
     return jobs
 
 
+def _canonical_duplicate(rows: list, seasons_meta: list[dict]):
+    """Pick which of several rows for the same episode survives a merge.
+
+    The TMDB-numbered row wins: it matches the metadata every refresh and every
+    outbound push is keyed on. Ties fall back to the earliest season, then the
+    oldest row.
+    """
+    counts = {
+        m.get("season_number"): (m.get("episode_count") or 0)
+        for m in seasons_meta
+        if m.get("season_number") is not None
+    }
+
+    def rank(row) -> tuple:
+        fits_metadata = (
+            row.season_number in counts
+            and row.episode_number is not None
+            and row.episode_number <= counts[row.season_number]
+        )
+        return (0 if fits_metadata else 1, row.season_number or 0, row.id)
+
+    return sorted(rows, key=rank)[0]
+
+
+async def _duplicate_episode_groups(db: AsyncSession, user_id: int) -> list[dict]:
+    """Episodes stored more than once for a show under different numbering."""
+    from models.show import Show
+
+    dupes_q = await db.execute(
+        select(Media.show_id, Media.tmdb_id)
+        .where(
+            Media.media_type == MediaType.episode,
+            Media.tmdb_id.isnot(None),
+            Media.show_id.isnot(None),
+        )
+        .group_by(Media.show_id, Media.tmdb_id)
+        .having(func.count() > 1)
+    )
+    pairs = dupes_q.all()
+    if not pairs:
+        return []
+
+    show_ids = {show_id for show_id, _ in pairs}
+    shows_q = await db.execute(select(Show).where(Show.id.in_(show_ids)))
+    shows = {s.id: s for s in shows_q.scalars().all()}
+
+    rows_q = await db.execute(
+        select(Media).where(
+            Media.media_type == MediaType.episode,
+            Media.show_id.in_(show_ids),
+            Media.tmdb_id.in_({tmdb_id for _, tmdb_id in pairs}),
+        )
+    )
+    by_key: dict[tuple[int, int], list] = {}
+    for row in rows_q.scalars().all():
+        by_key.setdefault((row.show_id, row.tmdb_id), []).append(row)
+
+    groups = []
+    for (show_id, tmdb_id) in pairs:
+        rows = by_key.get((show_id, tmdb_id), [])
+        if len(rows) < 2:
+            continue
+        show = shows.get(show_id)
+        seasons_meta = (show.tmdb_data or {}).get("seasons", []) if show else []
+        keeper = _canonical_duplicate(rows, seasons_meta)
+        groups.append({
+            "show_id": show_id,
+            "show_title": show.title if show else None,
+            "series_tmdb_id": show.tmdb_id if show else None,
+            "tmdb_id": tmdb_id,
+            "keep": {"id": keeper.id, "season": keeper.season_number, "episode": keeper.episode_number},
+            "merge": [
+                {"id": r.id, "season": r.season_number, "episode": r.episode_number}
+                for r in rows if r.id != keeper.id
+            ],
+        })
+    return groups
+
+
+@router.get("/duplicate-episodes")
+async def duplicate_episodes_report(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Dry run: what a duplicate-episode merge would keep, move and delete."""
+    groups = await _duplicate_episode_groups(db, current_user.id)
+    merge_ids = [m["id"] for g in groups for m in g["merge"]]
+
+    moves: dict[str, int] = {}
+    if merge_ids:
+        from models.ratings import Rating
+
+        for label, model in (
+            ("watch_events", WatchEvent),
+            ("collections", Collection),
+            ("ratings", Rating),
+            ("playback_progress", PlaybackProgress),
+        ):
+            row = await db.execute(
+                select(func.count()).select_from(model).where(model.media_id.in_(merge_ids))
+            )
+            moves[label] = row.scalar_one()
+
+    by_show: dict[str, int] = {}
+    for g in groups:
+        title = g["show_title"] or f"show {g['show_id']}"
+        by_show[title] = by_show.get(title, 0) + 1
+
+    from models.episode_order import EpisodeOrderMapping
+
+    mapped_q = await db.execute(select(EpisodeOrderMapping.series_tmdb_id).distinct())
+    mapped_series = {row[0] for row in mapped_q.all()}
+    unmapped = sorted({
+        g["show_title"] or f"show {g['show_id']}"
+        for g in groups
+        if g.get("series_tmdb_id") not in mapped_series
+    })
+
+    return {
+        "groups": len(groups),
+        "rows_to_delete": len(merge_ids),
+        "rows_to_move": moves,
+        "shows_needing_mapping": unmapped,
+        "shows": sorted(
+            ({"title": t, "groups": c} for t, c in by_show.items()),
+            key=lambda x: x["groups"],
+            reverse=True,
+        ),
+        "sample": groups[:5],
+    }
+
+
+@router.post("/duplicate-episodes/merge")
+async def merge_duplicate_episodes(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Merge duplicate episode rows onto the TMDB-numbered row. Destructive."""
+    job = SyncJob(user_id=current_user.id, source=CollectionSource.tmdb, job_type="dedupe", status=SyncStatus.pending)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    background_tasks.add_task(run_merge_duplicate_episodes, current_user.id, job.id)
+    return {"status": "started", "message": "Duplicate episode merge is running in the background"}
+
+
+async def run_merge_duplicate_episodes(user_id: int, job_id: int | None = None):
+    from core.episode_order import ensure_episode_order_mapping
+    from models.lists import ListItem
+    from models.ratings import Rating
+    from models.show import Show
+    from routers.shows import get_user_tvdb_key
+
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        async def _update_job(**kwargs):
+            if job_id is None:
+                return
+            await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(updated_at=func.now(), **kwargs))
+            await db.commit()
+
+        try:
+            await _update_job(status=SyncStatus.running, processed_items=0, total_items=0)
+            groups = await _duplicate_episode_groups(db, user_id)
+            await _update_job(total_items=len(groups))
+
+            # Deleting the TVDB-numbered rows leaves TVDB browsing blank unless
+            # the show can translate between the two orders, so build the
+            # mapping first and skip any show that still can't.
+            settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+            settings = settings_q.scalar_one_or_none()
+            tmdb_key = await _get_effective_tmdb_key(db, settings)
+            tvdb_key = await get_user_tvdb_key(db, user_id)
+
+            mapped_shows: set[int] = set()
+            skipped_shows: set[int] = set()
+            for show_id in {g["show_id"] for g in groups}:
+                show_q = await db.execute(select(Show).where(Show.id == show_id))
+                show = show_q.scalars().first()
+                if not show or not show.tmdb_id or not tmdb_key or not tvdb_key:
+                    skipped_shows.add(show_id)
+                    continue
+                try:
+                    await ensure_episode_order_mapping(db, show.tmdb_id, tmdb_key, tvdb_key)
+                    mapped_shows.add(show_id)
+                except Exception:
+                    skipped_shows.add(show_id)
+            await db.commit()
+
+            groups = [g for g in groups if g["show_id"] in mapped_shows]
+            await _update_job(total_items=len(groups))
+
+            deleted = 0
+            for index, group in enumerate(groups, start=1):
+                if index % 25 == 0:
+                    await _raise_if_cancelled(db, job_id)
+                keep_id = group["keep"]["id"]
+                merge_ids = [m["id"] for m in group["merge"]]
+                if not merge_ids:
+                    continue
+
+                # collections and playback_progress are unique per (user, media),
+                # so drop the loser's row where the keeper already has one.
+                for model in (Collection, PlaybackProgress):
+                    await db.execute(
+                        delete(model).where(
+                            model.media_id.in_(merge_ids),
+                            model.user_id.in_(select(model.user_id).where(model.media_id == keep_id)),
+                        )
+                    )
+                # list_items is unique per (list, media).
+                await db.execute(
+                    delete(ListItem).where(
+                        ListItem.media_id.in_(merge_ids),
+                        ListItem.list_id.in_(select(ListItem.list_id).where(ListItem.media_id == keep_id)),
+                    )
+                )
+                for model in (WatchEvent, Collection, Rating, PlaybackProgress, ListItem):
+                    await db.execute(
+                        update(model).where(model.media_id.in_(merge_ids)).values(media_id=keep_id)
+                    )
+                # Anything still pointing at the old rows goes with them.
+                await db.execute(delete(Media).where(Media.id.in_(merge_ids)))
+                deleted += len(merge_ids)
+
+                if index % 25 == 0:
+                    await db.commit()
+                    await _update_job(processed_items=index)
+
+            await db.commit()
+            await _update_job(
+                status=SyncStatus.completed,
+                processed_items=len(groups),
+                stats={
+                    "groups": len(groups),
+                    "rows_deleted": deleted,
+                    "shows_skipped": len(skipped_shows),
+                },
+            )
+        except SyncCancelled:
+            await db.rollback()
+            await _update_job(status=SyncStatus.cancelled)
+        except Exception as e:
+            await db.rollback()
+            await _update_job(status=SyncStatus.failed, error_message=str(e)[:500])
+
+
 @router.post("/link-providers")
 async def link_providers(
     background_tasks: BackgroundTasks,
