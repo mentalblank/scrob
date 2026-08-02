@@ -241,6 +241,7 @@ export interface PersonDetail {
   page: number;
   page_size: number;
   in_lists: number[];
+  collection: "in" | "out" | null;
 }
 
 export interface WatchEvent {
@@ -547,12 +548,14 @@ export interface UserSettings {
   use_hls_player: boolean;
   playback_target: "web" | "internal";
   onboarded?: boolean;
+  shuffle_next_up: boolean;
+  minimalist_next_up: boolean;
 }
 
 export interface MediaServerConnection {
   id: number;
   user_id: number;
-  type: "jellyfin" | "emby" | "plex" | "nuvio";
+  type: "jellyfin" | "emby" | "plex" | "nuvio" | "stremio";
   name: string;
   url: string;
   token: string;
@@ -574,7 +577,7 @@ export interface MediaServerConnection {
 }
 
 export interface MediaServerConnectionCreate {
-  type: "jellyfin" | "emby" | "plex" | "nuvio";
+  type: "jellyfin" | "emby" | "plex" | "nuvio" | "stremio";
   name: string;
   url: string;
   token: string;
@@ -670,6 +673,10 @@ export interface MediaItem {
   show_uri_id?: string | null;
   show_poster_path?: string | null;
   show_backdrop_path?: string | null;
+  // True when this episode has no real TMDB counterpart and was enriched
+  // from TVDB instead (see #101) — its season/episode numbers are TVDB's
+  // raw numbers, not TMDB's, regardless of whether show_tmdb_id is set.
+  tvdb_sourced?: boolean;
   next_up_hidden?: boolean;
   known_for_department?: string | null;
   in_library?: boolean;
@@ -1024,6 +1031,10 @@ export const api = {
       patch<MediaServerConnection>(`/auth/connections/${id}`, body, token),
     deleteConnection: (id: number, token: string) =>
       del<{ status: string }>(`/auth/connections/${id}`, undefined, token),
+    startStremioLink: (token: string) =>
+      post<{ code: string; link: string; qrcode: string }>("/auth/stremio/link/start", undefined, token),
+    pollStremioLink: (body: { code: string; name: string }, token: string) =>
+      post<{ status: "pending" | "connected"; connection?: MediaServerConnection }>("/auth/stremio/link/poll", body, token),
     getScrobbleConnections: (token: string) =>
       get<ScrobbleConnection[]>("/auth/scrobble-connections", undefined, token),
     createScrobbleConnection: (body: ScrobbleConnectionCreate, token: string) =>
@@ -1033,21 +1044,21 @@ export const api = {
     deleteScrobbleConnection: (id: number, token: string) =>
       del<{ status: string }>(`/auth/scrobble-connections/${id}`, undefined, token),
     testJellyfin: (url: string, token: string, jellyfinUserId: string | null, userToken: string) =>
-      post<{ success: boolean; message: string }>(`/auth/test-jellyfin?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}${jellyfinUserId ? `&user_id=${encodeURIComponent(jellyfinUserId)}` : ""}`, undefined, userToken),
+      post<{ success: boolean; message: string }>("/auth/test-jellyfin", { url, token, user_id: jellyfinUserId }, userToken),
     testEmby: (url: string, token: string, embyUserId: string | null, userToken: string) =>
-      post<{ success: boolean; message: string }>(`/auth/test-emby?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}${embyUserId ? `&user_id=${encodeURIComponent(embyUserId)}` : ""}`, undefined, userToken),
+      post<{ success: boolean; message: string }>("/auth/test-emby", { url, token, user_id: embyUserId }, userToken),
     testPlex: (url: string, token: string, userToken: string) =>
-      post<{ success: boolean; message: string }>(`/auth/test-plex?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`, undefined, userToken),
+      post<{ success: boolean; message: string }>("/auth/test-plex", { url, token }, userToken),
     testRadarr: (url: string, token: string, userToken: string) =>
-      post<{ success: boolean; message: string }>(`/auth/test-radarr?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`, undefined, userToken),
+      post<{ success: boolean; message: string }>("/auth/test-radarr", { url, token }, userToken),
     getRadarrProfiles: (url: string, token: string, userToken: string) =>
-      get<{ quality_profiles: any[]; root_folders: any[] }>(`/auth/radarr/profiles?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`, undefined, userToken),
+      post<{ quality_profiles: any[]; root_folders: any[] }>("/auth/radarr/profiles", { url, token }, userToken),
     testSonarr: (url: string, token: string, userToken: string) =>
-      post<{ success: boolean; message: string }>(`/auth/test-sonarr?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`, undefined, userToken),
+      post<{ success: boolean; message: string }>("/auth/test-sonarr", { url, token }, userToken),
     getSonarrProfiles: (url: string, token: string, userToken: string) =>
-      get<{ quality_profiles: any[]; root_folders: any[]; language_profiles: any[] }>(`/auth/sonarr/profiles?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`, undefined, userToken),
+      post<{ quality_profiles: any[]; root_folders: any[]; language_profiles: any[] }>("/auth/sonarr/profiles", { url, token }, userToken),
     testTmdb: (key: string, userToken: string) =>
-      post<{ success: boolean; message: string }>(`/auth/test-tmdb?key=${encodeURIComponent(key)}`, undefined, userToken),
+      post<{ success: boolean; message: string }>("/auth/test-tmdb", { key }, userToken),
     getConnectionStatus: (token: string) =>
       get<ConnectionStatus>("/auth/connection-status", undefined, token),
     totp2faSetup: (token: string) =>
@@ -1124,8 +1135,19 @@ export const api = {
     getRecommendations: (type: string, idOrUri: number | string, token?: string) =>
       get<{ results: MediaItem[] }>(`/media/${type}/${idOrUri}/recommendations`, undefined, token),
 
-    getPerson: (personId: number | string, page: number = 1, token?: string) =>
-      get<PersonDetail>(`/media/person/${personId}`, { page }, token),
+    getPerson: (
+      personId: number | string,
+      page: number = 1,
+      token?: string,
+      filters?: { collection?: "in" | "out" | ""; genre?: string[]; year?: number[]; minRating?: string },
+    ) =>
+      get<PersonDetail>(`/media/person/${personId}`, {
+        page,
+        collection: filters?.collection || undefined,
+        genre: filters?.genre?.length ? filters.genre : undefined,
+        year: filters?.year?.length ? filters.year : undefined,
+        min_rating: filters?.minRating || undefined,
+      }, token),
 
     getCollection: (collectionId: number, token?: string) =>
       get<CollectionDetail>(`/media/collection/${collectionId}`, undefined, token),
@@ -1337,6 +1359,8 @@ export const api = {
       post<{ status: string; job_id: number; message: string }>("/sync/plex", params, token),
     syncConnection: (connectionId: number, params?: { movie_limit?: number; show_limit?: number }, token?: string) =>
       post<{ status: string; job_id: number; message: string }>(`/sync/connection/${connectionId}`, params, token),
+    fullResyncConnection: (connectionId: number, token: string) =>
+      post<{ status: string; job_id: number; message: string }>(`/sync/connection/${connectionId}?full=true`, undefined, token),
     status: (token: string) =>
       get<SyncJob[]>("/sync/status", undefined, token),
     getConnectionLibraries: (connectionId: number, token: string) =>
@@ -1487,4 +1511,3 @@ export function tmdbImageUrl(path: string | null | undefined, size: string = "w5
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   return `/api/proxy/media/image/${size}${cleanPath}`;
 }
-

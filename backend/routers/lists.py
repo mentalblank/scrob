@@ -13,9 +13,10 @@ from models.base import MediaType, PrivacyLevel
 from models.show import Show as ShowModel
 from models.media_request import MediaRequest, RequestStatus
 from models.users import UserSettings
-from dependencies import get_current_user
+from dependencies import get_current_user, get_current_user_or_api_key
 from models.users import User
 from routers.media import enrich_with_state
+from core.enrichment import is_unmapped_tvdb_episode
 
 logger = logging.getLogger(__name__)
 
@@ -106,19 +107,21 @@ def _format_item(item: ListItem) -> dict:
             "adult": media.adult,
             "library": None,
             "in_library": False,
+            "tvdb_sourced": is_unmapped_tvdb_episode(media),
         },
     }
     if media.media_type == MediaType.episode and media.show:
         data["media"]["show_title"] = media.show.title
         data["media"]["show_poster_path"] = media.show.poster_path
         data["media"]["show_tmdb_id"] = media.show.tmdb_id
+        data["media"]["show_tvdb_id"] = media.show.tvdb_id
     return data
 
 
 @router.get("/public")
 async def get_public_lists(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
     result = await db.execute(
         select(ListModel, User.username)
@@ -143,7 +146,7 @@ async def get_public_lists(
 @router.get("")
 async def get_lists(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
     result = await db.execute(
         select(ListModel)
@@ -186,7 +189,7 @@ async def create_list(
 async def get_list(
     list_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
     result = await db.execute(
         select(ListModel)

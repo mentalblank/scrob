@@ -13,7 +13,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core import mdblist as mdblist_client
-from core.enrichment import enrich_media
+from core.enrichment import enrich_media, is_unmapped_tvdb_episode
 from db import engine, get_db
 from dependencies import get_current_user
 from models.base import CollectionSource, MediaType
@@ -298,6 +298,11 @@ def _payload_item(
             return None
         if media.season_number is None or media.episode_number is None:
             return None
+        # Episode enriched from TVDB, no real TMDB counterpart (see #101) —
+        # its season/episode numbers are raw TVDB numbers, not safe to send
+        # as if they were positions under show.tmdb_id.
+        if is_unmapped_tvdb_episode(media):
+            return None
         episode: dict[str, Any] = {"number": media.episode_number}
         if watched_at is not None:
             episode["watched_at"] = _iso_utc(watched_at)
@@ -397,7 +402,12 @@ async def _import_watched(
     existing = {row[0] for row in existing_result.all()}
     changed: set[int] = set()
 
-    for kind in ("movies", "shows", "episodes"):
+    # MDBList's /sync/watched "shows" entries are rollup wrappers (a show's
+    # own last_watched_at just mirrors its most recently watched episode) —
+    # they carry no per-episode data of their own. Importing them as watch
+    # events creates a spurious series-level WatchEvent alongside the real
+    # episode-level one for every watched show.
+    for kind in ("movies", "episodes"):
         for entry in payload.get(kind, []):
             try:
                 async with db.begin_nested():
@@ -425,7 +435,7 @@ async def _import_watched(
                 logger.warning("Error importing MDBList %s watch item: %s", kind, exc)
                 stats["errors"] += 1
 
-    stats["skipped"] += len(payload.get("seasons", []))
+    stats["skipped"] += len(payload.get("seasons", [])) + len(payload.get("shows", []))
     return changed
 
 

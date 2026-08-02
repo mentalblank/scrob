@@ -131,6 +131,10 @@ const activeButtonsCount = [
             <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none text-center md:text-left">{item.title}</h1>
           )}
 
+          {item.original_title && item.original_title !== item.title && (
+            <p class="text-sm text-zinc-500 text-center md:text-left mb-2">Original title: <span class="text-zinc-400">{item.original_title}</span></p>
+          )}
+
           {item.tagline && (
             <p class="text-lg md:text-xl italic text-zinc-400 font-light leading-relaxed text-center md:text-left mb-4">"{item.tagline}"</p>
           )}

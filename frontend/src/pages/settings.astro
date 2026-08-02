@@ -465,6 +465,28 @@ const COUNTRIES = (countriesRes || [])
               </div>
             </div>
 
+            <!-- Next Up Row -->
+            <div class="space-y-4 pt-2">
+              <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Next Up Row</label>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label class="flex items-start justify-between gap-4 p-4 rounded-xl border border-zinc-800 bg-zinc-950/40 cursor-pointer transition-all hover:bg-zinc-900/50">
+                  <span class="min-w-0">
+                    <span class="block font-semibold text-zinc-100">Shuffle Next Up</span>
+                    <span class="block text-xs text-zinc-500 leading-relaxed mt-0.5">Randomise the order of the Next Up row. When off, shows are ordered by most recently watched.</span>
+                  </span>
+                  <input type="checkbox" name="shuffle_next_up" id="shuffle_next_up" checked={settings.shuffle_next_up === true} class="w-5 h-5 mt-0.5 shrink-0 rounded-lg border-zinc-800 bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer" />
+                </label>
+
+                <label class="flex items-start justify-between gap-4 p-4 rounded-xl border border-zinc-800 bg-zinc-950/40 cursor-pointer transition-all hover:bg-zinc-900/50">
+                  <span class="min-w-0">
+                    <span class="block font-semibold text-zinc-100">Minimalist Next Up</span>
+                    <span class="block text-xs text-zinc-500 leading-relaxed mt-0.5">Show the Next Up row like any other row, without the large banner and title text.</span>
+                  </span>
+                  <input type="checkbox" name="minimalist_next_up" id="minimalist_next_up" checked={settings.minimalist_next_up === true} class="w-5 h-5 mt-0.5 shrink-0 rounded-lg border-zinc-800 bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer" />
+                </label>
+              </div>
+            </div>
+
             <!-- Visibility Filters Behavior -->
             <div class="space-y-4 pt-2">
               <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest">Visibility Filters Behavior</label>
@@ -2335,6 +2357,26 @@ const COUNTRIES = (countriesRes || [])
           </div>
         </section>
 
+        <!-- Export Data -->
+        <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
+          <div class="mb-4 border-b border-zinc-800 pb-2">
+            <h2 class="section-headline">Export Data</h2>
+          </div>
+          <div class="bg-zinc-950/40 border border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div>
+              <h3 class="text-lg font-bold text-zinc-100 mb-1">Download My Data</h3>
+              <p class="text-zinc-400 text-sm">Export your watch history, ratings, collection, lists and comments as a zip you can re-import later.</p>
+            </div>
+            <button
+              type="button"
+              id="export-data-btn"
+              class="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+            >
+              Download
+            </button>
+          </div>
+        </section>
+
         <!-- Data Management -->
         <section class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl backdrop-blur-xl shadow-xl p-6 md:p-8 space-y-6">
           <div class="mb-4 border-b border-zinc-800 pb-2">
@@ -2407,6 +2449,65 @@ const COUNTRIES = (countriesRes || [])
       <div class="flex gap-3">
         <button type="button" id="cancel-action" class="flex-1 px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold rounded-xl transition-all cursor-pointer">Cancel</button>
         <button type="button" id="confirm-action" class="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-zinc-100 font-bold rounded-xl transition-all cursor-pointer"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Export Modal -->
+  <div id="export-data-modal" class="fixed inset-0 bg-zinc-950/85 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl p-8 max-w-md w-full shadow-2xl backdrop-blur-xl max-h-[90vh] overflow-y-auto">
+      <h2 class="text-2xl font-bold text-zinc-100 mb-2">Export your data</h2>
+      <p class="text-zinc-400 mb-6 text-sm leading-relaxed">Choose what to include in the export.</p>
+      <div class="space-y-2 mb-6">
+        {[
+          { key: "watched", label: "Watch History" },
+          { key: "ratings", label: "Ratings" },
+          { key: "collection", label: "Collection" },
+          { key: "lists", label: "Lists" },
+          { key: "comments", label: "Comments" },
+        ].map(({ key, label }) => (
+          <button
+            type="button"
+            data-export-option={key}
+            class="export-option w-full flex items-center justify-between px-4 py-3 bg-zinc-800 hover:bg-zinc-700 border-2 border-transparent rounded-xl transition-colors cursor-pointer"
+          >
+            <span class="text-sm font-medium text-zinc-100">{label}</span>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="check-icon w-5 h-5 text-blue-500">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          </button>
+        ))}
+      </div>
+
+      <p class="text-xs text-amber-400/90 mb-2 leading-relaxed flex items-start gap-1.5">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="text-red-500 w-4 h-4 shrink-0 mt-0.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+        </svg>
+        <span>These include API keys and tokens in <strong>plain text</strong> — only enable if you understand the risk.</span>
+      </p>
+      <div class="space-y-2 mb-8">
+        {[
+          { key: "api_keys", label: "API Keys" },
+          { key: "media_connections", label: "Media & Cloud Connections" },
+          { key: "scrobble_connections", label: "Scrobble-only Connections" },
+          { key: "connections", label: "Connections" },
+        ].map(({ key, label }) => (
+          <button
+            type="button"
+            data-export-option={key}
+            data-secret="true"
+            class="export-option w-full flex items-center justify-between px-4 py-3 bg-zinc-800 hover:bg-zinc-700 border-2 border-transparent rounded-xl transition-colors cursor-pointer"
+          >
+            <span class="text-sm font-medium text-zinc-100">{label}</span>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="check-icon w-5 h-5 text-amber-500 invisible">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          </button>
+        ))}
+      </div>
+      <div class="flex gap-3">
+        <button type="button" id="export-data-modal-cancel" class="flex-1 px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold rounded-xl transition-all cursor-pointer">Cancel</button>
+        <button type="button" id="export-data-modal-confirm" class="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-zinc-100 font-bold rounded-xl transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Export</button>
       </div>
     </div>
   </div>
@@ -3398,14 +3499,17 @@ const COUNTRIES = (countriesRes || [])
         try {
           let url = '';
           let method = 'POST';
+          let requestBody: Record<string, unknown> | null = null;
           let syncConnId: string | null = null; // set for sync/push actions to start progress poller
 
           if (action === 'test_tmdb') {
             const val = (document.getElementById('tmdb_api_key') as HTMLInputElement).value;
-            url = `/api/proxy/auth/test-tmdb?key=${encodeURIComponent(val)}`;
+            url = '/api/proxy/auth/test-tmdb';
+            requestBody = { key: val };
           } else if (action === 'test_tvdb') {
             const val = (document.getElementById('tvdb_api_key') as HTMLInputElement).value;
-            url = `/api/proxy/auth/test-tvdb?key=${encodeURIComponent(val)}`;
+            url = '/api/proxy/auth/test-tvdb';
+            requestBody = { key: val };
           } else if (action === 'test_connection') {
             const connId = newBtn.getAttribute('data-conn-id');
             const connType = newBtn.getAttribute('data-conn-type');
@@ -3423,13 +3527,19 @@ const COUNTRIES = (countriesRes || [])
             } else {
               let testEndpoint: string;
               if (connType === 'plex') {
-                testEndpoint = `/api/proxy/auth/test-plex?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`;
+                testEndpoint = '/api/proxy/auth/test-plex';
               } else if (connType === 'emby') {
-                testEndpoint = `/api/proxy/auth/test-emby?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+                testEndpoint = '/api/proxy/auth/test-emby';
               } else {
-                testEndpoint = `/api/proxy/auth/test-jellyfin?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}&user_id=${encodeURIComponent(ui)}`;
+                testEndpoint = '/api/proxy/auth/test-jellyfin';
               }
-              testRes = await fetch(testEndpoint, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+              // Credentials travel in the body — query strings leak into proxy
+              // and browser-history logs (upstream #89).
+              testRes = await fetch(testEndpoint, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: u, token: t, user_id: ui || null }),
+              });
             }
             const testData = await testRes.json();
             if (testRes.ok) {
@@ -3644,9 +3754,10 @@ const COUNTRIES = (countriesRes || [])
             const t = document.getElementById('radarr_token').value;
             setConnStatus('radarr-conn-status', 'checking');
             // First test connection
-            const testRes = await fetch(`/api/proxy/auth/test-radarr?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+            const testRes = await fetch('/api/proxy/auth/test-radarr', {
               method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}` }
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: u, token: t }),
             });
             if (!testRes.ok) {
               setConnStatus('radarr-conn-status', 'disconnected');
@@ -3654,8 +3765,10 @@ const COUNTRIES = (countriesRes || [])
             }
             
             // Then fetch profiles
-            const profRes = await fetch(`/api/proxy/auth/radarr/profiles?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
-              headers: { 'Authorization': `Bearer ${token}` }
+            const profRes = await fetch('/api/proxy/auth/radarr/profiles', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: u, token: t }),
             });
             const profData = await profRes.json();
             
@@ -3686,9 +3799,10 @@ const COUNTRIES = (countriesRes || [])
             const t = document.getElementById('sonarr_token').value;
             setConnStatus('sonarr-conn-status', 'checking');
             // First test connection
-            const testRes = await fetch(`/api/proxy/auth/test-sonarr?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
+            const testRes = await fetch('/api/proxy/auth/test-sonarr', {
               method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}` }
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: u, token: t }),
             });
             if (!testRes.ok) {
               setConnStatus('sonarr-conn-status', 'disconnected');
@@ -3696,8 +3810,10 @@ const COUNTRIES = (countriesRes || [])
             }
             
             // Then fetch profiles
-            const profRes = await fetch(`/api/proxy/auth/sonarr/profiles?url=${encodeURIComponent(u)}&token=${encodeURIComponent(t)}`, {
-              headers: { 'Authorization': `Bearer ${token}` }
+            const profRes = await fetch('/api/proxy/auth/sonarr/profiles', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: u, token: t }),
             });
             const profData = await profRes.json();
             
@@ -3862,7 +3978,10 @@ const COUNTRIES = (countriesRes || [])
 
           const res = await fetch(url, {
             method,
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: requestBody
+              ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+              : { 'Authorization': `Bearer ${token}` },
+            ...(requestBody ? { body: JSON.stringify(requestBody) } : {}),
           });
           const data = await res.json();
 
@@ -4814,6 +4933,8 @@ const COUNTRIES = (countriesRes || [])
           'show_comments',
           'show_user_ratings',
           'use_hls_player',
+          'shuffle_next_up',
+          'minimalist_next_up',
         ] as const;
         const syncPrefs: Record<string, boolean> = {};
         for (const key of syncKeys) {
@@ -5314,6 +5435,123 @@ const COUNTRIES = (countriesRes || [])
     }
   }
 
+  interface ExportSelection {
+    watched: boolean;
+    ratings: boolean;
+    collection: boolean;
+    lists: boolean;
+    comments: boolean;
+    api_keys: boolean;
+    media_connections: boolean;
+    scrobble_connections: boolean;
+    connections: boolean;
+  }
+
+  function showExportDataModal(): Promise<ExportSelection | null> {
+    return new Promise(resolve => {
+      const modal = document.getElementById('export-data-modal');
+      const confirmBtn = document.getElementById('export-data-modal-confirm') as HTMLButtonElement | null;
+      const cancelBtn = document.getElementById('export-data-modal-cancel') as HTMLButtonElement | null;
+      const options = Array.from(document.querySelectorAll<HTMLButtonElement>('.export-option'));
+      if (!modal || !confirmBtn || !cancelBtn || options.length === 0) { resolve(null); return; }
+
+      // Secret-bearing options start unselected; everything else is preselected.
+      const selected = new Set(
+        options.filter(o => o.getAttribute('data-secret') !== 'true').map(o => o.getAttribute('data-export-option')!)
+      );
+
+      const syncOptionUI = () => {
+        options.forEach(opt => {
+          const isOn = selected.has(opt.getAttribute('data-export-option')!);
+          const isSecret = opt.getAttribute('data-secret') === 'true';
+          opt.querySelector('.check-icon')?.classList.toggle('invisible', !isOn);
+          opt.classList.toggle(isSecret ? 'border-amber-500' : 'border-blue-500', isOn);
+          opt.classList.toggle('border-transparent', !isOn);
+        });
+        confirmBtn.disabled = selected.size === 0;
+      };
+      syncOptionUI();
+
+      const optionHandlers = options.map(opt => {
+        const handler = () => {
+          const name = opt.getAttribute('data-export-option')!;
+          if (selected.has(name)) selected.delete(name); else selected.add(name);
+          syncOptionUI();
+        };
+        opt.addEventListener('click', handler);
+        return { opt, handler };
+      });
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+
+      const cleanup = (result: ExportSelection | null) => {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        confirmBtn.removeEventListener('click', onConfirm);
+        cancelBtn.removeEventListener('click', onCancel);
+        optionHandlers.forEach(({ opt, handler }) => opt.removeEventListener('click', handler));
+        resolve(result);
+      };
+      const onConfirm = () => cleanup({
+        watched: selected.has('watched'),
+        ratings: selected.has('ratings'),
+        collection: selected.has('collection'),
+        lists: selected.has('lists'),
+        comments: selected.has('comments'),
+        api_keys: selected.has('api_keys'),
+        media_connections: selected.has('media_connections'),
+        scrobble_connections: selected.has('scrobble_connections'),
+        connections: selected.has('connections'),
+      });
+      const onCancel = () => cleanup(null);
+      confirmBtn.addEventListener('click', onConfirm, { once: true });
+      cancelBtn.addEventListener('click', onCancel, { once: true });
+    });
+  }
+
+  function setupExportData() {
+    const btn = document.getElementById('export-data-btn') as HTMLButtonElement | null;
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+      const selection = await showExportDataModal();
+      if (!selection) return;
+
+      btn.disabled = true;
+      const originalText = btn.textContent;
+      btn.textContent = 'Preparing…';
+
+      try {
+        const params = new URLSearchParams(
+          Object.entries(selection).map(([key, value]) => [key, String(value)])
+        );
+        const res = await fetch(`/api/proxy/export/data?${params}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'Export failed');
+        }
+        const cd = res.headers.get('Content-Disposition');
+        const filename = cd?.match(/filename="([^"]+)"/)?.[1] ?? 'scrob-export.zip';
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        showMessage('Export downloaded successfully!');
+      } catch (e) {
+        showMessage(e instanceof Error ? e.message : 'Export failed', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText ?? 'Download';
+      }
+    });
+  }
+
   function setupHealButton() {
     const btn = document.getElementById('heal-btn');
     const modal = document.getElementById('heal-modal');
@@ -5640,6 +5878,7 @@ const COUNTRIES = (countriesRes || [])
 
   setupApiKey();
   setupHealButton();
+  setupExportData();
   setupClearSessionsButton();
   setupCollapsibleRows();
   checkConnections();
@@ -5657,6 +5896,7 @@ const COUNTRIES = (countriesRes || [])
     setupProfileAndPreferences();
     setupApiKey();
     setupHealButton();
+    setupExportData();
     setupClearSessionsButton();
     setupCollapsibleRows();
     checkConnections();

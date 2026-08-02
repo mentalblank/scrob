@@ -1,12 +1,15 @@
 import asyncio
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
+from dependencies import require_admin
+from models.users import User
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from db import engine, Base
 import models # noqa: F401
-from routers import webhooks, media, history, ratings, sync, shows, auth, lists, oidc, plex_auth, profile, trakt, simkl, mdblist, comments, admin, compat, stremio
+from routers import webhooks, media, history, ratings, sync, shows, auth, lists, oidc, plex_auth, profile, trakt, simkl, mdblist, comments, admin, compat, stremio, export
 
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -30,9 +33,50 @@ async def _auto_sync_scheduler():
         run_emby_sync,
         run_jellyfin_sync,
         run_nuvio_sync,
+        run_stremio_sync,
         run_plex_sync,
     )
-    from routers.trakt import run_trakt_sync
+    from routers.trakt import run_trakt_sync, _run_trakt_push
+    from routers.simkl import run_simkl_sync, _run_simkl_push
+    from routers.mdblist import run_mdblist_sync, run_mdblist_push
+
+    # Trakt/Simkl/MDBList are single, user-level cloud connections (no
+    # MediaServerConnection row, no connection_id) — same due-date logic as
+    # the media-connection loop below, just keyed by user_id + source alone.
+    cloud_sync_config = [
+        {
+            "source": CollectionSource.trakt,
+            "connected_field": "trakt_access_token",
+            "auto_sync_field": "trakt_auto_sync_interval",
+            "auto_push_field": "trakt_auto_push_interval",
+            "push_flags": ("trakt_push_watched", "trakt_push_ratings", "trakt_push_collection"),
+            "pull_runner": run_trakt_sync,
+            "push_runner": _run_trakt_push,
+        },
+        {
+            "source": CollectionSource.simkl,
+            "connected_field": "simkl_access_token",
+            "auto_sync_field": "simkl_auto_sync_interval",
+            "auto_push_field": "simkl_auto_push_interval",
+            "push_flags": ("simkl_push_watched", "simkl_push_ratings"),
+            "pull_runner": run_simkl_sync,
+            "push_runner": _run_simkl_push,
+        },
+        {
+            "source": CollectionSource.mdblist,
+            "connected_field": "mdblist_api_key",
+            "auto_sync_field": "mdblist_auto_sync_interval",
+            "auto_push_field": "mdblist_auto_push_interval",
+            "push_flags": (
+                "mdblist_push_watched",
+                "mdblist_push_ratings",
+                "mdblist_push_watchlist",
+                "mdblist_push_collection",
+            ),
+            "pull_runner": run_mdblist_sync,
+            "push_runner": run_mdblist_push,
+        },
+    ]
 
     check_interval = 300  # seconds between scheduler ticks
     source_map = {
@@ -40,12 +84,14 @@ async def _auto_sync_scheduler():
         "emby": CollectionSource.emby,
         "plex": CollectionSource.plex,
         "nuvio": CollectionSource.nuvio,
+        "stremio": CollectionSource.stremio,
     }
     runner_map = {
         "jellyfin": run_jellyfin_sync,
         "emby": run_emby_sync,
         "plex": run_plex_sync,
         "nuvio": run_nuvio_sync,
+        "stremio": run_stremio_sync,
     }
 
     while True:
@@ -154,6 +200,94 @@ async def _auto_sync_scheduler():
                 if del_res.rowcount > 0:
                     print(f"Cleanup: removed {del_res.rowcount} expired playback sessions (>24h old)")
                 await db.commit()
+
+                cloud_settings_result = await db.execute(
+                    select(UserSettings).where(
+                        or_(
+                            *[
+                                getattr(UserSettings, cfg["auto_sync_field"]).isnot(None)
+                                for cfg in cloud_sync_config
+                            ],
+                            *[
+                                getattr(UserSettings, cfg["auto_push_field"]).isnot(None)
+                                for cfg in cloud_sync_config
+                            ],
+                        )
+                    )
+                )
+                cloud_settings_rows = cloud_settings_result.scalars().all()
+
+                for settings_row in cloud_settings_rows:
+                    for cfg in cloud_sync_config:
+                        source = cfg["source"]
+                        auto_sync = getattr(settings_row, cfg["auto_sync_field"])
+                        auto_push = getattr(settings_row, cfg["auto_push_field"])
+                        if auto_sync is None and auto_push is None:
+                            continue
+                        if not getattr(settings_row, cfg["connected_field"]):
+                            continue
+
+                        active_q = await db.execute(
+                            select(SyncJob)
+                            .where(
+                                SyncJob.user_id == settings_row.user_id,
+                                SyncJob.source == source,
+                                SyncJob.status.in_([SyncStatus.pending, SyncStatus.running]),
+                            )
+                            .limit(1)
+                        )
+                        if active_q.scalar_one_or_none():
+                            continue
+
+                        schedules: list[tuple[str, float, object]] = []
+                        if auto_sync is not None:
+                            schedules.append(("pull", auto_sync, cfg["pull_runner"]))
+                        if auto_push is not None and any(
+                            getattr(settings_row, flag) for flag in cfg["push_flags"]
+                        ):
+                            schedules.append(("push", auto_push, cfg["push_runner"]))
+
+                        due: list[tuple[datetime, str, object]] = []
+                        for job_type, interval, runner in schedules:
+                            last_q = await db.execute(
+                                select(SyncJob)
+                                .where(
+                                    SyncJob.user_id == settings_row.user_id,
+                                    SyncJob.source == source,
+                                    SyncJob.job_type == job_type,
+                                    SyncJob.status.in_([SyncStatus.completed, SyncStatus.failed]),
+                                )
+                                .order_by(SyncJob.updated_at.desc())
+                                .limit(1)
+                            )
+                            last_job = last_q.scalar_one_or_none()
+                            next_run = (
+                                last_job.updated_at + timedelta(hours=interval)
+                                if last_job
+                                else datetime.min
+                            )
+                            if next_run <= now:
+                                due.append((next_run, job_type, runner))
+
+                        if not due:
+                            continue
+                        _, job_type, runner = min(due, key=lambda item: item[0])
+                        job = SyncJob(
+                            user_id=settings_row.user_id,
+                            source=source,
+                            status=SyncStatus.pending,
+                            job_type=job_type,
+                        )
+                        db.add(job)
+                        await db.flush()
+                        job_id = job.id
+                        await db.commit()
+
+                        print(
+                            f"Auto-{job_type}: queuing {source.value} for user "
+                            f"{settings_row.user_id} (job {job_id})"
+                        )
+                        asyncio.create_task(runner(settings_row.user_id, job_id))
 
         except Exception as e:
             print(f"Auto-sync scheduler error: {e}")
@@ -368,10 +502,28 @@ async def lifespan(app: FastAPI):
 from core.config import settings
 
 # Rate limiter — keyed by client IP, in-memory storage (suitable for single-instance deploy).
-app = FastAPI(title="Scrob", version="0.1.0", lifespan=lifespan)
+# API docs (docs_url/redoc_url/openapi_url) are disabled here and re-added below behind
+# require_admin — the schema reveals the full endpoint surface and exact app version,
+# which shouldn't be public on a self-hosted instance that may be internet-facing.
+app = FastAPI(title="Scrob", version=settings.app_version, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def get_openapi_schema(_: User = Depends(require_admin)):
+    return JSONResponse(app.openapi())
+
+
+@app.get("/docs", include_in_schema=False)
+async def get_docs(_: User = Depends(require_admin)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{app.title} - Swagger UI")
+
+
+@app.get("/redoc", include_in_schema=False)
+async def get_redoc(_: User = Depends(require_admin)):
+    return get_redoc_html(openapi_url="/openapi.json", title=f"{app.title} - ReDoc")
 
 # The backend is internal-only (localhost), but lock CORS to the configured
 # frontend origin as defence-in-depth. The backend uses Bearer token auth only
@@ -401,6 +553,7 @@ app.include_router(mdblist.router, prefix="/mdblist", tags=["mdblist"])
 app.include_router(comments.router, prefix="/comments", tags=["comments"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(stremio.router, prefix="/stremio", tags=["stremio"])
+app.include_router(export.router, prefix="/export", tags=["export"])
 app.include_router(compat.router, tags=["compat"])
 
 @app.get("/health")

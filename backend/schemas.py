@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, SecretStr, field_validator, model_validator
 from typing import Optional
 from datetime import datetime
 from models.base import UserRole, MediaType, PrivacyLevel
@@ -120,6 +120,8 @@ class UserSettings(BaseModel):
     trakt_push_collection: Optional[bool] = None
     trakt_push_lists: Optional[bool] = None
     trakt_scrobble: Optional[bool] = None
+    trakt_auto_sync_interval: Optional[float] = None
+    trakt_auto_push_interval: Optional[float] = None
 
     trakt_full_sync_interval: Optional[int] = None
     trakt_partial_sync_interval: Optional[int] = None
@@ -135,6 +137,8 @@ class UserSettings(BaseModel):
     simkl_push_watched: Optional[bool] = None
     simkl_push_ratings: Optional[bool] = None
     simkl_scrobble: Optional[bool] = None
+    simkl_auto_sync_interval: Optional[float] = None
+    simkl_auto_push_interval: Optional[float] = None
 
     # MDBList — API key authentication
     mdblist_api_key: Optional[str] = None
@@ -147,6 +151,8 @@ class UserSettings(BaseModel):
     mdblist_push_watchlist: Optional[bool] = None
     mdblist_push_collection: Optional[bool] = None
     mdblist_scrobble: Optional[bool] = None
+    mdblist_auto_sync_interval: Optional[float] = None
+    mdblist_auto_push_interval: Optional[float] = None
 
     preferences: Optional[dict] = None
     blur_explicit: Optional[bool] = None
@@ -157,6 +163,8 @@ class UserSettings(BaseModel):
     playback_target: Optional[str] = None  # "web" | "internal"
     default_episode_order: Optional[str] = None  # "tmdb" | "tvdb"
     onboarded: Optional[bool] = None
+    shuffle_next_up: Optional[bool] = None
+    minimalist_next_up: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -172,6 +180,30 @@ class NuvioConnectionTestRequest(BaseModel):
     url: str
     token: str
     profile_id: int
+
+
+class ApiKeyTestRequest(BaseModel):
+    key: SecretStr
+
+
+class ServiceConnectionTestRequest(BaseModel):
+    url: str
+    token: SecretStr
+    user_id: Optional[str] = None
+
+
+class StremioLinkPollRequest(BaseModel):
+    code: str
+    name: str = "Stremio"
+    connection_id: Optional[int] = None
+    sync_collection: bool = True
+    sync_watched: bool = True
+    sync_playback: bool = True
+    push_collection: bool = False
+    push_watched: bool = False
+    push_playback: bool = False
+    auto_sync_interval: Optional[float] = None
+    auto_push_interval: Optional[float] = None
 
 
 class MediaServerConnectionBase(BaseModel):
@@ -238,6 +270,12 @@ class MediaServerConnectionResponse(MediaServerConnectionBase):
     last_partial_sync: Optional[datetime] = None
     created_at: datetime
 
+    @model_validator(mode="after")
+    def redact_stremio_auth_key(self):
+        if self.type == "stremio":
+            self.token = ""
+        return self
+
     class Config:
         from_attributes = True
 
@@ -281,6 +319,7 @@ class WatchEventCreate(BaseModel):
     completed: bool = True
     show_uri_id: Optional[str] = None
     series_tmdb_id: Optional[int] = None
+    series_tvdb_id: Optional[int] = None  # lets the show be linked to TVDB (see #101) without requiring a prior visit to its TVDB page
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
 

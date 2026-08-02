@@ -5,6 +5,7 @@ import MediaCard from "../../components/MediaCard.astro";
 import CommentsSection from "../../components/CommentsSection.astro";
 import Pagination from "../../components/Pagination.astro";
 import InfiniteScroll from "../../components/InfiniteScroll.astro";
+import FilterPanel from "../../components/FilterPanel.astro";
 import { api, tmdbImageUrl, type MediaItem } from "../../lib/api";
 export const prerender = false;
 
@@ -34,16 +35,42 @@ if (rawId.includes(":")) {
   fetchKey = provider === "tvdb" ? `tvdb:p:${numericId}` : `tmdb:p:${numericId}`;
 }
 
+const collectionParam = Astro.url.searchParams.get("collection");
+const collection: "in" | "out" | "" = collectionParam === "in" || collectionParam === "out" ? collectionParam : "";
+const genre = Astro.url.searchParams.getAll("genre");
+const year = Astro.url.searchParams.getAll("year").map(Number).filter((y) => !Number.isNaN(y));
+const minRating = Astro.url.searchParams.get("min_rating") ?? "";
+
 // Backend `/media/person/{id}` accepts URI string ("tvdb:p:X", "tmdb:p:X") or raw integer
-const person = await api.media.getPerson(fetchKey, page, token);
+const person = await api.media.getPerson(fetchKey, page, token, { collection, genre, year, minRating });
 
 const profile = await api.profile.get(token!);
 const paginationType = profile?.pagination_type ?? "infinite_scroll";
 
 const credits = person.credits || [];
 const totalPages = Math.ceil(person.total_credits / person.page_size);
-const baseUrl = `/person/${rawId}`;
+const filterParams = new URLSearchParams();
+if (collection) filterParams.set("collection", collection);
+for (const g of genre) filterParams.append("genre", g);
+for (const y of year) filterParams.append("year", String(y));
+if (minRating) filterParams.set("min_rating", minRating);
+const baseUrl = `/person/${rawId}${filterParams.toString() ? `?${filterParams.toString()}` : ""}`;
 const personUri = (person as any).uri_id ?? fetchKey;
+
+const MOVIE_GENRES = [
+  "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary",
+  "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery",
+  "Romance", "Science Fiction", "Thriller", "War", "Western",
+];
+const TV_GENRES = [
+  "Action & Adventure", "Animation", "Comedy", "Crime", "Documentary",
+  "Drama", "Family", "Kids", "Mystery", "News", "Reality",
+  "Sci-Fi & Fantasy", "Soap", "Talk", "War & Politics", "Western",
+];
+const CREDIT_GENRES = Array.from(new Set([...MOVIE_GENRES, ...TV_GENRES])).sort();
+
+const currentYear = new Date().getFullYear();
+const years = Array.from({ length: currentYear - 1949 }, (_, i) => currentYear - i);
 ---
 
 <Base title={person.name}>
@@ -116,16 +143,27 @@ const personUri = (person as any).uri_id ?? fetchKey;
       )}
 
       <div>
-        <h2 class="section-headline mb-6">Known For</h2>
-        <div id="credits-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {credits.map((item) => (
-            <div class="flex flex-col gap-1">
-              <MediaCard item={item as unknown as MediaItem} />
-              {item.character && (
-                <p class="text-xs text-zinc-500 truncate px-1">as {item.character}</p>
-              )}
-            </div>
-          ))}
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+          <h2 class="section-headline">Known For</h2>
+          <FilterPanel
+            id="person-credits-filters"
+            basePath={`/person/${id}`}
+            sections={[
+              { key: "collection", label: "Collection", options: [{ value: "in", label: "In My Collection" }, { value: "out", label: "Not In My Collection" }], selected: collection ? [collection] : [], multi: false },
+              { key: "genre", label: "Genre", options: CREDIT_GENRES.map((g) => ({ value: g, label: g })), selected: genre },
+              { key: "year", label: "Year", options: years.map((y) => ({ value: String(y), label: String(y) })), selected: year.map(String) },
+              {
+                key: "min_rating",
+                label: "Rating",
+                options: [
+                  ...[9, 8, 7, 6, 5].map((r) => ({ value: String(r), label: `${r}+ Stars` })),
+                  { value: "lt5", label: "Less than 5 Stars" },
+                ],
+                selected: minRating ? [minRating] : [],
+                multi: false,
+              },
+            ]}
+          />
         </div>
 
         {paginationType === "pagination" ? (
@@ -139,7 +177,14 @@ const personUri = (person as any).uri_id ?? fetchKey;
             type="person_credits"
             currentPage={page}
             totalPages={totalPages}
-            params={{ person_id: String(numericId), source: provider }}
+            params={{
+              person_id: String(numericId),
+              source: provider,
+              ...(collection ? { collection } : {}),
+              ...(genre.length ? { genre } : {}),
+              ...(year.length ? { year: year.map(String) } : {}),
+              ...(minRating ? { min_rating: minRating } : {}),
+            }}
             targetSelector="#credits-grid"
             endpoint="/partials/person-credits"
           />

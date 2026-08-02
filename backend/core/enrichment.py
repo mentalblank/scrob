@@ -2,6 +2,58 @@ from core import tmdb
 from models.media import Media, MediaType
 
 
+def tmdb_season_covers(show_tmdb_data: dict | None, season_number: int, episode_number: int) -> bool:
+    """True if the show's cached TMDB season list (shape: [{season_number,
+    episode_count, name}, ...], as stored on Show.tmdb_data) plausibly has
+    this season/episode position. Used to decide whether a TVDB episode with
+    no local mapping genuinely has no TMDB counterpart (confidently absent,
+    safe to enrich from TVDB directly) versus might still exist on TMDB but
+    hasn't been matched yet (ambiguous — don't guess)."""
+    if not show_tmdb_data:
+        return False
+    for season in show_tmdb_data.get("seasons", []):
+        if season.get("season_number") == season_number:
+            return episode_number <= (season.get("episode_count") or 0)
+    return False
+
+
+def is_unmapped_tvdb_episode(media: Media) -> bool:
+    """True if this episode Media row was created from TVDB data because it
+    has no TMDB counterpart. Such rows must be excluded from anything sent to
+    services that expect real TMDB identifiers (Trakt, Simkl, MDBList)."""
+    return (
+        media.media_type == MediaType.episode
+        and isinstance(media.tmdb_data, dict)
+        and media.tmdb_data.get("source") == "tvdb"
+    )
+
+
+async def enrich_episode_from_tvdb(media: Media, tvdb_episode_data: dict) -> None:
+    """Populate a bare episode Media record from TVDB data (shape: core.tvdb's
+    format_episode output) for an episode that has no TMDB counterpart.
+
+    The TVDB episode id lands in both uri_id ("tvdb:e:<id>", the canonical
+    identifier every URL builder reads) and tmdb_id, which older tmdb_id-keyed
+    consumers still index on. tmdb_data.source is tagged "tvdb" so
+    is_unmapped_tvdb_episode can keep these rows out of outbound TMDB pushes.
+    """
+    tvdb_episode_id = tvdb_episode_data.get("tvdb_id")
+    if tvdb_episode_id:
+        media.tmdb_id = tvdb_episode_id
+        if not media.uri_id:
+            media.uri_id = f"tvdb:e:{tvdb_episode_id}"
+    media.title = tvdb_episode_data.get("name") or media.title
+    media.overview = tvdb_episode_data.get("overview")
+    if tvdb_episode_data.get("image_url"):
+        media.poster_path = tvdb_episode_data["image_url"]
+    media.release_date = tvdb_episode_data.get("air_date")
+    media.tmdb_data = {
+        "runtime": tvdb_episode_data.get("runtime"),
+        "tvdb_episode_id": tvdb_episode_id,
+        "source": "tvdb",
+    }
+
+
 def extract_movie_certification(data: dict, country: str = "US") -> str | None:
     """Age certification from a TMDB movie payload, for `country` then US then any."""
     results = (data.get("release_dates") or {}).get("results", [])

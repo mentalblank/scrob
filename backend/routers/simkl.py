@@ -17,7 +17,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core import simkl as simkl_client
-from core.enrichment import enrich_media
+from core.enrichment import enrich_media, is_unmapped_tvdb_episode
 from db import get_db, engine
 from dependencies import get_current_user
 from models.base import CollectionSource, MediaType
@@ -211,18 +211,26 @@ async def _get_or_create_episode_media(
             season_data = await tmdb.get_season(show_tmdb_id, season_number, api_key=api_key)
         ep_map = {ep["episode_number"]: ep for ep in season_data.get("episodes", [])}
         ep = ep_map.get(episode_number)
+        if not ep:
+            # TMDB has no such episode (provider numbering mismatch) — don't fabricate
+            # a placeholder row for it; see routers/trakt.py's twin of this function.
+            logger.warning(
+                "Simkl episode s%se%s not found on TMDB for show tmdb=%s — skipping",
+                season_number, episode_number, show_tmdb_id,
+            )
+            return None
         media = Media(
-            tmdb_id=ep["id"] if ep else None,
+            tmdb_id=ep["id"],
             media_type=MediaType.episode,
-            title=ep["name"] if ep else f"S{season_number:02d}E{episode_number:02d}",
-            overview=ep.get("overview") if ep else None,
-            poster_path=tmdb.poster_url(ep.get("still_path"), size="w500") if ep else None,
-            release_date=ep.get("air_date") if ep else None,
-            tmdb_rating=ep.get("vote_average") if ep else None,
+            title=ep["name"],
+            overview=ep.get("overview"),
+            poster_path=tmdb.poster_url(ep.get("still_path"), size="w500"),
+            release_date=ep.get("air_date"),
+            tmdb_rating=ep.get("vote_average"),
             show_id=show_id,
             season_number=season_number,
             episode_number=episode_number,
-            tmdb_data={"runtime": ep.get("runtime"), "cast": []} if ep else {},
+            tmdb_data={"runtime": ep.get("runtime"), "cast": []},
         )
         db.add(media)
         await db.flush()
@@ -689,7 +697,7 @@ async def _run_simkl_push(user_id: int, job_id: int) -> None:
             if settings.simkl_push_watched:
                 for mid in watched_ids:
                     media = media_by_id.get(mid)
-                    if not media or not media.tmdb_id:
+                    if not media or not media.tmdb_id or is_unmapped_tvdb_episode(media):
                         continue
                     # Simkl has no unknown-date representation, and watched_at=None
                     # means "stamp as now" on its side — skip rather than fabricate.
@@ -706,7 +714,7 @@ async def _run_simkl_push(user_id: int, job_id: int) -> None:
             if settings.simkl_push_ratings:
                 for mid, rating in ratings_map.items():
                     media = media_by_id.get(mid)
-                    if not media or not media.tmdb_id:
+                    if not media or not media.tmdb_id or is_unmapped_tvdb_episode(media):
                         continue
                     if media.media_type == MediaType.movie:
                         push_tasks.append(simkl_client.set_movie_rating(settings.simkl_client_id, settings.simkl_access_token, media.tmdb_id, rating))
