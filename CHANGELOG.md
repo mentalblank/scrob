@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file. This projec
 
 ### Added
 
+- **Series Progress Page**: A `/progress` page listing every show you have started, with watched/aired episode counts and a progress bar, sortable by recency, completeness, episodes remaining or title.
+- **Compact Watch History**: Toggle the history page between card and compact list views; the choice is remembered per browser.
+- **Change Username**: Usernames can be edited from Profile settings, with uniqueness and format validation.
+- **Stremio Configure Link**: The addon's configuration page is reachable from Integrations settings.
+- **Maintenance & Data Tab**: Maintenance and data-management actions moved out of Security & API Keys into their own settings tab.
 - **Registration Controls**: Admins can allow or block new registrations and set a maximum user count from Global Server Settings, without editing environment variables or restarting. Leaving them unset keeps the existing `ENABLE_REGISTRATIONS` / `REGISTRATION_MAX_ALLOWED_USERS` behaviour.
 - **First-Run Setup Wizard**: Fresh installs land on registration, the first account becomes admin, and admins are walked through API keys before anything else.
 - **Onboarding Walkthrough**: Register offers Plex sign-up, email, or email-plus-link-later, followed by a skippable settings walkthrough (profile, appearance, region, genres, content preferences, optional Plex link).
