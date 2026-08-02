@@ -1012,6 +1012,20 @@ async def get_show(
                 if sn > last_sn:
                     season_ep_counts[sn] = 0
 
+        # A season with no air date and no dated episodes has not been scheduled
+        # yet — listing it just adds an empty, permanently 0% row.
+        def _season_has_aired_episodes(sn: int) -> bool:
+            return any((ep.get("release_date") or "").strip() for ep in seasons.get(sn, []))
+
+        # Seasons with no air date at all contribute no aired episodes, so they
+        # must not pad the progress denominator.
+        for meta in (show.tmdb_data or {}).get("seasons", []):
+            sn = meta.get("season_number")
+            if sn is None or sn not in season_ep_counts:
+                continue
+            if not (meta.get("air_date") or "").strip() and not _season_has_aired_episodes(sn):
+                season_ep_counts[sn] = 0
+
         # A remapped season is usually absent from this show's own metadata.
         remapped_totals: dict[int, int] = {}
         for sn, _ in remapped_eps:
@@ -1048,6 +1062,10 @@ async def get_show(
                 "air_date": s.get("air_date") or tmdb_season_map.get(s["season_number"], {}).get("air_date"),
             }
             for s in base_seasons_meta
+        ]
+        enhanced_seasons_meta = [
+            s for s in enhanced_seasons_meta
+            if (s.get("air_date") or "").strip() or _season_has_aired_episodes(s["season_number"])
         ]
 
         where_to_watch = await get_where_to_watch(
