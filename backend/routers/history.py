@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -562,6 +562,92 @@ def _aired_episode_total(show: Show, include_specials: bool) -> int:
             count = min(count, last_number)
         total += count
     return total
+
+
+async def _duplicate_history_clusters(db: AsyncSession, user_id: int, window_minutes: int) -> list[list[int]]:
+    """Group a user's watch events that look like the same play logged twice.
+
+    Imports from several providers rarely agree on the exact second, so events
+    for one episode within `window_minutes` of each other are one play.
+    """
+    rows = await db.execute(
+        select(WatchEvent.id, WatchEvent.media_id, WatchEvent.watched_at)
+        .where(WatchEvent.user_id == user_id, WatchEvent.watched_at.isnot(None))
+        .order_by(WatchEvent.media_id, WatchEvent.watched_at)
+    )
+    clusters: list[list[int]] = []
+    current: list[int] = []
+    current_media: int | None = None
+    previous_at = None
+    window = timedelta(minutes=window_minutes)
+
+    for event_id, media_id, watched_at in rows.all():
+        if media_id != current_media or previous_at is None or watched_at - previous_at > window:
+            if len(current) > 1:
+                clusters.append(current)
+            current = [event_id]
+            current_media = media_id
+        else:
+            current.append(event_id)
+        previous_at = watched_at
+
+    if len(current) > 1:
+        clusters.append(current)
+    return clusters
+
+
+@router.get("/duplicates")
+async def duplicate_history_report(
+    window_minutes: int = Query(5, ge=1, le=1440),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Dry run: how many watch events look like the same play logged twice."""
+    clusters = await _duplicate_history_clusters(db, current_user.id, window_minutes)
+    removable = sum(len(c) - 1 for c in clusters)
+
+    titles: list[str] = []
+    if clusters:
+        sample_ids = [c[0] for c in clusters[:5]]
+        rows = await db.execute(
+            select(Media.title, Show.title, Media.season_number, Media.episode_number)
+            .join(WatchEvent, WatchEvent.media_id == Media.id)
+            .outerjoin(Show, Show.id == Media.show_id)
+            .where(WatchEvent.id.in_(sample_ids))
+        )
+        for title, show_title, season, episode in rows.all():
+            label = f"{show_title} S{season:02d}E{episode:02d}" if show_title and season is not None else (title or "")
+            titles.append(label)
+
+    return {
+        "window_minutes": window_minutes,
+        "groups": len(clusters),
+        "removable_events": removable,
+        "sample": titles,
+    }
+
+
+@router.post("/duplicates/cleanup")
+async def cleanup_duplicate_history(
+    window_minutes: int = Query(5, ge=1, le=1440),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete the extra events in each duplicate cluster, keeping the earliest."""
+    clusters = await _duplicate_history_clusters(db, current_user.id, window_minutes)
+    doomed = [event_id for cluster in clusters for event_id in cluster[1:]]
+    if not doomed:
+        return {"status": "ok", "removed": 0, "groups": 0}
+
+    for start in range(0, len(doomed), 500):
+        await db.execute(
+            delete(WatchEvent).where(
+                WatchEvent.id.in_(doomed[start:start + 500]),
+                WatchEvent.user_id == current_user.id,
+            )
+        )
+    await db.commit()
+    return {"status": "ok", "removed": len(doomed), "groups": len(clusters)}
 
 
 @router.get("/progress")
