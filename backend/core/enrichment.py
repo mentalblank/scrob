@@ -47,6 +47,7 @@ async def enrich_episode_from_tvdb(media: Media, tvdb_episode_data: dict) -> Non
     if tvdb_episode_data.get("image_url"):
         media.poster_path = tvdb_episode_data["image_url"]
     media.release_date = tvdb_episode_data.get("air_date")
+    media.runtime = tvdb_episode_data.get("runtime") or media.runtime
     media.tmdb_data = {
         "runtime": tvdb_episode_data.get("runtime"),
         "tvdb_episode_id": tvdb_episode_id,
@@ -169,6 +170,7 @@ async def enrich_media(
             media.backdrop_path = tmdb.poster_url(data.get("backdrop_path"), size="w1280")
             media.release_date = data.get("release_date")
             media.tmdb_rating = data.get("vote_average")
+            media.runtime = data.get("runtime") or media.runtime
             media.tmdb_data = {
                 "runtime": data.get("runtime"),
                 "genres": [g["name"] for g in data.get("genres", [])],
@@ -238,6 +240,7 @@ async def enrich_media(
                         if ep.get("image"):
                             media.poster_path = tvdb_client._image_url(ep["image"])
                         media.release_date = ep.get("aired")
+                        media.runtime = ep.get("runtime") or media.runtime
                         media.tmdb_data = {
                             "runtime": ep.get("runtime"),
                             "tvdb_episode_id": tvdb_ep_id,
@@ -258,6 +261,7 @@ async def enrich_media(
                 media.poster_path = tmdb.poster_url(data.get("still_path"), size="w500")
                 media.release_date = data.get("air_date")
                 media.tmdb_rating = data.get("vote_average")
+                media.runtime = data.get("runtime") or media.runtime
                 media.tmdb_data = {
                     "runtime": data.get("runtime"),
                     "cast": [

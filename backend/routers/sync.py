@@ -4,7 +4,7 @@ import re
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy import select, update, delete, func, cast, or_, delete as sa_delete
+from sqlalchemy import select, update, delete, func, cast, or_, and_, delete as sa_delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.dialects.postgresql import insert, JSONB
@@ -5218,13 +5218,19 @@ async def run_heal(user_id: int, api_key: str, job_id: int | None = None):
             await _update_job(status=SyncStatus.running)
             await _raise_if_cancelled(db, job_id)
 
-            # ── Phase 1: Re-enrich items that have show linkage but missing poster ──
+            # ── Phase 1: Re-enrich items missing a poster or a runtime ──
             coll_q = await db.execute(
                 select(Media)
                 .join(Collection, Collection.media_id == Media.id)
                 .where(
                     Collection.user_id == user_id,
-                    Media.poster_path.is_(None),
+                    or_(
+                        Media.poster_path.is_(None),
+                        and_(
+                            Media.runtime.is_(None),
+                            Media.media_type.in_([MediaType.movie, MediaType.episode]),
+                        ),
+                    ),
                 )
             )
             items = coll_q.scalars().all()
