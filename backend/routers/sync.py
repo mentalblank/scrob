@@ -1437,6 +1437,45 @@ async def _fan_out_changes_to_other_connections(
         await db.commit()
 
 
+def _position_beyond_known(
+    local_max_season: dict[int, int],
+    local_max_episode: dict[tuple[int, int], int],
+    show_id: int,
+    season_num: int,
+    episode_num: int,
+) -> bool:
+    """True when a position sits past the show's stored range — the shape of a foreign episode order."""
+    max_season = local_max_season.get(show_id)
+    if max_season is None:
+        return False
+    if season_num > max_season:
+        return True
+    # The next episode of a known season is just a new airing, not a numbering clash.
+    return episode_num > local_max_episode.get((show_id, season_num), 0) + 1
+
+
+async def _build_order_mapping(user_id: int, series_tmdb_id: int) -> bool:
+    """Build a show's episode order mapping in its own session so a failure can't abort a sync."""
+    from core.episode_order import ensure_episode_order_mapping
+    from routers.shows import get_user_tvdb_key
+
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        try:
+            settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+            settings = settings_q.scalar_one_or_none()
+            tmdb_key = await _get_effective_tmdb_key(db, settings)
+            tvdb_key = await get_user_tvdb_key(db, user_id)
+            if not tmdb_key or not tvdb_key:
+                return False
+            await ensure_episode_order_mapping(db, series_tmdb_id, tmdb_key, tvdb_key)
+            await db.commit()
+            return True
+        except Exception:
+            await db.rollback()
+            return False
+
+
 async def sync_items(
     items: list,
     media_type: MediaType,
@@ -1548,6 +1587,16 @@ async def sync_items(
             )
             for m in medias:
                 media_by_tmdb[(m.tmdb_id, m.media_type)] = m
+
+    # Highest season/episode already stored per show, to spot TVDB numbering below.
+    local_max_season: dict[int, int] = {}
+    local_max_episode: dict[tuple[int, int], int] = {}
+    for sid, sn, en in media_by_episode:
+        if sid is None or sn is None or en is None:
+            continue
+        local_max_season[sid] = max(local_max_season.get(sid, 0), sn)
+        local_max_episode[(sid, sn)] = max(local_max_episode.get((sid, sn), 0), en)
+    mapping_attempted: set[int] = set()
 
     # Reverse lookup: media.id → Media object (for healing unenriched items in skipped branch)
     media_by_id: dict[int, Media] = {m.id: m for _, _, m in files_rows}
@@ -1715,6 +1764,21 @@ async def sync_items(
                                 mapping = await get_mapping_by_tvdb_position(
                                     db, show_tmdb_id, season_num, episode_num
                                 )
+                                # A position past what is stored is the shape of TVDB
+                                # numbering, so build the mapping once rather than
+                                # letting the show split across two orders.
+                                if (
+                                    not mapping
+                                    and show_tmdb_id not in mapping_attempted
+                                    and _position_beyond_known(
+                                        local_max_season, local_max_episode, show_id, season_num, episode_num
+                                    )
+                                ):
+                                    mapping_attempted.add(show_tmdb_id)
+                                    if await _build_order_mapping(user_id, show_tmdb_id):
+                                        mapping = await get_mapping_by_tvdb_position(
+                                            db, show_tmdb_id, season_num, episode_num
+                                        )
                                 if mapping:
                                     media = media_by_episode.get((
                                         show_id,

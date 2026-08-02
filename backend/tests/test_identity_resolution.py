@@ -1,7 +1,7 @@
 """Identity resolution: uris, provider ids and duplicate-tolerant lookups."""
 import unittest
 
-from routers.sync import _canonical_duplicate
+from routers.sync import _canonical_duplicate, _position_beyond_known
 from utils.media_uri import MediaURI
 
 
@@ -53,6 +53,31 @@ class CanonicalDuplicateChoice(unittest.TestCase):
         earlier = _Row(id=7, season_number=8, episode_number=1)
         keeper = _canonical_duplicate([later, earlier], [])
         self.assertEqual(keeper.id, earlier.id)
+
+
+class ForeignOrderDetection(unittest.TestCase):
+    """A sync miss only triggers a mapping build when the position looks TVDB-numbered."""
+
+    MAX_SEASON = {7: 2}
+    MAX_EPISODE = {(7, 1): 25, (7, 2): 12}
+
+    def _beyond(self, season: int, episode: int) -> bool:
+        return _position_beyond_known(self.MAX_SEASON, self.MAX_EPISODE, 7, season, episode)
+
+    def test_season_past_the_last_stored_one(self):
+        self.assertTrue(self._beyond(3, 1))
+
+    def test_absolute_numbering_inside_a_known_season(self):
+        self.assertTrue(self._beyond(1, 140))
+
+    def test_next_episode_of_a_season_is_a_new_airing(self):
+        self.assertFalse(self._beyond(2, 13))
+
+    def test_gap_inside_a_stored_season(self):
+        self.assertFalse(self._beyond(1, 9))
+
+    def test_show_with_nothing_stored_is_left_alone(self):
+        self.assertFalse(_position_beyond_known({}, {}, 99, 4, 1))
 
 
 if __name__ == "__main__":
