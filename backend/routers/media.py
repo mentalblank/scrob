@@ -1996,13 +1996,15 @@ async def on_air_today(
 @router.get("/airing-today/collected")
 async def airing_today_collected(
     timezone: str = Query(default="UTC"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=40, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_api_key),
 ):
     """Return shows airing today on TMDB that the user has in their collection."""
     tmdb_key = await get_user_tmdb_key(db, current_user.id)
     if not check_tmdb_key(tmdb_key):
-        return {"results": []}
+        return {"results": [], "page": page, "total_pages": 1, "total_results": 0}
 
     from datetime import datetime
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -2025,14 +2027,14 @@ async def airing_today_collected(
     collected_tmdb_ids: set[int] = {row[0] for row in collected_q.all()}
 
     if not collected_tmdb_ids:
-        return {"results": []}
+        return {"results": [], "page": page, "total_pages": 1, "total_results": 0}
 
     # Fetch page 1 to discover total_pages, then fetch remaining pages concurrently
     try:
         first = await tmdb.get_on_air_today(page=1, api_key=tmdb_key)
     except Exception as e:
         print(f"Error fetching airing-today from TMDB: {e}")
-        return {"results": []}
+        return {"results": [], "page": page, "total_pages": 1, "total_results": 0}
     total_pages = min(first.get("total_pages", 1), 20)
     all_shows = list(first.get("results", []))
 
@@ -2049,7 +2051,7 @@ async def airing_today_collected(
     collected_shows = [s for s in all_shows if s.get("id") in collected_tmdb_ids]
 
     if not collected_shows:
-        return {"results": []}
+        return {"results": [], "page": page, "total_pages": 1, "total_results": 0}
 
     semaphore = asyncio.Semaphore(10)
 
@@ -2097,8 +2099,21 @@ async def airing_today_collected(
         }
 
     results = list(await asyncio.gather(*[fetch_episode(s) for s in collected_shows]))
+
+    # The TMDB sweep above returns the whole set at once, so paginate here —
+    # without it every infinite-scroll page repeats the same shows forever.
+    total_results = len(results)
+    total_pages = max(1, (total_results + page_size - 1) // page_size)
+    offset = (page - 1) * page_size
+    results = results[offset:offset + page_size]
+
     await enrich_with_state(db, current_user.id, results, hide_blocked=True)
-    return {"results": results}
+    return {
+        "results": results,
+        "page": page,
+        "total_pages": total_pages,
+        "total_results": total_results,
+    }
 
 
 @router.get("/recently-added")

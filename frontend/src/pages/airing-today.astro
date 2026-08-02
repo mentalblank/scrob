@@ -79,8 +79,9 @@ try {
 
   <InfiniteScroll
     type={filter === "all" ? "airing_today" : "airing_today_collected"}
-    currentPage={data.page}
-    totalPages={data.total_pages}
+    currentPage={data.page ?? 1}
+    totalPages={data.total_pages ?? 1}
+    params={{ filter }}
   />
 </Base>
 
