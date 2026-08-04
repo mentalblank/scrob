@@ -628,6 +628,17 @@ async def _push_nuvio_library_delta(
 
 
 
+def _watched_epoch_ms(value: datetime | int | float | None) -> int | None:
+    """Watch records carry dates as epoch milliseconds; stored dates are naive UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return int(value.timestamp() * 1000)
+    return int(value)
+
+
 def _nuvio_watched_item(
     media: Media,
     watched_at: datetime | None,
@@ -635,16 +646,11 @@ def _nuvio_watched_item(
     *,
     include_unknown_date: bool = False,
 ) -> dict | None:
-    if watched_at is None:
-        if not include_unknown_date:
-            # Nuvio cannot represent an unknown date. Stremio can still merge
-            # the watched state without replacing its last-watched timestamp.
-            return None
-        watched_epoch_ms = None
-    else:
-        if watched_at.tzinfo is None:
-            watched_at = watched_at.replace(tzinfo=timezone.utc)
-        watched_epoch_ms = int(watched_at.timestamp() * 1000)
+    if watched_at is None and not include_unknown_date:
+        # Nuvio cannot represent an unknown date. Stremio can still merge
+        # the watched state without replacing its last-watched timestamp.
+        return None
+    watched_epoch_ms = _watched_epoch_ms(watched_at)
 
     if media.media_type == MediaType.movie and (content_id := _nuvio_imdb_id(media)):
         return {
@@ -4471,7 +4477,7 @@ async def _push_stremio_connection(
             watched_by_key[watch_key(record)] = {
                 **record,
                 "watched": watched,
-                "watched_at": watched_at_by_media.get(media_id),
+                "watched_at": _watched_epoch_ms(watched_at_by_media.get(media_id)),
             }
         watched_records = list(watched_by_key.values())
     progress_records = (
@@ -4559,10 +4565,10 @@ async def _push_stremio_connection(
                 )
             candidate = dict(base_item)
             state = {**_stremio_default_state(), **(candidate.get("state") or {})}
-            watched_at_ms = record.get("watched_at")
+            watched_at_ms = _watched_epoch_ms(record.get("watched_at"))
             watched_at = (
                 datetime.fromtimestamp(
-                    int(watched_at_ms) / 1000,
+                    watched_at_ms / 1000,
                     tz=timezone.utc,
                 ).isoformat().replace("+00:00", "Z")
                 if watched_at_ms is not None
