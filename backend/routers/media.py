@@ -2248,14 +2248,37 @@ async def get_person_details(
                                     "popularity": 10.0 if c.get("isFeatured") else 1.0,
                                 })
 
+                        bio = bio or p_data.get("biography")
+                        people_type = p_data.get("peopleType")
+                        place = p_data.get("birthPlace")
+
+                        # TVDB people records are often bare, so fill the profile
+                        # text from the TMDB id it already stores.
+                        if not (bio and people_type and place) and check_tmdb_key(tmdb_key):
+                            tmdb_person_id = next(
+                                (r.get("id") for r in (p_data.get("remoteIds") or [])
+                                 if r.get("sourceName") == "TheMovieDB.com"),
+                                None,
+                            )
+                            if tmdb_person_id:
+                                try:
+                                    extra = await tmdb.get_person(int(tmdb_person_id), api_key=tmdb_key)
+                                except Exception:
+                                    extra = {}
+                                bio = bio or extra.get("biography")
+                                people_type = people_type or extra.get("known_for_department")
+                                place = place or extra.get("place_of_birth")
+                                if not img and extra.get("profile_path"):
+                                    img = tmdb.poster_url(extra["profile_path"])
+
                         data = {
                             "id": numeric_id,
                             "name": p_data.get("name"),
-                            "biography": bio or p_data.get("biography"),
+                            "biography": bio,
                             "profile_path": img,
                             "birthday": p_data.get("birth"),
-                            "place_of_birth": p_data.get("birthPlace"),
-                            "known_for_department": p_data.get("peopleType"),
+                            "place_of_birth": place,
+                            "known_for_department": people_type,
                             "combined_credits": {"cast": cast_credits, "crew": []},
                         }
                 except Exception:
