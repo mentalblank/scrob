@@ -257,7 +257,7 @@ const showProgress = progressPct > 0 && !watched;
             {showProgress && (
               <span class="text-xs font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
             )}
-            <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
+            <span class="media-card-type text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
               {isPerson ? 'Person' : isCollection ? 'Collection' : isSeries ? 'Show' : isSeason ? 'Season' : (item.type === 'episode' ? 'Episode' : item.type)}
             </span>
           </div>
@@ -278,7 +278,7 @@ const showProgress = progressPct > 0 && !watched;
             {showProgress && (
               <span class="text-xs font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
             )}
-            <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
+            <span class="media-card-type text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
               {item.type === 'episode' ? 'Episode' : item.type}
             </span>
           </div>

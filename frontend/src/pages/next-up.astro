@@ -24,35 +24,35 @@ const hasVisible = items.some((i) => !isHidden(i));
 ---
 
 <Base title="Next Up">
-  <div class="mb-8 flex items-center justify-between gap-4">
+  <div class="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div>
       <h1 class="page-title mb-2">Next Up</h1>
       <p class="text-zinc-500">Continue where you left off</p>
     </div>
-    <div class="flex items-center gap-2 shrink-0">
-      <div class="flex gap-1 p-1 bg-zinc-950/60 border border-zinc-800/50 rounded-xl" id="next-up-view-toggle">
+    <div class="flex items-center gap-2 w-full sm:w-auto sm:shrink-0">
+      <div class="flex gap-1 p-1 bg-zinc-950/60 border border-zinc-800/50 rounded-xl shrink-0" id="next-up-view-toggle">
         <button
           type="button"
           data-view-mode="comfortable"
           title="Card view"
-          class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer flex items-center gap-1.5"
+          class="px-3 py-2.5 sm:py-1.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5"
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
-          Cards
+          <span class="hidden sm:inline">Cards</span>
         </button>
         <button
           type="button"
           data-view-mode="compact"
           title="Compact list view"
-          class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer flex items-center gap-1.5"
+          class="px-3 py-2.5 sm:py-1.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5"
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-          Compact
+          <span class="hidden sm:inline">Compact</span>
         </button>
       </div>
     <button
       id="toggle-hidden-btn"
-      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-zinc-400 bg-zinc-900/40 hover:bg-zinc-900/60 border border-zinc-800/50 rounded-xl hover:border-zinc-600 hover:text-zinc-200 transition-all active:scale-95 cursor-pointer shrink-0"
+      class="flex items-center justify-center gap-2 flex-1 sm:flex-none px-3 sm:px-4 py-3 sm:py-2 text-xs sm:text-sm whitespace-nowrap font-bold text-zinc-400 bg-zinc-900/40 hover:bg-zinc-900/60 border border-zinc-800/50 rounded-xl hover:border-zinc-600 hover:text-zinc-200 transition-all active:scale-95 cursor-pointer sm:shrink-0"
     >
       <svg id="toggle-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>
@@ -84,15 +84,21 @@ const hasVisible = items.some((i) => !isHidden(i));
 </Base>
 
 <style is:global>
+  /* minmax(0, ...) or the track grows to the row's min-content width and the
+     card runs off the side of the page. */
   .next-up-compact {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.5rem;
   }
   @media (min-width: 1024px) {
     .next-up-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
+  .next-up-compact > * {
+    min-width: 0;
+  }
   .next-up-compact .media-card {
     flex-direction: row;
+    min-width: 0;
     border-radius: 1rem;
   }
   .next-up-compact .media-card-poster {
@@ -128,6 +134,13 @@ const hasVisible = items.some((i) => !isHidden(i));
   .next-up-compact .card-action-btn span {
     display: none;
   }
+  /* Phone rows: keep 44px touch targets and drop what the poster crowds out. */
+  @media (max-width: 639px) {
+    .next-up-compact .media-card-poster { width: 3.25rem; }
+    .next-up-compact .media-card-info { padding: 0.5rem 0.625rem; }
+    .next-up-compact .card-action-bar { grid-template-columns: repeat(3, 2.75rem); }
+    .next-up-compact .media-card-type { display: none; }
+  }
 </style>
 
 <script>
@@ -143,7 +156,7 @@ const hasVisible = items.some((i) => !isHidden(i));
       grid.classList.toggle('next-up-compact', mode === 'compact');
       toggle.querySelectorAll<HTMLButtonElement>('[data-view-mode]').forEach(btn => {
         const isActive = btn.dataset.viewMode === mode;
-        btn.className = `px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer flex items-center gap-1.5 ${isActive ? ACTIVE : IDLE}`;
+        btn.className = `px-3 py-2.5 sm:py-1.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer flex items-center justify-center gap-1.5 ${isActive ? ACTIVE : IDLE}`;
       });
     };
 
