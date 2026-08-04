@@ -18,13 +18,15 @@ const use24h = Astro.cookies.get("time_format_24h")?.value === "true";
 const startDate = Astro.url.searchParams.get("start_date") || undefined;
 const endDate = Astro.url.searchParams.get("end_date") || undefined;
 const groupBy = Astro.url.searchParams.get("group_by") || "date";
+const undated = Astro.url.searchParams.get("undated") === "1";
 
 const history = await api.history.list({
   page,
   page_size: 40,
   type,
   start_date: startDate,
-  end_date: endDate
+  end_date: endDate,
+  undated: undated || undefined,
 }, token);
 
 // Grouping logic
@@ -66,6 +68,7 @@ if (type) urlParams.set("type", type);
 if (startDate) urlParams.set("start_date", startDate);
 if (endDate) urlParams.set("end_date", endDate);
 if (groupBy && groupBy !== "date") urlParams.set("group_by", groupBy);
+if (undated) urlParams.set("undated", "1");
 
 const baseUrl = `/history${urlParams.toString() ? `?${urlParams.toString()}` : ""}`;
 ---
@@ -118,6 +121,19 @@ const baseUrl = `/history${urlParams.toString() ? `?${urlParams.toString()}` : "
           class={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${type === 'episode' ? 'bg-zinc-100 text-zinc-900 shadow-lg shadow-zinc-100/5' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800/50'}`}
         >
           Shows
+        </a>
+        <a
+          href={`/history?${(() => {
+            const p = new URLSearchParams(urlParams);
+            if (undated) p.delete("undated");
+            else p.set("undated", "1");
+            p.delete("page");
+            return p.toString();
+          })()}`}
+          title="Plays logged without a date"
+          class={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 ${undated ? 'bg-zinc-100 text-zinc-900 shadow-lg shadow-zinc-100/5' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800/50'}`}
+        >
+          Undated
         </a>
       </div>
 

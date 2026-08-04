@@ -1287,7 +1287,7 @@ export const api = {
   },
 
   history: {
-    list: (params?: { page?: number; page_size?: number; type?: string; start_date?: string; end_date?: string }, token?: string) =>
+    list: (params?: { page?: number; page_size?: number; type?: string; start_date?: string; end_date?: string; undated?: boolean }, token?: string) =>
       get<{ page: number; page_size: number; total_pages: number; total_results: number; results: WatchEvent[] }>("/history", params, token),
 
     markAsWatched: (body: { uri_id?: string; tmdb_id?: number; media_type: string; watched_at?: string | null; completed?: boolean }, token: string) =>

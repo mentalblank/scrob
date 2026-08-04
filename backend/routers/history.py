@@ -336,22 +336,39 @@ async def get_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     type: str | None = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    undated: bool = Query(False),  # plays logged without a date, which sort past the last page
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_api_key),
 ):
     offset = (page - 1) * page_size
 
-    base_query = (
+    filters = [WatchEvent.user_id == current_user.id, WatchEvent.completed == True]
+    if type and type in ("movie", "episode"):
+        filters.append(Media.media_type == type)
+    if undated:
+        filters.append(WatchEvent.watched_at.is_(None))
+    else:
+        for raw, op in ((start_date, ">="), (end_date, "<=")):
+            if not raw:
+                continue
+            try:
+                parsed = datetime.fromisoformat(raw)
+            except ValueError:
+                continue
+            if len(raw) <= 10 and op == "<=":
+                parsed = parsed + timedelta(days=1)
+            filters.append(
+                WatchEvent.watched_at >= parsed if op == ">=" else WatchEvent.watched_at < parsed
+            )
+
+    total_result = await db.execute(
         select(func.count())
         .select_from(WatchEvent)
         .join(Media, Media.id == WatchEvent.media_id)
-        .where(WatchEvent.user_id == current_user.id)
-        .where(WatchEvent.completed == True)
+        .where(*filters)
     )
-    if type and type in ("movie", "episode"):
-        base_query = base_query.where(Media.media_type == type)
-
-    total_result = await db.execute(base_query)
     total_count = total_result.scalar_one()
     total_pages = max(1, (total_count + page_size - 1) // page_size)
 
@@ -359,14 +376,11 @@ async def get_history(
         select(WatchEvent, Media)
         .join(Media, Media.id == WatchEvent.media_id)
         .options(selectinload(WatchEvent.media).selectinload(Media.show))
-        .where(WatchEvent.user_id == current_user.id)
-        .where(WatchEvent.completed == True)
+        .where(*filters)
         .order_by(WatchEvent.watched_at.desc().nulls_last(), WatchEvent.id.desc())
+        .offset(offset)
+        .limit(page_size)
     )
-    if type and type in ("movie", "episode"):
-        query = query.where(Media.media_type == type)
-
-    query = query.offset(offset).limit(page_size)
 
     result = await db.execute(query)
     rows = result.all()

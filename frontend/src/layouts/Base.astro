@@ -1437,13 +1437,18 @@ const bottomNavItem = (active: boolean) =>
           });
 
           eventsEl.innerHTML = events.map((ev: any) => {
-            const dateStr = ev.watched_at.includes('Z') || ev.watched_at.includes('+') ? ev.watched_at : ev.watched_at + 'Z';
-            const date = new Date(dateStr);
+            // A play can be logged with no date at all — formatting null threw and
+            // took the whole list, and its delete button, with it.
+            let label = 'No date recorded';
+            if (ev.watched_at) {
+              const dateStr = ev.watched_at.includes('Z') || ev.watched_at.includes('+') ? ev.watched_at : ev.watched_at + 'Z';
+              label = formatter.format(new Date(dateStr));
+            }
             const statusLabel = ev.completed ? 'Completed' : `In progress (${Math.round((ev.progress_percent || 0) * 100)}%)`;
 
             return `<div class="flex items-center justify-between p-3.5 bg-zinc-900/60 border border-zinc-800/80 rounded-2xl hover:border-zinc-700 transition-colors group">
               <div class="flex flex-col gap-0.5">
-                <span class="text-sm font-bold text-zinc-200">${esc(formatter.format(date))}</span>
+                <span class="text-sm font-bold ${ev.watched_at ? 'text-zinc-200' : 'text-zinc-500 italic'}">${esc(label)}</span>
                 <span class="text-[10px] font-bold uppercase tracking-wider ${ev.completed ? 'text-green-500' : 'text-amber-500'}">${esc(statusLabel)}</span>
               </div>
               <button class="p-2.5 rounded-xl bg-red-500/5 hover:bg-red-500/20 text-red-500 border border-red-500/10 hover:border-red-500/30 transition-all duration-200 cursor-pointer active:scale-90" 
