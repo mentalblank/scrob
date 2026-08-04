@@ -151,12 +151,12 @@ const bottomNavItem = (active: boolean) =>
       <!-- Default bar -->
       <div id="nav-default" class="flex items-center justify-between gap-3 safe-area-top">
         <!-- Left: logo + desktop links -->
-        <div class="flex items-center gap-6 min-w-0">
+        <div class="flex items-center gap-4 lg:gap-6 min-w-0 flex-1">
           <a href="/" class="flex items-center gap-2 text-zinc-100 font-bold text-lg tracking-tight shrink-0 group active:opacity-70 transition-opacity">
             <img src={logo.src} alt="Scrob Logo" width="32" height="32" loading="eager" class="w-7 h-7 md:w-8 md:h-8 object-contain group-hover:scale-105 transition-transform" />
             <span>Scrob</span>
           </a>
-          <div class="hidden md:flex items-center gap-6 text-sm">
+          <div class="hidden md:flex items-center gap-4 lg:gap-6 text-sm shrink-0">
             <a href="/movies" class={navLink(activeMovies)}>Movies</a>
             <a href="/shows" class={navLink(activeShows)}>Shows</a>
             <a href="/discover" class={navLink(activeDiscover)}>Discover</a>
@@ -165,14 +165,14 @@ const bottomNavItem = (active: boolean) =>
             <a href="/progress" class={navLink(activeProgress)}>Progress</a>
           </div>
           <!-- Desktop search -->
-          <div class="relative hidden md:block" id="desktop-search-wrapper">
+          <div class="relative hidden md:block min-w-0 flex-1 lg:flex-none" id="desktop-search-wrapper">
             <form action="/search" method="GET" autocomplete="off">
               <input
                 id="desktop-search-input"
                 type="text"
                 name="q"
                 placeholder="Search movies & shows..."
-                class="bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 w-64 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 focus:border-zinc-700 transition-all placeholder:text-zinc-400"
+                class="bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 w-full lg:w-64 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 focus:border-zinc-700 transition-all placeholder:text-zinc-400"
                 autocomplete="off"
               />
               <kbd id="desktop-search-kbd" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400 font-sans pointer-events-none border border-zinc-800 rounded px-1.5 py-0.5 bg-zinc-950">/</kbd>
