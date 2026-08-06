@@ -193,6 +193,38 @@ async def admin_heal_metadata(
     return {"status": "started", "message": "Server-wide metadata heal is running in the background"}
 
 
+@router.post("/maintenance/refresh-metadata")
+async def admin_refresh_metadata(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Re-fetch every show server-wide: metadata, both catalogues' artwork, and
+    the numbering episodes are filed under.
+
+    Shows and media rows are shared by every account, and merging an episode
+    stored twice moves plays that belong to other users, so this is an
+    admin-only action.
+    """
+    from routers.shows import get_user_tvdb_key
+    from routers.sync import run_refresh_metadata
+
+    gs = await _get_or_create_global_settings(db)
+    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_q.scalar_one_or_none()
+    tmdb_key = gs.tmdb_api_key or (settings.tmdb_api_key if settings else None)
+    if not tmdb_key:
+        raise HTTPException(status_code=400, detail="A TMDB API key is required to refresh metadata")
+
+    tvdb_key = await get_user_tvdb_key(db, current_user.id)
+    job = SyncJob(user_id=current_user.id, source=CollectionSource.tmdb, job_type="refresh", status=SyncStatus.pending)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    background_tasks.add_task(run_refresh_metadata, current_user.id, tmdb_key, tvdb_key, job.id)
+    return {"status": "started", "message": "Server-wide metadata refresh is running in the background"}
+
+
 @router.post("/maintenance/backfill-content-ratings")
 async def admin_backfill_content_ratings(
     background_tasks: BackgroundTasks,
@@ -334,7 +366,7 @@ async def restore_database(
     _: User = Depends(require_admin),
 ):
     """Restore database from a pg_dump custom-format backup file."""
-    fname = file.filename or ""
+    fname = (file.filename or "").lower()
     if not (fname.endswith(".pgdump") or fname.endswith(".bak")):
         raise HTTPException(status_code=400, detail="Only .pgdump backup files are accepted.")
 
@@ -361,6 +393,10 @@ async def clear_database(
     Resets all media, collections, history, lists, and comments globally.
     User settings and admin settings are preserved.
     """
+    # Anything keyed on a media or show row's primary key has to go with it.
+    # A left-behind alias keeps pointing at a deleted id, and its uniqueness
+    # constraint means the next import can't replace it — uri lookups then
+    # resolve to rows that no longer exist.
     tables_to_truncate = [
         "shows",
         "media",
@@ -375,7 +411,13 @@ async def clear_database(
         "playback_progress",
         "follows",
         "blocklist_items",
-        "comments"
+        "comments",
+        "media_aliases",
+        "media_translations",
+        "show_translations",
+        "episode_movie_conversions",
+        "show_season_overrides",
+        "show_episode_overrides",
     ]
     
     query = text(f"TRUNCATE {', '.join(tables_to_truncate)} CASCADE")

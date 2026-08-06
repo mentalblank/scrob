@@ -476,6 +476,28 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
         </div>
         <div class="p-6 flex flex-col sm:flex-row sm:items-center gap-4 border-t border-zinc-800">
           <div class="flex-1">
+            <h3 class="font-semibold text-zinc-100 mb-1">Refresh all metadata</h3>
+            <p class="text-sm text-zinc-400">Re-read every show from TMDB, and from TVDB when a key is set, storing both catalogues' artwork. Episodes a media server numbered its own way are re-filed onto TMDB's numbering, and an episode stored twice under two numberings is merged — which moves plays across every account, so it runs server-wide.</p>
+          </div>
+          <button id="admin-refresh-btn"
+            class="shrink-0 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+            Refresh
+          </button>
+        </div>
+        <div id="admin-refresh-progress" class="hidden border-t border-zinc-800 px-6 py-3">
+          <div class="flex justify-between items-center mb-1.5">
+            <span id="admin-refresh-job-label" class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Working…</span>
+            <span id="admin-refresh-job-pct" class="text-xs font-bold text-zinc-400"></span>
+          </div>
+          <div class="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+            <div id="admin-refresh-job-bar" class="h-1.5 rounded-full transition-all duration-500 bg-blue-600 animate-pulse" style="width: 100%"></div>
+          </div>
+          <div class="flex justify-between text-xs text-zinc-500 mt-1">
+            <span id="admin-refresh-job-items"></span>
+          </div>
+        </div>
+        <div class="p-6 flex flex-col sm:flex-row sm:items-center gap-4 border-t border-zinc-800">
+          <div class="flex-1">
             <h3 class="font-semibold text-zinc-100 mb-1">Backfill content ratings</h3>
             <p class="text-sm text-zinc-400">Fetch the age certification (TV-MA, R, …) for every show and movie that doesn't have one stored. Content-rating blocks on the Blocklist page only apply to titles with a stored rating.</p>
           </div>
@@ -1267,6 +1289,99 @@ const adminCount = users.filter((u: AdminUser) => u.is_admin).length;
       const jobs: any[] = await res.json();
       const job = jobs.find((j: any) => j.source === 'tmdb' && j.job_type === 'heal');
       if (job && (job.status === 'pending' || job.status === 'running')) startAdminHealPoller();
+    } catch { /* non-fatal */ }
+  })();
+
+  // ── Refresh all metadata ─────────────────────────────────────────────────
+  let adminRefreshPoller: ReturnType<typeof setTimeout> | null = null;
+
+  function renderAdminRefreshProgress(job: any) {
+    const strip = document.getElementById('admin-refresh-progress');
+    const bar   = document.getElementById('admin-refresh-job-bar');
+    const pctEl = document.getElementById('admin-refresh-job-pct');
+    const label = document.getElementById('admin-refresh-job-label');
+    const items = document.getElementById('admin-refresh-job-items');
+    if (!strip) return;
+
+    if (!job) { strip.classList.add('hidden'); return; }
+    strip.classList.remove('hidden');
+
+    const isFailed = job.status === 'failed' || job.status === 'cancelled';
+    const isCompleted = job.status === 'completed';
+
+    if (isFailed) {
+      if (bar) { bar.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500'; bar.style.width = '100%'; }
+      if (label) label.textContent = 'Refresh failed';
+      if (pctEl) pctEl.textContent = '';
+      if (items) items.textContent = job.error_message || 'Unknown error';
+      return;
+    }
+
+    const pct = job.total_items > 0 ? Math.min(100, Math.round((job.processed_items / job.total_items) * 100)) : 0;
+    if (bar) {
+      bar.className = `h-1.5 rounded-full transition-all duration-500 bg-blue-600${pct === 0 && !isCompleted ? ' animate-pulse' : ''}`;
+      bar.style.width = isCompleted ? '100%' : `${Math.max(pct, 2)}%`;
+    }
+    if (label) label.textContent = isCompleted ? 'Refresh complete' : 'Refreshing shows…';
+    if (pctEl) pctEl.textContent = isCompleted ? '100%' : pct > 0 ? `${pct}%` : '';
+    if (items) {
+      const refreshed = job.stats?.episodes_refreshed;
+      const moved = job.stats?.episodes_renumbered;
+      const merged = job.stats?.duplicates_merged;
+      items.textContent = isCompleted && typeof refreshed === 'number'
+        ? `${refreshed} episode${refreshed === 1 ? '' : 's'} refreshed${moved ? `, ${moved} re-filed` : ''}${merged ? `, ${merged} merged` : ''}`
+        : job.total_items > 0 ? `${job.processed_items} / ${job.total_items} shows` : 'Loading…';
+    }
+  }
+
+  async function pollAdminRefreshJob() {
+    try {
+      const res = await fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) return;
+      const jobs: any[] = await res.json();
+      const job = jobs.find((j: any) => j.source === 'tmdb' && j.job_type === 'refresh');
+      const isActive = job && (job.status === 'pending' || job.status === 'running');
+      const isRecentDone = job && ['completed', 'failed', 'cancelled'].includes(job.status)
+        && new Date(job.updated_at).getTime() > Date.now() - 8000;
+      renderAdminRefreshProgress((isActive || isRecentDone) ? job : null);
+      adminRefreshPoller = isActive ? setTimeout(pollAdminRefreshJob, 2000) : null;
+    } catch {
+      adminRefreshPoller = null;
+    }
+  }
+
+  const adminRefreshBtn = document.getElementById('admin-refresh-btn') as HTMLButtonElement | null;
+  adminRefreshBtn?.addEventListener('click', async () => {
+    adminRefreshBtn.disabled = true;
+    const original = adminRefreshBtn.textContent;
+    adminRefreshBtn.textContent = 'Starting…';
+    try {
+      const res = await fetch('/api/proxy/admin/maintenance/refresh-metadata', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Could not start refresh');
+      }
+      if (adminRefreshPoller != null) clearTimeout(adminRefreshPoller);
+      pollAdminRefreshJob();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      adminRefreshBtn.disabled = false;
+      adminRefreshBtn.textContent = original;
+    }
+  });
+
+  // Resume an active refresh on page load
+  (async () => {
+    try {
+      const res = await fetch('/api/proxy/sync/status', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) return;
+      const jobs: any[] = await res.json();
+      const job = jobs.find((j: any) => j.source === 'tmdb' && j.job_type === 'refresh');
+      if (job && (job.status === 'pending' || job.status === 'running')) pollAdminRefreshJob();
     } catch { /* non-fatal */ }
   })();
 

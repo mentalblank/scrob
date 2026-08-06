@@ -150,6 +150,20 @@ async def get_season(season_id: int, api_key: str) -> dict:
     return data.get("data") or {}
 
 
+async def get_episode(episode_id: int, api_key: str) -> dict:
+    """Fetch extended episode info, including its series id and remote ids."""
+    data = await _get(f"/episodes/{episode_id}/extended", api_key)
+    return data.get("data") or {}
+
+
+def remote_id(raw: dict, source_name: str) -> str | None:
+    """Pull one provider's id out of a TVDB record's remoteIds list."""
+    for entry in raw.get("remoteIds") or []:
+        if isinstance(entry, dict) and entry.get("sourceName") == source_name:
+            return str(entry.get("id")) if entry.get("id") else None
+    return None
+
+
 def format_season(raw: dict, language: str | None = None) -> dict:
     """Normalise extended TVDB season metadata."""
     translations = raw.get("translations") or {}

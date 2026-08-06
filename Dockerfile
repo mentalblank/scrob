@@ -19,6 +19,7 @@ ENV TZ=UTC
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl \
     gosu \
+    postgresql-client-17 \
     supervisor \
     tzdata \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -45,7 +46,7 @@ COPY --from=frontend-builder /app/frontend/package.json ./
 
 # ── Entrypoint & supervisor config ────────────────────────────────────────────
 COPY entrypoint.sh /entrypoint.sh
-COPY supervisord.conf /etc/supervisor/conf.d/scrob.conf
+COPY supervisord.conf /etc/supervisor/supervisord.conf
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 7330

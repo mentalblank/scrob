@@ -1,64 +1,79 @@
-# app/models/__init__.py
-from .base import Base, UserRole, MediaType, CollectionSource
-from .users import User, UserSettings, TotpBackupCode
-from .connections import MediaServerConnection
-from .scrobble_connection import ScrobbleConnection
-from .profile import UserProfileData
-from .comments import Comment
-from .email_activation import EmailActivation
-from .password_reset import PasswordResetToken
-from .show import Show
-from .media import Media
+from .base import Base, UserRole, MediaType, CollectionSource, PrivacyLevel
+from .blocklist import BlocklistItem
 from .collection import Collection, CollectionFile
+from .comments import Comment
+from .connections import MediaServerConnection
+from .email_activation import EmailActivation
+from .episode_movie_conversion import EpisodeMovieConversion
+from .episode_order import UserShowEpisodeOrder, EpisodeOrderMapping
 from .events import WatchEvent
-from .ratings import Rating
-from .lists import List, ListItem
-from .sync import SyncJob, SyncStatus
-from .library_selections import JellyfinLibrarySelection, EmbyLibrarySelection, PlexLibrarySelection
-from .playback_session import PlaybackSession
-from .playback_progress import PlaybackProgress
 from .follows import Follow
 from .global_settings import GlobalSettings
-from .blocklist import BlocklistItem
-from .episode_movie_conversion import EpisodeMovieConversion
-from .media_alias import MediaAlias
-from .season_override import ShowSeasonOverride, ShowEpisodeOverride
-from .media_request import MediaRequest
 from .image_cache import ImageCache
+from .library_selections import (
+    JellyfinLibrarySelection,
+    EmbyLibrarySelection,
+    PlexLibrarySelection,
+)
+from .lists import List, ListItem
+from .media import Media
+from .media_alias import MediaAlias
+from .media_request import MediaRequest
 from .media_translation import MediaTranslation
+from .password_reset import PasswordResetToken
+from .playback_progress import PlaybackProgress
+from .playback_session import PlaybackSession
+from .profile import UserProfileData
+from .provider_cache import ProviderCache
+from .ratings import Rating
+from .scrobble_connection import ScrobbleConnection
+from .season_override import ShowSeasonOverride, ShowEpisodeOverride
+from .show import Show
 from .show_translation import ShowTranslation
-from .episode_order import EpisodeOrderMapping, UserShowEpisodeOrder
+from .sync import SyncJob
+from .users import User, UserSettings, TotpBackupCode
 
 __all__ = [
     "Base",
-    "UserRole", "MediaType", "CollectionSource",
-    "User", "UserSettings", "TotpBackupCode",
-    "MediaServerConnection",
-    "ScrobbleConnection",
-    "UserProfileData",
+    "UserRole",
+    "MediaType",
+    "CollectionSource",
+    "PrivacyLevel",
+    "BlocklistItem",
+    "Collection",
+    "CollectionFile",
     "Comment",
+    "MediaServerConnection",
     "EmailActivation",
-    "PasswordResetToken",
-    "Show",
-    "Media",
-    "Collection", "CollectionFile",
+    "EpisodeMovieConversion",
+    "UserShowEpisodeOrder",
+    "EpisodeOrderMapping",
     "WatchEvent",
-    "Rating",
-    "List", "ListItem",
-    "SyncJob", "SyncStatus",
-    "JellyfinLibrarySelection", "EmbyLibrarySelection", "PlexLibrarySelection",
-    "PlaybackSession",
-    "PlaybackProgress",
     "Follow",
     "GlobalSettings",
-    "BlocklistItem",
-    "EpisodeMovieConversion",
+    "ImageCache",
+    "JellyfinLibrarySelection",
+    "EmbyLibrarySelection",
+    "PlexLibrarySelection",
+    "List",
+    "ListItem",
+    "Media",
     "MediaAlias",
+    "MediaRequest",
+    "MediaTranslation",
+    "PasswordResetToken",
+    "PlaybackProgress",
+    "PlaybackSession",
+    "UserProfileData",
+    "ProviderCache",
+    "Rating",
+    "ScrobbleConnection",
     "ShowSeasonOverride",
     "ShowEpisodeOverride",
-    "MediaRequest",
-    "ImageCache",
-    "MediaTranslation",
+    "Show",
     "ShowTranslation",
-    "EpisodeOrderMapping", "UserShowEpisodeOrder",
+    "SyncJob",
+    "User",
+    "UserSettings",
+    "TotpBackupCode",
 ]

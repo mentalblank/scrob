@@ -173,7 +173,7 @@ class ListsTests(unittest.IsolatedAsyncioTestCase):
 class CommentsTests(unittest.IsolatedAsyncioTestCase):
     async def test_movie_comment(self) -> None:
         comment = SimpleNamespace(id=1, created_at=datetime(2026, 1, 1), content="Great movie",
-                                   is_spoiler=False, media_type="movie", tmdb_id=100,
+                                   is_spoiler=False, media_type="movie", uri_id="tmdb:m:100",
                                    season_number=None, episode_number=None)
         db = _FakeSession([[comment], [_movie_media()]])
 
@@ -181,6 +181,28 @@ class CommentsTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(out["movies"]), 1)
         self.assertEqual(out["movies"][0]["comment"], "Great movie")
+
+    async def test_show_season_and_episode_comments_are_bucketed_by_their_numbers(self) -> None:
+        """The app writes media_type "series" for a show, a season and an episode
+        alike — what a comment is about is its season/episode numbers."""
+        show_comment = SimpleNamespace(id=1, created_at=datetime(2026, 1, 1), content="show",
+                                       is_spoiler=False, media_type="series", uri_id="tmdb:s:200",
+                                       season_number=None, episode_number=None)
+        season_comment = SimpleNamespace(id=2, created_at=datetime(2026, 1, 1), content="season",
+                                         is_spoiler=False, media_type="series", uri_id="tmdb:s:200",
+                                         season_number=1, episode_number=None)
+        episode_comment = SimpleNamespace(id=3, created_at=datetime(2026, 1, 1), content="episode",
+                                          is_spoiler=False, media_type="series", uri_id="tmdb:s:200",
+                                          season_number=1, episode_number=4)
+        db = _FakeSession([[show_comment, season_comment, episode_comment], [_show()]])
+
+        out = await data_export.build_comments(db, user_id=1)
+
+        self.assertEqual([c["comment"] for c in out["shows"]], ["show"])
+        self.assertEqual([c["comment"] for c in out["seasons"]], ["season"])
+        self.assertEqual([c["comment"] for c in out["episodes"]], ["episode"])
+        self.assertEqual(out["episodes"][0]["episode"], {"season": 1, "number": 4})
+        self.assertEqual(out["episodes"][0]["show"]["ids"]["tmdb"], 200)
 
 
 class SecretCategoryTests(unittest.IsolatedAsyncioTestCase):

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func, Index
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, event, func, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +32,7 @@ class Media(Base):
     tagline        : Mapped[Optional[str]]   = mapped_column(Text)
     status         : Mapped[Optional[str]]   = mapped_column(String(100))
     tmdb_data      : Mapped[Optional[dict]]  = mapped_column(JSONB)
+    tvdb_data      : Mapped[Optional[dict]]  = mapped_column(JSONB)
     adult          : Mapped[bool]            = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # Episodes only ↓
     show_id        : Mapped[Optional[int]]   = mapped_column(ForeignKey("shows.id", ondelete="SET NULL"))
@@ -48,3 +49,45 @@ class Media(Base):
     watch_events : Mapped[list["WatchEvent"]] = relationship(back_populates="media")
     ratings      : Mapped[list["Rating"]]     = relationship(back_populates="media")
     list_items   : Mapped[list["ListItem"]]   = relationship(back_populates="media")
+
+
+_URI_TYPE_CODE = {
+    MediaType.movie: "m",
+    MediaType.series: "s",
+    MediaType.episode: "e",
+}
+
+
+def stamp_media_uri(
+    media: "Media",
+    *,
+    tvdb_id: int | str | None = None,
+    imdb_id: str | None = None,
+) -> None:
+    """Give a row its uri from whichever provider id is known, TMDB first.
+
+    A source that identifies its library by TVDB or IMDb alone still produces an
+    addressable row — the uri names the provider it is keyed on.
+    """
+    if media.uri_id:
+        return
+    code = _URI_TYPE_CODE.get(media.media_type)
+    if not code:
+        return
+    # MediaURI ids are digits only, so IMDb's tt-prefix is dropped.
+    imdb_numeric = str(imdb_id).strip().lower().lstrip("t") if imdb_id else None
+    for provider, external_id in (
+        ("tmdb", media.tmdb_id),
+        ("tvdb", tvdb_id),
+        ("imdb", imdb_numeric),
+    ):
+        if external_id in (None, "") or not str(external_id).isdigit():
+            continue
+        media.uri_id = f"{provider}:{code}:{external_id}"
+        return
+
+
+@event.listens_for(Media, "before_insert")
+def _stamp_media_uri(mapper, connection, target: "Media") -> None:
+    """Every row addressable by a TMDB id carries its uri from creation."""
+    stamp_media_uri(target)

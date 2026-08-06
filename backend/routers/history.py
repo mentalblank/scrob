@@ -735,16 +735,30 @@ async def get_show_progress(
     )
     local_aired_seasons: dict[int, set[int]] = {}
     local_aired_counts: dict[tuple[int, int], int] = {}
+    local_positions: dict[int, set[tuple[int, int]]] = {}
     runtime_samples: dict[int, list[int]] = {}
     for show_id, season_number, episode_number, runtime, release_date in local_result.all():
         if release_date and release_date <= today:
             local_aired_seasons.setdefault(show_id, set()).add(season_number)
             key = (show_id, season_number)
             local_aired_counts[key] = local_aired_counts.get(key, 0) + 1
+            # Real positions, for the per-episode segments the UI draws. They
+            # come from the rows themselves rather than being counted from one,
+            # which a continuously numbered season never matches.
+            local_positions.setdefault(show_id, set()).add((season_number, episode_number))
         if runtime:
             runtime_samples.setdefault(show_id, []).append(runtime)
 
     hidden_show_ids = await _hidden_next_up_show_ids(db, current_user.id)
+    settings_q = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )
+    viewer_settings = settings_q.scalar_one_or_none()
+    _prefs = (viewer_settings.preferences or {}) if viewer_settings else {}
+    prefers_tvdb = (
+        _prefs.get("primary_metadata_source") == "tvdb"
+        or (viewer_settings.default_episode_order if viewer_settings else None) == "tvdb"
+    )
     shows_result = await db.execute(
         select(Show).where(Show.id.in_([sid for sid in watched_positions if sid not in hidden_show_ids]))
     )
@@ -763,7 +777,15 @@ async def get_show_progress(
         show_started = bool((show.first_air_date or "").strip() and (show.first_air_date or "") <= today)
         aired_seasons = local_aired_seasons.get(show.id, set())
 
-        countable: set[tuple[int, int]] = set()
+        # Counted per season, never by inventing episode numbers: a catalogue is
+        # free to number a season 62-77 rather than 1-16, and positions built by
+        # counting from one then miss every real episode.
+        total = 0
+        watched = 0
+        watched_by_season: dict[int, int] = {}
+        for season_number, _episode_number in watched_pos:
+            watched_by_season[season_number] = watched_by_season.get(season_number, 0) + 1
+
         for meta in seasons_meta:
             season_number = meta.get("season_number")
             air_date = (meta.get("air_date") or "").strip()
@@ -792,23 +814,14 @@ async def get_show_progress(
                 aired = max(aired, episode_count)
             aired = min(aired, episode_count) if episode_count else aired
 
-            for episode_number in range(1, aired + 1):
-                countable.add((season_number, episode_number))
-        # Only count watched positions that exist in a known season. A library
-        # can hold the same episodes twice under two numbering schemes (TVDB
-        # splits a run into two seasons where TMDB has one); counting the extra
-        # rows would push the watched total past the episode count.
-        known_seasons = {
-            m.get("season_number")
-            for m in seasons_meta
-            if m.get("season_number") and m.get("season_number") != 0
-        }
-        if known_seasons:
-            countable |= {pos for pos in watched_pos if pos[0] in known_seasons}
-        else:
-            countable |= watched_pos
-        total = len(countable)
-        watched = len(watched_pos & countable)
+            total += aired
+            # A library can hold the same episodes twice under two numbering
+            # schemes, so a season never counts more watched than it has aired.
+            watched += min(watched_by_season.get(season_number, 0), aired)
+
+        if not seasons_meta:
+            total = len(watched_pos)
+            watched = len(watched_pos)
         watched_at = last_watched.get(show.id)
 
         # Episodes with no stored runtime borrow this show's average, so a few
@@ -828,7 +841,13 @@ async def get_show_progress(
             "uri_id": show.uri_id,
             "type": "series",
             "title": show.title,
-            "poster_path": show.poster_path,
+            # Artwork follows the viewer's provider, the same as every other
+            # card; the row carries both, so this needs no extra fetch.
+            "poster_path": (
+                (show.tvdb_data or {}).get("poster_path")
+                if prefers_tvdb and (show.tvdb_data or {}).get("poster_path")
+                else show.poster_path
+            ),
             "status": show.status,
             "genres": [g["name"] if isinstance(g, dict) else g for g in (show.tmdb_data or {}).get("genres", [])],
             "watched_episodes": watched,
@@ -841,7 +860,7 @@ async def get_show_progress(
             # Sorted watched positions let the UI draw one segment per episode.
             "episodes": [
                 {"season": season, "episode": episode, "watched": (season, episode) in watched_pos}
-                for season, episode in sorted(countable)
+                for season, episode in sorted(local_positions.get(show.id, set()) | watched_pos)
             ],
         })
 

@@ -228,9 +228,9 @@ const startOnForm = !!error;
       </div>
       <div class="p-6 bg-zinc-900/40 border border-zinc-800 rounded-2xl shadow-2xl backdrop-blur-md">
         <h2 class="font-semibold text-zinc-100 mb-1">Restore Database</h2>
-        <p class="text-sm text-zinc-400 mb-4">Upload a <code class="text-zinc-300">.bak</code> file to restore a previous installation.</p>
+        <p class="text-sm text-zinc-400 mb-4">Upload a <code class="text-zinc-300">.pgdump</code> backup file to restore a previous installation.</p>
         <div class="flex flex-col gap-3">
-          <input id="bootstrap-restore-file" type="file" accept=".bak"
+          <input id="bootstrap-restore-file" type="file" accept=".pgdump,.bak"
             class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
           <button id="bootstrap-restore-btn" disabled
             class="w-full px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">

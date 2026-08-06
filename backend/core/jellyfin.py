@@ -94,7 +94,7 @@ async def _get_all_paginated_items(
 async def get_movies(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
     return await _get_all_paginated_items(
         library_id, url, token, user_id, "Movie",
-        "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData",
+        "ProviderIds,MediaStreams,Path,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData",
         min_date
     )
 
@@ -113,7 +113,7 @@ async def get_items_by_ids(url: str, token: str, user_id: str, item_ids: List[st
         return []
     params = {
         "Ids": ",".join(item_ids),
-        "Fields": "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData",
+        "Fields": "ProviderIds,MediaStreams,Path,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData",
     }
     data = await _get(url, token, f"Users/{user_id}/Items", params=params)
     return data.get("Items", [])
@@ -122,7 +122,7 @@ async def get_items_by_ids(url: str, token: str, user_id: str, item_ids: List[st
 async def get_episodes(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
     return await _get_all_paginated_items(
         library_id, url, token, user_id, "Episode",
-        "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,RunTimeTicks,PremiereDate,UserData",
+        "ProviderIds,MediaStreams,Path,Overview,Genres,CommunityRating,RunTimeTicks,PremiereDate,UserData",
         min_date
     )
 

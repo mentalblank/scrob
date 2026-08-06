@@ -536,6 +536,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from telemetry import setup_telemetry
+
+setup_telemetry(app)
+
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(oidc.router, prefix="/auth/oidc", tags=["oidc"])
 app.include_router(plex_auth.router, prefix="/auth/plex", tags=["plex-auth"])

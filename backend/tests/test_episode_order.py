@@ -137,7 +137,7 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
     async def test_cached_mapping_keeps_the_series_tvdb_id(self) -> None:
         db = AsyncMock()
         db.execute.return_value = _ExistingResult([
-            SimpleNamespace(tvdb_id=10414110),
+            SimpleNamespace(tvdb_id=10414110, tvdb_series_id=389597),
         ])
         with patch(
             "core.episode_order.tmdb.get_show",
@@ -203,6 +203,7 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tvdb_season_metadata_uses_tvdb_text_and_mapped_tmdb_rating(self) -> None:
         mapping = SimpleNamespace(
+            series_tmdb_id=127532,
             tvdb_season_number=2,
             tmdb_season_number=1,
         )
@@ -271,6 +272,8 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
         silently dropped from the season's counts."""
         show = ShowModel(id=42, tvdb_id=500, tmdb_id=999)
         mapping = SimpleNamespace(
+            series_tmdb_id=999,
+            tvdb_series_id=500,
             tvdb_id=5001,
             tvdb_season_number=2,
             tvdb_episode_number=1,
@@ -312,7 +315,9 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
             execute=AsyncMock(
                 side_effect=[
                     _ScalarOneResult(show),                             # show_result
-                    _ExistingResult([mapping]),                         # mapping_result
+                    _ExistingResult([mapping]),                         # this show's mappings
+                    _ExistingResult([mapping]),                         # the TVDB series' mappings
+                    _ExistingResult([show]),                            # member shows
                     _ExistingResult([mapped_episode, unmapped_episode]),  # ep_result
                     _EmptyResult(),                                     # season overrides — none
                     _EmptyResult(),                                     # episode overrides — none
@@ -385,7 +390,9 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
             execute=AsyncMock(
                 side_effect=[
                     _ScalarOneResult(show),              # show_result
-                    _EmptyResult(),                      # mapping_result — no order mappings
+                    _EmptyResult(),                      # this show's mappings — none
+                    _EmptyResult(),                      # the TVDB series' mappings — none
+                    _ExistingResult([show]),             # member shows
                     _EmptyResult(),                      # ep_result — season 3 is empty here now
                     _ExistingResult([override]),         # season overrides
                     _ExistingResult([remapped_episode]),  # target-season episodes
@@ -482,3 +489,19 @@ class OverallShowProgressTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateExternalIdTests(unittest.TestCase):
+    """Two TMDB episodes sometimes carry the same TVDB external id. A TVDB
+    episode maps to one position, and letting both through aborts the insert on
+    the unique constraint — leaving the show with no mapping at all."""
+
+    def test_a_tvdb_episode_is_claimed_only_once(self) -> None:
+        import inspect
+
+        from core import episode_order
+
+        source = inspect.getsource(episode_order.ensure_episode_order_mapping)
+        guard = source.index("if mapped_tvdb_id in used_tvdb_ids:")
+        add = source.index("used_tvdb_ids.add(mapped_tvdb_id)")
+        assert guard < add, "the duplicate check must run before the id is claimed"

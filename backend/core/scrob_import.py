@@ -30,6 +30,7 @@ from models.scrobble_connection import ScrobbleConnection
 from models.show import Show
 from models.sync import SyncJob
 from models.users import UserSettings
+from utils.media_uri import MediaURI
 
 logger = logging.getLogger(__name__)
 
@@ -540,12 +541,12 @@ async def apply_scrob_import(
 
     # ── Comments ───────────────────────────────────────────────────────
     if include_comments:
-        def _comment_key(media_type: str, tmdb_id: int | None, season_number: int | None, episode_number: int | None, content: str) -> tuple:
-            return (media_type, tmdb_id, season_number, episode_number, content)
+        def _comment_key(media_type: str, uri_id: str | None, season_number: int | None, episode_number: int | None, content: str) -> tuple:
+            return (media_type, uri_id, season_number, episode_number, content)
 
         existing_comments_result = await db.execute(select(Comment).where(Comment.user_id == user_id))
         existing_comment_keys = {
-            _comment_key(c.media_type, c.tmdb_id, c.season_number, c.episode_number, c.content)
+            _comment_key(c.media_type, c.uri_id, c.season_number, c.episode_number, c.content)
             for c in existing_comments_result.scalars()
         }
 
@@ -553,13 +554,18 @@ async def apply_scrob_import(
             if not tmdb_id:
                 stats["skipped"] += 1
                 return
+            # Season and episode comments hang off the show's URI, addressed by the number columns.
+            uri_id = str(
+                MediaURI.for_movie("tmdb", tmdb_id) if media_type == "movie"
+                else MediaURI.for_show("tmdb", tmdb_id)
+            )
             content = entry.get("comment") or ""
-            key = _comment_key(media_type, tmdb_id, season_number, episode_number, content)
+            key = _comment_key(media_type, uri_id, season_number, episode_number, content)
             if key in existing_comment_keys:
                 stats["skipped"] += 1
                 return
             db.add(Comment(
-                user_id=user_id, media_type=media_type, tmdb_id=tmdb_id,
+                user_id=user_id, media_type=media_type, uri_id=uri_id,
                 season_number=season_number, episode_number=episode_number,
                 content=content, is_spoiler=bool(entry.get("spoiler")),
                 created_at=_parse_iso(entry.get("created_at")) or datetime.utcnow(),
@@ -578,7 +584,10 @@ async def apply_scrob_import(
             await _tick()
         for entry in data.comments.get("episodes", []):
             ep = entry.get("episode", {})
-            _add_comment("episode", entry.get("ids", {}).get("tmdb"), ep.get("season"), ep.get("number"), entry)
+            show_tmdb_id = entry.get("show", {}).get("ids", {}).get("tmdb") or entry.get("ids", {}).get("tmdb")
+            # "series" for anything under a show — the same media_type the app
+            # writes, so an imported comment is found by the same query.
+            _add_comment("series", show_tmdb_id, ep.get("season"), ep.get("number"), entry)
             await _tick()
         await db.commit()
 

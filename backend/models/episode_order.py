@@ -50,6 +50,11 @@ class EpisodeOrderMapping(Base):
             "tvdb_season_number",
             "tvdb_episode_number",
         ),
+        Index(
+            "idx_episode_order_mapping_tvdb_series",
+            "tvdb_series_id",
+            "tvdb_season_number",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -57,6 +62,9 @@ class EpisodeOrderMapping(Base):
     tmdb_season_number: Mapped[int] = mapped_column(Integer, nullable=False)
     tmdb_episode_number: Mapped[int] = mapped_column(Integer, nullable=False)
     tmdb_episode_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # A TVDB series can host several TMDB shows as its later seasons, so which
+    # series a row belongs to is not derivable from series_tmdb_id.
+    tvdb_series_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tvdb_id: Mapped[int] = mapped_column(Integer, nullable=False)
     tvdb_season_number: Mapped[int] = mapped_column(Integer, nullable=False)
     tvdb_episode_number: Mapped[int] = mapped_column(Integer, nullable=False)
