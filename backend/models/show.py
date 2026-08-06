@@ -29,6 +29,7 @@ class Show(Base):
     first_air_date       : Mapped[Optional[str]]   = mapped_column(String(20))
     last_air_date        : Mapped[Optional[str]]   = mapped_column(String(20))
     tmdb_data            : Mapped[Optional[dict]]  = mapped_column(JSONB)
+    tvdb_data            : Mapped[Optional[dict]]  = mapped_column(JSONB)
     # User-defined rename overrides (propagated everywhere in the UI)
     custom_title         : Mapped[Optional[str]]   = mapped_column(String(500))
     custom_season_names  : Mapped[Optional[dict]]  = mapped_column(JSONB)  # {season_number: custom_name}
@@ -36,6 +37,16 @@ class Show(Base):
     updated_at           : Mapped[datetime]        = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     episodes : Mapped[list["Media"]] = relationship(back_populates="show")
+
+
+def _stamp_show_uri(mapper, connection, target: "Show") -> None:
+    """Every show addressable by a provider id carries its uri from creation."""
+    if target.uri_id:
+        return
+    if target.tmdb_id:
+        target.uri_id = f"tmdb:s:{target.tmdb_id}"
+    elif target.tvdb_id:
+        target.uri_id = f"tvdb:s:{target.tvdb_id}"
 
 
 def _seed_show_aliases(mapper, connection, target: "Show") -> None:
@@ -54,4 +65,5 @@ def _seed_show_aliases(mapper, connection, target: "Show") -> None:
         )
 
 
+event.listen(Show, "before_insert", _stamp_show_uri)
 event.listen(Show, "after_insert", _seed_show_aliases)

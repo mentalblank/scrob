@@ -9,6 +9,10 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p"
 _RETRYABLE = (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError)
 
 
+class TMDBUnavailable(RuntimeError):
+    """TMDB could not be reached — says nothing about whether a key is valid."""
+
+
 def get_headers(api_key: str = None) -> dict:
     key = api_key or getattr(settings, 'tmdb_api_key', None)
     if not key:
@@ -36,19 +40,38 @@ async def _get(url: str, *, headers: dict = None, params: dict = None, max_retri
             last_exc = e
             if attempt < max_retries:
                 await asyncio.sleep(2 ** (attempt + 1))  # 2s, 4s, 8s
-        except httpx.HTTPStatusError:
-            raise  # 4xx/5xx — don't retry, surface immediately
+        except httpx.HTTPStatusError as e:
+            # TMDB answers 5xx for its own upstream blips (status 43,
+            # "Couldn't connect to the backend server") — the same request
+            # succeeds moments later, so retry those. 4xx is our fault and
+            # never fixes itself.
+            if e.response.status_code < 500:
+                raise
+            last_exc = e
+            if attempt >= max_retries:
+                raise
+            await asyncio.sleep(2 ** (attempt + 1))
     raise last_exc
 
 
 async def validate_api_key(api_key: str) -> bool:
+    """True if TMDB accepts the key, False if it rejects it.
+
+    Raises TMDBUnavailable when TMDB can't answer — an outage is not a verdict
+    on the key, and reporting one as the other sends people to regenerate a key
+    that was fine all along.
+    """
     if not api_key:
         return False
     try:
         await _get(f"{TMDB_BASE}/authentication", headers=get_headers(api_key))
         return True
-    except Exception:
-        return False
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code < 500:
+            return False
+        raise TMDBUnavailable(str(e)) from e
+    except Exception as e:
+        raise TMDBUnavailable(str(e)) from e
 
 
 async def get_movie(tmdb_id: int, api_key: str = None, language: str | None = None) -> dict:

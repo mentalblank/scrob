@@ -1,7 +1,7 @@
 import asyncio
 import re
 import unicodedata
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import date
 
 from sqlalchemy import delete, select
@@ -247,6 +247,13 @@ async def ensure_episode_order_mapping(
             continue
 
         mapped_tvdb_id = int(match["id"])
+        # Two TMDB episodes can carry the same TVDB external id — a split or a
+        # merged entry on one side. A TVDB episode maps to exactly one position,
+        # so the first claim wins; letting both through aborts the whole show's
+        # mapping on the unique constraint and leaves it with none at all.
+        if mapped_tvdb_id in used_tvdb_ids:
+            unmatched.append(episode)
+            continue
         used_tvdb_ids.add(mapped_tvdb_id)
         mappings.append(
             EpisodeOrderMapping(
@@ -284,3 +291,47 @@ def validate_episode_order(value: str) -> str:
     if value not in _VALID_ORDERS:
         raise ValueError(f"Unsupported episode order: {value}")
     return value
+
+
+async def tmdb_episode_index(
+    series_tmdb_id: int,
+    api_key: str | None,
+    *,
+    season_numbers: Iterable[int] | None = None,
+    concurrency: int = 8,
+) -> dict[int, tuple[int, int, dict]]:
+    """Map each TMDB episode id of a show to the position TMDB gives it.
+
+    A media server can number a show its own way — TVDB seasons, absolute order,
+    story arcs — while still naming every episode by its TMDB id. The id is what
+    identifies an episode; the source's numbers only describe that server.
+
+    Returns {episode_tmdb_id: (season_number, episode_number, episode_payload)}.
+    """
+    if season_numbers is None:
+        show = await tmdb.get_show_light(series_tmdb_id, api_key=api_key)
+        season_numbers = [
+            s["season_number"]
+            for s in show.get("seasons", [])
+            if s.get("season_number") is not None
+        ]
+
+    semaphore = asyncio.Semaphore(concurrency)
+    index: dict[int, tuple[int, int, dict]] = {}
+
+    async def load(season_number: int) -> None:
+        async with semaphore:
+            try:
+                data = await tmdb.get_season(series_tmdb_id, season_number, api_key=api_key)
+            except Exception:
+                return
+            for episode in data.get("episodes", []):
+                if episode.get("id") and episode.get("episode_number") is not None:
+                    index[episode["id"]] = (
+                        season_number,
+                        episode["episode_number"],
+                        episode,
+                    )
+
+    await asyncio.gather(*[load(sn) for sn in sorted(set(season_numbers))])
+    return index

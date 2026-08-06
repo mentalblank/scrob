@@ -36,6 +36,7 @@ from models.ratings import Rating
 from models.scrobble_connection import ScrobbleConnection
 from models.show import Show
 from models.users import User, UserSettings
+from utils.media_uri import MediaURI
 
 HISTORY_CHUNK_SIZE = 2000
 COLLECTION_CHUNK_SIZE = 2000
@@ -305,10 +306,23 @@ async def build_lists(db: AsyncSession, user_id: int) -> tuple[list[dict], list[
 async def build_comments(db: AsyncSession, user_id: int) -> dict[str, list[dict]]:
     comments = (await db.execute(select(Comment).where(Comment.user_id == user_id))).scalars().all()
 
-    tmdb_ids_by_type: dict[str, set[int]] = {"movie": set(), "series": set(), "episode": set()}
+    # The export wire format carries bare TMDB ids; comments are stored as URIs.
+    # Anything not addressed by a TMDB URI can't be represented, so drop it.
+    tmdb_id_by_comment: dict[int, int] = {}
     for c in comments:
-        if c.media_type in tmdb_ids_by_type:
-            tmdb_ids_by_type[c.media_type].add(c.tmdb_id)
+        try:
+            uri = MediaURI.parse(c.uri_id)
+        except ValueError:
+            continue
+        if uri.provider == "tmdb":
+            tmdb_id_by_comment[c.id] = int(uri.id)
+    comments = [c for c in comments if c.id in tmdb_id_by_comment]
+
+    # Only a movie comment names a movie; every other comment names a show.
+    tmdb_ids_by_type: dict[str, set[int]] = {"movie": set(), "series": set()}
+    for c in comments:
+        bucket = "movie" if c.media_type == "movie" else "series"
+        tmdb_ids_by_type[bucket].add(tmdb_id_by_comment[c.id])
 
     movies_res = await db.execute(select(Media).where(Media.media_type == MediaType.movie, Media.tmdb_id.in_(tmdb_ids_by_type["movie"]))) if tmdb_ids_by_type["movie"] else None
     movies_by_tmdb = {m.tmdb_id: m for m in movies_res.scalars().all()} if movies_res else {}
@@ -318,18 +332,22 @@ async def build_comments(db: AsyncSession, user_id: int) -> dict[str, list[dict]
 
     out: dict[str, list[dict]] = {"movies": [], "shows": [], "seasons": [], "episodes": []}
     for c in comments:
+        tmdb_id = tmdb_id_by_comment[c.id]
         base = {"id": c.id, "created_at": _iso(c.created_at), "comment": c.content, "spoiler": c.is_spoiler}
         if c.media_type == "movie":
-            media = movies_by_tmdb.get(c.tmdb_id)
-            out["movies"].append({**base, "movie": {"title": media.title if media else None, "year": _year(media.release_date) if media else None, "ids": {"tmdb": c.tmdb_id}}})
-        elif c.media_type == "series" and c.season_number is None:
-            show = shows_by_tmdb.get(c.tmdb_id)
-            out["shows"].append({**base, "show": _show_dict(c.tmdb_id, show.title if show else "", show.first_air_date if show else None, show.tvdb_id if show else None)})
-        elif c.media_type == "series" and c.season_number is not None:
-            show = shows_by_tmdb.get(c.tmdb_id)
-            out["seasons"].append({**base, "season": {"number": c.season_number}, "show": _show_dict(c.tmdb_id, show.title if show else "", show.first_air_date if show else None, show.tvdb_id if show else None)})
-        elif c.media_type == "episode":
-            out["episodes"].append({**base, "episode": {"season": c.season_number, "number": c.episode_number}, "ids": {"tmdb": c.tmdb_id}})
+            media = movies_by_tmdb.get(tmdb_id)
+            out["movies"].append({**base, "movie": {"title": media.title if media else None, "year": _year(media.release_date) if media else None, "ids": {"tmdb": tmdb_id}}})
+            continue
+        # Everything else hangs off the show's uri, so what a comment is about
+        # is decided by its season and episode numbers, not its media_type.
+        show = shows_by_tmdb.get(tmdb_id)
+        show_dict = _show_dict(tmdb_id, show.title if show else "", show.first_air_date if show else None, show.tvdb_id if show else None)
+        if c.episode_number is not None:
+            out["episodes"].append({**base, "episode": {"season": c.season_number, "number": c.episode_number}, "show": show_dict, "ids": {"tmdb": tmdb_id}})
+        elif c.season_number is not None:
+            out["seasons"].append({**base, "season": {"number": c.season_number}, "show": show_dict})
+        else:
+            out["shows"].append({**base, "show": show_dict})
     return out
 
 

@@ -482,3 +482,19 @@ class OverallShowProgressTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateExternalIdTests(unittest.TestCase):
+    """Two TMDB episodes sometimes carry the same TVDB external id. A TVDB
+    episode maps to one position, and letting both through aborts the insert on
+    the unique constraint — leaving the show with no mapping at all."""
+
+    def test_a_tvdb_episode_is_claimed_only_once(self) -> None:
+        import inspect
+
+        from core import episode_order
+
+        source = inspect.getsource(episode_order.ensure_episode_order_mapping)
+        guard = source.index("if mapped_tvdb_id in used_tvdb_ids:")
+        add = source.index("used_tvdb_ids.add(mapped_tvdb_id)")
+        assert guard < add, "the duplicate check must run before the id is claimed"

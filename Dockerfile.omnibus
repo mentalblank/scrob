@@ -35,7 +35,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     gosu \
     supervisor \
     tzdata \
-    postgresql \
+    postgresql-17 \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get purge -y curl \
@@ -63,7 +63,7 @@ COPY --from=frontend-builder /app/frontend/package.json ./
 # ── Entrypoint & supervisor configs ───────────────────────────────────────────
 COPY entrypoint.sh /entrypoint.sh
 COPY entrypoint.omnibus.sh /entrypoint.omnibus.sh
-COPY supervisord.conf /etc/supervisor/conf.d/scrob.conf
+COPY supervisord.conf /etc/supervisor/supervisord.conf
 COPY supervisord.omnibus.conf /etc/supervisor/supervisord.omnibus.conf
 RUN chmod +x /entrypoint.sh /entrypoint.omnibus.sh
 

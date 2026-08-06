@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func, or_
 
 from db import get_db
-from models.media import Media
+from models.media import Media, stamp_media_uri
 from models.show import Show
 from models.collection import Collection, CollectionFile
 from models.events import WatchEvent
@@ -227,7 +227,38 @@ async def _get_scrobble_connection_by_id(db: AsyncSession, user_id: int, connect
     return result.scalar_one_or_none()
 
 
-async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: str = None) -> Show:
+async def _record_media_identity(
+    db: AsyncSession,
+    media: Media,
+    *,
+    tvdb_id: str | int | None = None,
+    imdb_id: str | None = None,
+) -> None:
+    """Keep every provider id the payload carried, and give the row a uri.
+
+    A scrobble is often the first time a title is seen, so this is the only
+    chance to capture ids the media server knows and TMDB may not expose.
+    """
+    from utils.alias_lookup import record_provider_ids
+
+    stamp_media_uri(media, tvdb_id=tvdb_id, imdb_id=imdb_id)
+    await record_provider_ids(
+        db,
+        media.id,
+        media.media_type.value,
+        tmdb_id=media.tmdb_id,
+        tvdb_id=tvdb_id,
+        imdb_id=imdb_id,
+    )
+
+
+async def _find_or_create_show(
+    db: AsyncSession,
+    series_tmdb_id: int,
+    api_key: str = None,
+    tvdb_id: str | int | None = None,
+    imdb_id: str | None = None,
+) -> Show:
     result = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
     show = result.scalar_one_or_none()
     if not show:
@@ -259,15 +290,22 @@ async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: s
                 ],
             },
         )
+        external_ids = show_data.get("external_ids") or {}
+        tvdb_id = tvdb_id or external_ids.get("tvdb_id")
+        imdb_id = imdb_id or external_ids.get("imdb_id")
+        if tvdb_id:
+            # tvdb_id is unique — never steal one another show already claims.
+            taken = await db.execute(select(Show.id).where(Show.tvdb_id == int(tvdb_id)))
+            if not taken.scalars().first():
+                show.tvdb_id = int(tvdb_id)
         db.add(show)
         await db.flush()
-        # Record the provider link so uri lookups resolve without a fallback.
-        from utils.alias_lookup import upsert_alias
+        # Record the provider links so uri lookups resolve without a fallback.
+        from utils.alias_lookup import record_provider_ids
 
-        if show.tmdb_id:
-            await upsert_alias(db, show.id, "series", "tmdb", str(show.tmdb_id))
-        if show.tvdb_id:
-            await upsert_alias(db, show.id, "series", "tvdb", str(show.tvdb_id))
+        await record_provider_ids(
+            db, show.id, "series", tmdb_id=show.tmdb_id, tvdb_id=tvdb_id, imdb_id=imdb_id
+        )
     return show
 
 
@@ -448,7 +486,11 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
             "year": item.get("ProductionYear"),
             "media_type": "movie" if item.get("Type") == "Movie" else "episode",
             "tmdb_id": item.get("ProviderIds", {}).get("Tmdb"),
+            "tvdb_id": item.get("ProviderIds", {}).get("Tvdb"),
+            "imdb_id": item.get("ProviderIds", {}).get("Imdb"),
             "series_tmdb_id": item.get("SeriesProviderIds", {}).get("Tmdb"),
+            "series_tvdb_id": item.get("SeriesProviderIds", {}).get("Tvdb"),
+            "series_imdb_id": item.get("SeriesProviderIds", {}).get("Imdb"),
             "season_number": item.get("ParentIndexNumber"),
             "episode_number": item.get("IndexNumber"),
             "progress_percent": round(position_ticks / runtime_ticks, 4) if runtime_ticks else 0.0,
@@ -469,6 +511,8 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
         or payload.get("Provider_Tmdb")
         or payload.get("Provider_tmdbid")
     )
+    tvdb_id = payload.get("Provider_tvdb") or payload.get("Provider_Tvdb")
+    imdb_id = payload.get("Provider_imdb") or payload.get("Provider_Imdb")
     position_ticks = payload.get("PlaybackPositionTicks") or payload.get("PositionTicks") or 0
     runtime_ticks = payload.get("RunTimeTicks") or 0
 
@@ -483,6 +527,8 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
         "year": payload.get("Year") or payload.get("ProductionYear"),
         "media_type": "movie" if item_type == "Movie" else "episode",
         "tmdb_id": str(tmdb_id) if tmdb_id else None,
+        "tvdb_id": str(tvdb_id) if tvdb_id else None,
+        "imdb_id": str(imdb_id) if imdb_id else None,
         "series_tmdb_id": None,  # not exposed in flat format; resolved in find_or_create
         "series_name": payload.get("SeriesName"),  # used to look up show when series_tmdb_id is absent
         "season_number": season_num,
@@ -536,7 +582,11 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
 
     if data["media_type"] == "episode" and series_tmdb_id:
         try:
-            show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            show = await _find_or_create_show(
+                db, series_tmdb_id, api_key,
+                tvdb_id=data.get("series_tvdb_id"),
+                imdb_id=data.get("series_imdb_id"),
+            )
         except Exception:
             pass
 
@@ -624,6 +674,9 @@ async def find_or_create_media_jellyfin(data: dict, db: AsyncSession, api_key: s
         await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
     else:
         await enrich_media(media, api_key=api_key)
+    await _record_media_identity(
+        db, media, tvdb_id=data.get("tvdb_id"), imdb_id=data.get("imdb_id")
+    )
     return media
 
 
@@ -1394,13 +1447,20 @@ async def find_or_create_media_plex(data: dict, db: AsyncSession, api_key: str =
 
     if media.media_type == MediaType.episode and series_tmdb_id:
         try:
-            show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            show = await _find_or_create_show(
+                db, series_tmdb_id, api_key,
+                tvdb_id=data.get("grandparent_tvdb_id"),
+                imdb_id=data.get("grandparent_imdb_id"),
+            )
             media.show_id = show.id
             await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
         except Exception as e:
             print(f"  Could not enrich episode with show context: {e}")
     else:
         await enrich_media(media, api_key=api_key)
+    await _record_media_identity(
+        db, media, tvdb_id=data.get("tvdb_id"), imdb_id=data.get("imdb_id")
+    )
     return media
 
 
@@ -1948,6 +2008,8 @@ async def find_or_create_media_kodi(data: dict, db: AsyncSession, api_key: str =
     show = None
     if series_tmdb_id:
         try:
+            # Kodi's uniqueid on an episode mixes episode-scoped and show-scoped
+            # ids, so the show's own ids come from TMDB rather than the payload.
             show = await _find_or_create_show(db, series_tmdb_id, api_key)
         except Exception:
             pass
@@ -2022,6 +2084,15 @@ async def find_or_create_media_kodi(data: dict, db: AsyncSession, api_key: str =
         await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
     else:
         await enrich_media(media, api_key=api_key)
+    # Kodi names the series with those ids on an episode payload, so only a movie
+    # can claim them for itself.
+    is_movie = media.media_type == MediaType.movie
+    await _record_media_identity(
+        db,
+        media,
+        tvdb_id=data.get("tvdb_id") if is_movie else None,
+        imdb_id=data.get("imdb_id") if is_movie else None,
+    )
     return media
 
 

@@ -211,13 +211,15 @@ async def enrich_media(
             media.content_rating = extract_show_content_rating(data)
             media.adult = data.get("adult", False)
 
-            # Pref=TVDB: override artwork only, keep TMDB metadata
-            if is_tvdb and series_tvdb_id and tvdb_api_key:
+            if series_tvdb_id and tvdb_api_key:
                 tvdb_poster, tvdb_backdrop = await _tvdb_series_artwork(series_tvdb_id, tvdb_api_key, tvdb_lang)
-                if tvdb_poster:
-                    media.poster_path = tvdb_poster
-                if tvdb_backdrop:
-                    media.backdrop_path = tvdb_backdrop
+                if tvdb_poster or tvdb_backdrop:
+                    media.tvdb_data = {
+                        **(media.tvdb_data or {}),
+                        "tvdb_id": series_tvdb_id,
+                        "poster_path": tvdb_poster,
+                        "backdrop_path": tvdb_backdrop,
+                    }
 
         elif media.media_type == MediaType.episode:
             if media.season_number is None or media.episode_number is None:
@@ -235,23 +237,43 @@ async def enrich_media(
                             if not media.uri_id:
                                 media.uri_id = f"tvdb:e:{tvdb_ep_id}"
                             # Do NOT set media.tmdb_id to a TVDB ID — different namespace
-                        media.title = ep.get("name") or media.title
-                        media.overview = ep.get("overview")
-                        if ep.get("image"):
-                            media.poster_path = tvdb_client._image_url(ep["image"])
-                        media.release_date = ep.get("aired")
-                        media.runtime = ep.get("runtime") or media.runtime
-                        media.tmdb_data = {
-                            "runtime": ep.get("runtime"),
-                            "tvdb_episode_id": tvdb_ep_id,
-                            "source": "tvdb",
+                        media.title = media.title or ep.get("name")
+                        media.overview = media.overview or ep.get("overview")
+                        media.release_date = media.release_date or ep.get("aired")
+                        media.runtime = media.runtime or ep.get("runtime")
+                        # Ids belong in media_aliases; tvdb_data carries artwork.
+                        media.tvdb_data = {
+                            **(media.tvdb_data or {}),
+                            "poster_path": tvdb_client._image_url(ep["image"]) if ep.get("image") else None,
                         }
-                        enriched = True
+                        # TMDB still names the row; only fall back to TVDB for a
+                        # title when TMDB has nothing to say about this episode.
+                        enriched = not series_tmdb_id
                 except Exception as e:
                     print(f"  TVDB enrich failed for episode: {e}, falling back to TMDB")
 
             if not enriched and series_tmdb_id:
-                data = await tmdb.get_episode(series_tmdb_id, media.season_number, media.episode_number, api_key=api_key)
+                try:
+                    data = await tmdb.get_episode(series_tmdb_id, media.season_number, media.episode_number, api_key=api_key)
+                except Exception:
+                    data = {}
+                # A row created from a media server, Trakt or a scrobble carries
+                # the source's numbering. When it also carries a TMDB episode id
+                # and that id isn't what sits at this position, the position is
+                # the source's, not TMDB's — so re-file the row where TMDB puts
+                # it. Costs one extra read, and only for a show the catalogues
+                # actually disagree about.
+                if media.tmdb_id and data.get("id") != media.tmdb_id:
+                    from core.episode_order import tmdb_episode_index
+
+                    try:
+                        placed = (await tmdb_episode_index(series_tmdb_id, api_key)).get(media.tmdb_id)
+                    except Exception:
+                        placed = None
+                    if placed:
+                        media.season_number, media.episode_number, data = placed
+                if not data:
+                    return
                 ep_id = data.get("id") or media.tmdb_id
                 media.tmdb_id = ep_id
                 if ep_id and not media.uri_id:
@@ -345,7 +367,7 @@ async def enrich_for_user(
         from routers.shows import get_user_tvdb_key
         from core import tvdb as tvdb_client
         tvdb_api_key = await get_user_tvdb_key(db, user_id)
-        tvdb_lang = tvdb_client.to_three_letter_lang(await get_user_content_language(db, user_id))
+        tvdb_lang = tvdb_client.tvdb_language(await get_user_content_language(db, user_id))
 
         if not series_tvdb_id:
             if series_uri_id:

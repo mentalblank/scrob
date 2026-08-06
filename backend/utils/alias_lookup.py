@@ -171,3 +171,73 @@ async def upsert_alias(
         .on_conflict_do_nothing(constraint="uq_media_aliases_provider_external_type")
     )
     await db.execute(stmt)
+
+
+async def record_provider_ids(
+    db: AsyncSession,
+    internal_id: int,
+    media_type: str,
+    *,
+    tmdb_id: int | str | None = None,
+    tvdb_id: int | str | None = None,
+    imdb_id: str | None = None,
+) -> None:
+    """Record every provider id known for a row, whatever the source gave us.
+
+    Identity is not metadata: a title keeps its ids even when enrichment is off,
+    so nothing has to be re-resolved later to reconcile it across providers.
+    """
+    # IMDb ids are stored numeric — MediaURI ids are digits only.
+    imdb_numeric = str(imdb_id).strip().lower().lstrip("t") if imdb_id else None
+    for provider, external_id in (("tmdb", tmdb_id), ("tvdb", tvdb_id), ("imdb", imdb_numeric)):
+        if external_id in (None, ""):
+            continue
+        await upsert_alias(db, internal_id, media_type, provider, str(external_id))
+
+
+async def record_provider_ids_bulk(
+    db: AsyncSession,
+    entries: list[tuple[int, str, dict]],
+) -> None:
+    """Record provider ids for many rows in one statement per chunk.
+
+    A library sync resolves tens of thousands of episodes, and a round trip per
+    id took longer than the metadata fetches it followed.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from models.base import MediaType as MT
+
+    rows: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for internal_id, media_type, ids in entries:
+        imdb_id = ids.get("imdb_id")
+        imdb_numeric = str(imdb_id).strip().lower().lstrip("t") if imdb_id else None
+        for provider, external_id in (
+            ("tmdb", ids.get("tmdb_id")),
+            ("tvdb", ids.get("tvdb_id")),
+            ("imdb", imdb_numeric),
+        ):
+            if external_id in (None, ""):
+                continue
+            # The unique constraint is on (provider, external_id, media_type), so
+            # a chunk carrying the same pair twice would abort the statement.
+            key = (provider, str(external_id), media_type)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({
+                "internal_id": internal_id,
+                "media_type": MT(media_type),
+                "provider": provider,
+                "external_id": str(external_id),
+                "is_manual": False,
+            })
+
+    for i in range(0, len(rows), 1000):
+        stmt = (
+            pg_insert(MediaAlias)
+            .values(rows[i : i + 1000])
+            .on_conflict_do_nothing(constraint="uq_media_aliases_provider_external_type")
+        )
+        await db.execute(stmt)

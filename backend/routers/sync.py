@@ -10,7 +10,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.dialects.postgresql import insert, JSONB
 
 from db import get_db, engine
-from models.media import Media
+from models.media import Media, stamp_media_uri
 from models.show import Show
 from models.collection import Collection, CollectionFile
 from models.users import User, UserSettings
@@ -21,6 +21,7 @@ from models.ratings import Rating, RatingChanges, RatingKey
 from models.playback_progress import PlaybackProgress
 from models.library_selections import JellyfinLibrarySelection, EmbyLibrarySelection, PlexLibrarySelection
 from models.season_override import ShowSeasonOverride, ShowEpisodeOverride
+from utils.alias_lookup import record_provider_ids, record_provider_ids_bulk
 from utils.media_uri import MediaURI
 from datetime import datetime, timedelta, timezone
 from dateutil import parser
@@ -29,9 +30,10 @@ from models.global_settings import GlobalSettings
 from core import jellyfin, emby, plex, nuvio, stremio, tmdb
 import core.trakt as trakt_client
 from core.enrichment import enrich_media, is_unmapped_tvdb_episode
+from core.episode_order import tmdb_episode_index
 from core.image_cache import pre_cache_all_collected_bg
 
-from dependencies import get_current_user, get_current_user_or_api_key
+from dependencies import get_current_user, get_current_user_or_api_key, require_admin
 logger = logging.getLogger("uvicorn.error")
 
 
@@ -62,6 +64,13 @@ async def _get_effective_tmdb_key(db: AsyncSession, user_settings: UserSettings 
     gs = gs_result.scalar_one_or_none()
     return gs.tmdb_api_key if gs else None
 
+
+def media_server_enrichment_enabled(user_settings: UserSettings | None) -> bool:
+    """Whether to read technical metadata (resolution, codecs, languages) off the
+    media server. Identity — ids and uris — is never gated by this."""
+    prefs = (user_settings.preferences or {}) if user_settings else {}
+    return prefs.get("media_server_enrichment", True) is not False
+
 router = APIRouter()
 
 # Global semaphore — at most one sync running at a time across all users
@@ -89,6 +98,16 @@ async def _select_in_chunks(db: AsyncSession, stmt_builder, ids: list):
         chunk = ids[i : i + _MAX_IN_PARAMS]
         res = await db.execute(stmt_builder(chunk))
         results.extend(res.scalars().all())
+    return results
+
+
+async def _select_rows_in_chunks(db: AsyncSession, stmt_builder, ids: list):
+    """Same chunking as _select_in_chunks, for statements selecting multiple columns."""
+    results = []
+    for i in range(0, len(ids), _MAX_IN_PARAMS):
+        chunk = ids[i : i + _MAX_IN_PARAMS]
+        res = await db.execute(stmt_builder(chunk))
+        results.extend(res.all())
     return results
 
 
@@ -272,6 +291,7 @@ async def sync_shows_batch(
         for tmdb_id, d in fetched.items():
             values.append({
                 "tmdb_id": tmdb_id,
+                "uri_id": str(MediaURI.for_show("tmdb", tmdb_id)),
                 "title": d.get("name"),
                 "original_title": d.get("original_name"),
                 "overview": d.get("overview"),
@@ -315,6 +335,31 @@ async def sync_shows_batch(
             for s in res.scalars().all():
                 existing_shows[s.tmdb_id] = s
 
+        # A bulk upsert bypasses the ORM insert hooks, so the ids TMDB just
+        # handed us are recorded here instead.
+        for tmdb_id, d in fetched.items():
+            show = existing_shows.get(tmdb_id)
+            if not show:
+                continue
+            external_ids = d.get("external_ids") or {}
+            tvdb_id = external_ids.get("tvdb_id")
+            if tvdb_id and show.tvdb_id is None:
+                # tvdb_id is unique — never steal one another show already claims.
+                taken = await db.execute(
+                    select(Show.id).where(Show.tvdb_id == int(tvdb_id), Show.id != show.id)
+                )
+                if not taken.scalars().first():
+                    show.tvdb_id = int(tvdb_id)
+            await record_provider_ids(
+                db,
+                show.id,
+                "series",
+                tmdb_id=tmdb_id,
+                tvdb_id=tvdb_id,
+                imdb_id=external_ids.get("imdb_id"),
+            )
+        await db.commit()
+
     show_map: dict[str, int] = {}
     show_id_to_tmdb: dict[int, int] = {}
     for source_id, tmdb_id in series_tmdb_map.items():
@@ -330,6 +375,11 @@ async def batch_enrich_items(
     items: list[tuple],  # (Media, series_tmdb_id | None)
     api_key: str = None,
     show_title_map: dict[int, str] | None = None,
+    tvdb_api_key: str | None = None,
+    show_tvdb_ids: dict[int, int] | None = None,  # series tmdb id → tvdb id
+    tvdb_episode_ids: dict[int, int] | None = None,  # media.id → tvdb episode id
+    tvdb_lang: str = "eng",
+    renumbered_shows: set[int] | None = None,  # series tmdb ids whose episodes moved
 ) -> list[dict]:
     """
     Parallel enrichment for newly created media.
@@ -378,19 +428,110 @@ async def batch_enrich_items(
             return_exceptions=True,
         )
 
-    for (stid, sn), ep_list in season_to_eps.items():
-        ep_map = season_data.get((stid, sn), {})
-        for media in ep_list:
-            ep = ep_map.get(media.episode_number)
-            if not ep:
-                continue
-            media.tmdb_id = ep.get("id") or media.tmdb_id
-            media.title = ep.get("name") or media.title
-            media.overview = ep.get("overview")
-            media.poster_path = tmdb.poster_url(ep.get("still_path"), size="w500")
-            media.release_date = ep.get("air_date")
-            media.tmdb_rating = ep.get("vote_average")
-            media.tmdb_data = {"runtime": ep.get("runtime"), "cast": []}
+    # Index every payload fetched above by its TMDB episode id. A server that
+    # numbers a show its own way still names each episode by that id, so the id
+    # is what says where the row belongs.
+    placement: dict[tuple[int, int], tuple[int, int, dict]] = {}
+    for (stid, sn), ep_map in season_data.items():
+        for ep in ep_map.values():
+            if ep.get("id") and ep.get("episode_number") is not None:
+                placement[(stid, ep["id"])] = (sn, ep["episode_number"], ep)
+
+    # An episode whose id is absent from the seasons we fetched is numbered by
+    # the source's own scheme — read the rest of that show's seasons once so it
+    # can be placed instead of being left where the server happened to put it.
+    unplaced_shows: set[int] = {
+        stid
+        for media, stid in episodes
+        if media.tmdb_id and (stid, media.tmdb_id) not in placement
+    }
+    if unplaced_shows:
+        print(f"    Resolving TMDB numbering for {len(unplaced_shows)} show(s)...")
+
+        async def index_show(stid: int) -> None:
+            async with semaphore:
+                fetched = {sn for (s, sn) in season_data if s == stid}
+                try:
+                    index = await tmdb_episode_index(stid, api_key)
+                except Exception as e:
+                    print(f"  Failed to index show={stid}: {e}")
+                    return
+                for ep_id, (sn, en, ep) in index.items():
+                    if sn not in fetched or (stid, ep_id) not in placement:
+                        placement[(stid, ep_id)] = (sn, en, ep)
+
+        await asyncio.gather(*[index_show(stid) for stid in unplaced_shows], return_exceptions=True)
+
+    def _apply(media: Media, ep: dict) -> None:
+        media.tmdb_id = ep.get("id") or media.tmdb_id
+        media.runtime = ep.get("runtime") or media.runtime
+        media.title = ep.get("name") or media.title
+        media.overview = ep.get("overview")
+        media.poster_path = tmdb.poster_url(ep.get("still_path"), size="w500")
+        media.release_date = ep.get("air_date")
+        media.tmdb_rating = ep.get("vote_average")
+        media.tmdb_data = {"runtime": ep.get("runtime"), "cast": []}
+
+    renumbered = 0
+    for media, stid in episodes:
+        placed = placement.get((stid, media.tmdb_id)) if media.tmdb_id else None
+        if placed:
+            season_number, episode_number, ep = placed
+            if (media.season_number, media.episode_number) != (season_number, episode_number):
+                media.season_number = season_number
+                media.episode_number = episode_number
+                renumbered += 1
+                if renumbered_shows is not None:
+                    renumbered_shows.add(stid)
+            _apply(media, ep)
+            continue
+        # No TMDB id to go on — fall back to the position the source gave.
+        ep = season_data.get((stid, media.season_number), {}).get(media.episode_number)
+        if ep:
+            _apply(media, ep)
+
+    if renumbered:
+        print(f"    Renumbered {renumbered} episode(s) onto TMDB numbering.")
+
+    # TVDB artwork is stored beside TMDB's so a page can follow the viewer's
+    # provider without another round trip. Stills are matched on the TVDB
+    # episode id, never on position — the two catalogues number shows
+    # differently and a still would otherwise land on the wrong episode.
+    if tvdb_api_key and show_tvdb_ids:
+        from core import tvdb as tvdb_client
+        from core.enrichment import _tvdb_series_artwork
+
+        async def fetch_tvdb(stid: int, tvdb_id: int) -> None:
+            async with semaphore:
+                show_episodes = [m for m, s in episodes if s == stid]
+                try:
+                    poster, backdrop = await _tvdb_series_artwork(tvdb_id, tvdb_api_key, tvdb_lang)
+                    raw_eps = await tvdb_client.get_series_episodes(
+                        tvdb_id, None, tvdb_api_key, language=tvdb_lang
+                    )
+                except Exception as e:
+                    print(f"  TVDB artwork failed for show={stid}: {e}")
+                    return
+                stills = {
+                    str(e["id"]): tvdb_client._image_url(e["image"])
+                    for e in raw_eps
+                    if e.get("id") and e.get("image")
+                }
+                for media in show_episodes:
+                    # The row's own TVDB id decides its still. It comes from the
+                    # caller (the aliases recorded when the item was synced), not
+                    # from the episode's position, which the two catalogues
+                    # disagree about often enough to put stills on the wrong
+                    # episode.
+                    tvdb_ep_id = (tvdb_episode_ids or {}).get(media.id)
+                    still = stills.get(str(tvdb_ep_id)) if tvdb_ep_id else None
+                    if still:
+                        media.tvdb_data = {**(media.tvdb_data or {}), "poster_path": still}
+
+        await asyncio.gather(
+            *[fetch_tvdb(stid, tvdb_id) for stid, tvdb_id in show_tvdb_ids.items()],
+            return_exceptions=True,
+        )
 
     # Build per-season warning entries (one entry per failed season).
     # `provider` tells the UI which catalogue the lookup failed against, so the
@@ -1500,7 +1641,10 @@ async def sync_items(
     new_ratings: RatingChanges | None = None,  # accumulated across calls; mutated in-place
     new_collected_ids: set[int] | None = None,  # accumulated across calls; mutated in-place
     connection_id: int | None = None,
+    server_enrichment: bool = True,
 ) -> list[dict]:  # returns warnings
+    from routers.shows import get_user_tvdb_key
+
     print(f"  Syncing {len(items)} {media_type.value}s from {source.value}...")
 
     # ── Phase 1: Pre-load existing data (replaces all N+1 queries) ────────────
@@ -1545,8 +1689,13 @@ async def sync_items(
             )
             for m in episodes:
                 media_by_episode[(m.show_id, m.season_number, m.episode_number)] = m
+                # An episode's identity is its TMDB id; the numbers only say how
+                # one server filed it. Keyed here so a row already stored under a
+                # different numbering is found instead of duplicated.
+                if m.tmdb_id:
+                    media_by_tmdb[(m.tmdb_id, m.media_type)] = m
             # Needed to translate TVDB-numbered items onto TMDB-numbered rows.
-            show_rows = await _select_in_chunks(
+            show_rows = await _select_rows_in_chunks(
                 db,
                 lambda chunk: select(Show.id, Show.tmdb_id).where(Show.id.in_(chunk)),
                 show_ids,
@@ -1626,6 +1775,7 @@ async def sync_items(
     # ── Phase 2: Main sync loop (no N+1 queries, savepoints for error isolation) ──
     new_media_for_enrichment: list[tuple] = []  # (Media, series_tmdb_id | None)
     skipped_warnings: list[dict] = []
+    source_ids_by_media: dict[int, tuple] = {}  # media.id → (Media, tvdb_id, imdb_id) from the source item
 
     for i, item in enumerate(items):
         new_media: Media | None = None
@@ -1634,19 +1784,30 @@ async def sync_items(
                 if source in _MEDIA_BROWSER_ITEM_SOURCES:
                     source_id = str(item.get("Id"))
                     quality = extract_jellyfin_quality(item)
-                    tmdb_id = get_jellyfin_tmdb_id(item.get("ProviderIds", {}))
+                    provider_ids = item.get("ProviderIds", {}) or {}
+                    tmdb_id = get_jellyfin_tmdb_id(provider_ids)
+                    tvdb_id = provider_ids.get("Tvdb") or provider_ids.get("tvdb")
+                    imdb_id = provider_ids.get("Imdb") or provider_ids.get("imdb")
                     parent_id = item.get("SeriesId")
                     name = item.get("Name")
                     season_num = item.get("ParentIndexNumber")
                     episode_num = item.get("IndexNumber")
                 else:  # Plex
                     source_id = str(item.get("ratingKey"))
+                    guids = item.get("Guid", [])
                     quality = plex.extract_quality(item.get("Media", []))
-                    tmdb_id = plex.extract_tmdb_id(item.get("Guid", []))
+                    tmdb_id = plex.extract_tmdb_id(guids)
+                    tvdb_id = plex.extract_tvdb_id(guids)
+                    imdb_id = plex.extract_imdb_id(guids)
                     parent_id = item.get("grandparentRatingKey")
                     name = item.get("title")
                     season_num = item.get("parentIndex")
                     episode_num = item.get("index")
+
+                # The toggle only governs technical metadata read off the server.
+                # The file itself still has to be recorded for the item to be collected.
+                if not server_enrichment:
+                    quality = {"file_path": quality.get("file_path")}
 
                 file_entry = existing_files.get(source_id)
                 media_id_for_watch: int | None = None
@@ -1694,6 +1855,10 @@ async def sync_items(
                             existing_file.connection_id = connection_id
                     stats["skipped"] += 1
                     media_id_for_watch = existing_media_id
+                    if existing_media_obj is not None:
+                        source_ids_by_media[existing_media_obj.id] = (
+                            existing_media_obj, tvdb_id, imdb_id,
+                        )
 
                     # Heal missing TMDB ID for movies
                     if media_type == MediaType.movie and existing_media_obj.tmdb_id is None and tmdb_id is not None:
@@ -1757,7 +1922,11 @@ async def sync_items(
 
                     # Look up existing media from pre-loaded dicts (O(1), no DB query)
                     if media_type == MediaType.episode and show_id:
-                        media = media_by_episode.get((show_id, season_num, episode_num))
+                        media = media_by_tmdb.get((tmdb_id, media_type)) if tmdb_id else None
+                        if media is not None and media.show_id is None:
+                            media.show_id = show_id
+                        if not media:
+                            media = media_by_episode.get((show_id, season_num, episode_num))
                         if not media and season_num is not None and episode_num is not None:
                             # The server may number episodes the TVDB way while the
                             # row is stored under TMDB numbering. Translate before
@@ -1908,6 +2077,8 @@ async def sync_items(
                             if tmdb_id or ep_series_tmdb_id:
                                 new_media_for_enrichment.append((media, ep_series_tmdb_id))
 
+                        source_ids_by_media[media.id] = (media, tvdb_id, imdb_id)
+
                         if sync_collection:
                             coll_id = existing_coll_by_media_id.get(media.id)
                             if coll_id is None:
@@ -2012,6 +2183,18 @@ async def sync_items(
         await db.commit()
         await _raise_if_cancelled(db, job_id)
 
+    alias_entries: list[tuple] = []
+    for media_obj, tvdb_id, imdb_id in source_ids_by_media.values():
+        stamp_media_uri(media_obj, tvdb_id=tvdb_id, imdb_id=imdb_id)
+        alias_entries.append((
+            media_obj.id,
+            media_obj.media_type.value,
+            {"tmdb_id": media_obj.tmdb_id, "tvdb_id": tvdb_id, "imdb_id": imdb_id},
+        ))
+    if alias_entries:
+        await record_provider_ids_bulk(db, alias_entries)
+        await db.commit()
+
     # ── Phase 3: Batch enrich newly created media ─────────────────────────────
     warnings: list[dict] = []
     if new_media_for_enrichment:
@@ -2035,8 +2218,77 @@ async def sync_items(
                         if series_tmdb_id:
                             series_title_map[series_tmdb_id] = title
 
-        warnings = await batch_enrich_items(new_media_for_enrichment, api_key=api_key, show_title_map=series_title_map)
+        # Artwork from both catalogues is stored in the same pass, so a viewer's
+        # provider preference never needs a second fetch.
+        tvdb_api_key = await get_user_tvdb_key(db, user_id)
+        show_tvdb_ids: dict[int, int] = {}
+        if tvdb_api_key and show_id_to_tmdb:
+            tvdb_rows = await _select_rows_in_chunks(
+                db,
+                lambda chunk: select(Show.tmdb_id, Show.tvdb_id).where(
+                    Show.id.in_(chunk), Show.tvdb_id.isnot(None)
+                ),
+                list(show_id_to_tmdb),
+            )
+            show_tvdb_ids = {tmdb_id: tvdb_id for tmdb_id, tvdb_id in tvdb_rows if tmdb_id}
+
+        # The source handed over a TVDB id per episode; that is what a still is
+        # matched on, so pass it through rather than making the artwork step
+        # guess from a position.
+        tvdb_episode_ids = {
+            media_obj.id: int(tvdb_id)
+            for media_obj, tvdb_id, _ in source_ids_by_media.values()
+            if tvdb_id and str(tvdb_id).isdigit()
+        }
+        renumbered_shows: set[int] = set()
+        warnings = await batch_enrich_items(
+            new_media_for_enrichment,
+            api_key=api_key,
+            show_title_map=series_title_map,
+            tvdb_api_key=tvdb_api_key,
+            show_tvdb_ids=show_tvdb_ids,
+            tvdb_episode_ids=tvdb_episode_ids,
+            renumbered_shows=renumbered_shows,
+        )
+        # A show whose episodes had to move is one the catalogues number
+        # differently — the only kind that needs a mapping to translate watch
+        # state onto a TVDB view. Building it here means browsing in TVDB order
+        # is correct straight after a pull, whichever way the ordering is set.
+        if tvdb_api_key and renumbered_shows:
+            from core.episode_order import ensure_episode_order_mapping
+            from models.episode_order import EpisodeOrderMapping
+
+            # Each mapping is a full read of both catalogues and can fail on data
+            # neither of them agrees about. It gets its own session per show so a
+            # failure can't poison the sync's transaction, and so the sync isn't
+            # holding one open across minutes of network calls.
+            await db.commit()
+            mapping_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+            for series_tmdb_id in sorted(renumbered_shows):
+                if series_tmdb_id not in show_tvdb_ids:
+                    continue
+                async with mapping_session() as map_db:
+                    try:
+                        mapped_q = await map_db.execute(
+                            select(func.count()).select_from(EpisodeOrderMapping)
+                            .where(EpisodeOrderMapping.series_tmdb_id == series_tmdb_id)
+                        )
+                        if mapped_q.scalar_one():
+                            continue
+                        await ensure_episode_order_mapping(map_db, series_tmdb_id, api_key, tvdb_api_key)
+                        await map_db.commit()
+                    except Exception as exc:
+                        await map_db.rollback()
+                        print(f"  Could not map episode order for show {series_tmdb_id}: {exc}")
+        # Enrichment is where an episode without a provider guid first learns its
+        # TMDB id, so anything keyed on it has to be stamped after it has run.
+        for media_obj, _ in new_media_for_enrichment:
+            _, tvdb_id, imdb_id = source_ids_by_media.get(media_obj.id, (None, None, None))
+            stamp_media_uri(media_obj, tvdb_id=tvdb_id, imdb_id=imdb_id)
         await db.commit()
+
+    # Identity is recorded whatever the enrichment settings are: every id the
+    # source handed us is kept so the item stays reconcilable across providers.
 
     all_warnings = skipped_warnings + warnings
     print(f"  Finished syncing {media_type.value}s. Stats: {stats}")
@@ -2059,6 +2311,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
             settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
             settings = settings_result.scalar_one_or_none()
             tmdb_api_key = await _get_effective_tmdb_key(db, settings)
+            server_enrichment = media_server_enrichment_enabled(settings)
 
             # Load the specific connection (or oldest jellyfin connection for this user)
             conn_q = select(MediaServerConnection).where(
@@ -2153,6 +2406,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
 
                     w = await sync_items(items, MediaType.movie, CollectionSource.jellyfin, db, stats, user_id, job_id, api_key=tmdb_api_key,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                        server_enrichment=server_enrichment,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id)
                     all_warnings.extend(w)
 
@@ -2196,6 +2450,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                         db, stats, user_id, job_id, show_map,
                         api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                        server_enrichment=server_enrichment,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id,
                     )
                     all_warnings.extend(w)
@@ -2206,6 +2461,7 @@ async def _run_jellyfin_sync(user_id: int, job_id: int, movie_limit: int, show_l
                             db, stats, user_id, job_id, {},
                             api_key=tmdb_api_key, show_id_to_tmdb={},
                             sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                            server_enrichment=server_enrichment,
                             new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id,
                         )
                         all_warnings.extend(w)
@@ -2263,6 +2519,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
             settings = settings_result.scalar_one_or_none()
             tmdb_api_key = await _get_effective_tmdb_key(db, settings)
+            server_enrichment = media_server_enrichment_enabled(settings)
 
             if not conn or not conn.url or not conn.token or not conn.server_user_id:
                 err = "Missing Emby connection (URL, Token, or User ID)"
@@ -2347,6 +2604,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
                     w = await sync_items(items, MediaType.movie, CollectionSource.emby, db, stats, user_id, job_id, api_key=tmdb_api_key,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                        server_enrichment=server_enrichment,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id)
                     all_warnings.extend(w)
 
@@ -2392,6 +2650,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         db, stats, user_id, job_id, show_map,
                         api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                        server_enrichment=server_enrichment,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id,
                     )
                     all_warnings.extend(w)
@@ -2402,6 +2661,7 @@ async def _run_emby_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                             db, stats, user_id, job_id, {},
                             api_key=tmdb_api_key, show_id_to_tmdb={},
                             sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                            server_enrichment=server_enrichment,
                             new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id,
                         )
                         all_warnings.extend(w)
@@ -2529,6 +2789,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
             settings = settings_result.scalar_one_or_none()
             tmdb_api_key = await _get_effective_tmdb_key(db, settings)
+            server_enrichment = media_server_enrichment_enabled(settings)
 
             if not conn or not conn.url or not conn.token:
                 err = "Missing Plex connection (URL or Token)"
@@ -2621,6 +2882,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
 
                     w = await sync_items(items, MediaType.movie, CollectionSource.plex, db, stats, user_id, job_id, api_key=tmdb_api_key,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                        server_enrichment=server_enrichment,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id)
                     all_warnings.extend(w)
 
@@ -2763,6 +3025,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                         db, stats, user_id, job_id, show_map,
                         api_key=tmdb_api_key, show_id_to_tmdb=show_id_to_tmdb,
                         sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                        server_enrichment=server_enrichment,
                         new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id,
                     )
                     all_warnings.extend(w)
@@ -2773,6 +3036,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                             db, stats, user_id, job_id, {},
                             api_key=tmdb_api_key, show_id_to_tmdb={},
                             sync_collection=conn.sync_collection, sync_watched=conn.sync_watched, sync_ratings=conn.sync_ratings,
+                            server_enrichment=server_enrichment,
                             new_watched_ids=_new_watched, new_ratings=_new_ratings, new_collected_ids=_new_collected, connection_id=conn.id,
                         )
                         all_warnings.extend(w)
@@ -2900,9 +3164,10 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
                     print(f"  Warning: Plex watchlist sync failed: {exc}")
                     await db.rollback()
 
-            backfilled = await _backfill_plex_languages(user_id, conn.id, p_url, p_token, job_id)
-            if backfilled:
-                print(f"Plex sync job {job_id}: backfilled language data for {backfilled} file(s).")
+            if server_enrichment:
+                backfilled = await _backfill_plex_languages(user_id, conn.id, p_url, p_token, job_id)
+                if backfilled:
+                    print(f"Plex sync job {job_id}: backfilled language data for {backfilled} file(s).")
             print(f"Plex sync job {job_id} completed. Stats: {stats}")
             await _fan_out_changes_to_other_connections(db, user_id, conn.id, _new_watched, _new_ratings, settings=settings, new_collected_ids=_new_collected)
             all_warnings = await _stamp_matched_show_warnings(db, user_id, all_warnings)
@@ -5414,9 +5679,13 @@ async def duplicate_episodes_report(
 async def merge_duplicate_episodes(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
-    """Merge duplicate episode rows onto the TMDB-numbered row. Destructive."""
+    """Merge duplicate episode rows onto the TMDB-numbered row. Destructive.
+
+    Deleting a media row takes every account's plays and ratings with it onto
+    the survivor, so this is server-wide work, not one user's housekeeping.
+    """
     job = SyncJob(user_id=current_user.id, source=CollectionSource.tmdb, job_type="dedupe", status=SyncStatus.pending)
     db.add(job)
     await db.commit()
@@ -5488,28 +5757,7 @@ async def run_merge_duplicate_episodes(user_id: int, job_id: int | None = None):
                 if not merge_ids:
                     continue
 
-                # collections and playback_progress are unique per (user, media),
-                # so drop the loser's row where the keeper already has one.
-                for model in (Collection, PlaybackProgress):
-                    await db.execute(
-                        delete(model).where(
-                            model.media_id.in_(merge_ids),
-                            model.user_id.in_(select(model.user_id).where(model.media_id == keep_id)),
-                        )
-                    )
-                # list_items is unique per (list, media).
-                await db.execute(
-                    delete(ListItem).where(
-                        ListItem.media_id.in_(merge_ids),
-                        ListItem.list_id.in_(select(ListItem.list_id).where(ListItem.media_id == keep_id)),
-                    )
-                )
-                for model in (WatchEvent, Collection, Rating, PlaybackProgress, ListItem):
-                    await db.execute(
-                        update(model).where(model.media_id.in_(merge_ids)).values(media_id=keep_id)
-                    )
-                # Anything still pointing at the old rows goes with them.
-                await db.execute(delete(Media).where(Media.id.in_(merge_ids)))
+                await _merge_media_rows(db, keep_id, merge_ids)
                 deleted += len(merge_ids)
 
                 if index % 25 == 0:
@@ -5532,6 +5780,237 @@ async def run_merge_duplicate_episodes(user_id: int, job_id: int | None = None):
         except Exception as e:
             await db.rollback()
             await _update_job(status=SyncStatus.failed, error_message=str(e)[:500])
+
+
+async def _merge_media_rows(db: AsyncSession, keep_id: int, merge_ids: list[int]) -> None:
+    """Move everything hanging off duplicate media rows onto the row we keep."""
+    from models.lists import ListItem
+
+    if not merge_ids:
+        return
+    # collections and playback_progress are unique per (user, media), so drop the
+    # loser's row wherever the keeper already has one.
+    for model in (Collection, PlaybackProgress):
+        await db.execute(
+            delete(model).where(
+                model.media_id.in_(merge_ids),
+                model.user_id.in_(select(model.user_id).where(model.media_id == keep_id)),
+            )
+        )
+    # list_items is unique per (list, media).
+    await db.execute(
+        delete(ListItem).where(
+            ListItem.media_id.in_(merge_ids),
+            ListItem.list_id.in_(select(ListItem.list_id).where(ListItem.media_id == keep_id)),
+        )
+    )
+    for model in (WatchEvent, Collection, Rating, PlaybackProgress, ListItem):
+        await db.execute(
+            update(model).where(model.media_id.in_(merge_ids)).values(media_id=keep_id)
+        )
+    await db.execute(delete(Media).where(Media.id.in_(merge_ids)))
+
+
+async def run_refresh_metadata(
+    user_id: int,
+    api_key: str,
+    tvdb_api_key: str | None = None,
+    job_id: int | None = None,
+):
+    """Re-fetch a library from scratch, show by show.
+
+    Each show is re-read from TMDB — and from TVDB too when a key is set, so
+    both catalogues' artwork is stored and a viewer's provider preference costs
+    nothing to answer. Episodes are placed where TMDB says they belong rather
+    than where a media server numbered them; where that position is already
+    taken, the two rows are the same episode stored twice and are merged onto
+    the older one.
+    """
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        async def _update_job(**kwargs):
+            if job_id is None:
+                return
+            await db.execute(
+                update(SyncJob).where(SyncJob.id == job_id).values(updated_at=func.now(), **kwargs)
+            )
+            await db.commit()
+
+        try:
+            await _update_job(status=SyncStatus.running, processed_items=0, total_items=0)
+
+            from core import tvdb as tvdb_client
+            from core.enrichment import _tvdb_series_artwork
+            from core.episode_order import ensure_episode_order_mapping
+            from models.episode_order import EpisodeOrderMapping
+            from models.media_alias import MediaAlias
+
+            settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+            settings = settings_q.scalar_one_or_none()
+            lang = tvdb_client.tvdb_language(
+                (settings.preferences or {}).get("content_language") if settings and settings.preferences else None
+            ) or "eng"
+
+            shows_q = await db.execute(
+                select(Show)
+                .where(Show.tmdb_id.isnot(None))
+                .where(Show.id.in_(select(Media.show_id).where(
+                    Media.media_type == MediaType.episode,
+                    Media.tmdb_id.isnot(None),
+                )))
+                .order_by(Show.id)
+            )
+            shows = shows_q.scalars().all()
+            await _update_job(total_items=len(shows))
+
+            renumbered = 0
+            merged = 0
+            refreshed = 0
+            mapped = 0
+            skipped_shows = 0
+
+            for processed, show in enumerate(shows, start=1):
+                if processed % 10 == 0:
+                    await _raise_if_cancelled(db, job_id)
+
+                eps_q = await db.execute(
+                    select(Media).where(
+                        Media.show_id == show.id,
+                        Media.media_type == MediaType.episode,
+                    )
+                )
+                local = eps_q.scalars().all()
+                identified = [m for m in local if m.tmdb_id]
+                if not identified:
+                    await _update_job(processed_items=processed)
+                    continue
+
+                try:
+                    index = await tmdb_episode_index(show.tmdb_id, api_key)
+                except Exception:
+                    skipped_shows += 1
+                    await _update_job(processed_items=processed)
+                    continue
+                if not index:
+                    skipped_shows += 1
+                    await _update_job(processed_items=processed)
+                    continue
+
+                # Re-read metadata and artwork for the whole show, both
+                # catalogues, before anything is moved — enrichment places an
+                # episode by its TMDB id, so the two agree by construction.
+                try:
+                    tvdb_episode_ids: dict[int, int] = {}
+                    if tvdb_api_key and show.tvdb_id:
+                        alias_q = await db.execute(
+                            select(MediaAlias.internal_id, MediaAlias.external_id).where(
+                                MediaAlias.provider == "tvdb",
+                                MediaAlias.media_type == MediaType.episode,
+                                MediaAlias.internal_id.in_([m.id for m in identified]),
+                            )
+                        )
+                        tvdb_episode_ids = {
+                            internal: int(external)
+                            for internal, external in alias_q.all()
+                            if str(external).isdigit()
+                        }
+                    await batch_enrich_items(
+                        [(m, show.tmdb_id) for m in identified],
+                        api_key=api_key,
+                        show_title_map={show.tmdb_id: show.title},
+                        tvdb_api_key=tvdb_api_key,
+                        show_tvdb_ids={show.tmdb_id: show.tvdb_id} if show.tvdb_id else None,
+                        tvdb_episode_ids=tvdb_episode_ids,
+                    )
+                    refreshed += len(identified)
+                    # Cards for the show itself read the show row, so its
+                    # artwork has to be recorded there too, not only on the
+                    # episodes underneath it.
+                    if tvdb_api_key and show.tvdb_id:
+                        poster, backdrop = await _tvdb_series_artwork(
+                            show.tvdb_id, tvdb_api_key, lang
+                        )
+                        if poster or backdrop:
+                            show.tvdb_data = {
+                                **(show.tvdb_data or {}),
+                                "tvdb_id": show.tvdb_id,
+                                "poster_path": poster,
+                                "backdrop_path": backdrop,
+                            }
+                except Exception:
+                    skipped_shows += 1
+
+                by_position = {(m.season_number, m.episode_number): m for m in local}
+                show_merged: list[int] = []
+                show_renumbered = 0
+                for media in identified:
+                    placed = index.get(media.tmdb_id)
+                    if not placed:
+                        continue
+                    season_number, episode_number, _ = placed
+                    if (media.season_number, media.episode_number) == (season_number, episode_number):
+                        continue
+
+                    occupant = by_position.get((season_number, episode_number))
+                    if occupant is not None and occupant.id != media.id:
+                        # Same episode stored twice under two numberings — keep
+                        # the older row so anything referencing it still resolves.
+                        keep, drop = sorted((occupant, media), key=lambda m: m.id)
+                        await _merge_media_rows(db, keep.id, [drop.id])
+                        keep.season_number = season_number
+                        keep.episode_number = episode_number
+                        by_position[(season_number, episode_number)] = keep
+                        show_merged.append(drop.id)
+                        merged += 1
+                        show_renumbered += 1
+                        continue
+
+                    by_position.pop((media.season_number, media.episode_number), None)
+                    media.season_number = season_number
+                    media.episode_number = episode_number
+                    by_position[(season_number, episode_number)] = media
+                    renumbered += 1
+                    show_renumbered += 1
+
+                # A show whose episodes had to move is one the two catalogues
+                # number differently — exactly the case TVDB browsing needs a
+                # mapping for, and the only case worth spending the calls on.
+                if show_renumbered and tvdb_api_key and show.tvdb_id:
+                    existing = await db.execute(
+                        select(func.count()).select_from(EpisodeOrderMapping)
+                        .where(EpisodeOrderMapping.series_tmdb_id == show.tmdb_id)
+                    )
+                    if not existing.scalar_one():
+                        try:
+                            await ensure_episode_order_mapping(
+                                db, show.tmdb_id, api_key, tvdb_api_key
+                            )
+                            mapped += 1
+                        except Exception:
+                            pass
+
+                await db.commit()
+                await _update_job(processed_items=processed)
+
+            await _update_job(
+                status=SyncStatus.completed,
+                processed_items=len(shows),
+                stats={
+                    "shows": len(shows),
+                    "episodes_refreshed": refreshed,
+                    "episodes_renumbered": renumbered,
+                    "duplicates_merged": merged,
+                    "shows_mapped": mapped,
+                    "shows_skipped": skipped_shows,
+                },
+            )
+        except SyncCancelled:
+            await db.rollback()
+            await _update_job(status=SyncStatus.cancelled)
+        except Exception as e:
+            logger.exception("Metadata refresh job %s failed", job_id)
+            await db.rollback()
+            await _update_job(status=SyncStatus.failed, error_message=str(e)[:900])
 
 
 @router.post("/link-providers")

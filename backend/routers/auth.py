@@ -323,7 +323,7 @@ async def bootstrap_restore(
     if count_result.scalar_one() > 0:
         raise HTTPException(status_code=403, detail="Bootstrap restore is only available when no users exist.")
 
-    fname = file.filename or ""
+    fname = (file.filename or "").lower()
     if not (fname.endswith(".pgdump") or fname.endswith(".bak")):
         raise HTTPException(status_code=400, detail="Only .pgdump backup files are accepted.")
 
@@ -447,7 +447,10 @@ async def update_user_settings(
     update_data = {k: v for k, v in settings_in.model_dump(exclude_unset=True).items() if k not in READ_ONLY_FIELDS}
 
     if "tmdb_api_key" in update_data and update_data["tmdb_api_key"]:
-        success = await tmdb.validate_api_key(update_data["tmdb_api_key"])
+        try:
+            success = await tmdb.validate_api_key(update_data["tmdb_api_key"])
+        except tmdb.TMDBUnavailable:
+            raise HTTPException(status_code=503, detail="TMDB is unreachable right now — the key could not be checked. Try again shortly.")
         if not success:
             raise HTTPException(status_code=400, detail="Invalid TMDB API Key")
 
@@ -838,7 +841,10 @@ async def test_tmdb(
 ):
     from core import tmdb
     _prevent_sensitive_response_caching(response)
-    success = await tmdb.validate_api_key(body.key.get_secret_value())
+    try:
+        success = await tmdb.validate_api_key(body.key.get_secret_value())
+    except tmdb.TMDBUnavailable:
+        raise HTTPException(status_code=503, detail="TMDB is unreachable right now — the key could not be checked. Try again shortly.")
     if not success:
         raise HTTPException(status_code=400, detail="Invalid TMDB API Key")
     return {"status": "ok", "message": "TMDB API key is valid."}

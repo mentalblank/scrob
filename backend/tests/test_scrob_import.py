@@ -231,11 +231,34 @@ class CommentsImportTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(stats["comments"], 1)
         comments = [o for o in db.added if type(o).__name__ == "Comment"]
-        self.assertEqual(comments[0].tmdb_id, 42)
+        self.assertEqual(comments[0].uri_id, "tmdb:m:42")
         self.assertEqual(comments[0].content, "Great flick")
 
+    async def test_episode_comment_lands_on_the_show_uri_with_its_numbers(self) -> None:
+        """Comments under a show are stored with media_type "series" and located
+        by their numbers — the same shape the app writes, so the comments
+        endpoint finds an imported comment."""
+        data = ScrobImportData(comments={
+            "movies": [], "shows": [], "seasons": [],
+            "episodes": [{"comment": "Great episode", "spoiler": False,
+                          "episode": {"season": 2, "number": 5},
+                          "show": {"ids": {"tmdb": 1396}}, "ids": {"tmdb": 1396}}],
+        })
+        db = _FakeSession([[], [], []])
+
+        stats = await apply_scrob_import(
+            db, job_id=1, user_id=1, data=data, api_key=None,
+            **{**_EMPTY_INCLUDE, "include_comments": True},
+        )
+
+        self.assertEqual(stats["comments"], 1)
+        comment = [o for o in db.added if type(o).__name__ == "Comment"][0]
+        self.assertEqual(comment.media_type, "series")
+        self.assertEqual(comment.uri_id, "tmdb:s:1396")
+        self.assertEqual((comment.season_number, comment.episode_number), (2, 5))
+
     async def test_duplicate_comment_is_skipped(self) -> None:
-        existing = SimpleNamespace(media_type="movie", tmdb_id=42, season_number=None, episode_number=None, content="Great flick")
+        existing = SimpleNamespace(media_type="movie", uri_id="tmdb:m:42", season_number=None, episode_number=None, content="Great flick")
         data = ScrobImportData(comments={
             "movies": [{"comment": "Great flick", "spoiler": False, "movie": {"ids": {"tmdb": 42}}}],
             "shows": [], "seasons": [], "episodes": [],

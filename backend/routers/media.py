@@ -763,6 +763,37 @@ async def enrich_with_state(
         return uris
 
     # --- Apply to items ---
+    # --- TVDB artwork (only when the viewer asked for it) ---
+    tvdb_artwork: dict[tuple[int, str], dict] = {}
+    if is_tvdb_pref:
+        art_q = await db.execute(
+            select(Media.tmdb_id, Media.media_type, Media.tvdb_data).where(
+                Media.tmdb_id.in_(all_tmdb_ids),
+                Media.tvdb_data.isnot(None),
+            )
+        )
+        for tmdb_id_val, media_type_val, data in art_q.all():
+            if data:
+                tvdb_artwork[(tmdb_id_val, media_type_val.value)] = data
+        if show_tmdb_ids:
+            show_art_q = await db.execute(
+                select(ShowModel.tmdb_id, ShowModel.tvdb_data).where(
+                    ShowModel.tmdb_id.in_(show_tmdb_ids),
+                    ShowModel.tvdb_data.isnot(None),
+                )
+            )
+            for tmdb_id_val, data in show_art_q.all():
+                if data:
+                    tvdb_artwork.setdefault((tmdb_id_val, "series"), data)
+
+    def _apply_tvdb_artwork(item: dict) -> None:
+        art = tvdb_artwork.get((item.get("tmdb_id"), item.get("type")))
+        if not art:
+            return
+        for field in ("poster_path", "backdrop_path"):
+            if art.get(field):
+                item[field] = art[field]
+
     for item in items:
         tid = item.get("tmdb_id")
         t = item.get("type")
@@ -797,6 +828,9 @@ async def enrich_with_state(
             item["watched"] = False
             item["collection_pct"] = 0
             item["in_library"] = False
+
+        if is_tvdb_pref:
+            _apply_tvdb_artwork(item)
 
         item["in_lists"] = list_membership.get(tid, [])
         item["is_monitored"] = monitored_status.get(tid, False)
@@ -2079,8 +2113,11 @@ async def airing_today_collected(
                 "show_tmdb_id": show["id"],
                 "season_number": episode.get("season_number"),
                 "episode_number": episode.get("episode_number"),
-                "poster_path": tmdb.poster_url(episode.get("still_path"), size="w780")
-                    or tmdb.poster_url(show.get("backdrop_path"), size="w780"),
+                # Cards for an episode lead with the show's poster, the same as
+                # Next Up — a still off one episode doesn't read as the show.
+                "show_poster_path": tmdb.poster_url(show.get("poster_path")),
+                "poster_path": tmdb.poster_url(show.get("poster_path"))
+                    or tmdb.poster_url(episode.get("still_path"), size="w780"),
                 "backdrop_path": tmdb.poster_url(show.get("backdrop_path"), size="w780"),
                 "tmdb_rating": show.get("vote_average"),
                 "release_date": episode.get("air_date"),

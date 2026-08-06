@@ -91,3 +91,20 @@ class HasAiredTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressCountingTests(unittest.TestCase):
+    """A catalogue is free to number a season 62-77 rather than 1-16. Counting
+    episodes from one invents positions that match nothing, and the real ones
+    then get added on top — which reported a show as having twice the episodes
+    it has."""
+
+    def test_progress_counts_per_season_without_inventing_positions(self) -> None:
+        import inspect
+
+        from routers import history
+
+        source = inspect.getsource(history.get_show_progress)
+        assert "for episode_number in range(1, aired + 1)" not in source
+        assert "total += aired" in source
+        assert "watched += min(watched_by_season.get(season_number, 0), aired)" in source
