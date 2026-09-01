@@ -2,8 +2,10 @@
 import { api } from "../lib/api";
 
 interface Props {
-  tmdbId: number;
-  mediaType: string; // "movie" | "episode"
+  uriId?: string | null;
+  tmdbId?: number | null;
+  mediaType: string; // "movie" | "episode" | "series" | "season"
+  seasonNumber?: number;
   inLibrary: boolean;
   title: string;
   token: string;
@@ -11,38 +13,43 @@ interface Props {
   mediaId?: number | null;
 }
 
-const { tmdbId, mediaType, inLibrary, title, token, secondary = false, mediaId } = Astro.props;
-const settings = await api.auth.getSettings(token);
-const useHls = settings.use_hls_player === true;
+const { uriId, tmdbId, mediaType, seasonNumber, inLibrary, title, token, secondary = false, mediaId } = Astro.props;
+const mediaRef = uriId ?? (tmdbId != null ? String(tmdbId) : "0");
+const settings = await api.auth.getSettings(token).catch(() => ({} as any));
+const cookieHls = Astro.cookies.get("use_hls_player")?.value;
+const useHls = cookieHls !== undefined ? cookieHls === "true" : (settings.use_hls_player === true);
+const playbackTarget = Astro.cookies.get("playback_target")?.value || settings.playback_target || "web";
 ---
 
 {inLibrary && (
-  <>
+  <div class="w-full">
     <button
       id="play-btn"
       class={secondary
-        ? "flex items-center gap-2 px-4 py-2 text-sm font-bold leading-none text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors cursor-pointer"
-        : "flex items-center gap-2 px-5 py-2.5 text-sm font-bold leading-none text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-blue-900/30"}
+        ? "w-full h-11 flex items-center justify-center gap-2 px-4 min-w-0 overflow-hidden text-sm font-bold leading-none text-zinc-300 bg-zinc-900/40 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900/60 rounded-xl transition-all duration-300 active:scale-95 cursor-pointer"
+        : "w-full h-11 flex items-center justify-center gap-2 px-4 min-w-0 overflow-hidden text-sm font-bold leading-none text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 active:scale-95 cursor-pointer shadow-lg shadow-blue-900/20"}
     >
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 shrink-0">
         <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
       </svg>
-      Play
+      <span class="truncate">Play</span>
     </button>
 
     <dialog
       id="player-dialog"
-      data-tmdb-id={tmdbId}
+      data-media-ref={mediaRef}
       data-media-id={mediaId ?? 0}
       data-media-type={mediaType}
+      data-season-number={seasonNumber || ""}
       data-title={title}
       data-token={token}
       data-use-hls={useHls ? "true" : "false"}
-      class="fixed inset-0 z-50 w-full max-w-5xl mx-auto my-auto bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl p-0 backdrop:bg-black/70"
+      data-playback-target={playbackTarget}
+      class="fixed inset-0 z-50 w-full max-w-5xl mx-auto my-auto bg-zinc-950/90 border border-zinc-800/80 rounded-2xl shadow-2xl p-0 backdrop:bg-zinc-950/85 backdrop:backdrop-blur-md"
     >
-      <div class="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-zinc-800/60">
         <span id="player-title" class="text-sm font-bold text-zinc-100 truncate"></span>
-        <button id="player-close" class="text-zinc-400 hover:text-zinc-100 transition p-1 rounded-lg hover:bg-zinc-800 cursor-pointer">
+        <button id="player-close" class="text-zinc-400 hover:text-zinc-200 transition p-1.5 rounded-xl hover:bg-zinc-900/60 cursor-pointer">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 6 6 18M6 6l12 12"/>
           </svg>
@@ -67,9 +74,9 @@ const useHls = settings.use_hls_player === true;
           </div>
         </div>
       </div>
-      <div id="player-sources" class="px-5 py-3 flex flex-wrap gap-2 border-t border-zinc-800 min-h-[52px] items-center"></div>
+      <div id="player-sources" class="px-5 py-3 flex flex-wrap gap-2 border-t border-zinc-800/60 min-h-[52px] items-center"></div>
     </dialog>
-  </>
+  </div>
 )}
 
 <script>
@@ -77,8 +84,12 @@ const useHls = settings.use_hls_player === true;
 
   function esc(str: string | null | undefined): string {
     if (str == null) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
 
   function generateUUID(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -108,13 +119,21 @@ const useHls = settings.use_hls_player === true;
 
   const dialog = document.getElementById('player-dialog') as HTMLDialogElement | null;
   if (dialog) {
-    const tmdbId    = dialog.dataset.tmdbId!;
+    const mediaRef  = dialog.dataset.mediaRef!;
     const mediaId   = parseInt(dialog.dataset.mediaId ?? '0', 10) || null;
     const mediaType = dialog.dataset.mediaType!;
+    const seasonNum = dialog.dataset.seasonNumber;
     const title     = dialog.dataset.title!;
     const token     = dialog.dataset.token!;
     const useHls    = dialog.dataset.useHls === "true";
-    const mediaIdParam = mediaId ? `&media_id=${mediaId}` : '';
+    const playbackTarget = dialog.dataset.playbackTarget || 'web';
+
+    // Show- and season-level Play buttons resolve server-side to a concrete
+    // episode, so every stream/subtitle/report call after that must address the
+    // resolved episode rather than the show this component was rendered for.
+    let activeMediaRef  = mediaRef;
+    let activeMediaType = mediaType;
+    let activeMediaIdParam = mediaId ? `&media_id=${mediaId}` : '';
 
     const playBtn   = document.getElementById('play-btn') as HTMLButtonElement | null;
     const video     = document.getElementById('player-video') as HTMLVideoElement;
@@ -182,7 +201,7 @@ const useHls = settings.use_hls_player === true;
       return true;
     }
 
-    function stopSession(): void {
+    function stopSession() {
       if (sessionTimer) { clearInterval(sessionTimer); sessionTimer = null; }
     }
 
@@ -204,7 +223,7 @@ const useHls = settings.use_hls_player === true;
         const track = document.createElement('track');
         track.kind = 'subtitles';
         const keyParam = sub.key ? `&key=${encodeURIComponent(sub.key)}` : '';
-        const srcUrl = `/api/proxy/media/subtitles/${mediaType}/${tmdbId}?connection_id=${connectionId}&stream_index=${sub.index}${keyParam}${sessionParam}${mediaIdParam}${fileParam}`;
+        const srcUrl = `/api/proxy/media/subtitles/${activeMediaType}/${activeMediaRef}?connection_id=${connectionId}&stream_index=${sub.index}${keyParam}${sessionParam}${activeMediaIdParam}${fileParam}`;
 
         // On-demand subtitle loading for Plex embedded subtitle tracks to prevent overwhelming the server with concurrent transcode sessions
         const isPlexEmbedded = source === 'plex' && (!sub.key || sub.key === 'None');
@@ -222,10 +241,10 @@ const useHls = settings.use_hls_player === true;
       });
     }
 
-    async function reportSession(state: string): Promise<void> {
+    async function reportSession(state: string) {
       if (!currentConnectionId) return;
       try {
-        await fetch(`/api/proxy/media/session/report/${mediaType}/${tmdbId}${mediaIdParam}`, {
+        await fetch(`/api/proxy/media/session/report/${activeMediaType}/${activeMediaRef}${activeMediaIdParam}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -310,28 +329,29 @@ const useHls = settings.use_hls_player === true;
         const codecParams = `&video_codecs=${encodeURIComponent(codecs.video)}&audio_codecs=${encodeURIComponent(codecs.audio)}`;
         const sessionParam = plexSessionId ? `&session_id=${plexSessionId}` : '';
         const hlsPath = source === 'plex' ? 'plex-hls' : 'hls';
-        loadHlsUrl(`/api/proxy/media/${hlsPath}/${mediaType}/${tmdbId}?connection_id=${connectionId}${mediaIdParam}${fileParam}${codecParams}${sessionParam}`);
+        loadHlsUrl(`/api/proxy/media/${hlsPath}/${activeMediaType}/${activeMediaRef}?connection_id=${connectionId}${activeMediaIdParam}${fileParam}${codecParams}${sessionParam}`);
       } else {
         destroyHls();
-        video.src = `/api/proxy/media/stream/${mediaType}/${tmdbId}?connection_id=${connectionId}${mediaIdParam}${fileParam}&token=${encodeURIComponent(token)}`;
+        video.src = `/api/proxy/media/stream/${activeMediaType}/${activeMediaRef}?connection_id=${connectionId}${activeMediaIdParam}${fileParam}&token=${encodeURIComponent(token)}`;
         video.play().catch(() => {});
       }
 
       reportSession('playing');
       sessionTimer = setInterval(() => {
         if (!video.paused && !video.ended) reportSession('progress');
-      }, 10_000);
+      }, 10000);
     }
 
     video.addEventListener('pause',   () => { reportSession('paused'); });
     video.addEventListener('play',    () => { reportSession('playing'); });
     async function markWatched(): Promise<void> {
       try {
+        const uId = activeMediaRef.includes(':') ? activeMediaRef : (activeMediaType === 'movie' ? `tmdb:m:${activeMediaRef}` : `tmdb:e:${activeMediaRef}`);
         await fetch('/api/proxy/history', {
           method: 'POST',
           keepalive: true,
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tmdb_id: parseInt(tmdbId), media_type: mediaType, completed: true }),
+          body: JSON.stringify({ uri_id: uId, media_type: activeMediaType, completed: true }),
         });
       } catch {}
     }
@@ -351,6 +371,7 @@ const useHls = settings.use_hls_player === true;
       video_codec?: string | null;
       audio_codec?: string | null;
       subtitles: { index: number; key?: string | null; language: string; label: string }[];
+      media_id?: number | null;
     }[]): void {
       if (sources.length === 0) {
         sourcesEl.innerHTML = '<span class="text-xs text-zinc-500">No playback source found.</span>';
@@ -359,34 +380,39 @@ const useHls = settings.use_hls_player === true;
       const LOCAL_SOURCES = ['plex', 'jellyfin', 'emby'];
       sourcesEl.innerHTML = sources.map((s, i) =>
         `<button
-          class="source-btn flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${i === 0 ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-500' : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:border-zinc-500'}"
+          class="source-btn flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${i === 0 ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-500' : 'bg-zinc-900/40 border-zinc-800 text-zinc-300 hover:border-zinc-700'}"
           data-connection-id="${s.connection_id}"
           data-file-id="${s.file_id ?? ''}"
           data-source="${esc(s.source)}"
           data-video-codec="${esc(s.video_codec)}"
           data-audio-codec="${esc(s.audio_codec)}"
           data-subtitles="${esc(JSON.stringify(s.subtitles || []))}"
+          data-media-id="${s.media_id ?? ''}"
         >
           ${LOCAL_SOURCES.includes(s.source) ? `<img src="/icons/${esc(s.source)}.svg" alt="${esc(s.source)}" class="w-4 h-4 rounded shrink-0" />` : ''}
           ${esc(s.name)}${s.resolution ? ` <span class="opacity-60 font-mono">${esc(s.resolution)}</span>` : ''}
         </button>`
       ).join('');
 
-      sourcesEl.querySelectorAll<HTMLButtonElement>('.source-btn').forEach(btn => {
+      sourcesEl.querySelectorAll('.source-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           sourcesEl.querySelectorAll('.source-btn').forEach(b => {
             b.classList.remove('bg-blue-600', 'border-blue-500', 'text-white', 'hover:bg-blue-500');
-            b.classList.add('bg-zinc-900', 'border-zinc-700', 'text-zinc-300', 'hover:border-zinc-500');
+            b.classList.add('bg-zinc-900/40', 'border-zinc-800', 'text-zinc-300', 'hover:border-zinc-700');
           });
           btn.classList.add('bg-blue-600', 'border-blue-500', 'text-white', 'hover:bg-blue-500');
-          btn.classList.remove('bg-zinc-900', 'border-zinc-700', 'text-zinc-300', 'hover:border-zinc-500');
+          btn.classList.remove('bg-zinc-900/40', 'border-zinc-800', 'text-zinc-300', 'hover:border-zinc-700');
+          const sourceBtn = btn as HTMLButtonElement;
+          // A manually-matched title can have its files spread over several media
+          // rows — follow the row this specific source belongs to.
+          if (sourceBtn.dataset.mediaId) activeMediaIdParam = `&media_id=${sourceBtn.dataset.mediaId}`;
           loadSource(
-            btn.dataset.connectionId!,
-            btn.dataset.fileId || null,
-            btn.dataset.source!,
-            JSON.parse(btn.dataset.subtitles || '[]'),
-            btn.dataset.videoCodec || null,
-            btn.dataset.audioCodec || null,
+            sourceBtn.dataset.connectionId!,
+            sourceBtn.dataset.fileId || null,
+            sourceBtn.dataset.source!,
+            JSON.parse(sourceBtn.dataset.subtitles || '[]'),
+            sourceBtn.dataset.videoCodec || null,
+            sourceBtn.dataset.audioCodec || null,
           );
         });
       });
@@ -401,26 +427,85 @@ const useHls = settings.use_hls_player === true;
       destroyHls();
       video.pause();
       video.src = '';
-      dialog.close();
+      dialog?.close();
     }
 
-    playBtn?.addEventListener('click', async () => {
-      titleEl.textContent = title;
-      sourcesEl.innerHTML = '<span class="text-xs text-zinc-400">Loading sources…</span>';
-      dialog.showModal();
+    async function startPlayback(preferredConnectionId?: string) {
+      if (playBtn) {
+        const origText = playBtn.innerHTML;
+        playBtn.innerHTML = '<span class="animate-pulse flex items-center justify-center gap-2"><svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading</span>';
+        playBtn.classList.add('opacity-80', 'cursor-not-allowed');
+      }
 
       try {
-        const res = await fetch(`/api/proxy/media/playback/${mediaType}/${tmdbId}${mediaId ? `?media_id=${mediaId}` : ''}`, {
+        const url = new URL(`/api/proxy/media/playback/${mediaType}/${mediaRef}`, window.location.origin);
+        if (seasonNum) url.searchParams.append('season_number', seasonNum);
+        if (mediaId) url.searchParams.append('media_id', String(mediaId));
+        
+        const res = await fetch(url.toString(), {
           headers: { 'Authorization': `Bearer ${token}` },
         });
+        
         const sources = res.ok ? await res.json() : [];
+
+        // For show/season refs the server resolved a concrete episode — address
+        // that from here on so streams and progress reports land on the episode.
+        const resolved = sources[0];
+        if (resolved?.media_type) {
+          activeMediaType = resolved.media_type;
+          activeMediaRef = resolved.media_ref || activeMediaRef;
+          activeMediaIdParam = resolved.media_id ? `&media_id=${resolved.media_id}` : '';
+        }
+
+        if (playBtn) {
+          playBtn.innerHTML = playBtn.dataset.origText || playBtn.innerHTML;
+          playBtn.classList.remove('opacity-80', 'cursor-not-allowed');
+        }
+
+        // "internal" — always use the built-in player. "web" — open the server web page.
+        if (playbackTarget !== 'internal') {
+          const targetSource = preferredConnectionId
+            ? sources.find((s: any) => s.connection_id == preferredConnectionId)
+            : sources.find((s: any) => s.external_url);
+
+          if (targetSource && targetSource.external_url) {
+            window.open(targetSource.external_url, '_blank', 'noopener,noreferrer');
+            return;
+          }
+        }
+
+        // Otherwise open the internal player modal
+        titleEl.textContent = resolved?.title ? `${title} — ${resolved.title}` : title;
+        dialog?.showModal();
         renderSources(sources);
         if (sources.length > 0) {
-          loadSource(sources[0].connection_id, sources[0].file_id ?? null, sources[0].source, sources[0].subtitles || [], sources[0].video_codec ?? null, sources[0].audio_codec ?? null);
+          // If preferred connection exists, select it, otherwise first
+          const preferred = preferredConnectionId
+            ? sources.find((s: any) => s.connection_id == preferredConnectionId)
+            : null;
+          const sourceToLoad = preferred || sources[0];
+          const btn = sourcesEl.querySelector(`[data-connection-id="${sourceToLoad.connection_id}"]`) as HTMLButtonElement | null;
+          if (btn) btn.click();
+        } else {
+          sourcesEl.innerHTML = '<span class="text-xs text-red-400">No local playback sources found.</span>';
         }
       } catch {
+        if (playBtn) {
+          playBtn.innerHTML = playBtn.dataset.origText || playBtn.innerHTML;
+          playBtn.classList.remove('opacity-80', 'cursor-not-allowed');
+        }
+        titleEl.textContent = title;
+        dialog?.showModal();
         sourcesEl.innerHTML = '<span class="text-xs text-red-400">Failed to load sources.</span>';
       }
+    }
+
+    if (playBtn) playBtn.dataset.origText = playBtn.innerHTML;
+    playBtn?.addEventListener('click', () => startPlayback());
+
+    document.addEventListener(`start-playback-${mediaRef}`, (e) => {
+      const ce = e as CustomEvent;
+      startPlayback(ce.detail?.connectionId);
     });
 
     closeBtn?.addEventListener('click', closePlayer);

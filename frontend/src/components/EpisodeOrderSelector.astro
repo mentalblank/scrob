@@ -105,15 +105,31 @@ const { tmdbId, tvdbId, selected, token } = Astro.props;
     // TVDB mapping can take minutes for long-running shows (one TMDB request per
     // episode), so it runs as a background job — poll until it finishes instead
     // of blocking the request and risking a reverse-proxy gateway timeout.
-    async function pollEpisodeOrderJob(jobId: number) {
+    async function pollEpisodeOrderJob(jobId: number, redirectOnComplete = true) {
       try {
+        const fetchHeaders: Record<string, string> = {};
+        const token = selector.dataset.token;
+        if (token && token !== 'undefined') {
+          fetchHeaders['Authorization'] = `Bearer ${token}`;
+        }
         const response = await fetch(`/api/proxy/shows/episode-order/jobs/${jobId}`, {
-          headers: { Authorization: `Bearer ${selector.dataset.token}` },
+          headers: fetchHeaders,
         });
         if (!response.ok) throw new Error('Unable to check episode order progress');
         const job = await response.json();
         if (job.status === 'completed') {
-          window.location.href = job.stats?.redirect ?? `/show/${selector.dataset.tmdbId}`;
+          if (!redirectOnComplete) {
+            setBusy(false);
+            progress?.classList.add('hidden');
+            return;
+          }
+          const tvdbId = selector.dataset.tvdbId;
+          const tmdbId = selector.dataset.tmdbId;
+          if (tvdbId && tvdbId !== 'undefined' && tvdbId !== 'null') {
+            window.location.href = `/show/tvdb:s:${tvdbId}`;
+          } else {
+            window.location.href = job.stats?.redirect ?? `/show/tmdb:s:${tmdbId}`;
+          }
           return;
         }
         if (job.status === 'failed' || job.status === 'cancelled') {
@@ -130,27 +146,47 @@ const { tmdbId, tvdbId, selected, token } = Astro.props;
     buttons.forEach((button) => {
       button.addEventListener('click', async () => {
         const episodeOrder = button.dataset.order as 'tmdb' | 'tvdb';
-        if (episodeOrder === selector.dataset.selected) return;
+        const tmdbId = selector.dataset.tmdbId;
+        const tvdbId = selector.dataset.tvdbId;
 
         setBusy(true);
         if (error) error.classList.add('hidden');
 
         try {
-          const response = await fetch(`/api/proxy/shows/${selector.dataset.tmdbId}/episode-order`, {
+          const fetchHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+          };
+          const token = selector.dataset.token;
+          if (token && token !== 'undefined') {
+            fetchHeaders['Authorization'] = `Bearer ${token}`;
+          }
+
+          const response = await fetch(`/api/proxy/shows/${tmdbId}/episode-order`, {
             method: 'POST',
-            headers: {
-              Authorization: `Bearer ${selector.dataset.token}`,
-              'Content-Type': 'application/json',
-            },
+            headers: fetchHeaders,
             body: JSON.stringify({ episode_order: episodeOrder }),
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.detail || 'Unable to update episode order');
+          // A `redirect` means the show is already matched and the page can switch
+          // straight away; any mapping job it kicked off finishes in the background.
+          if (data.redirect) {
+            window.location.href = data.redirect;
+            return;
+          }
           if (data.status === 'started' && data.job_id) {
             pollEpisodeOrderJob(data.job_id);
             return;
           }
-          window.location.href = data.redirect;
+          if (episodeOrder === 'tvdb' && tvdbId && tvdbId !== 'undefined' && tvdbId !== 'null') {
+            window.location.href = `/show/tvdb:s:${tvdbId}`;
+          } else if (episodeOrder === 'tmdb' && tmdbId && tmdbId !== 'undefined' && tmdbId !== 'null') {
+            window.location.href = `/show/tmdb:s:${tmdbId}`;
+          } else if (data.redirect) {
+            window.location.href = data.redirect;
+          } else {
+            window.location.reload();
+          }
         } catch (exception) {
           fail(exception instanceof Error ? exception.message : 'Unable to update episode order');
         }
@@ -161,15 +197,22 @@ const { tmdbId, tvdbId, selected, token } = Astro.props;
     // the page was refreshed mid-run — instead of silently losing track of it.
     (async () => {
       try {
+        const fetchHeaders: Record<string, string> = {};
+        const token = selector.dataset.token;
+        if (token && token !== 'undefined') {
+          fetchHeaders['Authorization'] = `Bearer ${token}`;
+        }
         const response = await fetch(`/api/proxy/shows/${selector.dataset.tmdbId}/episode-order/job`, {
-          headers: { Authorization: `Bearer ${selector.dataset.token}` },
+          headers: fetchHeaders,
         });
         if (!response.ok) return;
         const job = await response.json();
         if (job && (job.status === 'pending' || job.status === 'running')) {
           setBusy(true);
           renderProgress(job);
-          pollEpisodeOrderJob(job.id);
+          // Resumed jobs are background work for the page the user is already on
+          // — surface progress, but don't yank them somewhere else when it lands.
+          pollEpisodeOrderJob(job.id, false);
         }
       } catch {}
     })();

@@ -1,0 +1,18 @@
+name: Manual Cleanup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    name: Delete all workflow runs
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete all runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh run list --status completed --limit 1000 --json databaseId -q '.[].databaseId' | xargs -P 8 -I{} gh run delete {}

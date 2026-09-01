@@ -1,7 +1,6 @@
 ---
 import "../styles/global.css";
 import logo from "../assets/scrob.png";
-import WatchedAtPicker from "../components/WatchedAtPicker.astro";
 import { api } from "../lib/api";
 
 interface Props { title: string; hideNav?: boolean }
@@ -32,15 +31,35 @@ if (!user) {
   showAnonNavLinks = status.enable_logged_out_navigation;
 }
 const blurExplicit = Astro.cookies.get("blur_explicit")?.value !== "false";
+// Spoiler guards, off unless the user turned them on. Each one blurs a class of
+// content belonging to something they have not watched yet; a click reveals it.
+const spoilerClasses = [
+  ["blur_unwatched_episode_images", "blur-ep-image"],
+  ["blur_unwatched_episode_overviews", "blur-ep-text"],
+  ["blur_unwatched_movie_images", "blur-movie-image"],
+  ["blur_unwatched_movie_overviews", "blur-movie-text"],
+]
+  .filter(([cookie]) => Astro.cookies.get(cookie)?.value === "true")
+  .map(([, className]) => className);
+const rootClasses = [blurExplicit ? "blur-explicit" : "", ...spoilerClasses].filter(Boolean).join(" ");
 const use24h = Astro.cookies.get("time_format_24h")?.value === "true";
+// Timestamps are stored as naive UTC; SSR would otherwise format them in the
+// container's timezone (TZ=UTC) while client-side code uses the viewer's.
+// The middleware overwrites this with the user's own setting when they have
+// one; tz_explicit says whether it did, so the script below knows not to
+// auto-detect over the top of a deliberate choice.
+const tz = Astro.cookies.get("tz")?.value || "";
+const tzExplicit = Astro.cookies.get("tz_explicit")?.value === "true";
 
 const pathname = Astro.url.pathname;
 const loginNextUrl = `/login?next=${encodeURIComponent(Astro.url.pathname + Astro.url.search)}`;
 const activeMovies = pathname.startsWith('/movies') || pathname.startsWith('/collection/movies') || pathname.startsWith('/trending/movies') || pathname.startsWith('/media/movie');
 const activeShows  = pathname.startsWith('/shows') || pathname.startsWith('/collection/shows') || pathname.startsWith('/show') || pathname.startsWith('/trending/shows');
 const activeHistory = pathname.startsWith('/history') || pathname === '/next-up';
+const activeProgress = pathname.startsWith('/progress');
 const activeLists  = pathname.startsWith('/lists') || pathname.startsWith('/list/');
-const activeHome   = !activeMovies && !activeShows && !activeHistory && !activeLists;
+const activeDiscover = pathname.startsWith('/discover');
+const activeHome   = !activeMovies && !activeShows && !activeHistory && !activeLists && !activeDiscover && !activeProgress;
 
 const navLink = (active: boolean) =>
   active
@@ -51,11 +70,14 @@ const bottomNavItem = (active: boolean) =>
   `flex flex-col items-center justify-center gap-1 flex-1 py-2 text-[10px] font-bold uppercase tracking-wider transition-colors active:bg-zinc-800/70 active:scale-95 ${active ? 'text-blue-400' : 'text-zinc-500'}`;
 ---
 <!doctype html>
-<html lang="en" class={blurExplicit ? "blur-explicit" : ""}>
+<html lang="en" class={rootClasses}>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>{title} - Scrob</title>
+  <title>{title} — Scrob</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.ico" />
@@ -73,6 +95,29 @@ const bottomNavItem = (active: boolean) =>
     html.light #sun-icon { display: inline; }
     html.light #moon-icon { display: none; }
   </style>
+  <script is:inline>
+    window.esc = function(str) {
+      if (str == null) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    };
+
+    // Pre-flight: migrate localStorage integer IDs to URI format (Phase 4 URI migration)
+    (function () {
+      var keys = ['last_watched_id', 'last_show_id', 'last_movie_id'];
+      keys.forEach(function (key) {
+        var val = localStorage.getItem(key);
+        if (val && /^\d+$/.test(val)) {
+          // Prefix numeric IDs with tmdb:s: (shows) or tmdb:m: (movies)
+          var prefix = key.includes('movie') ? 'tmdb:m:' : 'tmdb:s:';
+          localStorage.setItem(key, prefix + val);
+        }
+      });
+    })();
+  </script>
   <script is:inline>
     // Theme initialization to avoid FOUC
     const theme = (() => {
@@ -93,7 +138,7 @@ const bottomNavItem = (active: boolean) =>
 
     // Accent color initialization to avoid FOUC
     const accent = localStorage.getItem('accentTheme');
-    if (accent && accent !== 'blue') {
+    if (accent && accent !== 'purple') {
       document.documentElement.setAttribute('data-accent', accent);
     } else {
       document.documentElement.removeAttribute('data-accent');
@@ -131,48 +176,60 @@ const bottomNavItem = (active: boolean) =>
     })();
   </script>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen overflow-x-hidden">
+<body class="bg-[var(--color-bg-page)] text-zinc-100 min-h-screen overflow-x-hidden relative">
+  <!-- Dynamic Ambient Glow Blobs -->
+  <div class="fixed top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-blue-500/5 dark:bg-[var(--accent-900)]/10 blur-[120px] pointer-events-none z-0"></div>
+  <div class="fixed bottom-[10%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-purple-500/5 dark:bg-purple-900/10 blur-[120px] pointer-events-none z-0"></div>
+
   {!hideNav && (
-    <nav class="px-4 md:px-6 py-3 md:py-4 text-sm relative z-30 bg-zinc-950 md:bg-transparent">
+    <nav class="sticky top-0 md:top-4 z-40 w-full max-w-6xl mx-auto mt-0 md:mt-4 px-4 md:px-6 py-3 md:py-3.5 text-sm transition-all shadow-lg">
+      <div class="absolute inset-0 bg-[var(--color-nav-bg)] backdrop-blur-md border-b md:border border-[var(--color-nav-border)] md:rounded-2xl pointer-events-none -z-10"></div>
       <!-- Default bar -->
       <div id="nav-default" class="flex items-center justify-between gap-3 safe-area-top">
         <!-- Left: logo + desktop links -->
-        <div class="flex items-center gap-6 min-w-0">
+        <div class="flex items-center gap-4 lg:gap-6 min-w-0 flex-1">
           <a href="/" class="flex items-center gap-2 text-zinc-100 font-bold text-lg tracking-tight shrink-0 group active:opacity-70 transition-opacity">
             <img src={logo.src} alt="Scrob Logo" width="32" height="32" loading="eager" class="w-7 h-7 md:w-8 md:h-8 object-contain group-hover:scale-105 transition-transform" />
             <span>Scrob</span>
           </a>
           {(user || showAnonNavLinks) && (
-            <div class="hidden md:flex items-center gap-6 text-sm">
-              <a href="/movies" class={navLink(activeMovies)}>Movies</a>
-              <a href="/shows" class={navLink(activeShows)}>Shows</a>
-              <a href="/lists" class={navLink(activeLists)}>Lists</a>
-              {user && (
-                <a href="/history" class={navLink(activeHistory)}>History</a>
-              )}
-            </div>
+          <div class="hidden md:flex items-center gap-4 lg:gap-6 text-sm shrink-0">
+            <a href="/movies" class={navLink(activeMovies)}>Movies</a>
+            <a href="/shows" class={navLink(activeShows)}>Shows</a>
+            <a href="/discover" class={navLink(activeDiscover)}>Discover</a>
+            <a href="/lists" class={navLink(activeLists)}>Lists</a>
+            <a href="/history" class={navLink(activeHistory)}>History</a>
+            <a href="/progress" class={navLink(activeProgress)}>Progress</a>
+          </div>
           )}
+          <!-- Desktop search -->
           {(user || showAnonNavLinks) && (
-            <!-- Desktop search -->
-            <form action="/search" method="GET" class="relative hidden md:block">
+          <div class="relative hidden md:block min-w-0 flex-1 lg:flex-none" id="desktop-search-wrapper">
+            <form action="/search" method="GET" autocomplete="off">
               <input
                 id="desktop-search-input"
                 type="text"
                 name="q"
                 placeholder="Search movies & shows..."
-                class="bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 w-64 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 focus:border-zinc-700 transition-all placeholder:text-zinc-400"
+                class="bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2 w-full lg:w-64 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 focus:border-zinc-700 transition-all placeholder:text-zinc-400"
+                autocomplete="off"
               />
-              <kbd class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400 font-sans pointer-events-none border border-zinc-800 rounded px-1.5 py-0.5 bg-zinc-950">/</kbd>
+              <kbd id="desktop-search-kbd" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400 font-sans pointer-events-none border border-zinc-800 rounded px-1.5 py-0.5 bg-zinc-950">/</kbd>
             </form>
+            <!-- Desktop predictive dropdown -->
+            <div id="desktop-search-dropdown" class="hidden absolute top-full left-0 right-0 mt-2 z-50 bg-zinc-950/70 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+              <div id="desktop-search-results" class="py-1.5 max-h-80 overflow-y-auto"></div>
+            </div>
+          </div>
           )}
         </div>
         <!-- Right: mobile search icon + theme + user -->
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 shrink-0">
+          <!-- Mobile search icon -->
           {(user || showAnonNavLinks) && (
-            <!-- Mobile search icon -->
-            <button id="mobile-search-open" class="md:hidden p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors" aria-label="Search">
-              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            </button>
+          <button id="mobile-search-open" class="md:hidden p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors" aria-label="Search">
+            <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </button>
           )}
           <!-- Theme toggle -->
           <button id="theme-toggle" class="p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-all hover:scale-110 active:scale-95" aria-label="Toggle Theme">
@@ -186,76 +243,43 @@ const bottomNavItem = (active: boolean) =>
           <!-- User menu (click-toggled) -->
           {user ? (
             <div class="relative">
-              <button id="user-menu-btn" class="relative flex items-center gap-1.5 text-zinc-400 hover:text-zinc-100 transition-colors p-3 rounded-xl bg-zinc-900 border border-zinc-800 cursor-pointer sm:p-1 sm:bg-transparent sm:border-transparent">
-                <span class="hidden sm:inline font-medium text-zinc-100 text-sm">{user.display_name}</span>
-                {pendingRequestCount > 0 && (
-                  <span class="absolute -top-1 -right-1 sm:top-0 sm:right-0 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-zinc-950"></span>
+              <button id="user-menu-btn" class="w-11 h-11 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-100 transition-all hover:scale-110 active:scale-95 cursor-pointer flex items-center justify-center overflow-hidden p-0" aria-label="User Menu">
+                {user.avatar_url ? (
+                  <img src={`/api/proxy${user.avatar_url}`} alt={user.display_name} class="w-full h-full object-cover shrink-0" />
+                ) : (
+                  <span class="w-full h-full bg-zinc-800 text-sm font-black text-zinc-300 flex items-center justify-center select-none shrink-0">
+                    {user.display_name ? user.display_name.substring(0, 1).toUpperCase() : "M"}
+                  </span>
                 )}
-                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sm:hidden text-zinc-400"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-                <svg id="user-chevron" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="opacity-50 hidden sm:block transition-transform duration-200"><path d="m6 9 6 6 6-6"/></svg>
+                {pendingRequestCount > 0 && (
+                  <span class="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-zinc-950"></span>
+                )}
               </button>
-              <div id="user-menu" class="hidden absolute top-full right-0 mt-2 sm:mt-3 w-48 z-50">
-                <div class="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl p-2 text-base">
-                  <a href="/discover" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-                    Discover
-                  </a>
-                  <a href="/calendar" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-                    Calendar
-                  </a>
-                  <a href="/profile" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-                    Profile
-                  </a>
-                  <a href={`/stats/${user.id}`} class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
-                    Statistics
-                  </a>
-                  <a href="/dropped" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><circle cx="12" cy="12" r="10"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
-                    Dropped
-                  </a>
-                  <div class="h-px bg-zinc-800 my-1 mx-1"></div>
-                  <a href="/user-settings" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                    Profile Settings
-                  </a>
-                  <a href="/connections" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                    Connections
-                  </a>
-                  <a href="/settings" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                    Settings
-                  </a>
+              <div id="user-menu" class="hidden absolute top-full right-0 mt-2 w-48 z-50">
+                <div class="bg-zinc-950/70 backdrop-blur-2xl border border-[var(--color-nav-border)] rounded-xl shadow-2xl p-2">
+                  <a href="/discover" class="md:hidden block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Discover</a>
+                  <a href="/progress" class="md:hidden block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Progress</a>
+                  <a href="/profile" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Profile</a>
+                  <a href={`/stats/${user.id}`} class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Statistics</a>
+                  <a href="/settings" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Settings</a>
+                  <a href="/connections" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Connections</a>
+                  <a href="/blocklist" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Content Filters</a>
+                  <a href="/remaps" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Metadata Overrides</a>
                   {user.is_admin && (
-                    <a href="/admin" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.79 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
-                      Admin
-                    </a>
+                    <a href="/admin" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">Admin</a>
                   )}
                   {user.is_admin && (
-                    <a href="/requests" class="flex items-center justify-between px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                      <span class="flex items-center gap-2.5">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-                        Requests
-                      </span>
+                    <a href="/requests" class="flex items-center justify-between px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">
+                      Requests
                       {pendingRequestCount > 0 && (
                         <span class="ml-2 min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center text-[10px] font-bold bg-blue-500 text-white rounded-full">{pendingRequestCount}</span>
                       )}
                     </a>
                   )}
-                  <a href="/about" class="flex items-center gap-2.5 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-lg transition">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                    About
-                  </a>
+                  <a href="/about" class="block px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:opacity-70 rounded-xl transition">About</a>
                   <div class="h-px bg-zinc-800 my-1 mx-1"></div>
                   <form method="POST" action="/logout" style="margin:0">
-                    <button type="submit" class="flex items-center gap-2.5 w-full text-left px-3 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition cursor-pointer">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 opacity-70"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-                      Logout
-                    </button>
+                    <button type="submit" class="block w-full text-left px-3 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition cursor-pointer">Logout</button>
                   </form>
                 </div>
               </div>
@@ -266,28 +290,37 @@ const bottomNavItem = (active: boolean) =>
         </div>
       </div>
 
+      <!-- Mobile search bar (hidden by default, shown when search icon tapped) -->
       {(user || showAnonNavLinks) && (
-        <!-- Mobile search bar (hidden by default, shown when search icon tapped) -->
-        <div id="nav-search" class="hidden items-center gap-2 safe-area-top">
-          <button id="mobile-search-close" class="p-2 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0" aria-label="Close search">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-          </button>
-          <form action="/search" method="GET" class="flex-1 flex items-center gap-2">
+      <div id="nav-search" class="hidden items-center gap-2 safe-area-top">
+        <button id="mobile-search-close" class="p-2 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0" aria-label="Close search">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+        <div class="flex-1 relative" id="mobile-search-wrapper">
+          <form action="/search" method="GET" autocomplete="off" class="flex items-center gap-2">
             <input
               id="mobile-search-input"
               type="text"
               name="q"
               placeholder="Search movies & shows..."
               class="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder:text-zinc-500"
+              autocomplete="off"
             />
             <button type="submit" class="self-stretch px-4 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-full transition-colors shrink-0">Go</button>
           </form>
+          <!-- Mobile predictive dropdown -->
+          <div id="mobile-search-dropdown" class="hidden absolute top-full left-0 right-0 mt-2 z-50 bg-zinc-950/70 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+            <div id="mobile-search-results" class="py-1.5 max-h-64 overflow-y-auto"></div>
+          </div>
         </div>
+      </div>
       )}
     </nav>
   )}
 
-  {pathname === "/" && <div id="now-playing-section"></div>}
+  {pathname === "/" && (
+    <div id="now-playing-section" class="relative z-30 w-full max-w-6xl mx-auto px-4 md:px-6 mt-3 md:mt-4"></div>
+  )}
 
   <main class:list={[
     "px-6 md:px-6 pb-24 md:pb-8 max-w-screen-xl mx-auto",
@@ -298,8 +331,8 @@ const bottomNavItem = (active: boolean) =>
   </main>
 
   <!-- Mobile bottom nav -->
-  {!hideNav && (user || showAnonNavLinks) && (
-    <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-900 border-t border-zinc-800 flex items-stretch safe-area-bottom">
+  {!hideNav && (
+    <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--color-nav-bg)] backdrop-blur-md border-t border-[var(--color-nav-border)] flex items-stretch safe-area-bottom">
       <a href="/" class={bottomNavItem(activeHome)}>
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         Home
@@ -451,51 +484,59 @@ const bottomNavItem = (active: boolean) =>
   </div>
 
   <!-- Watch history modal -->
-  <div id="watch-history-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-      <div class="px-5 pt-5 pb-4 border-b border-zinc-800 flex items-center justify-between gap-3">
-        <h3 id="watch-history-modal-title" class="text-base font-bold text-zinc-100">Watch History</h3>
-        <button id="watch-history-modal-close" class="text-zinc-500 hover:text-zinc-200 transition cursor-pointer shrink-0" aria-label="Close">
+  <div id="watch-history-modal" class="hidden fixed inset-0 z-[999] flex items-center justify-center" role="dialog" aria-modal="true">
+    <div id="watch-history-modal-backdrop" class="absolute inset-0 bg-black/75 backdrop-blur-sm cursor-pointer"></div>
+    <div class="relative bg-zinc-950/85 border border-zinc-800/85 rounded-3xl shadow-2xl w-full max-w-md mx-4 overflow-hidden flex flex-col max-h-[85vh] z-10 backdrop-blur-xl">
+      <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
+        <h3 class="text-sm font-bold text-zinc-100 flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="text-indigo-500">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span id="watch-history-modal-title">Play History</span>
+        </h3>
+        <button id="watch-history-modal-close" class="p-1 rounded-xl hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition cursor-pointer shrink-0" aria-label="Close">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <div id="watch-history-modal-events" class="watch-history-scroll max-h-52 overflow-y-auto divide-y divide-zinc-800/50"></div>
-      <div class="px-4 pt-3 pb-4 border-t border-zinc-800 space-y-2.5">
-        <button id="watch-history-unwatch-btn" class="hidden w-full px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-95 disabled:opacity-50 disabled:pointer-events-none">
+      
+      <div id="watch-history-modal-events" class="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin"></div>
+      
+      <div class="p-4 border-t border-zinc-800 bg-zinc-950/40 space-y-3">
+        <button id="watch-history-unwatch-btn" class="hidden w-full px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none">
           Mark as unwatched
         </button>
-        <p id="watch-history-add-play-label" class="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Add a play</p>
+        <p id="watch-history-log-label" class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Log a new play</p>
         <div class="flex gap-2">
           <button id="watch-history-now-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white">Just now</button>
           <button id="watch-history-custom-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Custom</button>
           <button id="watch-history-unknown-btn" class="flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200">Unknown</button>
         </div>
-        <input type="datetime-local" id="watch-history-date-input" class="hidden w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-zinc-200 focus:outline-none focus:border-green-500 [color-scheme:dark]" />
-        <button id="watch-history-log-btn" class="w-full px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-95">
-          Mark as watched
+        <input type="datetime-local" id="watch-history-date-input" class="hidden w-full px-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-sm text-zinc-200 focus:outline-none focus:border-blue-500 [color-scheme:dark]" />
+        <button id="watch-history-log-btn" class="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-xl transition-all cursor-pointer active:scale-[0.98] shadow-lg shadow-indigo-900/20">
+          Log play
         </button>
       </div>
     </div>
   </div>
 
-  <WatchedAtPicker />
 
   <!-- Create list modal -->
-  <div id="create-list-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+  <div id="create-list-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl shadow-2xl p-6 w-full max-w-sm mx-4 backdrop-blur-xl">
       <h3 class="text-base font-bold text-zinc-100 mb-4">Create new list</h3>
       <input id="create-list-name" type="text" placeholder="List name" maxlength="100"
-        class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500 mb-4" />
+        class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500 mb-4" />
       <div class="flex gap-2 justify-end">
         <button id="create-list-cancel" class="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-100 transition cursor-pointer">Cancel</button>
-        <button id="create-list-confirm" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition cursor-pointer">Create</button>
+        <button id="create-list-confirm" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition cursor-pointer">Create</button>
       </div>
     </div>
   </div>
 
   <!-- PWA install banner -->
   <div id="pwa-banner" class="hidden fixed bottom-14 left-0 right-0 z-[60] p-4 md:bottom-6 md:left-auto md:right-6 md:max-w-sm">
-    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-4 flex items-start gap-3">
+    <div class="bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/85 rounded-2xl shadow-2xl p-4 flex items-start gap-3">
       <img src="/web-app-manifest-192x192.png" alt="" aria-hidden="true" class="w-12 h-12 rounded-xl shrink-0" />
       <div class="flex-1 min-w-0">
         <p class="text-sm font-bold text-zinc-100">Install Scrob</p>
@@ -505,24 +546,111 @@ const bottomNavItem = (active: boolean) =>
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
       <div id="pwa-install-wrap" class="hidden">
-        <button id="pwa-install-btn" class="shrink-0 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition cursor-pointer">Install</button>
+        <button id="pwa-install-btn" class="shrink-0 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition cursor-pointer">Install</button>
       </div>
     </div>
   </div>
 
   <!-- Confirm dialog -->
-  <div id="confirm-dialog" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+  <div id="confirm-dialog" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm">
+    <div class="bg-zinc-900/85 border border-zinc-800/85 rounded-3xl shadow-2xl p-6 w-full max-w-sm mx-4 backdrop-blur-xl overflow-hidden">
       <h3 id="confirm-title" class="text-base font-bold text-zinc-100 mb-2"></h3>
       <p id="confirm-body" class="text-sm text-zinc-400 mb-6"></p>
       <div class="flex gap-2 justify-end">
         <button id="confirm-cancel" class="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-100 transition cursor-pointer">Cancel</button>
-        <button id="confirm-ok" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white font-semibold rounded-lg transition cursor-pointer">Confirm</button>
+        <button id="confirm-ok" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white font-semibold rounded-xl transition cursor-pointer">Confirm</button>
       </div>
     </div>
   </div>
 
   <script>
+    // ── Global URL helper ─────────────────────────────────────────────────────
+    // Constructs canonical media URLs, preferring uri_id over integer IDs.
+    window["buildItemUrl"] = function(item: any, preferTvdb = false): string {
+      const t = item?.type;
+      
+      if (preferTvdb) {
+        if ((t === 'series' || t === 'show') && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+        if (t === 'person' && item.tvdb_id) return `/person/tvdb:p:${item.tvdb_id}`;
+      }
+
+      if (item?.uri_id) {
+        const p = item.uri_id.split(':');
+        if (p.length === 3) {
+          const [prov, pfx, numId] = p;
+          if (preferTvdb && (pfx === 's' || t === 'series' || t === 'show') && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+          if (preferTvdb && pfx === 'p' && item.tvdb_id) return `/person/tvdb:p:${item.tvdb_id}`;
+          
+          if (pfx === 's') return `/show/${prov}:s:${numId}`;
+          if (pfx === 'm') return `/media/movie/${prov}:m:${numId}`;
+          if (pfx === 'p') return `/person/${prov}:p:${numId}`;
+        }
+      }
+
+      if (t === 'movie') {
+        if (item.tmdb_id) return `/media/movie/tmdb:m:${item.tmdb_id}`;
+        return '/';
+      }
+      if (t === 'series' || t === 'show') {
+        if (preferTvdb && item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+        if (item.tmdb_id) return `/show/tmdb:s:${item.tmdb_id}`;
+        if (item.tvdb_id) return `/show/tvdb:s:${item.tvdb_id}`;
+        return '/';
+      }
+      if (t === 'episode' || t === 'season') {
+        const sn = item.season_number, en = item.episode_number;
+        // The TVDB position the backend translated for this row (#186). A TVDB
+        // show id with a TMDB position lands on a real but unrelated episode
+        // wherever the two catalogues number a show differently, so the
+        // translated numbers are the only ones that may be paired with it.
+        const tsn = item.tvdb_season_number, ten = item.tvdb_episode_number;
+        if (preferTvdb && item.show_tvdb_id && !item.tvdb_sourced) {
+          if (t === 'episode' && tsn != null && ten != null) {
+            return `/show/tvdb:s:${item.show_tvdb_id}/season/${tsn}/${ten}`;
+          }
+          if (t === 'season' && tsn != null) {
+            return `/show/tvdb:s:${item.show_tvdb_id}/season/${tsn}`;
+          }
+        }
+        const showUri = item.show_uri_id;
+        if (showUri) {
+          const sp = showUri.split(':');
+          if (sp.length === 3 && sp[1] === 's') {
+            const base = `/show/${sp[0]}:s:${sp[2]}`;
+            if (sn != null && en != null) return `${base}/season/${sn}/${en}`;
+            if (sn != null) return `${base}/season/${sn}`;
+            return base;
+          }
+        }
+        const st = item.show_tmdb_id || null;
+        const sv = item.show_tvdb_id || null;
+        // sn/en are TMDB's below here, so they only go with a TVDB id when the
+        // row itself is TVDB-native (no TMDB counterpart at all).
+        const svTvdbNative = item.tvdb_sourced ? sv : null;
+        if (sn != null && en != null) {
+          if (preferTvdb && svTvdbNative) return `/show/tvdb:s:${svTvdbNative}/season/${sn}/${en}`;
+          if (st) return `/show/tmdb:s:${st}/season/${sn}/${en}`;
+          if (sv) return `/show/tvdb:s:${sv}/season/${sn}/${en}`;
+        }
+        if (sn != null) {
+          if (preferTvdb && svTvdbNative) return `/show/tvdb:s:${svTvdbNative}/season/${sn}`;
+          if (st) return `/show/tmdb:s:${st}/season/${sn}`;
+          if (sv) return `/show/tvdb:s:${sv}/season/${sn}`;
+        }
+        if (preferTvdb && sv) return `/show/tvdb:s:${sv}`;
+        if (st) return `/show/tmdb:s:${st}`;
+        if (sv) return `/show/tvdb:s:${sv}`;
+        return '/';
+      }
+      if (t === 'person') {
+        if (item.tvdb_id && (!item.tmdb_id || preferTvdb)) return `/person/tvdb:p:${item.tvdb_id}`;
+        if (item.tmdb_id) return `/person/tmdb:p:${item.tmdb_id}`;
+        return '/';
+      }
+      if (item?.tmdb_id) return `/media/${t}/tmdb:${t === 'movie' ? 'm' : 's'}:${item.tmdb_id}`;
+      return '/';
+    };
+
     // ── Theme toggle ───────────────────────────────────────────────────────────
     const themeToggle = document.getElementById('theme-toggle');
 
@@ -543,18 +671,15 @@ const bottomNavItem = (active: boolean) =>
     // ── User dropdown (click-toggled) ──────────────────────────────────────────
     const userMenuBtn = document.getElementById('user-menu-btn');
     const userMenu = document.getElementById('user-menu');
-    const userChevron = document.getElementById('user-chevron');
 
     userMenuBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       const open = !userMenu?.classList.contains('hidden');
       userMenu?.classList.toggle('hidden', open);
-      userChevron?.style.setProperty('transform', open ? '' : 'rotate(180deg)');
     });
 
     document.addEventListener('click', () => {
       userMenu?.classList.add('hidden');
-      userChevron?.style.removeProperty('transform');
     });
 
     // ── Mobile search expand ───────────────────────────────────────────────────
@@ -573,13 +698,15 @@ const bottomNavItem = (active: boolean) =>
       navSearch?.classList.add('hidden');
       navSearch?.classList.remove('flex');
       navDefault?.classList.remove('hidden');
+      closeMobileDropdown();
     };
 
     document.getElementById('mobile-search-close')?.addEventListener('click', closeSearch);
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !navSearch?.classList.contains('hidden')) {
-        closeSearch();
+      if (e.key === 'Escape') {
+        if (!navSearch?.classList.contains('hidden')) { closeSearch(); return; }
+        closeDesktopDropdown();
         return;
       }
       if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
@@ -595,37 +722,154 @@ const bottomNavItem = (active: boolean) =>
         }
       }
     });
+
+    // ── Predictive search dropdown ─────────────────────────────────────────────
+    const desktopInput    = document.getElementById('desktop-search-input') as HTMLInputElement | null;
+    const desktopKbd      = document.getElementById('desktop-search-kbd');
+    const desktopDropdown = document.getElementById('desktop-search-dropdown')!;
+    const desktopResults  = document.getElementById('desktop-search-results')!;
+    const mobileDropdown  = document.getElementById('mobile-search-dropdown')!;
+    const mobileResults   = document.getElementById('mobile-search-results')!;
+
+    let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+    function closeDesktopDropdown() {
+      desktopDropdown?.classList.add('hidden');
+    }
+    function closeMobileDropdown() {
+      mobileDropdown?.classList.add('hidden');
+    }
+
+    const searchSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`;
+    const movieSvg  = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>`;
+    const tvSvg     = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="15" x="2" y="7" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>`;
+    const personSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+
+    function buildDropdownHtml(query: string, results: any[]): string {
+      const esc = (s: unknown) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      let html = '';
+      const primarySource = document.cookie.split('; ').find(row => row.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
+
+      results.slice(0, 6).forEach(item => {
+        const isMovie = item.type === 'movie';
+        const isPerson = item.type === 'person';
+        const href = window["buildItemUrl"](item, primarySource === 'tvdb');
+        const icon = isMovie ? movieSvg : (isPerson ? personSvg : tvSvg);
+        
+        let badge = '';
+        if (isMovie) {
+          badge = `<span class="text-[9px] font-bold uppercase tracking-wider text-blue-400 px-1.5 py-0.5 rounded bg-blue-500/10 shrink-0">Movie</span>`;
+        } else if (isPerson) {
+          badge = `<span class="text-[9px] font-bold uppercase tracking-wider text-green-400 px-1.5 py-0.5 rounded bg-green-500/10 shrink-0">Person</span>`;
+        } else {
+          badge = `<span class="text-[9px] font-bold uppercase tracking-wider text-purple-400 px-1.5 py-0.5 rounded bg-purple-500/10 shrink-0">Show</span>`;
+        }
+
+        const year = item.release_date
+          ? new Date(item.release_date).getFullYear()
+          : '';
+
+        html += `<a href="${esc(href)}" class="nav-dropdown-item flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800/60 transition-colors group cursor-pointer">
+          <div class="shrink-0 text-zinc-500 group-hover:text-zinc-300 transition-colors">${icon}</div>
+          ${ item.poster_path
+              ? `<img src="${esc(item.poster_path)}" class="w-7 h-10 rounded object-cover shrink-0 border border-zinc-800" loading="lazy" />`
+              : `<div class="w-7 h-10 rounded bg-zinc-800 shrink-0"></div>` }
+          <div class="flex-1 min-w-0 pr-2">
+            <p class="text-sm font-semibold text-zinc-100 truncate">${esc(item.title)}</p>
+            <p class="text-[10px] text-zinc-500">${esc(year)}</p>
+          </div>
+          ${badge}
+        </a>`;
+      });
+
+      // Always append the full-search fallback
+      html += `<a href="/search?q=${encodeURIComponent(query)}" class="nav-dropdown-item flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800/60 transition-colors border-t border-zinc-800/60 group cursor-pointer">
+        <div class="shrink-0 text-zinc-400">${searchSvg}</div>
+        <p class="text-sm text-zinc-400 group-hover:text-zinc-100 transition-colors">Search for <strong class="text-zinc-200">&ldquo;${String(query).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}&rdquo;</strong></p>
+      </a>`;
+
+      return html;
+    }
+
+    async function fetchSuggestions(query: string, resultsEl: HTMLElement, dropdownEl: HTMLElement) {
+      if (!query.trim()) {
+        dropdownEl.classList.add('hidden');
+        return;
+      }
+      try {
+        const res = await fetch(`/api/proxy/media/search?q=${encodeURIComponent(query)}&page=1`, {
+          headers: { 'Authorization': `Bearer ${window["__AUTH_TOKEN__"] ?? ''}` }
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        resultsEl.innerHTML = buildDropdownHtml(query, data.results ?? []);
+        dropdownEl.classList.remove('hidden');
+      } catch {
+        // On error still show the fallback search link
+        resultsEl.innerHTML = buildDropdownHtml(query, []);
+        dropdownEl.classList.remove('hidden');
+      }
+    }
+
+    function attachPredictive(inputEl: HTMLInputElement | null, resultsEl: HTMLElement, dropdownEl: HTMLElement) {
+      if (!inputEl) return;
+      inputEl.addEventListener('input', () => {
+        if (searchDebounce) clearTimeout(searchDebounce);
+        const q = inputEl.value;
+        if (!q.trim()) { dropdownEl.classList.add('hidden'); return; }
+        searchDebounce = setTimeout(() => fetchSuggestions(q, resultsEl, dropdownEl), 220);
+      });
+      inputEl.addEventListener('focus', () => {
+        if (inputEl.value.trim()) fetchSuggestions(inputEl.value, resultsEl, dropdownEl);
+        // Hide the kbd hint when focused
+        desktopKbd?.classList.add('hidden');
+      });
+      inputEl.addEventListener('blur', () => {
+        // Delay so clicks on dropdown items register first
+        setTimeout(() => dropdownEl.classList.add('hidden'), 150);
+        desktopKbd?.classList.remove('hidden');
+      });
+    }
+
+    attachPredictive(desktopInput, desktopResults, desktopDropdown);
+    attachPredictive(mobileSearchInput, mobileResults, mobileDropdown);
+
+    // Close desktop dropdown when clicking outside
+    document.addEventListener('pointerdown', (e) => {
+      const wrapper = document.getElementById('desktop-search-wrapper');
+      if (wrapper && !wrapper.contains(e.target as Node)) closeDesktopDropdown();
+    });
   </script>
 
-  <script define:vars={{ __layoutAuthToken: token ?? '', __use24h: use24h, __isAdmin: user?.is_admin === true, __radarrCustomizeOnAdd: radarrCustomizeOnAdd, __sonarrCustomizeOnAdd: sonarrCustomizeOnAdd }}>
+  <script define:vars={{ __layoutAuthToken: token ?? '', __use24h: use24h, __tzCookie: tz, __tzExplicit: tzExplicit, __isAdmin: user?.is_admin === true, __radarrCustomizeOnAdd: radarrCustomizeOnAdd, __sonarrCustomizeOnAdd: sonarrCustomizeOnAdd }}>
     // Expose the server-side token for the card action script (httpOnly cookie is not JS-readable)
     window.__AUTH_TOKEN__ = __layoutAuthToken;
     window.__USE_24H__ = __use24h;
+    // Effective display timezone for everything this script formats. Empty
+    // string means "use the browser's", which is also the SSR fallback.
+    window.__TZ__ = __tzCookie || undefined;
     window.__IS_ADMIN__ = __isAdmin;
     window.__RADARR_CUSTOMIZE_ON_ADD__ = __radarrCustomizeOnAdd;
     window.__SONARR_CUSTOMIZE_ON_ADD__ = __sonarrCustomizeOnAdd;
 
-    // ── Now Playing poller (Global) ──────────────────────────────────────────
-    function esc(str) {
-      if (str == null) return '';
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+    // Hand the viewer's timezone to the server so SSR-rendered times match the
+    // ones this script formats. Reload once when it was missing or stale, or the
+    // current page keeps whatever timezone the server just guessed. Skipped
+    // entirely once the user has picked a timezone of their own.
+    const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!__tzExplicit && browserTz && browserTz !== __tzCookie) {
+      document.cookie = `tz=${browserTz}; path=/; SameSite=Lax; Max-Age=31536000`;
+      if (!sessionStorage.getItem('tz-reloaded')) {
+        sessionStorage.setItem('tz-reloaded', '1');
+        location.reload();
+      }
     }
 
-    function tmdbImageUrl(path, size = 'w500') {
-      if (!path) return null;
-      if (path.startsWith('http://') || path.startsWith('https://')) {
-        const m = /image\.tmdb\.org\/t\/p\/([^/]+)(\/.+)$/.exec(path);
-        if (m) return `/api/proxy/media/image/${m[1]}${m[2]}`;
-        const t = /artworks\.thetvdb\.com(\/.+)$/.exec(path);
-        if (t) return `/api/proxy/media/image/tvdb${t[1]}`;
-        return path;
-      }
-      return `/api/proxy/media/image/${size}${path.startsWith('/') ? path : '/' + path}`;
-    }
+    const esc = window.esc;
+
+    window.showMessage = function(text, type = 'success') {
+      window["showToast"](text, type === 'error' ? 'error' : 'success');
+    };
 
     function calcLivePct(progressSeconds, updatedAt, runtime, playing) {
       if (!runtime || runtime <= 0) return 0;
@@ -644,24 +888,14 @@ const bottomNavItem = (active: boolean) =>
         const m = session.media;
         const isEpisode = m.type === 'episode';
         const title = isEpisode ? (m.show_title ?? m.title) : m.title;
+        // Numbered by whichever catalogue the link routes to (#186).
+        const sSn = (!m.tvdb_sourced && m.tvdb_season_number != null) ? m.tvdb_season_number : m.season_number;
+        const sEn = (!m.tvdb_sourced && m.tvdb_episode_number != null) ? m.tvdb_episode_number : m.episode_number;
         const subtitle = isEpisode
-          ? `S${String(m.season_number).padStart(2,'0')}E${String(m.episode_number).padStart(2,'0')} · ${m.title}`
+          ? `S${String(sSn).padStart(2,'0')}E${String(sEn).padStart(2,'0')} · ${m.title}`
           : null;
-        // Local copy of lib/episodeHref's episode branch - this
-        // define:vars script can't import (see lib/episodeHref.ts's header
-        // comment for the full list of duplicate sites to keep in sync).
-        // #186: route to /show/tvdb/... using the translated position when
-        // the show is set to TVDB numbering, instead of guessing off
-        // tvdb_sourced alone (which only means "no TMDB counterpart").
-        const href = isEpisode
-          ? (!m.tvdb_sourced && m.show_episode_order === 'tvdb' && m.show_tvdb_id && m.tvdb_season_number != null && m.tvdb_episode_number != null
-              ? `/show/tvdb/${m.show_tvdb_id}/season/${m.tvdb_season_number}/${m.tvdb_episode_number}`
-              : !m.tvdb_sourced && m.show_tmdb_id && m.season_number && m.episode_number
-              ? `/show/${m.show_tmdb_id}/season/${m.season_number}/${m.episode_number}`
-              : m.show_tvdb_id && m.season_number && m.episode_number
-                ? `/show/tvdb/${m.show_tvdb_id}/season/${m.season_number}/${m.episode_number}`
-                : m.show_tmdb_id ? `/show/${m.show_tmdb_id}` : m.show_tvdb_id ? `/show/tvdb/${m.show_tvdb_id}` : null)
-          : (m.tmdb_id ? `/media/movie/${m.tmdb_id}` : null);
+        const primarySource = document.cookie.split('; ').find(row => row.startsWith('primary_metadata_source='))?.split('=')[1] || 'tmdb';
+        const href = window["buildItemUrl"](m, primarySource === 'tvdb') || null;
         const isPaused = session.state === 'paused';
         const sourceLabels = { plex: 'Plex', emby: 'Emby', kodi: 'Kodi', jellyfin: 'Jellyfin', manual: 'Scrob' };
         const sourceLabel = sourceLabels[session.source] ?? session.source;
@@ -682,7 +916,18 @@ const bottomNavItem = (active: boolean) =>
           : `<span class="relative shrink-0 flex w-2 h-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full ${dotColor} opacity-75"></span><span class="relative inline-flex rounded-full w-2 h-2 ${dotColor}"></span></span>`;
 
         const rawPoster = isEpisode ? (m.show_poster_path ?? m.poster_path) : m.poster_path;
-        const posterUrl = tmdbImageUrl(rawPoster, 'w185');
+        const posterUrl = rawPoster
+          ? (rawPoster.startsWith('http') ? rawPoster : `https://image.tmdb.org/t/p/w185${rawPoster}`)
+          : null;
+
+        const rawBackdrop = m.backdrop_path || m.show_backdrop_path;
+        const backdropUrl = rawBackdrop
+          ? (rawBackdrop.startsWith('http') ? rawBackdrop : `https://image.tmdb.org/t/p/w1280${rawBackdrop}`)
+          : null;
+
+        const backdropBg = backdropUrl
+          ? `style="background-image: url('${esc(backdropUrl)}'); background-size: cover; background-position: center;"`
+          : '';
 
         // #319 - movie-only mid/post-credits scene indicator. Movies never
         // use the subtitle line (that's episode-only), so it doubles as a
@@ -702,7 +947,9 @@ const bottomNavItem = (active: boolean) =>
           : '';
 
         return `<div class="relative group border-b border-zinc-800/50 last:border-0">
-            <div class="absolute inset-0 bg-zinc-900"></div>
+            <div class="absolute inset-0 overflow-hidden" ${backdropBg}>
+              ${backdropUrl ? `<div class="absolute inset-0 bg-zinc-950/85 backdrop-blur-sm"></div>` : `<div class="absolute inset-0 bg-zinc-900"></div>`}
+            </div>
             ${href ? `<a href="${esc(href)}" class="relative flex items-center gap-3 px-6 md:px-8 py-2.5 max-w-screen-xl mx-auto hover:brightness-110 transition-all">` : `<div class="relative flex items-center gap-3 px-6 md:px-8 py-2.5 max-w-screen-xl mx-auto">`}
               ${posterUrl
                 ? `<img src="${esc(posterUrl)}" alt="" class="shrink-0 w-7 h-10 rounded object-cover opacity-90" loading="lazy" decoding="async" />`
@@ -719,7 +966,14 @@ const bottomNavItem = (active: boolean) =>
                 ${subtitle ? `<p class="text-[10px] text-zinc-400 truncate leading-tight mt-0.5">${esc(subtitle)}</p>` : ''}
                 ${creditsLine}
               </div>
-              <span data-nppct="${sessionKey}" class="text-xs font-bold text-zinc-300 tabular-nums shrink-0">${esc(String(pctDisplay))}%</span>
+              <div class="flex items-center gap-3">
+                <span data-nppct="${sessionKey}" class="text-xs font-bold text-zinc-300 tabular-nums shrink-0">${esc(String(pctDisplay))}%</span>
+                <button onclick="event.preventDefault(); event.stopPropagation(); window.clearNowPlaying('${sessionKey}')"
+                        class="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                        title="Clear stuck session">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+              </div>
             ${href ? '</a>' : '</div>'}
             <div class="absolute bottom-0 left-0 right-0" style="height:2px;background:rgba(0,0,0,0.12)">
               <div data-npbar="${sessionKey}"
@@ -731,7 +985,7 @@ const bottomNavItem = (active: boolean) =>
             </div>
           </div>`;
       }).join('');
-      return `<div class="bg-zinc-950 border-b border-zinc-800/30">${rows}</div>`;
+      return `<div class="bg-zinc-950/90 backdrop-blur-md border border-zinc-800/40 rounded-2xl shadow-xl overflow-hidden">${rows}</div>`;
     }
 
     function tickNowPlaying() {
@@ -775,6 +1029,19 @@ const bottomNavItem = (active: boolean) =>
       } catch { /* ignore */ }
     }
 
+    window.clearNowPlaying = async function(sessionKey) {
+      if (!await window.showConfirm('Clear session?', 'This will remove the now-playing entry from your dashboard. It does not stop playback on the source server.')) return;
+      try {
+        const res = await fetch(`/api/proxy/history/now-playing/${sessionKey}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${window.__AUTH_TOKEN__}` },
+        });
+        if (res.ok) {
+          pollNowPlaying();
+        }
+      } catch { /* ignore */ }
+    };
+
     if (window.__AUTH_TOKEN__) {
       const isHome = () => window.location.pathname === '/';
       
@@ -793,7 +1060,7 @@ const bottomNavItem = (active: boolean) =>
   <script>
     // ── Card action bar ────────────────────────────────────────────────────────
     const API = '/api/proxy';
-    const TOKEN = () => (window as any).__AUTH_TOKEN__ ?? '';
+    const TOKEN = () => window["__AUTH_TOKEN__"] ?? '';
 
     function esc(s: unknown): string {
       if (s == null) return '';
@@ -810,103 +1077,7 @@ const bottomNavItem = (active: boolean) =>
       return res.json();
     }
 
-    // apiFetch's Error.message is the raw response body — usually a JSON
-    // {"detail": "..."} string from FastAPI, sometimes plain text.
-    function alertFromError(err: any, fallback = 'Something went wrong'): void {
-      let msg = fallback;
-      try {
-        const data = JSON.parse(err.message);
-        msg = data.detail || msg;
-      } catch {
-        if (err.message) msg = err.message;
-      }
-      alert(msg);
-    }
-
     // ── Watched-at picker ──────────────────────────────────────────────────────
-    function showWatchedAtPicker(anchorEl: HTMLElement): Promise<string | null> {
-      return new Promise(resolve => {
-        const picker = document.getElementById('watched-at-picker')!;
-        const nowBtn = document.getElementById('watched-at-now-btn')!;
-        const customBtn = document.getElementById('watched-at-custom-btn')!;
-        const input = document.getElementById('watched-at-input') as HTMLInputElement;
-        const confirmBtn = document.getElementById('watched-at-confirm')!;
-        const cancelBtn = document.getElementById('watched-at-cancel')!;
-
-        const activeClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white';
-        const inactiveClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200';
-
-        // Reset to "Just now" state
-        let useNow = true;
-        input.classList.add('hidden');
-        nowBtn.className = activeClass;
-        customBtn.className = inactiveClass;
-
-        // Pre-fill input with current local time
-        const toLocal = (d: Date) => {
-          const pad = (n: number) => String(n).padStart(2, '0');
-          return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        };
-        input.value = toLocal(new Date());
-        input.max = toLocal(new Date());
-
-        // Position below the button if there's room, otherwise above
-        picker.classList.remove('hidden');
-        const rect = anchorEl.getBoundingClientRect();
-        const pickerH = picker.offsetHeight;
-        const spaceBelow = window.innerHeight - rect.bottom;
-        const top = spaceBelow >= pickerH + 8
-          ? rect.bottom + window.scrollY + 4
-          : rect.top + window.scrollY - pickerH - 4;
-        picker.style.top = `${top}px`;
-        picker.style.left = `${Math.min(rect.left + window.scrollX, window.innerWidth - 288 - 8)}px`;
-
-        const close = (result: string | null) => {
-          picker.classList.add('hidden');
-          document.removeEventListener('pointerdown', outsideHandler);
-          nowBtn.replaceWith(nowBtn.cloneNode(true));
-          customBtn.replaceWith(customBtn.cloneNode(true));
-          confirmBtn.replaceWith(confirmBtn.cloneNode(true));
-          cancelBtn.replaceWith(cancelBtn.cloneNode(true));
-          resolve(result);
-        };
-
-        document.getElementById('watched-at-now-btn')!.addEventListener('click', () => {
-          useNow = true;
-          input.classList.add('hidden');
-          (document.getElementById('watched-at-now-btn') as HTMLElement).className = activeClass;
-          (document.getElementById('watched-at-custom-btn') as HTMLElement).className = inactiveClass;
-        });
-
-        document.getElementById('watched-at-custom-btn')!.addEventListener('click', () => {
-          useNow = false;
-          input.max = toLocal(new Date());
-          input.classList.remove('hidden');
-          (document.getElementById('watched-at-now-btn') as HTMLElement).className = inactiveClass;
-          (document.getElementById('watched-at-custom-btn') as HTMLElement).className = activeClass;
-        });
-
-        document.getElementById('watched-at-confirm')!.addEventListener('click', () => {
-          if (useNow) {
-            close(toLocal(new Date()));
-          } else {
-            const val = input.value;
-            if (!val) { close(toLocal(new Date())); return; }
-            close(val); // already a naive local datetime string
-          }
-        });
-
-        document.getElementById('watched-at-cancel')!.addEventListener('click', () => close(null));
-
-        const outsideHandler = (e: PointerEvent) => {
-          if (!picker.contains(e.target as Node) && e.target !== anchorEl && !anchorEl.contains(e.target as Node)) {
-            close(null);
-          }
-        };
-        setTimeout(() => document.addEventListener('pointerdown', outsideHandler), 0);
-      });
-    }
-
     // ── Confirm dialog ─────────────────────────────────────────────────────────
     (window as Window & { showConfirm: typeof showConfirm }).showConfirm = showConfirm;
     function showConfirm(title: string, body: string): Promise<boolean> {
@@ -921,6 +1092,44 @@ const bottomNavItem = (active: boolean) =>
         document.getElementById('confirm-ok')!.addEventListener('click', () => close(true), { once: true });
         document.getElementById('confirm-cancel')!.addEventListener('click', () => close(false), { once: true });
       });
+    }
+
+    // ── Toast system ──────────────────────────────────────────────────────────
+    window["showToast"] = showToast;
+    function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
+      const existing = document.querySelectorAll('.scrob-toast');
+      existing.forEach(t => {
+        t.classList.add('translate-y-10', 'opacity-0');
+        setTimeout(() => t.remove(), 300);
+      });
+
+      const toast = document.createElement('div');
+      toast.className = `scrob-toast fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-2xl font-bold shadow-2xl transition-all duration-300 translate-y-10 opacity-0 flex items-center gap-2 pointer-events-none`;
+      
+      const colors = {
+        success: 'bg-emerald-600 text-white shadow-emerald-900/40',
+        error: 'bg-red-600 text-white shadow-red-900/40',
+        info: 'bg-blue-600 text-white shadow-blue-900/40'
+      };
+      toast.classList.add(...colors[type].split(' '));
+      
+      const icon = {
+        success: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>',
+        error: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>',
+        info: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" /></svg>'
+      };
+      
+      toast.innerHTML = `${icon[type]} <span>${message}</span>`;
+      document.body.appendChild(toast);
+      
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-10', 'opacity-0');
+      });
+      
+      setTimeout(() => {
+        toast.classList.add('translate-y-10', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
     }
 
     // ── Rating popover ─────────────────────────────────────────────────────────
@@ -942,7 +1151,7 @@ const bottomNavItem = (active: boolean) =>
 
     function openRatingPopover(
       btn: HTMLElement | null,
-      tmdbId: string,
+      uriIdForRating: string,
       mediaType: string,
       currentRating: number | null,
       seasonNumber: number | null = null,
@@ -1000,9 +1209,8 @@ const bottomNavItem = (active: boolean) =>
         });
         half.addEventListener('click', async () => {
           try {
-            const ratingBody: Record<string, unknown> = { tmdb_id: Number(tmdbId), media_type: mediaType, rating: i };
+            const ratingBody: Record<string, unknown> = { uri_id: uriIdForRating, media_type: mediaType, rating: i };
             if (seasonNumber !== null) ratingBody.season_number = seasonNumber;
-            if (seasonNumber !== null && episodeOrder === 'tvdb') ratingBody.episode_order = 'tvdb';
             await apiFetch('/ratings', 'POST', ratingBody);
             if (btn) {
               btn.dataset.userRating = String(i);
@@ -1033,8 +1241,7 @@ const bottomNavItem = (active: boolean) =>
       removeBtn.onclick = async () => {
         try {
           const seasonQuery = seasonNumber !== null ? `&season_number=${seasonNumber}` : '';
-          const orderQuery = seasonNumber !== null && episodeOrder === 'tvdb' ? '&episode_order=tvdb' : '';
-          await apiFetch(`/ratings?tmdb_id=${tmdbId}&media_type=${mediaType}${seasonQuery}${orderQuery}`, 'DELETE');
+          await apiFetch(`/ratings?uri_id=${encodeURIComponent(uriIdForRating)}&media_type=${mediaType}${seasonQuery}`, 'DELETE');
           if (btn) {
             btn.dataset.userRating = '';
             btn.dataset.state = 'inactive';
@@ -1109,22 +1316,44 @@ const bottomNavItem = (active: boolean) =>
       })();
     });
 
+    function alertFromError(err: any, fallback = 'Something went wrong'): void {
+      let msg = fallback;
+      try {
+        const data = JSON.parse(err.message);
+        msg = data.detail || msg;
+      } catch {
+        if (err.message) msg = err.message;
+      }
+      alert(msg);
+    }
+
     // ── List popover ───────────────────────────────────────────────────────────
     let _activeListBtn: HTMLElement | null = null;
-    let _listTmdbId = '';
+    let _listUriId = '';
     let _listMediaType = '';
-    let _listSeasonNumber = '';
+    let _listShowUri: string | null = null;
+    let _listSeason: string | null = null;
+    let _listEpisode: string | null = null;
 
     function closeListPopover() {
       document.getElementById('list-popover')!.classList.add('hidden');
       _activeListBtn = null;
     }
 
-    async function openListPopover(btn: HTMLElement, tmdbId: string, mediaType: string, seasonNumber = '') {
+    async function openListPopover(btn: HTMLElement, uriIdForList: string, mediaType: string) {
       _activeListBtn = btn;
-      _listTmdbId = tmdbId;
+      _listUriId = uriIdForList;
       _listMediaType = mediaType;
-      _listSeasonNumber = seasonNumber;
+      // Episode/Season context for items not yet in the DB (lets backend resolve/create the row).
+      const _listCard = btn.closest('[data-card]') as HTMLElement | null;
+      const _clean = (v: string | undefined): string | null =>
+        (v && v !== 'null' && v !== 'undefined' && v.trim() !== '') ? v : null;
+      _listShowUri = _clean(_listCard?.dataset.showUriId);
+      _listSeason = _clean(_listCard?.dataset.season);
+      _listEpisode = _clean(_listCard?.dataset.episodeNumber);
+      if (_listSeason && !_listEpisode && mediaType === 'series') {
+        _listMediaType = 'season';
+      }
       const popover = document.getElementById('list-popover')!;
       const itemsEl = document.getElementById('list-popover-items')!;
       itemsEl.innerHTML = '<div class="px-3 py-2 text-xs text-zinc-500">Loading…</div>';
@@ -1159,33 +1388,24 @@ const bottomNavItem = (active: boolean) =>
             // (media_type=series) - individual episodes have their own
             // tmdb_id and never carry one, even though an episode card's
             // dataset also has a season number for display purposes.
-            const seasonNumber = _listMediaType === 'series' && _listSeasonNumber ? Number(_listSeasonNumber) : null;
+            const seasonNumber = _listMediaType === 'series' && _listSeason ? Number(_listSeason) : null;
             if (cb.checked) {
-              const body: Record<string, unknown> = { tmdb_id: Number(_listTmdbId), media_type: _listMediaType };
-              if (seasonNumber != null) body.season_number = seasonNumber;
-              await apiFetch(`/lists/${listId}/items`, 'POST', body);
+              const listBody: Record<string, string | number> = { uri_id: _listUriId, media_type: _listMediaType };
+              if (_listMediaType === 'episode' || _listMediaType === 'season') {
+                if (_listShowUri) listBody.show_uri_id = _listShowUri;
+                if (_listSeason) listBody.season_number = Number(_listSeason);
+                if (_listMediaType === 'episode' && _listEpisode) listBody.episode_number = Number(_listEpisode);
+              }
+              await apiFetch(`/lists/${listId}/items`, 'POST', listBody);
             } else {
-              // Find the list_item id — need to fetch list detail
               const detail = await apiFetch(`/lists/${listId}`);
-              const item = detail.items?.find((i: { media: { tmdb_id: number; season_number: number | null } }) => {
-                if (i.media?.tmdb_id !== Number(_listTmdbId)) return false;
-                // Only a whole-season list entry (media_type=series) needs
-                // season_number to disambiguate one season from another on
-                // the same show. For everything else (movies, episodes,
-                // shows added whole) tmdb_id alone is already unique - and
-                // for an episode, media.season_number here is the episode's
-                // own season within its show (a display fallback the API
-                // uses when there's no stored list_item.season_number), not
-                // something to match against.
-                if (_listMediaType !== 'series') return true;
-                return (i.media?.season_number ?? null) === seasonNumber;
-              });
+              const item = detail.items?.find((i: { media: { uri_id: string } }) => i.media?.uri_id === _listUriId);
               if (item) {
                 await apiFetch(`/lists/${listId}/items/${item.id}`, 'DELETE');
                 // If we're on the list detail page for this list, remove the card immediately
                 const pageListId = window.location.pathname.match(/^\/list\/(\d+)/)?.[1];
                 if (pageListId === String(listId)) {
-                  const wrapper = document.querySelector(`[data-item-id="${item.id}"]`);
+                  const wrapper = document.querySelector<HTMLElement>(`[data-item-id="${item.id}"]`);
                   wrapper?.remove();
                   closeListPopover();
                   const grid = document.getElementById('items-grid');
@@ -1204,20 +1424,14 @@ const bottomNavItem = (active: boolean) =>
               const nowInLists = updated.length > 0;
               _activeListBtn.dataset.state = nowInLists ? 'active' : 'inactive';
 
-              const isCard = _activeListBtn.parentElement?.classList.contains('grid');
-              if (nowInLists) {
-                _activeListBtn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-sky-500/10', 'hover:text-sky-400');
-                if (isCard) {
-                  _activeListBtn.classList.add('bg-sky-500/20', 'text-sky-400');
+              const isCardBtn = _activeListBtn.classList.contains('card-action-btn');
+              if (!isCardBtn) {
+                if (nowInLists) {
+                  _activeListBtn.classList.remove('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-sky-500/10', 'hover:text-sky-400');
+                  _activeListBtn.classList.add('bg-sky-500/20', 'text-sky-400', 'hover:bg-sky-500/30');
                 } else {
-                  _activeListBtn.classList.add('bg-sky-500/50', 'text-sky-300', 'hover:bg-sky-400/50');
-                }
-              } else {
-                _activeListBtn.classList.remove('bg-sky-500/20', 'bg-sky-500/50', 'text-sky-400', 'text-sky-300', 'hover:bg-sky-500/40', 'hover:bg-sky-400/50');
-                if (isCard) {
-                  _activeListBtn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-sky-500/10', 'hover:text-sky-400');
-                } else {
-                  _activeListBtn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-sky-500/10', 'hover:text-sky-400');
+                  _activeListBtn.classList.remove('bg-sky-500/20', 'text-sky-400', 'hover:bg-sky-500/30');
+                  _activeListBtn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-sky-500/10', 'hover:text-sky-400');
                 }
               }
             }
@@ -1282,8 +1496,11 @@ const bottomNavItem = (active: boolean) =>
       document.getElementById('drop-modal')!.classList.add('hidden');
     }
 
-    function openDropModal(mediaType: string, showId: string | undefined, mediaId: string, tmdbId?: string) {
+    function openDropModal(mediaType: string, showId: string | undefined, mediaId: string, tmdbId?: string, uriId?: string) {
       const isSeries = mediaType === 'series';
+      // Drop is a blocklist entry now. A card opened straight from TMDB may have
+      // no uri on it yet, so fall back to the one its tmdb id implies.
+      const dropUri = uriId || (tmdbId ? `tmdb:${isSeries ? 's' : 'm'}:${tmdbId}` : '');
       document.getElementById('drop-modal-title')!.textContent = isSeries ? 'Drop Show' : 'Drop Movie';
       document.getElementById('drop-modal-body')!.textContent = isSeries
         ? 'Dropping hides this show from Next Up, Calendar, and recommendations, without touching your watch history.'
@@ -1306,17 +1523,12 @@ const bottomNavItem = (active: boolean) =>
 
       document.getElementById('drop-modal-drop')!.onclick = async () => {
         closeDropModal();
+        if (!dropUri) {
+          alertFromError(new Error('This item has no identifier to drop.'), 'Failed to drop');
+          return;
+        }
         try {
-          if (isSeries) {
-            await apiFetch('/history/drop/show', 'POST', { show_id: Number(showId) });
-          } else {
-            // A movie opened straight from TMDB has no local id yet - send the
-            // tmdb id so the backend can resolve/create one (#330).
-            const body = mediaId && Number(mediaId) > 0
-              ? { media_id: Number(mediaId) }
-              : { tmdb_id: Number(tmdbId) };
-            await apiFetch('/history/drop/movie', 'POST', body);
-          }
+          await apiFetch('/media/blocklist', 'POST', { uri_id: dropUri, media_type: mediaType, is_dropped: true });
           window.location.reload();
         } catch (err: any) {
           alertFromError(err, 'Failed to drop');
@@ -1466,7 +1678,7 @@ const bottomNavItem = (active: boolean) =>
         // Re-open popover if we had an active card
         if (_activeListBtn) {
           const card = _activeListBtn.closest('[data-card]') as HTMLElement;
-          if (card) openListPopover(_activeListBtn, card.dataset.tmdbId!, card.dataset.mediaType!);
+          if (card) openListPopover(_activeListBtn, card.dataset.uriId!, card.dataset.mediaType!);
         }
       } catch { /* ignore */ }
     });
@@ -1478,19 +1690,33 @@ const bottomNavItem = (active: boolean) =>
     // ── Watched button UI updater ──────────────────────────────────────────────
     function setWatchedActiveClasses(targetBtn: HTMLElement, active: boolean) {
       const isCard = targetBtn.parentElement?.classList.contains('grid');
+      // A series-level button carries a percentage; an episode/movie one does not.
+      const isSeries = targetBtn.dataset.watchPct !== undefined;
+      if (isSeries) {
+        const newPct = active ? 100 : 0;
+        targetBtn.dataset.watchPct = String(newPct);
+        targetBtn.title = `${newPct}% watched`;
+        targetBtn.style.background = '';
+        const labelEl = targetBtn.querySelector('span');
+        if (labelEl) labelEl.textContent = `${newPct}%`;
+        const smLabelEl = targetBtn.querySelectorAll('span')[1];
+        if (smLabelEl) smLabelEl.textContent = `${newPct}%`;
+      } else {
+        targetBtn.title = active ? 'Mark as unwatched' : 'Mark as watched';
+      }
       if (active) {
-        targetBtn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-400', 'hover:text-green-500');
+        targetBtn.classList.remove('bg-zinc-850', 'bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-400', 'hover:text-green-500');
         if (isCard) {
           targetBtn.classList.add('bg-green-500/20', 'text-green-400');
         } else {
-          targetBtn.classList.add('bg-green-500/50', 'text-green-300', 'hover:bg-green-400/50');
+          targetBtn.classList.add('bg-green-500/20', 'text-green-400', 'hover:bg-green-500/30');
         }
       } else {
-        targetBtn.classList.remove('bg-green-500/20', 'bg-green-500/50', 'text-green-400', 'text-green-300', 'hover:bg-green-500/40', 'hover:bg-green-400/50');
+        targetBtn.classList.remove('bg-green-500/20', 'bg-green-500/50', 'text-green-400', 'text-green-300', 'hover:bg-green-500/40', 'hover:bg-green-400/50', 'hover:bg-green-500/30');
         if (isCard) {
           targetBtn.classList.add('bg-zinc-900', 'text-zinc-400', 'hover:bg-green-500/10', 'hover:text-green-500');
         } else {
-          targetBtn.classList.add('bg-zinc-800', 'text-zinc-500', 'hover:bg-green-500/10', 'hover:text-green-400');
+          targetBtn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-green-500/10', 'hover:text-green-400');
         }
       }
       targetBtn.querySelector('circle')?.setAttribute('fill', active ? 'currentColor' : 'none');
@@ -1541,6 +1767,12 @@ const bottomNavItem = (active: boolean) =>
     // modal, the season-level ActionBar's percentage badge doesn't get touched
     // by anything above (that only cascades show/season -> episodes, not the
     // reverse) - recompute it from the now-updated episode buttons on the page.
+    // Cards are matched by data-show-tmdb-id, so a tmdb: uri reduces to its bare
+    // id; a tvdb-sourced show has none to match on and skips the resync.
+    function _tmdbIdFromUri(uri: string | null): string {
+      return (uri || '').startsWith('tmdb:') ? (uri || '').split(':').pop() || '' : '';
+    }
+
     function syncSeasonWatchPctFromDOM(showTmdbId: string, season: string) {
       if (!showTmdbId || !season) return;
       const epCards = document.querySelectorAll<HTMLElement>(
@@ -1595,29 +1827,79 @@ const bottomNavItem = (active: boolean) =>
     }
 
     // ── Watch history modal ────────────────────────────────────────────────────
-    let _watchHistoryTmdbId = '';
+    let _watchHistoryTmdbId: string | null = '';
     let _watchHistoryMediaType = '';
     let _watchHistoryDateMode: 'now' | 'custom' | 'unknown' = 'now';
-    let _watchHistoryShowTmdbId = '';
-    let _watchHistoryShowTvdbId = '';
-    let _watchHistorySeasonNumber = '';
-    let _watchHistoryEpisodeNumber = '';
-    // Set when the modal is being used to mark a whole season/show watched
-    // (no single item's history applies) rather than logging one item's play.
-    let _watchHistoryBulkMode: { kind: 'season' | 'show'; seriesId: string; season: string; episodeOrder: string; btn: HTMLElement; tvdbId: string } | null = null;
 
+    // Wall-clock value for the datetime-local input, written in the viewer's
+    // effective timezone rather than the browser's, so logging "now" from a
+    // France server while set to Sydney shows the Sydney time.
     const toLocal = (d: Date) => {
       const p = (n: number) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+      const tz = (window as any).__TZ__;
+      if (!tz) return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+      const parts: Record<string, string> = {};
+      for (const part of new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      }).formatToParts(d)) parts[part.type] = part.value;
+      const hour = parts.hour === '24' ? '00' : parts.hour;
+      return `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}`;
     };
+
+    // Inverse of toLocal: the instant at which that wall clock reads in the
+    // effective zone. Two passes settle the DST-boundary cases where the
+    // offset at the guessed instant differs from the offset at the real one.
+    const fromLocal = (wall: string) => {
+      const tz = (window as any).__TZ__;
+      if (!tz) return new Date(wall);
+      const target = Date.parse(wall + 'Z');
+      let ts = target;
+      for (let i = 0; i < 2; i++) ts = target + (ts - Date.parse(toLocal(new Date(ts)) + 'Z'));
+      return new Date(ts);
+    };
+
     const toUTC = (d: Date) => d.toISOString().slice(0, 16);
 
-    function closeWatchHistoryModal() {
-      document.getElementById('watch-history-modal')!.classList.add('hidden');
-      _watchHistoryBulkMode = null;
+    // Set when the modal is marking a whole season or show watched, rather than
+    // logging one item's play — the backend takes the same watched_at either way.
+    let _watchHistoryBulk: { kind: 'season' | 'show'; showUri: string; season: string; btn: HTMLElement } | null = null;
+
+    let _watchHistoryMediaId: string | null = null;
+    let _watchHistoryUriId: string | null = null;
+    let _watchHistoryShowUri: string | null = null;
+    let _watchHistorySeason: string | null = null;
+    let _watchHistoryEpisode: string | null = null;
+
+    // Shared identifier query used both to fetch events for the current item and to unwatch it.
+    function _watchHistoryIdQuery(): string {
+      if (_watchHistoryMediaId) return `id=${encodeURIComponent(_watchHistoryMediaId)}`;
+      if (_watchHistoryUriId) return `uri_id=${encodeURIComponent(_watchHistoryUriId)}`;
+      if (_watchHistoryShowUri && _watchHistorySeason && _watchHistoryEpisode) {
+        // Episode not in the library: resolve via parent show + season + episode.
+        return `show_uri_id=${encodeURIComponent(_watchHistoryShowUri)}&season_number=${_watchHistorySeason}&episode_number=${_watchHistoryEpisode}`;
+      }
+      return '';  // no identifier — backend returns empty events
     }
 
-    function resetWatchHistoryDateUI() {
+    async function openWatchHistoryModal(_btn: HTMLElement | null, uriIdForHistory: string | null, mediaType: string, mediaId: string | null = null, showUri: string | null = null, season: string | null = null, episode: string | null = null) {
+      // dataset values can be the literal strings "null"/"undefined"/"" — normalise to null.
+      const _clean = (v: string | null): string | null =>
+        (v && v !== 'null' && v !== 'undefined' && v.trim() !== '') ? v : null;
+      _watchHistoryBulk = null;
+      document.getElementById('watch-history-modal-title')!.textContent = 'Play History';
+      document.getElementById('watch-history-modal-events')!.classList.remove('hidden');
+      document.getElementById('watch-history-log-label')!.textContent = 'Log a new play';
+      document.getElementById('watch-history-log-btn')!.textContent = 'Log play';
+      _watchHistoryTmdbId = null;
+      _watchHistoryUriId = _clean(uriIdForHistory);
+      _watchHistoryMediaType = mediaType;
+      _watchHistoryMediaId = _clean(mediaId);
+      _watchHistoryShowUri = _clean(showUri);
+      _watchHistorySeason = _clean(season);
+      _watchHistoryEpisode = _clean(episode);
+
+      // Reset "add play" form to "Just now"
       _watchHistoryDateMode = 'now';
       const nowBtn = document.getElementById('watch-history-now-btn')!;
       const customBtn = document.getElementById('watch-history-custom-btn')!;
@@ -1631,117 +1913,123 @@ const bottomNavItem = (active: boolean) =>
       dateInput.classList.add('hidden');
       dateInput.value = toLocal(new Date());
       dateInput.max = toLocal(new Date());
-    }
 
-    async function openWatchHistoryModal(_btn: HTMLElement, tmdbId: string, mediaType: string, showTmdbId = '', seasonNumber = '', episodeNumber = '', showTvdbId = '') {
-      _watchHistoryBulkMode = null;
-      _watchHistoryTmdbId = tmdbId;
-      _watchHistoryMediaType = mediaType;
-      _watchHistoryShowTmdbId = showTmdbId;
-      _watchHistoryShowTvdbId = showTvdbId;
-      _watchHistorySeasonNumber = seasonNumber;
-      _watchHistoryEpisodeNumber = episodeNumber;
-
-      document.getElementById('watch-history-modal-title')!.textContent = 'Watch History';
-      document.getElementById('watch-history-modal-events')!.classList.remove('hidden');
-      document.getElementById('watch-history-add-play-label')!.classList.remove('hidden');
-      resetWatchHistoryDateUI();
-
-      document.getElementById('watch-history-log-btn')!.textContent = 'Mark as watched';
       document.getElementById('watch-history-modal')!.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
       await loadWatchHistoryEvents();
     }
 
-    function openBulkWatchModal(btn: HTMLElement, kind: 'season' | 'show', seriesId: string, season = '', episodeOrder = '', tvdbId = '') {
-      _watchHistoryBulkMode = { kind, seriesId, season, episodeOrder, btn, tvdbId };
+    function openBulkWatchModal(btn: HTMLElement, kind: 'season' | 'show', showUri: string, season: string) {
+      _watchHistoryBulk = { kind, showUri, season, btn };
 
-      document.getElementById('watch-history-modal-title')!.textContent = kind === 'season' ? 'Mark Season Watched' : 'Mark Show Watched';
+      document.getElementById('watch-history-modal-title')!.textContent =
+        kind === 'season' ? 'Mark Season Watched' : 'Mark Show Watched';
       document.getElementById('watch-history-modal-events')!.classList.add('hidden');
       document.getElementById('watch-history-unwatch-btn')!.classList.add('hidden');
-      document.getElementById('watch-history-add-play-label')!.classList.add('hidden');
-      resetWatchHistoryDateUI();
-
+      document.getElementById('watch-history-log-label')!.textContent = 'Watched on';
       document.getElementById('watch-history-log-btn')!.textContent = 'Mark as watched';
+
+      _watchHistoryDateMode = 'now';
+      const activeClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-blue-600 text-white';
+      const inactiveClass = 'flex-1 px-3 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer bg-zinc-800 text-zinc-400 border border-zinc-700';
+      document.getElementById('watch-history-now-btn')!.className = activeClass;
+      document.getElementById('watch-history-custom-btn')!.className = inactiveClass;
+      document.getElementById('watch-history-unknown-btn')!.className = inactiveClass;
+      const dateInput = document.getElementById('watch-history-date-input') as HTMLInputElement;
+      dateInput.classList.add('hidden');
+      dateInput.value = toLocal(new Date());
+      dateInput.max = toLocal(new Date());
+
       document.getElementById('watch-history-modal')!.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
     }
 
-    function cascadeWatchedUI(btn: HTMLElement, mediaType: string, tmdbId: string, seriesId: string, season: string, episodeOrder: string, nowWatched: boolean) {
-      updateWatchedButtonUI(btn, nowWatched);
-
-      // If marking a show as watched/unwatched, update all season/episode cards on the page
-      if (mediaType === 'series' && !season) {
-        // Find season cards: can be [data-tmdb-id=SHOW_ID] with [data-season] set,
-        // OR [data-show-tmdb-id=SHOW_ID] with [data-season] set.
-        const allSeasonCards = document.querySelectorAll(`
-          [data-card][data-media-type="series"][data-tmdb-id="${tmdbId}"][data-season]:not([data-season=""]),
-          [data-card][data-media-type="series"][data-show-tmdb-id="${tmdbId}"][data-season]:not([data-season=""])
-        `);
-        allSeasonCards.forEach(c => {
-          const sBtn = c.querySelector('[data-action="watched"]');
-          if (sBtn) updateWatchedButtonUI(sBtn, nowWatched);
+    function applyBulkWatchedUI(btn: HTMLElement, kind: 'season' | 'show', showUri: string, season: string) {
+      updateWatchedButtonUI(btn, true);
+      if (!showUri) return;
+      const uri = CSS.escape(showUri);
+      const mark = (selector: string) => {
+        document.querySelectorAll(selector).forEach(c => {
+          const b = c.querySelector('[data-action="watched"]');
+          if (b) updateWatchedButtonUI(b as HTMLElement, true);
         });
-        // Also update any episode cards for this show
-        const allEpCards = document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${tmdbId}"]`);
-        allEpCards.forEach(c => {
-          const eBtn = c.querySelector('[data-action="watched"]');
-          if (eBtn) updateWatchedButtonUI(eBtn, nowWatched);
-        });
-      }
-
-      // If marking a season as watched/unwatched, update all episodes for that season on the page
-      if (mediaType === 'series' && season) {
-        const seasonAttribute = episodeOrder === 'tvdb' ? 'data-display-season' : 'data-season';
-        const allEpCards = document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${seriesId}"][${seasonAttribute}="${season}"]`);
-        allEpCards.forEach(c => {
-          const eBtn = c.querySelector('[data-action="watched"]');
-          if (eBtn) updateWatchedButtonUI(eBtn, nowWatched);
-        });
+      };
+      if (kind === 'show') {
+        mark(`[data-card][data-media-type="series"][data-uri-id="${uri}"][data-season]:not([data-season=""])`);
+        mark(`[data-card][data-media-type="episode"][data-show-uri-id="${uri}"]`);
+      } else {
+        mark(`[data-card][data-media-type="episode"][data-show-uri-id="${uri}"][data-season="${season}"]`);
       }
     }
 
     async function loadWatchHistoryEvents() {
       const eventsEl = document.getElementById('watch-history-modal-events')!;
-      eventsEl.innerHTML = '<div class="px-4 py-3 text-xs text-zinc-500">Loading…</div>';
+      eventsEl.innerHTML = '<div class="text-zinc-500 text-sm text-center py-8 flex justify-center items-center gap-2"><svg class="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading plays...</div>';
       const unwatchBtn = document.getElementById('watch-history-unwatch-btn') as HTMLButtonElement;
       unwatchBtn.classList.add('hidden');
       try {
-        const seriesQuery = _watchHistoryMediaType === 'episode' && _watchHistoryShowTmdbId
-          ? `&series_tmdb_id=${_watchHistoryShowTmdbId}`
-          : '';
-        const { watched, events }: { watched: boolean; events: Array<{ id: number; watched_at: string | null }> } = await apiFetch(
-          `/history/item-events?tmdb_id=${_watchHistoryTmdbId}&media_type=${_watchHistoryMediaType}${seriesQuery}`
-        );
+        const query = _watchHistoryIdQuery();
+        const res = await fetch(`/api/proxy/history/item/events?${query}&media_type=${_watchHistoryMediaType}`, {
+          headers: { 'Authorization': `Bearer ${TOKEN()}` }
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const events = data.events || [];
+
         if (events.length === 0) {
-          eventsEl.innerHTML = '<div class="px-4 py-3 text-sm text-zinc-500 italic">No plays recorded yet</div>';
+          eventsEl.innerHTML = '<div class="text-zinc-500 text-sm text-center py-12 px-4 italic opacity-50 bg-zinc-900/30 border border-dashed border-zinc-800 rounded-2xl">No plays recorded for this item.</div>';
         } else {
-          eventsEl.innerHTML = events.map(ev => {
-            const fmt = ev.watched_at
-              ? new Date(ev.watched_at + 'Z').toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: !(window as any).__USE_24H__ })
-              : 'Unknown date';
-            return `<div class="flex items-center justify-between px-4 py-2.5 hover:bg-zinc-800/50 group">
-              <span class="text-sm text-zinc-200">${esc(fmt)}</span>
-              <button class="text-zinc-600 group-hover:text-zinc-400 hover:!text-red-400 transition-colors cursor-pointer" data-delete-event="${ev.id}" aria-label="Remove">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          const formatter = new Intl.DateTimeFormat(undefined, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+            hour12: !window["__USE_24H__"]
+          });
+
+          eventsEl.innerHTML = events.map((ev: any) => {
+            // A play can be logged with no date at all — formatting null threw and
+            // took the whole list, and its delete button, with it.
+            let label = 'No date recorded';
+            if (ev.watched_at) {
+              const dateStr = ev.watched_at.includes('Z') || ev.watched_at.includes('+') ? ev.watched_at : ev.watched_at + 'Z';
+              label = formatter.format(new Date(dateStr));
+            }
+            const statusLabel = ev.completed ? 'Completed' : `In progress (${Math.round((ev.progress_percent || 0) * 100)}%)`;
+
+            return `<div class="flex items-center justify-between p-3.5 bg-zinc-900/60 border border-zinc-800/80 rounded-2xl hover:border-zinc-700 transition-colors group">
+              <div class="flex flex-col gap-0.5">
+                <span class="text-sm font-bold ${ev.watched_at ? 'text-zinc-200' : 'text-zinc-500 italic'}">${esc(label)}</span>
+                <span class="text-[10px] font-bold uppercase tracking-wider ${ev.completed ? 'text-green-500' : 'text-amber-500'}">${esc(statusLabel)}</span>
+              </div>
+              <button class="p-2.5 rounded-xl bg-red-500/5 hover:bg-red-500/20 text-red-500 border border-red-500/10 hover:border-red-500/30 transition-all duration-200 cursor-pointer active:scale-90" 
+                      data-delete-event="${ev.id}" 
+                      title="Remove play">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
             </div>`;
           }).join('');
         }
-        // "Any plays at all" (controls the destructive "remove all history"
-        // button) is a different question from "counts as watched right now"
-        // (controls the ActionBar button) - they only diverge when a rewatch
-        // is active and every remaining play predates it.
-        const hasEvents = events.length > 0;
-        unwatchBtn.classList.toggle('hidden', !hasEvents);
-        document.getElementById('watch-history-log-btn')!.textContent = hasEvents ? 'Log a rewatch' : 'Mark as watched';
-        document.querySelectorAll<HTMLElement>(
-          `[data-card][data-tmdb-id="${_watchHistoryTmdbId}"][data-media-type="${_watchHistoryMediaType}"] [data-action="watched"]`
-        ).forEach(b => updateWatchedButtonUI(b, watched));
+        
+        const isWatched = events.some((e: any) => e.completed);
+        unwatchBtn.classList.toggle('hidden', !isWatched);
+        if (_watchHistoryUriId) {
+          document.querySelectorAll<HTMLElement>(
+            `[data-card][data-uri-id="${CSS.escape(_watchHistoryUriId)}"][data-media-type="${_watchHistoryMediaType}"] [data-action="watched"]`
+          ).forEach(b => updateWatchedButtonUI(b, isWatched));
+        }
       } catch {
-        eventsEl.innerHTML = '<div class="px-4 py-2 text-xs text-red-400">Failed to load</div>';
+        eventsEl.innerHTML = '<div class="px-4 py-2 text-xs text-red-400">Failed to load history</div>';
       }
     }
 
+    function closeWatchHistoryModal() {
+      document.getElementById('watch-history-modal')!.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
     document.getElementById('watch-history-modal-close')!.addEventListener('click', closeWatchHistoryModal);
+    document.getElementById('watch-history-modal-backdrop')!.addEventListener('click', closeWatchHistoryModal);
+
+    window["openWatchHistoryModal"] = openWatchHistoryModal;
     document.getElementById('watch-history-modal')!.addEventListener('click', (e) => {
       if (e.target === document.getElementById('watch-history-modal')) closeWatchHistoryModal();
     });
@@ -1757,7 +2045,9 @@ const bottomNavItem = (active: boolean) =>
       try {
         await apiFetch(`/history/event/${delBtn.dataset.deleteEvent}`, 'DELETE');
         await loadWatchHistoryEvents();
-        syncSeasonWatchPctFromDOM(_watchHistoryShowTmdbId, _watchHistorySeasonNumber);
+        syncSeasonWatchPctFromDOM(_tmdbIdFromUri(_watchHistoryShowUri), _watchHistorySeason || '');
+        // The season bar feeds the show bar; without this the show card keeps its stale pct.
+        syncShowWatchPctFromDOM(_tmdbIdFromUri(_watchHistoryShowUri));
       } catch {
         delBtn.style.opacity = '';
         delBtn.style.pointerEvents = '';
@@ -1775,12 +2065,12 @@ const bottomNavItem = (active: boolean) =>
       unwatchBtn.disabled = true;
       unwatchBtn.textContent = 'Removing…';
       try {
-        await apiFetch(
-          `/history/item?tmdb_id=${encodeURIComponent(_watchHistoryTmdbId)}&media_type=${encodeURIComponent(_watchHistoryMediaType)}`,
-          'DELETE'
-        );
+        const query = _watchHistoryIdQuery();
+        await apiFetch(`/history/item?${query}&media_type=${_watchHistoryMediaType}`, 'DELETE');
         await loadWatchHistoryEvents();
-        syncSeasonWatchPctFromDOM(_watchHistoryShowTmdbId, _watchHistorySeasonNumber);
+        syncSeasonWatchPctFromDOM(_tmdbIdFromUri(_watchHistoryShowUri), _watchHistorySeason || '');
+        // The season bar feeds the show bar; without this the show card keeps its stale pct.
+        syncShowWatchPctFromDOM(_tmdbIdFromUri(_watchHistoryShowUri));
       } catch { /* keep the modal open so the user can retry */ }
       unwatchBtn.disabled = false;
       unwatchBtn.textContent = 'Mark as unwatched';
@@ -1823,70 +2113,102 @@ const bottomNavItem = (active: boolean) =>
           ? null
           : _watchHistoryDateMode === 'now'
             ? toUTC(new Date())
-            : toUTC(new Date(input.value || toLocal(new Date())));
+            : toUTC(fromLocal(input.value || toLocal(new Date())));
         const logBtn = document.getElementById('watch-history-log-btn') as HTMLButtonElement;
-        const idleLabel = logBtn.textContent || 'Mark as watched';
         logBtn.disabled = true;
-        logBtn.textContent = 'Saving…';
 
-        if (_watchHistoryBulkMode) {
-          const { kind, seriesId, season, episodeOrder, btn: sourceBtn, tvdbId: bulkTvdbId } = _watchHistoryBulkMode;
+        if (_watchHistoryBulk) {
+          const { kind, showUri, season, btn } = _watchHistoryBulk;
+          logBtn.textContent = 'Marking…';
           try {
             if (kind === 'season') {
-              const body: Record<string, unknown> = {
-                series_tmdb_id: Number(seriesId),
+              await apiFetch('/history/season', 'POST', {
+                show_uri_id: showUri,
                 season_number: Number(season),
                 watched_at: watchedAt,
-              };
-              if (episodeOrder === 'tvdb') body.episode_order = 'tvdb';
-              if (bulkTvdbId) body.series_tvdb_id = Number(bulkTvdbId);
-              await apiFetch('/history/season', 'POST', body);
-              cascadeWatchedUI(sourceBtn, 'series', seriesId, seriesId, season, episodeOrder, true);
-              syncShowWatchPctFromDOM(seriesId);
+              });
             } else {
-              const body: Record<string, unknown> = { series_tmdb_id: Number(seriesId), watched_at: watchedAt };
-              if (bulkTvdbId) body.series_tvdb_id = Number(bulkTvdbId);
-              await apiFetch('/history/show-all', 'POST', body);
-              cascadeWatchedUI(sourceBtn, 'series', seriesId, seriesId, '', '', true);
+              await apiFetch('/history/show-all', 'POST', {
+                show_uri_id: showUri,
+                watched_at: watchedAt,
+              });
             }
+            applyBulkWatchedUI(btn, kind, showUri, season);
             closeWatchHistoryModal();
-          } catch (err) {
-            logBtn.textContent = idleLabel;
-            alertFromError(err, 'Failed to mark as watched');
+          } catch {
+            logBtn.textContent = 'Mark as watched';
           }
           logBtn.disabled = false;
           return;
         }
 
+        logBtn.textContent = 'Logging…';
         try {
-          const watchBody: Record<string, unknown> = {
-            tmdb_id: Number(_watchHistoryTmdbId),
+          await apiFetch('/history', 'POST', {
+            uri_id: _watchHistoryUriId,
+            media_id: _watchHistoryMediaId ? Number(_watchHistoryMediaId) : null,
             media_type: _watchHistoryMediaType,
             completed: true,
             watched_at: watchedAt,
-          };
-          if (_watchHistoryMediaType === 'episode' && _watchHistoryShowTmdbId) {
-            watchBody.series_tmdb_id = Number(_watchHistoryShowTmdbId);
-            if (_watchHistoryShowTvdbId) watchBody.series_tvdb_id = Number(_watchHistoryShowTvdbId);
-            if (_watchHistorySeasonNumber) watchBody.season_number = Number(_watchHistorySeasonNumber);
-            if (_watchHistoryEpisodeNumber) watchBody.episode_number = Number(_watchHistoryEpisodeNumber);
-          }
-          await apiFetch('/history', 'POST', watchBody);
+            show_uri_id: _watchHistoryShowUri,
+            season_number: _watchHistorySeason ? Number(_watchHistorySeason) : null,
+            episode_number: _watchHistoryEpisode ? Number(_watchHistoryEpisode) : null,
+          });
           await loadWatchHistoryEvents();
-          syncSeasonWatchPctFromDOM(_watchHistoryShowTmdbId, _watchHistorySeasonNumber);
+          syncSeasonWatchPctFromDOM(_tmdbIdFromUri(_watchHistoryShowUri), _watchHistorySeason || '');
+          // The season bar feeds the show bar; without this the show card keeps its stale pct.
+          syncShowWatchPctFromDOM(_tmdbIdFromUri(_watchHistoryShowUri));
           // Reset to "Just now" after logging
           _watchHistoryDateMode = 'now';
           (document.getElementById('watch-history-now-btn') as HTMLElement).className = activeClass;
           (document.getElementById('watch-history-custom-btn') as HTMLElement).className = inactiveClass;
           (document.getElementById('watch-history-unknown-btn') as HTMLElement).className = inactiveClass;
           input.classList.add('hidden');
-        } catch (err) {
-          logBtn.textContent = idleLabel;
-          alertFromError(err, 'Failed to mark as watched');
-        }
+        } catch { /* ignore */ }
         logBtn.disabled = false;
+        logBtn.textContent = 'Log play';
       });
     })();
+
+    async function triggerDashboardRefresh(cardElement: HTMLElement) {
+      const dashboardSection = cardElement.closest('#dashboard-next-up') as HTMLElement | null;
+      if (dashboardSection) {
+        (dashboardSection as HTMLElement).style.opacity = '0.7';
+        (dashboardSection as HTMLElement).style.pointerEvents = 'none';
+
+        try {
+          const res = await fetch('/partials/dashboard-next-up', {
+            headers: { 'Authorization': `Bearer ${TOKEN()}` }
+          });
+          if (res.ok) {
+            const html = (await res.text()).trim();
+            if (html) {
+              const temp = document.createElement('div');
+              temp.innerHTML = html;
+              const newSection = temp.firstElementChild as HTMLElement;
+              if (newSection) {
+                (dashboardSection as HTMLElement).style.transition = 'opacity 0.3s ease';
+                (dashboardSection as HTMLElement).style.opacity = '0';
+                setTimeout(() => {
+                  (dashboardSection as HTMLElement).replaceWith(newSection);
+                  newSection.style.opacity = '0';
+                  requestAnimationFrame(() => {
+                    newSection.style.transition = 'opacity 0.5s ease';
+                    newSection.style.opacity = '1';
+                  });
+                }, 300);
+              }
+            } else {
+              dashboardSection.remove();
+            }
+          }
+        } catch (e) {
+          console.error('Dashboard refresh failed:', e);
+          (dashboardSection as HTMLElement).style.opacity = '1';
+          (dashboardSection as HTMLElement).style.pointerEvents = 'auto';
+        }
+      }
+    }
 
     // ── Main event delegation ──────────────────────────────────────────────────
     document.addEventListener('click', async (e) => {
@@ -1899,19 +2221,300 @@ const bottomNavItem = (active: boolean) =>
       if (!card) return;
 
       const action = btn.dataset.action;
-      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'rewatch', 'drop'];
+      const mediaActions = ['watched', 'list', 'collected', 'request', 'rate', 'block', 'block-item', 'drop', 'remove-progress', 'unified-block'];
       if (!action || !mediaActions.includes(action)) return;
-
       e.preventDefault();
       e.stopPropagation();
 
-      const tmdbIdRaw = card.dataset.tmdbId;
-      const tmdbId = tmdbIdRaw && tmdbIdRaw !== 'null' ? tmdbIdRaw : '';
-      // ActionBar cards set data-media-id; MediaCard grid cards set data-id
-      // (same purpose, mismatched attribute name) — check both.
-      const mediaId = card.dataset.mediaId || card.dataset.id || '';
-      const mediaType = card.dataset.mediaType!;
-      const episodeOrder = card.dataset.episodeOrder || 'tmdb';
+      let tmdbIdRaw = card.dataset.tmdbId;
+      let tmdbId = tmdbIdRaw && tmdbIdRaw !== 'null' ? tmdbIdRaw : '';
+      let uriId = card.dataset.uriId || '';
+      const mediaId = card.dataset.mediaId || '';
+      let mediaType = card.dataset.mediaType!;
+
+      // Season cards render as data-media-type="season", but every downstream
+      // branch is written against 'series' + a season number. Without this the
+      // watched handler matches no branch at all (silently doing nothing) and
+      // collect posts media_type=season, which the API rejects as an invalid enum.
+      if (mediaType === 'season') {
+        mediaType = 'series';
+        const showUriId = card.dataset.showUriId || '';
+        if (showUriId) uriId = showUriId;
+        const showTmdbId = card.dataset.showTmdbId || '';
+        if (showTmdbId) tmdbId = showTmdbId;
+      }
+
+      const isBlockAction = ['block', 'block-item', 'drop', 'unified-block'].includes(action);
+      if ((isBlockAction || action === 'request') && mediaType === 'episode') {
+        const showUriId = card.dataset.showUriId || '';
+        if (showUriId) uriId = showUriId;
+        const showTmdbId = card.dataset.showTmdbId || '';
+        if (showTmdbId) tmdbId = showTmdbId;
+        mediaType = 'series';
+      }
+
+      // mediaType after the episode→series conversion above; used by block/drop branches.
+      const mediaTypeForBlock = mediaType;
+
+      const blockPayload = (uri: string, type: string, dropped: boolean) =>
+        ({ uri_id: uri, media_type: type, is_dropped: dropped });
+      const blockDeleteQuery = (uri: string, type: string) =>
+        `uri_id=${encodeURIComponent(uri)}&media_type=${type}`;
+
+      if (action === 'unified-block') {
+        const isDropped  = btn.dataset.isDropped  === 'true';
+        const isBlocked  = btn.dataset.isBlocked  === 'true';
+        const inLibrary  = card.dataset.inLibrary  === 'true';
+        const partialWatched = card.dataset.partialWatched === 'true';
+        const isWatched  = card.dataset.watched   === 'true';
+        const isSeries   = mediaType === 'series';
+        const forceBlock = btn.dataset.forceBlock === 'true';
+
+        // Determine intent: undo if already active, else decide drop vs block
+        const defaultShouldDrop = isSeries && (inLibrary || isWatched || partialWatched || card.closest('#dashboard-next-up') !== null || card.closest('#next-up-grid') !== null || window.location.pathname.startsWith('/next-up'));
+        const alreadyActive = !forceBlock && (isDropped || isBlocked);
+        const shouldDrop    = !forceBlock && (btn.dataset.actionIntent ? (btn.dataset.actionIntent === 'drop') : defaultShouldDrop);
+
+        // SVG icons
+        const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
+        const ICON_DROP  = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
+        const ICON_SPIN  = `<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>`;
+
+        // Helper to update all buttons on the card client-side
+        const updateCardButtons = () => {
+          const cardIsDropped = card.dataset.isDropped === 'true';
+          const cardIsBlocked = card.dataset.isBlocked === 'true';
+          
+          const container = card.querySelector('[class*="aspect-"]');
+          if (!container) return;
+          
+          container.querySelectorAll('[data-action="unified-block"]').forEach(el => el.remove());
+          
+          const btnBase = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+          const btnBaseRight = `${btnBase} right-1.5`;
+          const btnBaseOffset = `${btnBase} right-[38px]`;
+
+          const btnInactiveDrop = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+          const btnInactiveBlock = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+          const btnActiveDrop  = `${btnBaseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+          const btnActiveBlock = `${btnBaseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+          const btnInactiveBlockOffset = `${btnBaseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
+          if (cardIsBlocked) {
+            const btnHtml = `<button data-action="unified-block" data-is-blocked="true" data-is-dropped="false" data-action-intent="block" title="Unblock" class="${btnActiveBlock}">${ICON_BLOCK}</button>`;
+            container.insertAdjacentHTML('beforeend', btnHtml);
+          } else if (cardIsDropped) {
+            const btn1Html = `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="true" data-action-intent="drop" title="Resume tracking" class="${btnActiveDrop}">${ICON_DROP}</button>`;
+            const btn2Html = `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-force-block="true" data-action-intent="block" title="Block" class="${btnInactiveBlockOffset}">${ICON_BLOCK}</button>`;
+            container.insertAdjacentHTML('beforeend', btn1Html);
+            container.insertAdjacentHTML('beforeend', btn2Html);
+          } else {
+            if (defaultShouldDrop) {
+              const btnHtml = `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="drop" title="Drop show" class="${btnInactiveDrop}">${ICON_DROP}</button>`;
+              container.insertAdjacentHTML('beforeend', btnHtml);
+            } else {
+              const btnHtml = `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="block" title="Block" class="${btnInactiveBlock}">${ICON_BLOCK}</button>`;
+              container.insertAdjacentHTML('beforeend', btnHtml);
+            }
+          }
+        };
+
+        btn.innerHTML = ICON_SPIN;
+        (btn as HTMLButtonElement).disabled = true;
+
+        try {
+          if (alreadyActive) {
+            // Undo: remove from blocklist entirely
+            await apiFetch(`/media/blocklist?${blockDeleteQuery(uriId, mediaType)}`, 'DELETE');
+            card.dataset.isDropped = 'false';
+            card.dataset.isBlocked = 'false';
+            updateCardButtons();
+            window["showToast"](isDropped ? 'Tracking resumed' : 'Unblocked', 'success');
+            window.dispatchEvent(new CustomEvent('unified-block-changed', {
+              detail: { uriId, tmdbId, mediaType, isBlocked: false, isDropped: false }
+            }));
+            triggerDashboardRefresh(card);
+          } else {
+            // Apply: drop or block
+            if (shouldDrop) {
+              await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, true));
+              card.dataset.isDropped = 'true';
+              card.dataset.isBlocked = 'false';
+              updateCardButtons();
+              window["showToast"]('Show dropped', 'success');
+              window.dispatchEvent(new CustomEvent('unified-block-changed', {
+                detail: { uriId, tmdbId, mediaType, isBlocked: false, isDropped: true }
+              }));
+              triggerDashboardRefresh(card);
+            } else {
+              await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, false));
+              card.dataset.isDropped = 'false';
+              card.dataset.isBlocked = 'true';
+              // For discovery cards: fade the card out (like old 'block' behaviour)
+              const isDiscoveryCard = !isSeries || !inLibrary;
+              if (isDiscoveryCard) {
+                card.style.transition = 'all 0.3s ease';
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.9)';
+                card.style.pointerEvents = 'none';
+                setTimeout(() => card.remove(), 300);
+              } else {
+                updateCardButtons();
+              }
+              window["showToast"]('Blocked', 'success');
+              window.dispatchEvent(new CustomEvent('unified-block-changed', {
+                detail: { uriId, tmdbId, mediaType, isBlocked: true, isDropped: false }
+              }));
+              triggerDashboardRefresh(card);
+            }
+          }
+        } catch (err) {
+          console.error(err);
+          window["showToast"]('Operation failed', 'error');
+          updateCardButtons();
+        } finally {
+          (btn as HTMLButtonElement).disabled = false;
+        }
+        return;
+      }
+
+      if (action === 'block') {
+        const title = card.querySelector('h3')?.textContent || 'this item';
+        const confirmed = await showConfirm(
+          "Don't show this again?",
+          `Hide "${title}" from your explore pages.`
+        );
+        if (!confirmed) return;
+        try {
+          await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, false));
+          card.style.transition = 'all 0.3s ease';
+          card.style.opacity = '0';
+          card.style.transform = 'scale(0.9)';
+          card.style.pointerEvents = 'none';
+          setTimeout(() => card.remove(), 300);
+          triggerDashboardRefresh(card);
+        } catch { /* ignore */ }
+        return;
+      }
+
+      if (action === 'block-item') {
+        const isBlocked = btn.dataset.blocked === 'true';
+        const title = card.querySelector('h1')?.textContent || card.querySelector('h3')?.textContent || 'this item';
+        
+        let confirmed = true;
+        if (!isBlocked) {
+          confirmed = await showConfirm(
+            "Don't show this again?",
+            `Hide "${title}" from your explore pages.`
+          );
+        }
+        if (!confirmed) return;
+
+        try {
+          if (isBlocked) {
+            await apiFetch(`/media/blocklist?${blockDeleteQuery(uriId, mediaType)}`, 'DELETE');
+            window["showToast"]('Unblocked successfully', 'success');
+          } else {
+            await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, false));
+            window["showToast"]('Blocked successfully', 'success');
+          }
+          
+          const nowBlocked = !isBlocked;
+          btn.dataset.blocked = String(nowBlocked);
+          btn.dataset.state = nowBlocked ? 'active' : 'inactive';
+          btn.title = nowBlocked ? 'Unblock this item' : 'Block this item';
+          const labelEl = btn.querySelector('span');
+          if (labelEl) labelEl.textContent = nowBlocked ? 'Blocked' : 'Block';
+          
+          if (nowBlocked) {
+            btn.classList.remove('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-red-500/10', 'hover:text-red-400');
+            btn.classList.add('bg-red-500/20', 'text-red-400', 'hover:bg-red-500/30');
+          } else {
+            btn.classList.remove('bg-red-500/20', 'text-red-400', 'hover:bg-red-500/30');
+            btn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-red-500/10', 'hover:text-red-400');
+          }
+          triggerDashboardRefresh(card);
+        } catch { /* ignore */ }
+        return;
+      }
+
+      if (action === 'drop') {
+        const isDropped = btn.dataset.dropped === 'true';
+        try {
+          if (isDropped) {
+            await apiFetch(`/media/blocklist?${blockDeleteQuery(uriId, mediaType)}`, 'DELETE');
+          } else {
+            await apiFetch('/media/blocklist', 'POST', blockPayload(uriId, mediaType, true));
+          }
+          
+          const nowDropped = !isDropped;
+          btn.dataset.dropped = String(nowDropped);
+          btn.dataset.state = nowDropped ? 'active' : 'inactive';
+          btn.title = nowDropped ? 'Resume tracking in Next Up' : 'Drop from Next Up';
+          
+          const labelEl = btn.querySelector('span');
+          if (labelEl) labelEl.textContent = nowDropped ? 'Dropped' : 'Drop';
+          
+          if (nowDropped) {
+            btn.classList.remove('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-amber-500/10', 'hover:text-amber-400');
+            btn.classList.add('bg-amber-500/20', 'text-amber-400', 'hover:bg-amber-500/30');
+          } else {
+            btn.classList.remove('bg-amber-500/20', 'text-amber-400', 'hover:bg-amber-500/30');
+            btn.classList.add('bg-zinc-950/25', 'text-zinc-500', 'hover:bg-amber-500/10', 'hover:text-amber-400');
+          }
+          
+          window["showToast"](nowDropped ? 'Show dropped' : 'Tracking resumed', 'success');
+          triggerDashboardRefresh(card);
+        } catch { /* ignore */ }
+        return;
+      }
+
+      if (action === 'remove-progress') {
+        const confirmed = await showConfirm(
+          "Remove from Continue Watching?",
+          "This will clear your saved progress for this item."
+        );
+        if (!confirmed) return;
+        try {
+          await apiFetch(`/history/continue-watching?uri_id=${encodeURIComponent(uriId)}&media_type=${mediaType}`, 'DELETE');
+          const wrapper = (card.closest('.flex-shrink-0') as HTMLElement | null) || card;
+          wrapper.style.transition = 'all 0.3s ease';
+          wrapper.style.opacity = '0';
+          wrapper.style.transform = 'scale(0.9)';
+          wrapper.style.pointerEvents = 'none';
+          setTimeout(() => {
+            wrapper.remove();
+            
+            // Check homepage continue watching section
+            const homepageSection = document.getElementById('continue-watching-section');
+            if (homepageSection && homepageSection.querySelectorAll('[data-card]').length === 0) {
+              homepageSection.remove();
+            }
+
+            // Check continue-watching page grid
+            const grid = document.getElementById('media-grid');
+            if (grid && grid.querySelectorAll('[data-card]').length === 0) {
+              const emptyStateHtml = `
+                <div class="flex flex-col items-center justify-center py-24 bg-zinc-900/30 border border-zinc-800/50 rounded-3xl text-center w-full">
+                  <div class="text-6xl mb-6 opacity-20">🍿</div>
+                  <h2 class="text-2xl font-bold text-zinc-300 mb-2">Nothing in progress</h2>
+                  <p class="text-zinc-500 max-w-sm mx-auto">Start watching a movie or show to see it here and resume anytime.</p>
+                </div>
+              `;
+              const container = grid.parentElement;
+              if (container) {
+                document.getElementById('infinite-scroll-sentinel')?.remove();
+                grid.replaceWith(document.createRange().createContextualFragment(emptyStateHtml));
+              }
+            }
+          }, 300);
+          window["showToast"]('Removed from Continue Watching', 'success');
+        } catch (err: any) {
+          alertFromError(err, 'Failed to remove from Continue Watching');
+        }
+        return;
+      }
 
       if (action === 'watched') {
         const isWatched = btn.dataset.watched === 'true';
@@ -1922,48 +2525,182 @@ const bottomNavItem = (active: boolean) =>
         const seriesId = showTmdbId || tmdbId;
 
         if (mediaType === 'movie' || mediaType === 'episode') {
-          await openWatchHistoryModal(btn, tmdbId, mediaType, card.dataset.showTmdbId || '', card.dataset.season || '', card.dataset.episodeNumber || '', card.dataset.showTvdbId || '');
+          await openWatchHistoryModal(
+            btn, uriId || null, mediaType, card.dataset.mediaId || null,
+            card.dataset.showUriId || null, card.dataset.season || null, card.dataset.episodeNumber || null,
+          );
           return;
         }
 
-        // Marking a season/show watched needs a date (custom/unknown/now) — handled by
-        // the modal's own log button, which POSTs to /history/season or /history/show-all
-        // once the user confirms (see the watch-history-log-btn handler below).
-        if (mediaType === 'series' && season && !isWatched) {
-          openBulkWatchModal(btn, 'season', seriesId, season, episodeOrder, card.dataset.tvdbId || '');
-          return;
-        }
-        if (mediaType === 'series' && !season && !isWatched) {
-          openBulkWatchModal(btn, 'show', tmdbId, '', '', card.dataset.tvdbId || '');
-          return;
-        }
-
-        // Only the "unwatch" (remove all history) cases remain here — no date involved.
+        // The bulk modal below doubles as the confirmation when marking watched,
+        // so only unwatching asks first.
         let confirmed = true;
         if (mediaType === 'series' && season && isWatched) {
-          confirmed = await showConfirm('Mark season as unwatched?', 'This will remove all watch events for every episode in this season.');
-        } else if (mediaType === 'series' && !season && isWatched) {
+          confirmed = await showConfirm(
+            'Mark season as unwatched?',
+            'This will remove all watch events for every episode in this season.'
+          );
+        } else if (mediaType === 'series' && isWatched) {
           confirmed = await showConfirm('Remove all watch history?', 'This will remove all watch events for every episode of this show.');
         }
         if (!confirmed) return;
 
+        // Marking a season or show watched goes through the modal so the user can
+        // pick the date; unwatching stays immediate.
+        if (mediaType === 'series' && !isWatched) {
+          const showUri = season ? (uriId || card.dataset.showUriId) : uriId;
+          if (!showUri) { alert('Missing show URI'); return; }
+          openBulkWatchModal(btn, season ? 'season' : 'show', showUri, season || '');
+          return;
+        }
+
         try {
           if (mediaType === 'series' && season) {
-            const orderQuery = episodeOrder === 'tvdb' ? '&episode_order=tvdb' : '';
-            await apiFetch(`/history/season?series_tmdb_id=${seriesId}&season_number=${season}${orderQuery}`, 'DELETE');
+            const showUri = uriId || card.dataset.showUriId;
+            if (!showUri) { alert('Missing show URI'); return; }
+            await apiFetch(`/history/season?show_uri_id=${encodeURIComponent(showUri)}&season_number=${season}`, 'DELETE');
           } else if (mediaType === 'series') {
-            await apiFetch(`/history/show-all?series_tmdb_id=${tmdbId}`, 'DELETE');
+            if (!uriId) { alert('Missing show URI'); return; }
+            await apiFetch(`/history/show-all?show_uri_id=${encodeURIComponent(uriId)}`, 'DELETE');
           }
-          cascadeWatchedUI(btn, mediaType, tmdbId, seriesId, season || '', episodeOrder, false);
+          const nowWatched = !isWatched;
+          
+          updateWatchedButtonUI(btn, nowWatched);
+
+          // If marking a show as watched/unwatched, update all season/episode cards on the page
+          if (mediaType === 'series' && !season) {
+            const showUri = uriId || (tmdbId ? `tmdb:s:${tmdbId}` : '');
+            const allSeasonCards = showUri
+              ? document.querySelectorAll(`[data-card][data-media-type="series"][data-uri-id="${CSS.escape(showUri)}"][data-season]:not([data-season=""])`)
+              : document.querySelectorAll(`[data-card][data-media-type="series"][data-tmdb-id="${tmdbId}"][data-season]:not([data-season=""])`);
+            allSeasonCards.forEach(c => {
+              const sBtn = c.querySelector<HTMLElement>('[data-action="watched"]');
+              if (sBtn) updateWatchedButtonUI(sBtn, nowWatched);
+            });
+            const allEpCards = showUri
+              ? document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-uri-id="${CSS.escape(showUri)}"]`)
+              : document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${tmdbId}"]`);
+            allEpCards.forEach(c => {
+              const eBtn = c.querySelector<HTMLElement>('[data-action="watched"]');
+              if (eBtn) updateWatchedButtonUI(eBtn, nowWatched);
+            });
+          }
+
+          // If marking a season as watched/unwatched, update all episodes for that season on the page
           if (mediaType === 'series' && season) {
-            syncShowWatchPctFromDOM(seriesId);
+            const showUri = uriId || (card.dataset.showUriId) || (seriesId ? `tmdb:s:${seriesId}` : '');
+            const allEpCards = showUri
+              ? document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-uri-id="${CSS.escape(showUri)}"][data-season="${season}"]`)
+              : document.querySelectorAll(`[data-card][data-media-type="episode"][data-show-tmdb-id="${seriesId}"][data-season="${season}"]`);
+            allEpCards.forEach(c => {
+              const eBtn = c.querySelector<HTMLElement>('[data-action="watched"]');
+              if (eBtn) updateWatchedButtonUI(eBtn, nowWatched);
+            });
+          }
+
+          // Next Up refresh logic: when an episode is marked as watched in a "Next Up" context,
+          // fetch the next episode for that series and replace the card.
+          if (mediaType === 'episode' && nowWatched) {
+            const nextUpContainer = card.closest('[data-next-up-grid], [data-next-up-list], [data-next-up-hero]');
+            if (nextUpContainer) {
+              const showUriForNext = card.dataset.showUriId || card.dataset.uriId;
+              if (showUriForNext) {
+                // DASHBOARD CASE: Refresh the whole section to update hero, backdrop, and order.
+                const dashboardSection = card.closest('#dashboard-next-up') as HTMLElement | null;
+                if (dashboardSection) {
+                  dashboardSection.style.opacity = '0.7';
+                  dashboardSection.style.pointerEvents = 'none';
+
+                  try {
+                    const res = await fetch('/partials/dashboard-next-up', {
+                      headers: { 'Authorization': `Bearer ${TOKEN()}` }
+                    });
+                    if (res.ok) {
+                      const html = (await res.text()).trim();
+                      if (html) {
+                        const temp = document.createElement('div');
+                        temp.innerHTML = html;
+                        const newSection = temp.firstElementChild as HTMLElement;
+                        if (newSection) {
+                          // Fade out old, fade in new
+                          dashboardSection.style.transition = 'opacity 0.3s ease';
+                          dashboardSection.style.opacity = '0';
+                          setTimeout(() => {
+                            dashboardSection.replaceWith(newSection);
+                            newSection.style.opacity = '0';
+                            requestAnimationFrame(() => {
+                              newSection.style.transition = 'opacity 0.5s ease';
+                              newSection.style.opacity = '1';
+                            });
+                          }, 300);
+                        }
+                      } else {
+                        dashboardSection.remove();
+                      }
+                    }
+                  } catch (e) {
+                    console.error('Dashboard refresh failed:', e);
+                    dashboardSection.style.opacity = '1';
+                    dashboardSection.style.pointerEvents = 'auto';
+                  }
+                  return;
+                }
+
+                // NEXT-UP GRID CASE: Refresh just this card or remove it.
+                card.style.opacity = '0.5';
+                card.style.pointerEvents = 'none';
+
+                try {
+                  const res = await fetch(`/partials/next-up-item?show_uri_id=${encodeURIComponent(showUriForNext)}`, {
+                    headers: { 'Authorization': `Bearer ${TOKEN()}` }
+                  });
+                  if (res.ok) {
+                    const html = (await res.text()).trim();
+                    const temp = document.createElement('div');
+                    temp.innerHTML = html;
+                    const newCard = temp.firstElementChild as HTMLElement;
+                    
+                    if (newCard) {
+                      card.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                      card.style.transform = 'scale(0.9) translateY(10px)';
+                      card.style.opacity = '0';
+                      
+                      setTimeout(() => {
+                        if (newCard.hasAttribute('data-remove-card')) {
+                          const wrapper = card.closest('.flex-shrink-0');
+                          (wrapper || card).remove();
+                          
+                          // If the grid is now empty, refresh the whole page
+                          if (nextUpContainer.children.length === 0 && nextUpContainer.id === 'next-up-grid') {
+                            location.reload();
+                          }
+                        } else {
+                          card.replaceWith(newCard);
+                          newCard.style.opacity = '0';
+                          newCard.style.transform = 'scale(1.1)';
+                          requestAnimationFrame(() => {
+                            newCard.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+                            newCard.style.opacity = '1';
+                            newCard.style.transform = 'scale(1)';
+                          });
+                        }
+                      }, 400);
+                    }
+                  }
+                } catch (e) {
+                  console.error('Next Up refresh failed:', e);
+                  card.style.opacity = '1';
+                  card.style.pointerEvents = 'auto';
+                }
+              }
+            }
           }
         } catch { /* ignore */ }
 
       } else if (action === 'list') {
-        if (!tmdbId) { alert('Cannot add unmatched item to lists'); return; }
+        if (!uriId) { alert('Cannot add unmatched item to lists'); return; }
         if (document.getElementById('list-popover')!.classList.contains('hidden') || _activeListBtn !== btn) {
-          openListPopover(btn, tmdbId, mediaType, card.dataset.season || '');
+          openListPopover(btn, uriId, mediaType);
         } else {
           closeListPopover();
         }
@@ -1971,45 +2708,41 @@ const bottomNavItem = (active: boolean) =>
       } else if (action === 'collected') {
         const season = card.dataset.season;
         const showTmdbId = card.dataset.showTmdbId;
+        const showUriId = card.dataset.showUriId;
         const inLibrary = btn.dataset.inLibrary === 'true';
         const seriesId = showTmdbId || tmdbId;
+        const seriesUri = showUriId || uriId;
         try {
           if (mediaType === 'series' && !season) {
-            // Show-level collect/uncollect — covers all seasons
+            if (!uriId) { alert('Missing show URI'); return; }
             if (inLibrary) {
               const ok = await showConfirm('Remove show from collection?', 'This will remove all collection entries for every episode in this show.');
               if (!ok) return;
-              await apiFetch(`/media/collect-show?tmdb_id=${tmdbId}`, 'DELETE');
+              await apiFetch(`/media/collect-show?uri_id=${encodeURIComponent(uriId)}`, 'DELETE');
             } else {
-              await apiFetch('/media/collect-show', 'POST', { tmdb_id: Number(tmdbId), media_type: 'series' });
+              await apiFetch('/media/collect-show', 'POST', { uri_id: uriId, media_type: 'series' });
             }
           } else if (mediaType === 'series' && season) {
-            // Season-level collect/uncollect
+            if (!seriesUri) { alert('Missing show URI'); return; }
             if (inLibrary) {
               const ok = await showConfirm('Remove season from collection?', 'This will remove all collection entries for this season.');
               if (!ok) return;
-              const orderQuery = episodeOrder === 'tvdb' ? '&episode_order=tvdb' : '';
-              await apiFetch(`/media/collect-season?series_tmdb_id=${seriesId}&season_number=${season}${orderQuery}`, 'DELETE');
+              await apiFetch(`/media/collect-season?show_uri_id=${encodeURIComponent(seriesUri)}&season_number=${season}`, 'DELETE');
             } else {
-              const collectSeasonBody: Record<string, number | string> = {
-                series_tmdb_id: Number(seriesId),
-                season_number: Number(season),
-              };
-              if (episodeOrder === 'tvdb') collectSeasonBody.episode_order = 'tvdb';
-              await apiFetch('/media/collect-season', 'POST', collectSeasonBody);
+              await apiFetch('/media/collect-season', 'POST', { show_uri_id: seriesUri, season_number: Number(season) });
             }
           } else {
             if (inLibrary) {
               const ok = await showConfirm('Remove from collection?', 'This will remove all collection entries for this item.');
               if (!ok) return;
-              const query = tmdbId ? `tmdb_id=${tmdbId}` : `id=${mediaId}`;
+              const query = uriId ? `uri_id=${encodeURIComponent(uriId)}` : `id=${mediaId}`;
               await apiFetch(`/media/collect?${query}&media_type=${mediaType}`, 'DELETE');
             } else {
-              if (!tmdbId) { alert('Cannot manually collect unmatched items'); return; }
-              const collectBody: Record<string, number | string> = { tmdb_id: Number(tmdbId), media_type: mediaType };
+              if (!uriId) { alert('Cannot manually collect unmatched items'); return; }
+              const collectBody: Record<string, number | string> = { uri_id: uriId, media_type: mediaType };
               if (mediaType === 'episode') {
                 const epNum = card.dataset.episodeNumber;
-                if (showTmdbId) collectBody.series_tmdb_id = Number(showTmdbId);
+                if (showUriId) collectBody.show_uri_id = showUriId;
                 if (season) collectBody.season_number = Number(season);
                 if (epNum) collectBody.episode_number = Number(epNum);
               }
@@ -2021,11 +2754,11 @@ const bottomNavItem = (active: boolean) =>
             btn.dataset.state = nowInLibrary ? 'active' : 'inactive';
             const isCard = btn.parentElement?.classList.contains('grid');
             if (nowInLibrary) {
-              btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'text-zinc-500', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
-              btn.classList.add(isCard ? 'bg-purple-500/20' : 'bg-purple-500/50', 'text-purple-400');
+              btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'text-zinc-400', 'hover:bg-purple-500/10', 'hover:text-purple-400');
+              btn.classList.add(isCard ? 'bg-purple-500/20' : 'bg-purple-500/20', 'text-purple-400', 'hover:bg-purple-500/30');
             } else {
-              btn.classList.remove('bg-purple-500/20', 'bg-purple-500/50', 'text-purple-400', 'text-purple-300', 'hover:bg-purple-500/40', 'hover:bg-purple-400/50');
-              btn.classList.add(isCard ? 'bg-zinc-900' : 'bg-zinc-800', isCard ? 'text-zinc-400' : 'text-zinc-500');
+              btn.classList.remove('bg-purple-500/20', 'bg-purple-500/50', 'text-purple-400', 'text-purple-300', 'hover:bg-purple-500/40', 'hover:bg-purple-400/50', 'hover:bg-purple-500/30');
+              btn.classList.add(isCard ? 'bg-zinc-900' : 'bg-zinc-950/25', isCard ? 'text-zinc-400' : 'text-zinc-500');
             }
             btn.title = nowInLibrary ? 'In collection' : 'Add to collection';
             return;
@@ -2049,37 +2782,46 @@ const bottomNavItem = (active: boolean) =>
             }
           : null;
         if (document.getElementById('rating-popover')!.classList.contains('hidden') || _activeRatingBtn !== btn) {
-          openRatingPopover(btn, tmdbId, mediaType, currentRating, ratingSeason, episodeOrder, rateInfo);
+          openRatingPopover(btn, uriId, mediaType, currentRating, ratingSeason);
         } else {
           closeRatingPopover();
         }
 
       } else if (action === 'request') {
-        const performRequestAdd = async (overrides?: Record<string, unknown>) => {
-          const originalContent = btn.innerHTML;
-          btn.innerHTML = '<svg class="animate-spin h-5 w-5 text-orange-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
-          btn.classList.add('pointer-events-none');
+        const originalContent = btn.innerHTML;
 
-          try {
-            const res = await apiFetch(`/media/${mediaType}/${tmdbId}/request`, 'POST', overrides);
-            if (res.status === 'added' || res.status === 'already_exists') {
-              btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-500"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-green-500">' + (res.status === 'added' ? 'Added' : 'Exists') + '</span>';
-              btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
-              btn.classList.add('bg-green-500/10', 'text-green-500');
-              (btn as HTMLButtonElement).disabled = true;
-            } else if (res.status === 'pending_approval') {
-              btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-amber-400"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-amber-400">Pending</span>';
-              btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
-              btn.classList.add('bg-amber-500/10', 'text-amber-400');
-              (btn as HTMLButtonElement).disabled = true;
-            } else {
-              throw new Error('Failed to request');
-            }
-          } catch (err: any) {
-            btn.innerHTML = originalContent;
-            btn.classList.remove('pointer-events-none');
-            alertFromError(err, 'Request failed');
+        const performRequestAdd = async (overrides?: Record<string, unknown>) => {
+        btn.innerHTML = '<svg class="animate-spin h-5 w-5 text-orange-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+        btn.classList.add('pointer-events-none');
+        
+        try {
+          const res = await apiFetch(`/media/${mediaType}/${tmdbId}/request`, 'POST', overrides);
+          if (res.status === 'added' || res.status === 'already_exists') {
+            btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-500"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-green-500">' + (res.status === 'added' ? 'Added' : 'Exists') + '</span>';
+            btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
+            btn.classList.add('bg-green-500/10', 'text-green-500');
+            (btn as HTMLButtonElement).disabled = true;
+          } else if (res.status === 'pending_approval') {
+            btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-amber-400"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="text-[10px] font-bold uppercase tracking-wider leading-none text-amber-400">Pending</span>';
+            btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
+            btn.classList.add('bg-amber-500/10', 'text-amber-400');
+            (btn as HTMLButtonElement).disabled = true;
+          } else {
+            throw new Error('Failed to request');
           }
+        } catch (err: any) {
+          btn.innerHTML = originalContent;
+          btn.classList.remove('pointer-events-none');
+          // Try to parse error message
+          let msg = 'Request failed';
+          try {
+             const data = JSON.parse(err.message);
+             msg = data.detail || msg;
+          } catch {
+             if (err.message) msg = err.message;
+          }
+          alert(msg);
+        }
         };
 
         // Admin-only, opt-in via Connections/Admin settings - everyone else
@@ -2116,14 +2858,11 @@ const bottomNavItem = (active: boolean) =>
         const showId = btn.dataset.showId;
         const isDropped = btn.dataset.dropped === 'true';
 
+        const dropUri = uriId || (tmdbId ? `tmdb:${mediaTypeForBlock === 'series' ? 's' : 'm'}:${tmdbId}` : '');
+
         if (isDropped) {
           try {
-            if (mediaType === 'series') {
-              await apiFetch(`/history/drop/show?show_id=${showId}`, 'DELETE');
-            } else {
-              const q = mediaId && Number(mediaId) > 0 ? `media_id=${mediaId}` : `tmdb_id=${tmdbId}`;
-              await apiFetch(`/history/drop/movie?${q}`, 'DELETE');
-            }
+            await apiFetch(`/media/blocklist?${blockDeleteQuery(dropUri, mediaTypeForBlock)}`, 'DELETE');
             window.location.reload();
           } catch (err: any) {
             alertFromError(err, 'Failed to undrop');
@@ -2131,41 +2870,46 @@ const bottomNavItem = (active: boolean) =>
           return;
         }
 
-        openDropModal(mediaType, showId, mediaId, tmdbId);
+        openDropModal(mediaTypeForBlock, showId, mediaId, tmdbId, dropUri);
       }
     });
   </script>
   <script>
     // ── Radarr / Sonarr monitored check (deferred after page load) ────────────
     (async () => {
-      const btn = document.querySelector<HTMLButtonElement>('[data-action="request"][data-request-loading="true"]');
-      if (!btn) return;
-      const card = btn.closest<HTMLElement>('[data-card]');
-      if (!card) return;
-      const tmdbId = card.dataset.tmdbId;
-      const mediaType = card.dataset.mediaType;
-      if (!tmdbId || !mediaType) return;
-
-      const API = '/api/proxy';
-      const TOKEN = () => (window as any).__AUTH_TOKEN__ ?? '';
-
-      try {
-        const res = await fetch(`${API}/media/request-status?tmdb_id=${tmdbId}&media_type=${mediaType}`, {
-          headers: { Authorization: `Bearer ${TOKEN()}` },
-        });
-        if (!res.ok) return; // service down — keep disabled
-        const { monitored } = await res.json();
-        btn.removeAttribute('data-request-loading');
-        if (monitored) {
-          btn.title = mediaType === 'series' ? 'Already in Sonarr' : 'Already in Radarr';
-          btn.dataset.state = 'active';
-          btn.classList.remove('bg-zinc-800', 'text-zinc-500', 'hover:bg-orange-300/60', 'hover:text-orange-400');
-          btn.classList.add('bg-orange-500/50', 'text-orange-300', 'hover:bg-orange-400/50');
-        } else {
-          btn.disabled = false;
+      const buttons = document.querySelectorAll<HTMLButtonElement>('[data-action="request"][data-request-loading="true"]');
+      for (const btn of buttons) {
+        const card = btn.closest<HTMLElement>('[data-card]');
+        if (!card) continue;
+        let uriIdReq = card.dataset.uriId;
+        let mediaType = card.dataset.mediaType;
+        if (mediaType === 'episode') {
+          uriIdReq = card.dataset.showUriId;
+          mediaType = 'series';
         }
-      } catch {
-        // network error — keep disabled
+        if (!uriIdReq || !mediaType) continue;
+
+        const API = '/api/proxy';
+        const TOKEN = () => window["__AUTH_TOKEN__"] ?? '';
+
+        try {
+          const res = await fetch(`${API}/media/request-status?uri_id=${encodeURIComponent(uriIdReq)}&media_type=${mediaType}`, {
+            headers: { Authorization: `Bearer ${TOKEN()}` },
+          });
+          if (!res.ok) continue; // service down — keep disabled
+          const { monitored } = await res.json();
+          btn.removeAttribute('data-request-loading');
+          if (monitored) {
+            btn.title = mediaType === 'series' ? 'Already in Sonarr' : 'Already in Radarr';
+            btn.dataset.state = 'active';
+            btn.classList.remove('bg-zinc-800', 'bg-zinc-900', 'bg-zinc-950/25', 'text-zinc-500', 'hover:bg-orange-500/10', 'hover:text-orange-400');
+            btn.classList.add('bg-orange-500/20', 'text-orange-400', 'hover:bg-orange-500/30');
+          } else {
+            btn.disabled = false;
+          }
+        } catch {
+          // network error — keep disabled
+        }
       }
     })();
   </script>
@@ -2365,6 +3109,18 @@ const bottomNavItem = (active: boolean) =>
         document.querySelectorAll<HTMLElement>('[data-adult="true"]').forEach(el => el.removeAttribute('data-adult'));
         document.querySelectorAll<HTMLElement>('[data-adult-backdrop="true"]').forEach(el => el.removeAttribute('data-adult-backdrop'));
       }
+    }, true);
+
+    // Spoiler guards reveal one element at a time — unlike explicit content,
+    // where revealing a poster is meant to reveal its backdrop with it.
+    document.addEventListener('click', (e) => {
+      const spoilerEl = (e.target as Element).closest<HTMLElement>('[data-spoiler]');
+      if (!spoilerEl) return;
+      const kind = spoilerEl.getAttribute('data-spoiler');
+      if (!kind || !document.documentElement.classList.contains(`blur-${kind}`)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      spoilerEl.removeAttribute('data-spoiler');
     }, true);
   </script>
 

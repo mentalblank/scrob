@@ -1,0 +1,32 @@
+---
+import ProgressRow from "../../components/ProgressRow.astro";
+import { api, type ShowProgress } from "../../lib/api";
+
+export const partial = true;
+export const prerender = false;
+
+const { token } = Astro.locals;
+const params = Astro.url.searchParams;
+const page = Number(params.get("page") || 1);
+
+let shows: ShowProgress[] = [];
+try {
+  const data = await api.history.progress(
+    {
+      page,
+      sort: params.get("sort") || "recent",
+      status: params.get("status") || "all",
+      search: params.get("search") || undefined,
+      genre: params.getAll("genre"),
+    },
+    token,
+  );
+  shows = data?.results ?? [];
+} catch {
+  return new Response("", { status: 200 });
+}
+
+const preferTvdb = Astro.cookies.get("primary_metadata_source")?.value === "tvdb";
+---
+
+{shows.map((show) => <ProgressRow show={show} preferTvdb={preferTvdb} />)}

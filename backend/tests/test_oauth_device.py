@@ -338,7 +338,8 @@ class DeviceTokenScopeEnforcementTests(_DeviceFlowAppMixin):
         )
         async with self.Session() as s:
             with self.assertRaises(Exception) as ctx:
-                await dependencies.get_current_user(db=s, token=token)
+                # x_api_key/apikey are FastAPI defaults, unresolved on a direct call
+                await dependencies.get_current_user(db=s, token=token, x_api_key=None, apikey=None)
         self.assertEqual(getattr(ctx.exception, "status_code", None), 403)
 
     async def test_device_token_for_a_nonexistent_grant_is_rejected(self):

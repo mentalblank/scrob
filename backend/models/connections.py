@@ -19,6 +19,7 @@ class MediaServerConnection(Base):
     token            : Mapped[str]           = mapped_column(String(500), nullable=False)
     server_user_id   : Mapped[Optional[str]] = mapped_column(String(255))  # jellyfin/emby user ID
     server_username  : Mapped[Optional[str]] = mapped_column(String(255))  # plex username for webhook attribution
+    external_server_url : Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Plex "Login with Plex" (PIN auth). NULL on manually-configured connections.
     # plex_auth_token is the account-level token (needed for watchlist / Discover /
@@ -43,6 +44,10 @@ class MediaServerConnection(Base):
     # Auto sync interval in hours (null = disabled)
     auto_sync_interval : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     auto_push_interval : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    partial_sync_interval : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    
+    last_full_sync        : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_partial_sync     : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Plex watchlist → Radarr/Sonarr auto-request (Plex connections only)
     watchlist_to_radarr       : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False, server_default="false")

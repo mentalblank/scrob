@@ -1,47 +1,36 @@
 ---
 import Base from "../layouts/Base.astro";
+import VisibilityFilters from "../components/VisibilityFilters.astro";
 import { api, tmdbImageUrl } from "../lib/api";
 export const prerender = false;
 
 const { token, user } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
-
-let settings: Awaited<ReturnType<typeof api.auth.getSettings>> | null = null;
-let profileData: Awaited<ReturnType<typeof api.profile.get>> | null = null;
-let hasTmdbKey = false;
-if (token) {
-  [settings, profileData] = await Promise.all([
-    api.auth.getSettings(token),
-    api.profile.get(token).catch(() => null),
-  ]);
-  hasTmdbKey = !!settings?.has_effective_tmdb_key;
-} else {
-  // Anonymous visitor - only reachable at all when the admin enabled
-  // logged-out navigation, which already implies a global TMDB key. There's
-  // no profile to personalise with, so this page falls back to exactly the
-  // same generic sections a freshly-registered user with no profile data
-  // set yet would see.
-  const status = await api.profile.publicAccessStatus().catch(() => ({ enable_logged_out_navigation: false }));
-  hasTmdbKey = status.enable_logged_out_navigation;
-}
+const profileData = await api.profile.get(token!).catch(() => null);
 const watchRegion: string = profileData?.country ?? 'US';
+const [settings, movieGenresRes, tvGenresRes, providersRes, connections] = await Promise.all([
+  api.auth.getSettings(token!),
+  api.media.getGenres("movie", token!).catch(() => ({ genres: [] })),
+  api.media.getGenres("tv", token!).catch(() => ({ genres: [] })),
+  api.media.getWatchProviders("movie", watchRegion, token!).catch(() => ({ results: [] })),
+  api.auth.getConnections(token!).catch(() => []),
+]);
+const hasTmdbKey = !!settings?.has_effective_tmdb_key;
+const allProviders = providersRes.results || [];
+const PROVIDER_NAMES = Object.fromEntries(allProviders.map(p => [String(p.provider_id), p.provider_name]));
 const hasProfileData = !!(
   profileData?.country ||
-  (profileData?.movie_genres?.length ?? 0) > 0 ||
-  (profileData?.show_genres?.length ?? 0) > 0 ||
+  (profileData?.liked_genres?.length ?? 0) > 0 ||
   (profileData?.streaming_services?.length ?? 0) > 0
 );
 
-const topMovieGenres = (profileData?.movie_genres ?? []).slice(0, 3);
-const topShowGenres  = (profileData?.show_genres  ?? []).slice(0, 3);
+const topGenres = (profileData?.liked_genres ?? []).slice(0, 6);
+const topMovieGenres = topGenres.filter(g => movieGenresRes?.genres.some((mg: any) => mg.name === g));
+const topShowGenres = topGenres.filter(g => tvGenresRes?.genres.some((tg: any) => tg.name === g));
 
-const PROVIDER_NAMES: Record<string, string> = {
-  "8": "Netflix", "9": "Prime Video", "337": "Disney+",
-  "350": "Apple TV+", "1899": "Max", "15": "Hulu",
-};
-
-const userServices = (profileData?.streaming_services ?? []).filter(id => id in PROVIDER_NAMES);
-const hasMediaServer = !!(settings?.plex_url || settings?.jellyfin_url || settings?.emby_url);
+const userServices = (profileData?.streaming_services ?? []);
+// Media servers live in media_server_connections, not on settings.
+const hasMediaServer = connections.length > 0;
 const canPick = hasTmdbKey && (userServices.length > 0 || hasMediaServer);
 
 // Grab a random backdrop for the "Feeling lucky?" banner
@@ -58,39 +47,25 @@ if (canPick) {
   } catch { /* no backdrop, fallback to gradient */ }
 }
 
-const MOVIE_GENRES = [
-  { label: "Action", emoji: "💥" },
-  { label: "Adventure", emoji: "🗺️" },
-  { label: "Animation", emoji: "🎨" },
-  { label: "Comedy", emoji: "😂" },
-  { label: "Crime", emoji: "🔍" },
-  { label: "Documentary", emoji: "🎥" },
-  { label: "Drama", emoji: "🎭" },
-  { label: "Fantasy", emoji: "🧙" },
-  { label: "Horror", emoji: "👻" },
-  { label: "Mystery", emoji: "🕵️" },
-  { label: "Romance", emoji: "💕" },
-  { label: "Science Fiction", emoji: "🚀" },
-  { label: "Thriller", emoji: "😰" },
-  { label: "War", emoji: "⚔️" },
-  { label: "Western", emoji: "🤠" },
-];
+const EMOJIS: Record<string, string> = {
+  "Action": "💥", "Adventure": "🗺️", "Animation": "🎨", "Comedy": "😂",
+  "Crime": "🔍", "Documentary": "🎥", "Drama": "🎭", "Family": "👪",
+  "Fantasy": "🧙", "History": "📜", "Horror": "👻", "Music": "🎵",
+  "Mystery": "🕵️", "Romance": "💕", "Science Fiction": "🚀", "TV Movie": "📺",
+  "Thriller": "😰", "War": "⚔️", "Western": "🤠",
+  "Action & Adventure": "💥", "Kids": "🧸", "News": "📰", "Reality": "📺",
+  "Sci-Fi & Fantasy": "🚀", "Soap": "🧼", "Talk": "🗣️", "War & Politics": "⚔️",
+};
 
-const TV_GENRES = [
-  { label: "Action & Adventure", emoji: "💥" },
-  { label: "Animation", emoji: "🎨" },
-  { label: "Comedy", emoji: "😂" },
-  { label: "Crime", emoji: "🔍" },
-  { label: "Documentary", emoji: "🎥" },
-  { label: "Drama", emoji: "🎭" },
-  { label: "Kids", emoji: "🧸" },
-  { label: "Mystery", emoji: "🕵️" },
-  { label: "Reality", emoji: "📺" },
-  { label: "Sci-Fi & Fantasy", emoji: "🚀" },
-  { label: "Thriller", emoji: "😰" },
-  { label: "War & Politics", emoji: "⚔️" },
-  { label: "Western", emoji: "🤠" },
-];
+const MOVIE_GENRES = (movieGenresRes?.genres || []).map(g => ({
+  label: g.name,
+  emoji: EMOJIS[g.name] || "🎬"
+}));
+
+const TV_GENRES = (tvGenresRes?.genres || []).map(g => ({
+  label: g.name,
+  emoji: EMOJIS[g.name] || "📺"
+}));
 
 // Poster skeleton (2:3, for movies)
 function skeleton() {
@@ -114,8 +89,9 @@ function skeletonWide() {
 ---
 
 <Base title="Discover">
-  <div class="mb-10">
+  <div class="flex items-center justify-between mb-10">
     <h1 class="page-title">Discover</h1>
+    <VisibilityFilters />
   </div>
 
   {!hasTmdbKey && (
@@ -130,8 +106,8 @@ function skeletonWide() {
 
   <!-- Pick for me modal -->
   <div id="pick-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
-    <div id="pick-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-    <div class="relative w-full max-w-lg max-h-[90vh] bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+    <div id="pick-modal-backdrop" class="absolute inset-0 bg-zinc-950/85 backdrop-blur-md"></div>
+    <div class="relative w-full max-w-lg max-h-[90vh] bg-zinc-900/90 border border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col backdrop-blur-xl ring-1 ring-white/10">
       <button id="pick-modal-close" class="absolute top-4 right-4 z-10 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100 rounded-full transition active:scale-95 cursor-pointer" aria-label="Close">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
@@ -204,7 +180,7 @@ function skeletonWide() {
           <div class="relative px-8 sm:px-12">
             <p class="text-xs font-black uppercase tracking-[0.2em] text-zinc-400 mb-2">Feeling lucky?</p>
             <h2 class="text-2xl sm:text-3xl font-black text-zinc-100 mb-5 leading-tight">Let us pick something<br class="hidden sm:block" /> for you to watch.</h2>
-            <div class="flex gap-3">
+            <div class="flex flex-wrap gap-3">
               <button
                 id="pick-movie-btn"
                 class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-blue-900/40 active:scale-95 text-sm uppercase tracking-wider cursor-pointer"
@@ -294,7 +270,7 @@ function skeletonWide() {
               <h2 class="text-lg font-black text-zinc-100 leading-tight">Add your region, genres and streaming services to unlock personalised recommendations.</h2>
             </div>
             <a
-              href="/user-settings"
+              href="/settings#tab-preferences"
               class="shrink-0 self-start md:self-auto inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-zinc-100 font-black rounded-2xl transition-all shadow-xl shadow-blue-900/40 active:scale-95 text-sm uppercase tracking-wider"
             >
               Update profile
@@ -306,23 +282,26 @@ function skeletonWide() {
         </section>
       )}
 
-      <!--
-        Streaming: each service gets its movies row + shows row adjacent.
-        Personalised (user's services) or fallback (Netflix + Prime / Netflix + Disney+).
-      -->
+      <!-- Render movies and shows rows for each streaming service -->
       {hasProfileData && userServices.length > 0
         ? userServices.map((id, i) => (
             <Fragment>
               <section data-section class="mb-6">
-                <h2 class="section-headline mb-5">On {PROVIDER_NAMES[id]}</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="section-headline">On {PROVIDER_NAMES[id]}</h2>
+                  <a href={`/movies?provider_id=${id}&provider_name=${encodeURIComponent(PROVIDER_NAMES[id])}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id={`streaming-movie-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-10">
-                <h2 class="section-headline mb-5">{PROVIDER_NAMES[id]} Shows</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="section-headline">{PROVIDER_NAMES[id]} Shows</h2>
+                  <a href={`/shows?provider_id=${id}&provider_name=${encodeURIComponent(PROVIDER_NAMES[id])}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id={`streaming-show-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-                  <Fragment set:html={skeletonWide()} />
+                  <Fragment set:html={skeleton()} />
                 </div>
               </section>
             </Fragment>
@@ -330,27 +309,39 @@ function skeletonWide() {
         : !hasProfileData && (
             <Fragment>
               <section data-section class="mb-6">
-                <h2 class="section-headline mb-5">On Netflix</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="section-headline">On Netflix</h2>
+                  <a href="/movies?provider_id=8&provider_name=Netflix" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id="fallback-movie-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-10">
-                <h2 class="section-headline mb-5">Netflix Shows</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="section-headline">Netflix Shows</h2>
+                  <a href="/shows?provider_id=8&provider_name=Netflix" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id="fallback-show-0" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-                  <Fragment set:html={skeletonWide()} />
+                  <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-6">
-                <h2 class="section-headline mb-5">On Prime Video</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="section-headline">On Prime Video</h2>
+                  <a href="/movies?provider_id=9&provider_name=Prime%20Video" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id="fallback-movie-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
                   <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-10">
-                <h2 class="section-headline mb-5">Prime Video Shows</h2>
+                <div class="flex items-baseline gap-3 mb-5">
+                  <h2 class="section-headline">Disney+ Shows</h2>
+                  <a href="/shows?provider_id=337&provider_name=Disney%2B" class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
+                </div>
                 <div id="fallback-show-1" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-                  <Fragment set:html={skeletonWide()} />
+                  <Fragment set:html={skeleton()} />
                 </div>
               </section>
               <section data-section class="mb-6">
@@ -368,7 +359,7 @@ function skeletonWide() {
             </Fragment>
           )
       }
-
+ 
       <!-- TV Show Genres (static) -->
       <section class="mb-10">
         <h2 class="text-sm font-black text-zinc-400 uppercase tracking-widest mb-4">Discover TV Shows</h2>
@@ -384,7 +375,7 @@ function skeletonWide() {
           ))}
         </div>
       </section>
-
+ 
       <!-- Favourite show genre rows (backdrop) -->
       {hasProfileData && topShowGenres.map((genre, i) => (
         <section data-section class="mb-10">
@@ -393,24 +384,24 @@ function skeletonWide() {
             <a href={`/shows?genre=${encodeURIComponent(genre)}`} class="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">See all →</a>
           </div>
           <div id={`show-genre-${i}`} class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-            <Fragment set:html={skeletonWide()} />
+            <Fragment set:html={skeleton()} />
           </div>
         </section>
       ))}
-
+ 
       <!-- On Air This Week (backdrop) -->
       <section data-section class="mb-10">
         <h2 class="section-headline mb-5">On Air This Week</h2>
         <div id="on-air-this-week" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-          <Fragment set:html={skeletonWide()} />
+          <Fragment set:html={skeleton()} />
         </div>
       </section>
-
+ 
       <!-- Top Rated Shows (backdrop) -->
       <section data-section class="mb-10">
         <h2 class="section-headline mb-5">Top Rated Shows</h2>
         <div id="top-rated-shows" class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
-          <Fragment set:html={skeletonWide()} />
+          <Fragment set:html={skeleton()} />
         </div>
       </section>
 
@@ -429,58 +420,149 @@ function skeletonWide() {
 </Base>
 
 <script define:vars={{ token, watchRegion, hasProfileData, topMovieGenres, topShowGenres, userServices, canPick }}>
-  function esc(str) {
-    if (str == null) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+  const esc = window.esc;
+
+  // Route artwork through the local image cache instead of hitting TMDB/TVDB direct.
+  function cachedImageUrl(path, size = 'w500') {
+    if (!path) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      const m = /image\.tmdb\.org\/t\/p\/([^/]+)(\/.+)$/.exec(path);
+      if (m) return `/api/proxy/media/image/${m[1]}${m[2]}`;
+      const t = /artworks\.thetvdb\.com(\/[^?#]+)/.exec(path);
+      if (t) return `/api/proxy/media/image/tvdb${t[1]}`;
+      return path;
+    }
+    return `/api/proxy/media/image/${size}${path.startsWith('/') ? path : '/' + path}`;
   }
 
   function itemUrl(item) {
-    if (item.type === 'series') return '/show/' + item.tmdb_id;
-    return '/media/movie/' + item.tmdb_id;
+    const primarySource = document.cookie.match(/primary_metadata_source=([^;]+)/)?.[1] || 'tmdb';
+    return window.buildItemUrl?.(item, primarySource === 'tvdb') || '/';
   }
 
-  // 2:3 poster card — movies
+  // 2:3 poster card — movies and shows
   function posterCard(item) {
-    const url = itemUrl(item);
+    const isSeries = item.type === 'series';
+    const href = itemUrl(item);
     const year = item.release_date ? item.release_date.slice(0, 4) : '';
     const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : '';
-    return `<a href="${esc(url)}" class="flex-shrink-0 w-40 group active:scale-95 active:opacity-70 transition-all duration-150">
-      <div class="relative aspect-[2/3] rounded-2xl overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
-        ${item.poster_path
-          ? `<img src="${esc(item.poster_path)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy">`
-          : `<div class="w-full h-full flex items-center justify-center text-zinc-400 text-xs text-center px-2">${esc(item.title)}</div>`
-        }
-        <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-      </div>
-      <p class="text-sm font-bold text-zinc-500 dark:text-zinc-300 truncate group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors leading-snug">${esc(item.title)}</p>
-      <p class="text-xs text-zinc-500 mt-0.5">${rating ? '★ ' + esc(rating) : ''}${rating && year ? ' · ' : ''}${esc(year)}</p>
-    </a>`;
-  }
+    const watched = item.watched ?? false;
+    const inLists = item.in_lists ?? [];
+    const inLibrary = item.in_library ?? false;
+    const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
+    const progressPct = isSeries && item.total_episodes_count 
+      ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
+      : (item.progress_percent ?? 0);
+    const showProgress = progressPct > 0;
+    const collectStyle = isSeries && collectionPct > 0
+      ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
+      : '';
+    const watchedFill = watched ? 'currentColor' : 'none';
+    const typeLabel = isSeries ? 'Show' : 'Movie';
 
-  // 3:2 backdrop card — shows (title overlaid inside)
-  function backdropCard(item) {
-    const url = itemUrl(item);
-    const year = item.release_date ? item.release_date.slice(0, 4) : '';
-    const rating = item.tmdb_rating ? Number(item.tmdb_rating).toFixed(1) : '';
-    const img = item.backdrop_path || item.poster_path;
-    const meta = [rating ? '★ ' + rating : '', year].filter(Boolean).join(' · ');
-    return `<a href="${esc(url)}" class="flex-shrink-0 w-56 group active:scale-95 active:opacity-70 transition-all duration-150">
-      <div class="relative aspect-[3/2] rounded-xl overflow-hidden bg-zinc-800 ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
-        ${img
-          ? `<img src="${esc(img)}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy">`
-          : `<div class="w-full h-full bg-zinc-800"></div>`
-        }
-        <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
-        <div class="absolute bottom-0 left-0 right-0 p-3">
-          <p class="text-sm font-bold text-white leading-snug line-clamp-2">${esc(item.title)}</p>
-          ${meta ? `<p class="text-xs text-white/60 mt-0.5">${esc(meta)}</p>` : ''}
+    return `<div
+      class="flex-shrink-0 w-40 group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
+      data-card
+      data-tmdb-id="${esc(String(item.tmdb_id ?? ''))}"
+      data-uri-id="${esc(String(item.uri_id || (item.tmdb_id ? `tmdb:${item.type === 'series' || item.type === 'season' || item.type === 'episode' ? 's' : 'm'}:${item.tmdb_id}` : (item.tvdb_id ? `tvdb:s:${item.tvdb_id}` : ""))))}"
+      data-media-type="${esc(item.type)}"
+      data-show-tmdb-id=""
+      data-show-uri-id=""
+      data-season=""
+      data-watched="${watched}"
+      data-collected="${inLibrary}"
+      data-listed="${inLists.length > 0}"
+      data-in-library="${inLibrary}"
+      data-partial-watched="${item.progress_percent > 0 || (item.watched_episodes_count > 0)}"
+      data-is-blocked="${item.is_blocked ?? false}"
+      data-is-dropped="${item.is_dropped ?? false}"
+    >
+      <a href="${esc(href)}" class="block">
+        <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
+          ${item.poster_path
+            ? `<img src="${esc(cachedImageUrl(item.poster_path, 'w500'))}" alt="${esc(item.title)}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" decoding="async" />`
+            : `<div class="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-900 p-4 text-center"><span class="text-3xl mb-2 opacity-30">🎬</span><span class="text-xs font-bold uppercase tracking-widest">${esc(item.title)}</span></div>`
+          }
+          <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          ${(() => {
+            const isBlocked = item.is_blocked ?? false;
+            const isDropped = item.is_dropped ?? false;
+            const showDrop = isSeries && (inLibrary || watched || (item.progress_percent > 0) || (item.watched_episodes_count > 0));
+            const base = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+            const baseRight = `${base} right-1.5`;
+            const baseOffset = `${base} right-[38px]`;
+
+            const btnInactiveDrop = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+            const btnInactiveBlock = `${baseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+            const btnActiveDrop  = `${baseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+            const btnActiveBlock = `${baseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+            const btnInactiveBlockOffset = `${baseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
+            const ICON_DROP = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>`;
+            const ICON_BLOCK = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>`;
+
+            if (isDropped) {
+              return `
+                <button data-action="unified-block" data-is-blocked="false" data-is-dropped="true" title="Resume tracking" class="${esc(btnActiveDrop)}">${ICON_DROP}</button>
+                <button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-force-block="true" data-action-intent="block" title="Block" class="${esc(btnInactiveBlockOffset)}">${ICON_BLOCK}</button>
+              `;
+            } else if (isBlocked) {
+              return `<button data-action="unified-block" data-is-blocked="true" data-is-dropped="false" title="Unblock" class="${esc(btnActiveBlock)}">${ICON_BLOCK}</button>`;
+            } else {
+              return `<button data-action="unified-block" data-is-blocked="false" data-is-dropped="false" data-action-intent="${showDrop ? 'drop' : 'block'}" title="${showDrop ? 'Drop show' : 'Block'}" class="${showDrop ? esc(btnInactiveDrop) : esc(btnInactiveBlock)}">${showDrop ? ICON_DROP : ICON_BLOCK}</button>`;
+            }
+          })()}
+          ${rating ? `<div class="rating-badge absolute top-2 left-2 bg-zinc-950/85 backdrop-blur-md text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border border-zinc-800/50 flex items-center gap-1"><span class="text-xs leading-none">★</span> ${esc(rating)}</div>` : ''}
+          ${showProgress ? `
+            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+              <div class="h-full bg-blue-500 rounded-r-full" style="width: ${progressPct}%"></div>
+            </div>
+          ` : ''}
         </div>
+      </a>
+      <div class="card-action-bar">
+        <button data-action="watched" data-watched="${watched}" data-state="${watched ? 'active' : 'inactive'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}"
+          class="card-action-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3" fill="${watchedFill}"/>
+          </svg>
+          <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Watched</span>
+        </button>
+        <button data-action="list" data-in-lists="${esc(JSON.stringify(inLists))}" data-state="${inLists.length > 0 ? 'active' : 'inactive'}" title="Add to list"
+          class="card-action-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+            <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+          <span class="text-[8px] font-bold uppercase tracking-wider leading-none">Lists</span>
+        </button>
+        <button data-action="collected" data-in-library="${inLibrary}" data-collection-pct="${collectionPct}" data-state="${(inLibrary || collectionPct > 0) ? 'active' : 'inactive'}"
+          title="${isSeries ? `${collectionPct}% in library` : (inLibrary ? 'In collection' : 'Add to collection')}"
+          style="${esc(collectStyle)}"
+          class="card-action-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+            <path d="M15 22v-4a3 3 0 0 0-6 0v4"/>
+            <path d="M2 7h20"/>
+          </svg>
+          <span class="text-[8px] font-bold uppercase tracking-wider leading-none">${isSeries ? `${collectionPct}%` : 'Collected'}</span>
+        </button>
       </div>
-    </a>`;
+      <a href="${esc(href)}" class="block p-3 bg-transparent flex-1">
+        <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">${esc(item.title)}</h3>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            ${year ? `<span class="text-[11px] font-medium text-zinc-500 tracking-wide">${esc(year)}</span>` : ''}
+          </div>
+          <div class="flex items-center gap-2">
+            ${showProgress ? `<span class="text-[10px] font-bold text-zinc-500 tabular-nums">${Math.round(progressPct)}%</span>` : ''}
+            <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">${typeLabel}</span>
+          </div>
+        </div>
+      </a>
+    </div>`;
   }
 
   // Trailer card — YouTube thumbnail with play button, opens YouTube in new tab
@@ -548,8 +630,8 @@ function skeletonWide() {
   loadTrailers('trending-trailers');
   loadSection('coming-soon',      '/media/upcoming');
   loadSection('top-rated-movies', '/media/top-rated-movies');
-  loadSection('on-air-this-week', '/media/on-air-this-week', 'backdrop');
-  loadSection('top-rated-shows',  '/media/top-rated-shows',  'backdrop');
+  loadSection('on-air-this-week', '/media/on-air-this-week', 'poster');
+  loadSection('top-rated-shows',  '/media/top-rated-shows',  'poster');
   loadSection('hidden-gems',      '/media/hidden-gems?type=movie');
 
   // For You (poster — consistent in a mixed row)
@@ -562,22 +644,20 @@ function skeletonWide() {
     loadSection(`movie-genre-${i}`, `/media/tmdb/list?type=movie&genre=${encodeURIComponent(genre)}&category=popular`);
   });
   topShowGenres.forEach((genre, i) => {
-    loadSection(`show-genre-${i}`, `/media/tmdb/list?type=series&genre=${encodeURIComponent(genre)}&category=popular`, 'backdrop');
+    loadSection(`show-genre-${i}`, `/media/tmdb/list?type=series&genre=${encodeURIComponent(genre)}&category=popular`, 'poster');
   });
 
   // Streaming rows (movies + shows paired per service)
   if (hasProfileData && userServices.length > 0) {
     userServices.forEach((id, i) => {
       loadSection(`streaming-movie-${i}`, `/media/streaming?provider_id=${id}&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
-      loadSection(`streaming-show-${i}`,  `/media/streaming?provider_id=${id}&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+      loadSection(`streaming-show-${i}`,  `/media/streaming?provider_id=${id}&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'poster');
     });
   } else if (!hasProfileData) {
     loadSection('fallback-movie-0', `/media/streaming?provider_id=8&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
-    loadSection('fallback-show-0',  `/media/streaming?provider_id=8&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+    loadSection('fallback-show-0',  `/media/streaming?provider_id=8&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'poster');
     loadSection('fallback-movie-1', `/media/streaming?provider_id=9&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
-    loadSection('fallback-show-1',  `/media/streaming?provider_id=9&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
-    loadSection('fallback-movie-2', `/media/streaming?provider_id=337&type=movie&watch_region=${encodeURIComponent(watchRegion)}`);
-    loadSection('fallback-show-2',  `/media/streaming?provider_id=337&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'backdrop');
+    loadSection('fallback-show-1',  `/media/streaming?provider_id=337&type=series&watch_region=${encodeURIComponent(watchRegion)}`, 'poster');
   }
 
   // ── Pick for me ──────────────────────────────────────────────────────────────
@@ -657,17 +737,27 @@ function skeletonWide() {
       errorEl.classList.add('flex');
       errorMsgEl.textContent = msg || 'Nothing found. Try adjusting your profile preferences.';
     }
-
     function sourceLabel(src) {
       let logoHtml;
       if (src.logo) {
-        logoHtml = `<img src="${esc(src.logo)}" alt="" class="w-5 h-5 rounded object-contain" />`;
+        logoHtml = `<img src="${esc(src.logo)}" alt="" class="w-4 h-4 rounded-sm object-cover" />`;
       } else if (src.type === 'plex' || src.type === 'jellyfin' || src.type === 'emby') {
-        logoHtml = `<img src="/icons/${esc(src.type)}.svg" alt="" class="w-5 h-5 rounded object-contain" />`;
+        logoHtml = `<img src="/icons/${esc(src.type)}.svg" alt="" class="w-4 h-4 rounded object-contain" />`;
       } else {
-        logoHtml = '<span class="text-zinc-400 text-xs">▶</span>';
+        logoHtml = '<span class="text-[10px]">▶</span>';
       }
-      return `<span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm font-medium text-zinc-200">${logoHtml} ${esc(src.name)}</span>`;
+
+      if (src.is_subscribed) {
+        return `<div class="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+          ${logoHtml}
+          <span class="text-blue-200 text-xs font-bold leading-none">${esc(src.name)}</span>
+        </div>`;
+      }
+      return `<div class="flex items-center gap-1.5 px-2 py-1 bg-zinc-800/40 border border-zinc-700/30 rounded-lg group opacity-60">
+        ${logoHtml}
+        <span class="text-zinc-500 text-[10px] font-bold uppercase tracking-tight">${esc(src.name)}</span>
+      </div>`;
+
     }
 
     function showResult(data) {
@@ -707,12 +797,25 @@ function skeletonWide() {
 
         const sourcesEl = document.getElementById('pick-sources');
         const sources = data.sources || [];
-        sourcesEl.innerHTML = sources.length
-          ? sources.map(sourceLabel).join('')
-          : '<span class="text-sm text-zinc-500">No streaming source found</span>';
+        const subscribed = sources.filter(s => s.is_subscribed);
+        const others = sources.filter(s => !s.is_subscribed);
+        
+        let html = '';
+        if (subscribed.length > 0) {
+          html += `<div class="w-full mb-1"><p class="text-[10px] font-black text-blue-400 uppercase tracking-[0.1em] mb-2">Available on your services</p><div class="flex flex-wrap gap-2">${subscribed.map(sourceLabel).join('')}</div></div>`;
+        }
+        if (others.length > 0) {
+          html += `<div class="w-full mt-2"><p class="text-[10px] font-black text-zinc-600 uppercase tracking-[0.1em] mb-2">${subscribed.length > 0 ? 'Other options' : 'Available on'}</p><div class="flex flex-wrap gap-2">${others.map(sourceLabel).join('')}</div></div>`;
+        }
+        
+        sourcesEl.innerHTML = html || '<span class="text-sm text-zinc-500">No streaming source found</span>';
 
         const viewLink = document.getElementById('pick-view-link');
-        viewLink.href = data.type === 'series' ? '/show/' + data.tmdb_id : '/media/movie/' + data.tmdb_id;
+        if (data.type === 'series') {
+          viewLink.href = data.uri_id ? `/show/${data.uri_id}` : data.tvdb_id ? `/show/tvdb:s:${data.tvdb_id}` : `/show/tmdb:s:${data.tmdb_id}`;
+        } else {
+          viewLink.href = data.uri_id ? `/media/movie/${data.uri_id}` : `/media/movie/tmdb:m:${data.tmdb_id}`;
+        }
       }
 
       if (imgSrc) {

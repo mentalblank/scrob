@@ -1,12 +1,8 @@
 import { defineMiddleware } from "astro:middleware";
 import { api } from "./lib/api";
 
-const PUBLIC_ROUTES = ["/login", "/register", "/logout", "/oidc-callback", "/oidc-start", "/link", "/site.webmanifest", "/favicon.ico", "/favicon.svg", "/apple-touch-icon.png", "/sw.js", "/offline.html"];
-// /api/proxy/auth/device/code and /device/token are the RFC 8628 endpoints a
-// third-party client hits with no Scrob session at all (#331) — the backend
-// leaves them unauthenticated by design, so the cookie gate must let them
-// through. Approve/pending/grants are NOT listed: those require a real login.
-const PUBLIC_PREFIXES = ["/auth/activate/", "/forgot-password", "/reset-password/", "/api/proxy/webhooks/", "/api/proxy/auth/has-users", "/api/proxy/auth/bootstrap-restore", "/api/proxy/auth/device/code", "/api/proxy/auth/device/token", "/api/proxy/media/stream/", "/api/proxy/radarr-compat/", "/api/proxy/sonarr-compat/"];
+const PUBLIC_ROUTES = ["/login", "/register", "/logout", "/oidc-callback", "/oidc-start", "/plex-start", "/plex-callback", "/site.webmanifest", "/favicon.ico", "/favicon.svg", "/apple-touch-icon.png", "/sw.js", "/offline.html"];
+const PUBLIC_PREFIXES = ["/auth/activate/", "/forgot-password", "/reset-password/", "/api/proxy/webhooks/", "/api/proxy/auth/has-users", "/api/proxy/auth/bootstrap-restore", "/api/proxy/media/stream/", "/api/proxy/radarr-compat/", "/api/proxy/sonarr-compat/", "/stremio/"];
 // Matches /profile/{id} (someone else's public profile page) but not the bare
 // /profile page (the logged-in user's own profile management), which must stay gated.
 const PUBLIC_PROFILE_PAGE_RE = /^\/profile\/\d+\/?$/;
@@ -44,7 +40,7 @@ const PUBLIC_PERSON_CREDITS_PARTIAL_RE = /^\/partials\/person-credits\/?$/;
 // HTML throws, caught by each row's own error handling).
 const PUBLIC_MEDIA_ROWS_PROXY_RE =
   /^\/api\/proxy\/media\/(trending\/(movies|shows|trailers)|airing-today\/collected|on-air-today|now-playing|upcoming|top-rated-(movies|shows)|on-air-this-week|hidden-gems|streaming)\/?$/;
-// API docs reveal the full endpoint surface and exact app version - admin-only,
+// API docs reveal the full endpoint surface and exact app version — admin-only,
 // never public, regardless of the isStaticAsset check below (which would
 // otherwise treat /openapi.json as a public static file just from its extension).
 const ADMIN_ONLY_ROUTES = ["/docs", "/redoc", "/openapi.json"];
@@ -69,10 +65,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // dependency decides whether that key is accepted for the route.
   const hasApiKey =
     pathname.startsWith("/api/proxy/") &&
-    (context.request.headers.get("X-Api-Key") !== null || context.url.searchParams.has("api_key"));
+    (context.request.headers.get("X-Api-Key") !== null ||
+      context.url.searchParams.has("api_key") ||
+      context.url.searchParams.has("apikey"));
 
   // Skip auth for static assets and public routes
   const isStaticAsset = /\.(js|css|woff2?|ico|png|svg|webp|jpg|jpeg|webmanifest|json|xml)$/.test(pathname);
+
   const isAdminOnlyRoute = ADMIN_ONLY_ROUTES.includes(pathname);
   const isPublicRoute =
     !isAdminOnlyRoute &&
@@ -112,6 +111,52 @@ export const onRequest = defineMiddleware(async (context, next) => {
       context.locals.user = user;
       context.locals.token = token;
 
+      // Sync primary_metadata_source cookie from user preferences
+      const prefs = (user as any)?.preferences ?? (user as any)?.settings?.preferences ?? {};
+      const userPref = (user as any)?.preferences?.primary_metadata_source || (user as any)?.settings?.preferences?.primary_metadata_source;
+      if (userPref && context.cookies.get("primary_metadata_source")?.value !== userPref) {
+        context.cookies.set("primary_metadata_source", userPref, {
+          path: "/",
+          maxAge: 31536000,
+          sameSite: "lax",
+        });
+      }
+
+      // An explicit per-user timezone beats the browser zone Base.astro
+      // auto-detects, so a viewer can read a France-hosted instance in Sydney
+      // time without moving anyone else's clock. tz_explicit tells that script
+      // to stop auto-detecting; without a setting it keeps doing so.
+      const userTz = (user as any)?.timezone || "";
+      const tzExplicit = userTz ? "true" : "false";
+      if (context.cookies.get("tz_explicit")?.value !== tzExplicit) {
+        context.cookies.set("tz_explicit", tzExplicit, {
+          path: "/",
+          maxAge: 31536000,
+          sameSite: "lax",
+        });
+      }
+      if (userTz && context.cookies.get("tz")?.value !== userTz) {
+        context.cookies.set("tz", userTz, {
+          path: "/",
+          maxAge: 31536000,
+          sameSite: "lax",
+        });
+      }
+
+      // Server-rendered cards read this to label Season 0 as Specials. Only write
+      // it when the payload actually carried preferences — otherwise a response
+      // without them resets the cookie the settings page just set.
+      if ("specials_label" in prefs) {
+        const specialsLabel = prefs.specials_label === true ? "true" : "false";
+        if (context.cookies.get("specials_label")?.value !== specialsLabel) {
+          context.cookies.set("specials_label", specialsLabel, {
+            path: "/",
+            maxAge: 31536000,
+            sameSite: "lax",
+          });
+        }
+      }
+
       // If logged in and trying to access login/register, redirect to home
       if (pathname === "/login" || pathname === "/register") {
         return context.redirect("/", 302);
@@ -121,20 +166,37 @@ export const onRequest = defineMiddleware(async (context, next) => {
       if (isAdminOnlyRoute && !user.is_admin) {
         return context.redirect("/", 302);
       }
-    } catch (e) {
-      // Only clear the session on a genuine auth rejection (bad/expired
-      // token). Any other failure here - the backend restarting, a network
-      // blip, a timeout - is transient and unrelated to whether this token
-      // is valid; clearing the cookie for those silently logs the user out
-      // and (now that /movies and /shows are reachable anonymously) does so
-      // without even an obvious redirect to explain why. Treat this one
-      // request as unauthenticated and let the next request re-verify.
-      const isAuthRejected = e instanceof Error && /^API 401\b/.test(e.message);
-      if (isAuthRejected) {
-        context.cookies.delete("token", { path: "/" });
+
+      // Onboarding gate — skip for static assets, API proxy calls, and the wizard
+      // routes themselves (avoid redirect loops / breaking the wizards' own fetches).
+      const skipOnboardingGate =
+        isStaticAsset || pathname.startsWith("/api/") || pathname === "/logout" ||
+        pathname.startsWith("/setup") || pathname.startsWith("/welcome") ||
+        // The welcome wizard's optional Plex-link step leaves and re-enters the
+        // app via these routes — don't bounce them back to /welcome mid-flow.
+        pathname.startsWith("/plex-link");
+      if (!skipOnboardingGate) {
+        if (user.is_admin && user.needs_setup) {
+          return context.redirect("/setup", 302);
+        }
+        if (user.needs_onboarding) {
+          return context.redirect("/welcome", 302);
+        }
       }
-      if (!isPublicRoute && !(await isAllowedAnonymousPublicPage())) {
-        return context.redirect("/login", 302);
+    } catch (e) {
+      // Only an auth rejection means the session is actually dead. A network
+      // blip or backend restart used to delete the cookie and bounce the user
+      // to /login mid-click, which looked like a random logout.
+      const status = (e as any)?.status;
+      const isAuthFailure = status === 401 || status === 403;
+      if (isAuthFailure) {
+        context.cookies.delete("token", { path: "/" });
+        if (!isPublicRoute) {
+          return context.redirect("/login", 302);
+        }
+      } else if (!isPublicRoute) {
+        // Keep the session and let the page render its own error state.
+        context.locals.token = token;
       }
     }
   } else {

@@ -1,3 +1,5 @@
+from datetime import date, datetime, timezone
+
 from sqlalchemy import select, func, delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,14 +11,30 @@ from models.show import Show as ShowModel
 from models.base import MediaType
 
 
-def capped_season_episode_counts(show: ShowModel, tmdb_extra: dict | None = None) -> dict[int, int]:
+def capped_season_episode_counts(
+    show: ShowModel, tmdb_extra: dict | None = None, today: date | None = None
+) -> dict[int, int]:
     """Per-season episode counts from cached (or freshly-fetched) TMDB metadata,
     capped at the last aired episode for shows still airing. Mirrors the
-    season_ep_counts calculation in routers.shows.get_show."""
+    season_ep_counts calculation in routers.shows.get_show.
+
+    today is the caller's calendar date (the viewing user's timezone); it falls
+    back to UTC for callers with no user in hand."""
+    seasons = (show.tmdb_data or {}).get("seasons", [])
     season_ep_counts: dict[int, int] = {
-        s["season_number"]: s.get("episode_count", 0)
-        for s in (show.tmdb_data or {}).get("seasons", [])
+        s["season_number"]: s.get("episode_count", 0) for s in seasons
     }
+
+    # An announced season that hasn't premiered yet still carries TMDB's full
+    # episode_count. last_episode_to_air below zeroes it, but that field is
+    # absent for some shows and its live fetch can time out - without this the
+    # whole unaired season lands in the denominator (Progress) and in
+    # "episodes left" (Next Up).
+    today_iso = (today or datetime.now(timezone.utc).date()).isoformat()
+    for s in seasons:
+        air_date = (s.get("air_date") or "").strip()
+        if air_date and air_date > today_iso:
+            season_ep_counts[s["season_number"]] = 0
 
     last_ep = (tmdb_extra or show.tmdb_data or {}).get("last_episode_to_air")
     if last_ep:

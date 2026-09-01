@@ -3,6 +3,8 @@ import Base from "../layouts/Base.astro";
 import PosterWall from "../components/PosterWall.astro";
 import AuthHero from "../components/AuthHero.astro";
 import AuthMobileFeatures from "../components/AuthMobileFeatures.astro";
+import ThemeToggle from "../components/ThemeToggle.astro";
+import PasswordToggle from "../components/PasswordToggle.astro";
 import { api } from "../lib/api";
 
 let error = "";
@@ -11,8 +13,15 @@ let pendingEmailConfirmation = false;
 const { enabled: registrationEnabled } = await api.auth.registrationStatus().catch(() => ({ enabled: false }));
 const { has_users: hasUsers } = await api.auth.hasUsers().catch(() => ({ has_users: true }));
 const { enable_logged_out_navigation: showNav } = await api.profile.publicAccessStatus().catch(() => ({ enable_logged_out_navigation: false }));
+// The nav bar is rendered by Base and the hero does not know about it - without
+// this the page overflows by the nav's height even though the hero content fits.
+const heroMinHeightClass = showNav
+  ? "min-h-[calc(100dvh-14rem)] md:min-h-[calc(100dvh-10rem)]"
+  : "min-h-[calc(100dvh-9rem)] md:min-h-[calc(100dvh-5rem)]";
 
-if (!registrationEnabled) {
+// First user is always allowed to register (backend enforces the same rule) —
+// only bounce to login when registrations are closed AND accounts already exist.
+if (!registrationEnabled && hasUsers) {
   return Astro.redirect("/login");
 }
 
@@ -43,7 +52,7 @@ if (Astro.request.method === "POST") {
       loginData.append("password", password);
       const result = await api.auth.login(loginData);
 
-      Astro.cookies.set("token", result.access_token, {
+      Astro.cookies.set("token", result.access_token ?? "", {
         path: "/",
         httpOnly: true,
         secure: import.meta.env.PROD,
@@ -58,33 +67,191 @@ if (Astro.request.method === "POST") {
   }
 }
 
-// When the nav bar renders (logged-out navigation enabled), it adds real
-// height above this section that the fixed 9rem/5rem budget below doesn't
-// know about - without this, the page overflows by the nav's height even
-// though the hero content itself fits the viewport.
-const heroMinHeightClass = showNav
-  ? "min-h-[calc(100dvh-14rem)] md:min-h-[calc(100dvh-10rem)]"
-  : "min-h-[calc(100dvh-9rem)] md:min-h-[calc(100dvh-5rem)]";
+// When a POST failed, jump straight back to the manual form instead of the chooser.
+const startOnForm = !!error;
 ---
 
-<Base title="Register" hideNav={!showNav}>
+<Base title="Register" hideNav>
   <!-- Decorative poster-wall background (full viewport, behind content) -->
   <PosterWall />
 
-  {!showNav && (
-  <button
-    id="theme-toggle"
-    tabindex="1"
-    class="fixed top-4 right-4 z-20 p-2 rounded-lg bg-zinc-900/80 backdrop-blur-sm border border-zinc-700 text-zinc-400 hover:text-zinc-100 transition-all hover:scale-110 active:scale-95"
-    aria-label="Toggle Theme"
-  >
-    <span id="sun-icon" class="hidden">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-    </span>
-    <span id="moon-icon">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-    </span>
-  </button>
+  <div class="max-w-md mx-auto mt-16 p-8 bg-zinc-900/40 border border-zinc-800 rounded-3xl shadow-2xl backdrop-blur-md relative">
+    <ThemeToggle />
+    <div class="flex flex-col items-center mb-6">
+      <img src="/scrob.png" alt="Scrob Logo" class="w-36 object-contain mb-2" />
+      <span class="text-zinc-100 font-bold text-xl tracking-tight">Scrob</span>
+    </div>
+    <h1 class="text-3xl font-bold mb-2 text-zinc-100 text-center">
+      {pendingEmailConfirmation ? "Account created" : "Create Account"}
+    </h1>
+    {!pendingEmailConfirmation && (
+      <p class="text-sm text-zinc-400 text-center mb-6">Choose how you'd like to get started.</p>
+    )}
+
+    {!hasUsers && !pendingEmailConfirmation && (
+      <div class="bg-blue-500/10 border border-blue-500/30 text-blue-300 p-3 rounded-xl mb-6 text-sm flex items-start gap-2.5">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 mt-0.5 shrink-0">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>You're the first user — this account will be the <strong class="font-semibold">server admin</strong>.</span>
+      </div>
+    )}
+
+    {error && (
+      <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-xl mb-6">
+        {error}
+      </div>
+    )}
+
+    {pendingEmailConfirmation ? (
+      <div class="text-center py-4">
+        <div class="w-14 h-14 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-7 h-7 text-zinc-300">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+          </svg>
+        </div>
+        <h2 class="text-lg font-semibold text-zinc-100 mb-2">Check your inbox</h2>
+        <p class="text-sm text-zinc-400 mb-6">
+          We've sent an activation link to your email address.<br />
+          Click the link to confirm your account and sign in.
+        </p>
+        <a href="/login" class="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">Back to login</a>
+      </div>
+    ) : (
+    <div>
+      <!-- Path chooser -->
+      <div id="register-chooser" class={`space-y-3 ${startOnForm ? "hidden" : ""}`}>
+        <a
+          href="/plex-start"
+          class="flex items-center gap-4 w-full p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded-2xl transition-colors cursor-pointer group"
+        >
+          <div class="w-10 h-10 rounded-xl bg-[#e5a00d]/15 flex items-center justify-center shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e5a00d" class="w-5 h-5">
+              <path d="M12 0L4 6v12l8 6 8-6V6l-8-6zm0 4.3l4.8 3.6v8.2L12 19.7l-4.8-3.6V7.9L12 4.3z" />
+            </svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-zinc-100">Sign up with Plex</p>
+            <p class="text-xs text-zinc-500 mt-0.5">Use your plex.tv account — no password needed here.</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-zinc-300 transition shrink-0"><path d="M9 18l6-6-6-6"/></svg>
+        </a>
+
+        <button
+          type="button"
+          id="show-email-form-btn"
+          class="flex items-center gap-4 w-full p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded-2xl transition-colors cursor-pointer group text-left"
+        >
+          <div class="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-5 h-5 text-blue-400">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-zinc-100">Create account with email</p>
+            <p class="text-xs text-zinc-500 mt-0.5">Classic email, username & password — link Plex later if you like.</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-zinc-300 transition shrink-0"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+
+      <!-- Manual email/password form -->
+      <div id="register-form-wrap" class={startOnForm ? "" : "hidden"}>
+        <button type="button" id="back-to-chooser-btn" class="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-300 transition-colors mb-4 cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          Other sign-up options
+        </button>
+        <form method="POST" class="space-y-4" id="register-form">
+          <div>
+            <label for="email" class="block text-sm font-medium text-zinc-400 mb-1">Email</label>
+            <input
+              type="email"
+              name="email"
+              id="email"
+              required
+              class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            />
+          </div>
+          <div>
+            <label for="username" class="block text-sm font-medium text-zinc-400 mb-1">Username</label>
+            <input
+              type="text"
+              name="username"
+              id="username"
+              required
+              class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            />
+          </div>
+          <div>
+            <label for="password" class="block text-sm font-medium text-zinc-400 mb-1">Password</label>
+            <div class="relative group/field">
+              <input
+                type="password"
+                name="password"
+                id="password"
+                required
+                class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              />
+              <PasswordToggle />
+            </div>
+          </div>
+          <div>
+            <label for="confirm_password" class="block text-sm font-medium text-zinc-400 mb-1">Confirm Password</label>
+            <div class="relative group/field">
+              <input
+                type="password"
+                name="confirm_password"
+                id="confirm_password"
+                required
+                class="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-4 pr-10 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              />
+              <PasswordToggle />
+            </div>
+          </div>
+          <label class="flex items-start gap-3 p-3.5 bg-zinc-800/50 border border-zinc-700 rounded-xl cursor-pointer">
+            <input type="checkbox" id="link-plex-after" class="w-4 h-4 mt-0.5 accent-[#e5a00d] cursor-pointer shrink-0" />
+            <span>
+              <span class="block text-sm font-semibold text-zinc-100">Link your Plex account after setup</span>
+              <span class="block text-xs text-zinc-500 mt-0.5">We'll offer a Plex-link step during onboarding so you can connect your servers.</span>
+            </span>
+          </label>
+          <button
+            type="submit"
+            class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95 duration-200 cursor-pointer mt-4"
+          >
+            Create Account
+          </button>
+        </form>
+      </div>
+
+      <div class="mt-6 text-center text-sm text-zinc-500">
+        Already have an account? <a href="/login" class="text-zinc-100 hover:underline">Login</a>
+      </div>
+    </div>
+    )}
+  </div>
+
+  {!hasUsers && (
+    <div class="max-w-md mx-auto mt-4 mb-12">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="flex-1 border-t border-zinc-800"></div>
+        <span class="text-xs text-zinc-600">or restore from backup</span>
+        <div class="flex-1 border-t border-zinc-800"></div>
+      </div>
+      <div class="p-6 bg-zinc-900/40 border border-zinc-800 rounded-2xl shadow-2xl backdrop-blur-md">
+        <h2 class="font-semibold text-zinc-100 mb-1">Restore Database</h2>
+        <p class="text-sm text-zinc-400 mb-4">Upload a <code class="text-zinc-300">.pgdump</code> backup file to restore a previous installation.</p>
+        <div class="flex flex-col gap-3">
+          <input id="bootstrap-restore-file" type="file" accept=".pgdump,.bak"
+            class="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer" />
+          <button id="bootstrap-restore-btn" disabled
+            class="w-full px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+            Restore Database
+          </button>
+        </div>
+        <div id="bootstrap-restore-error" class="hidden mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2"></div>
+      </div>
+    </div>
   )}
 
   <div class={`relative z-10 ${heroMinHeightClass} flex items-center py-6 md:py-10`}>
@@ -249,8 +416,8 @@ const heroMinHeightClass = showNav
 
 <!-- Bootstrap Restore Confirmation Modal -->
 <div id="bootstrap-restore-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
-  <div id="bootstrap-restore-modal-backdrop" class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-  <div class="relative bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+  <div id="bootstrap-restore-modal-backdrop" class="absolute inset-0 bg-zinc-950/85 backdrop-blur-sm"></div>
+  <div class="relative bg-zinc-900/60 border border-zinc-800 rounded-3xl p-8 w-full max-w-md shadow-2xl backdrop-blur-md">
     <h2 class="text-xl font-black text-zinc-100 mb-2">Restore Database?</h2>
     <p class="text-sm text-zinc-400 mb-1">Restoring from:</p>
     <p id="bootstrap-restore-modal-filename" class="text-sm text-zinc-100 font-medium mb-4 break-all"></p>
@@ -259,11 +426,11 @@ const heroMinHeightClass = showNav
     </div>
     <div class="flex gap-3">
       <button type="button" id="bootstrap-restore-cancel-btn"
-        class="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        class="flex-1 px-4 py-3 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-300 font-bold rounded-xl transition-all text-sm cursor-pointer border border-zinc-700/40 active:scale-95">
         Cancel
       </button>
       <button type="button" id="bootstrap-restore-confirm-btn"
-        class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors text-sm cursor-pointer">
+        class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all text-sm cursor-pointer active:scale-95">
         Restore
       </button>
     </div>
@@ -271,32 +438,34 @@ const heroMinHeightClass = showNav
 </div>
 
 <script>
-  function setupPasswordToggles() {
-    const toggles = document.querySelectorAll('.password-toggle');
-    toggles.forEach(toggle => {
-      toggle.addEventListener('click', () => {
-        const input = toggle.parentElement?.querySelector('input');
-        if (!input) return;
+  // ── Path chooser ⇄ email form toggle ──
+  const chooser = document.getElementById('register-chooser');
+  const formWrap = document.getElementById('register-form-wrap');
+  document.getElementById('show-email-form-btn')?.addEventListener('click', () => {
+    chooser?.classList.add('hidden');
+    formWrap?.classList.remove('hidden');
+  });
+  document.getElementById('back-to-chooser-btn')?.addEventListener('click', () => {
+    formWrap?.classList.add('hidden');
+    chooser?.classList.remove('hidden');
+  });
 
-        const isPassword = input.type === 'password';
-        input.type = isPassword ? 'text' : 'password';
-
-        const eyeIcon = toggle.querySelector('.eye-icon');
-        const eyeSlashIcon = toggle.querySelector('.eye-slash-icon');
-
-        if (isPassword) {
-          eyeIcon?.classList.add('hidden');
-          eyeSlashIcon?.classList.remove('hidden');
-        } else {
-          eyeIcon?.classList.remove('hidden');
-          eyeSlashIcon?.classList.add('hidden');
-        }
-      });
-    });
+  // ── "Link Plex after setup" intent ──
+  // Remembered in localStorage so the welcome wizard can insert a Plex-link step.
+  const linkPlexCb = document.getElementById('link-plex-after') as HTMLInputElement | null;
+  if (linkPlexCb) {
+    // Restore choice after a failed POST round-trip.
+    linkPlexCb.checked = localStorage.getItem('link_plex_after_onboarding') === '1';
+    const syncFlag = () => {
+      if (linkPlexCb.checked) {
+        localStorage.setItem('link_plex_after_onboarding', '1');
+      } else {
+        localStorage.removeItem('link_plex_after_onboarding');
+      }
+    };
+    linkPlexCb.addEventListener('change', syncFlag);
+    document.getElementById('register-form')?.addEventListener('submit', syncFlag);
   }
-
-  setupPasswordToggles();
-  document.addEventListener('astro:after-swap', setupPasswordToggles);
 
   // ── Bootstrap restore ──
   const bootstrapFile = document.getElementById('bootstrap-restore-file') as HTMLInputElement | null;

@@ -36,10 +36,11 @@ Astro.response.headers.set("Cache-Control", "no-store");
   }
 
   function dayLabel(iso, todayIso) {
-    // Diffed as plain ISO date strings (via Date.UTC) against the server's
-    // own "today", not the viewer's browser clock - the entries themselves
-    // are already dated against the server's configured timezone, so the
-    // label has to use that same reference or it can disagree with the data.
+    // Diffed as plain ISO date strings (via Date.UTC) against the "today" the
+    // backend computed, not the viewer's browser clock - the entries are
+    // already dated in the user's own timezone (their setting, else the
+    // server's), so the label has to use that same reference or it can
+    // disagree with the data.
     const d = Date.UTC(...iso.split('-').map(Number));
     const t = Date.UTC(...todayIso.split('-').map(Number));
     const diff = Math.round((d - t) / 86400000);

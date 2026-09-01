@@ -56,6 +56,12 @@ class _ScalarOneResult:
     def first(self):
         return self.item
 
+    def all(self):
+        # This fake stands in for a scalar_one_or_none lookup. get_tvdb_season
+        # also iterates season/episode overrides through the same fake session;
+        # these tests have none, so an empty list is the right answer.
+        return []
+
 
 class _NestedTxn:
     async def __aenter__(self):
@@ -378,6 +384,7 @@ class EpisodeOrderMappingTests(unittest.IsolatedAsyncioTestCase):
                     _ScalarOneResult(show),                             # show_result
                     _ExistingResult([mapping]),                         # mapping_result
                     _ExistingResult([mapped_episode, unmapped_episode]),  # ep_result
+                    _EmptyResult(),                                     # get_remapped_episodes — overrides
                     _ScalarOneResult(None),                             # get_active_rewatch — none active
                     _ExistingResult([(201,), (202,)]),                  # watched_q — both watched
                     _ExistingResult([(201,)]),                          # collected_q — only 201 collected

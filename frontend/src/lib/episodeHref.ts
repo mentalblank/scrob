@@ -13,16 +13,11 @@
 // _attach_episode_order_fields), route TVDB with the translated numbers.
 // Otherwise fall back to the pre-existing logic unchanged.
 //
-// Duplicated inline (not imported) in places that can't `import` inside an
-// Astro `define:vars` client script - keep them in sync with this function
-// if it changes: frontend/src/pages/next-up.astro (buildCard),
-// frontend/src/pages/continue-watching.astro (buildCard, episode branch
-// only - this page also has movie-type cards, which fall through to the
-// final tmdb_id branch same as here),
-// frontend/src/pages/index.astro (episodeCardHtml),
-// frontend/src/pages/list/[id].astro (buildCard, season/series branches
-// only - this page has no episode-type cards), and
-// frontend/src/layouts/Base.astro (renderNowPlaying).
+// The same rule is mirrored in two other places that can't import this
+// function - keep all three in sync: lib/urls.ts (episodeUrl/mediaUrl, which
+// takes the preference from the primary_metadata_source cookie rather than
+// the item), and window.buildItemUrl in layouts/Base.astro, the client-side
+// builder every `define:vars` script goes through.
 export interface EpisodeHrefItem {
   type?: string | null;
   id?: number | string | null;

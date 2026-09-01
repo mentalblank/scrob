@@ -17,6 +17,7 @@ from models.playback_progress import PlaybackProgress
 from models.playback_session import PlaybackSession
 from models.rewatch import ShowRewatch
 from models.show import Show
+from models.users import UserSettings
 from routers import history
 from schemas import WatchEventCreate
 
@@ -132,9 +133,9 @@ class ManualEpisodeWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(push_call.kwargs["watched"], True)
         self.assertIn(media.id, push_call.kwargs["watched_at_by_media"])
         get_key.assert_awaited_once()
-        # Called twice: once for the WatchEvent itself, once more after
-        # record_rewatch_progress (a no-op here, but still its own commit).
-        self.assertEqual(db.commit.await_count, 2)
+        # One commit: the WatchEvent write and record_rewatch_progress now share
+        # a transaction rather than committing separately.
+        self.assertEqual(db.commit.await_count, 1)
 
     async def test_manual_episode_repairs_existing_orphan(self):
         orphan = Media(
@@ -156,10 +157,7 @@ class ManualEpisodeWatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(orphan.show_id, self.show.id)
         self.assertEqual((orphan.season_number, orphan.episode_number), (1, 1))
         get_episode.assert_not_awaited()
-        enrich.assert_awaited_once_with(
-            orphan, api_key="tmdb-key", series_tmdb_id=277439,
-            tvdb_id=None, tvdb_api_key=None, tvdb_lang=None,
-        )
+        enrich.assert_awaited_once_with(orphan, api_key="tmdb-key", series_tmdb_id=277439)
 
     async def test_tvdb_mapping_uses_canonical_show_position(self):
         mapped_media = Media(
@@ -417,6 +415,7 @@ class GetNowPlayingEpisodeOrderTests(unittest.IsolatedAsyncioTestCase):
         db = _FakeSession([
             [(session, media)],  # main PlaybackSession+Media query
             show,                # per-session Show lookup
+            None,                # UserSettings - no account-wide TVDB default
             [preference],        # get_episode_orders_for_series
             [mapping],           # get_tmdb_to_tvdb_positions
         ])
@@ -442,6 +441,7 @@ class GetNowPlayingEpisodeOrderTests(unittest.IsolatedAsyncioTestCase):
         db = _FakeSession([
             [(session, media)],  # main PlaybackSession+Media query
             show,                # per-session Show lookup
+            None,                # UserSettings - no account-wide TVDB default
             [],                  # get_episode_orders_for_series - no preference row
         ])
 
@@ -450,6 +450,87 @@ class GetNowPlayingEpisodeOrderTests(unittest.IsolatedAsyncioTestCase):
         item = result["now_playing"][0]["media"]
         self.assertNotIn("show_episode_order", item)
         self.assertNotIn("tvdb_season_number", item)
+
+
+    async def test_account_tvdb_source_translates_without_a_per_show_row(self) -> None:
+        """A viewer whose primary metadata source is TVDB has asked for TVDB
+        numbering on every show they have not pinned to TMDB - without this the
+        bar linked a TVDB show id to a TMDB position (#186)."""
+        media = Media(
+            id=10, tmdb_id=550, media_type=MediaType.episode,
+            title="Ep", season_number=4, episode_number=12, show_id=1,
+        )
+        show = Show(id=1, tmdb_id=550, tvdb_id=999, title="Show")
+        session = PlaybackSession(
+            id=1, user_id=7, media_id=10, session_key="k", source="plex",
+            state="playing", progress_percent=0.1, progress_seconds=60,
+            started_at=datetime(2026, 1, 1), updated_at=datetime(2026, 1, 1),
+        )
+        mapping = EpisodeOrderMapping(
+            series_tmdb_id=550, tmdb_season_number=4, tmdb_episode_number=12,
+            tmdb_episode_id=1, tvdb_id=1, tvdb_season_number=3, tvdb_episode_number=8,
+            match_method="external_id",
+        )
+        db = _FakeSession([
+            [(session, media)],  # main PlaybackSession+Media query
+            show,                # per-session Show lookup
+            UserSettings(user_id=7, preferences={"primary_metadata_source": "tvdb"}),
+            [],                  # get_episode_orders_for_series - no per-show row
+            [mapping],           # get_tmdb_to_tvdb_positions
+        ])
+
+        result = await history.get_now_playing(db=db, current_user=SimpleNamespace(id=7))
+
+        item = result["now_playing"][0]["media"]
+        self.assertEqual(item["show_episode_order"], "tvdb")
+        self.assertEqual(item["tvdb_season_number"], 3)
+        self.assertEqual(item["tvdb_episode_number"], 8)
+
+
+class FillTvdbProgressMetaTests(unittest.IsolatedAsyncioTestCase):
+    """The progress page's rows are built from the local show row, which for a
+    show synced before TVDB names/artwork were stored carries neither - so a
+    TVDB-primary viewer saw TMDB titles and posters there. Only the page being
+    returned is looked up, and a rename still outranks both catalogues."""
+
+    async def _run(self, rows):
+        meta = AsyncMock(return_value={"name": "TVDB Name", "poster_path": "tvdb.jpg"})
+        with (
+            patch("routers.shows.get_user_tvdb_key", AsyncMock(return_value="key")),
+            patch("core.enrichment.tvdb_series_meta_cached", meta),
+            patch("routers.history.get_user_metadata_language", AsyncMock(return_value=None)),
+        ):
+            await history._fill_tvdb_progress_meta(_FakeSession([]), 7, rows)
+        return meta
+
+    async def test_row_without_stored_meta_is_filled_from_tvdb(self) -> None:
+        rows = [{"tvdb_id": 99, "title": "TMDB Name", "poster_path": "tmdb.jpg",
+                 "custom_title": None, "_needs_tvdb_meta": True}]
+
+        await self._run(rows)
+
+        self.assertEqual(rows[0]["title"], "TVDB Name")
+        self.assertEqual(rows[0]["poster_path"], "tvdb.jpg")
+        self.assertNotIn("_needs_tvdb_meta", rows[0])
+
+    async def test_rename_survives_the_tvdb_name(self) -> None:
+        rows = [{"tvdb_id": 99, "title": "Monster", "poster_path": "tmdb.jpg",
+                 "custom_title": "Monster", "_needs_tvdb_meta": True}]
+
+        await self._run(rows)
+
+        self.assertEqual(rows[0]["title"], "Monster")
+        self.assertEqual(rows[0]["poster_path"], "tvdb.jpg")
+
+    async def test_row_with_stored_meta_costs_no_lookup(self) -> None:
+        rows = [{"tvdb_id": 99, "title": "Stored", "poster_path": "stored.jpg",
+                 "custom_title": None, "_needs_tvdb_meta": False}]
+
+        meta = await self._run(rows)
+
+        meta.assert_not_awaited()
+        self.assertEqual(rows[0]["title"], "Stored")
+        self.assertNotIn("_needs_tvdb_meta", rows[0])
 
 
 class GetNowPlayingCreditsStingerTests(unittest.IsolatedAsyncioTestCase):
@@ -616,93 +697,11 @@ class PushWatchStateTraktTokenTests(unittest.IsolatedAsyncioTestCase):
         add_movie.assert_not_awaited()
 
 
-class DropMovieResolveTests(unittest.IsolatedAsyncioTestCase):
-    """#330: dropping a movie opened straight from TMDB (no local Media row)
-    must resolve/create one instead of storing a garbage id."""
-
-    def setUp(self):
-        # flag_modified needs a real ORM instance; these tests use SimpleNamespace.
-        p = patch("routers.history.flag_modified")
-        p.start()
-        self.addCleanup(p.stop)
-
-    async def test_drop_by_media_id_uses_it_directly(self):
-        settings = SimpleNamespace(dropped_movies=[])
-        db = _FakeSession([settings])
-        await history.drop_movie(
-            body=SimpleNamespace(media_id=42, tmdb_id=None),
-            db=db, current_user=SimpleNamespace(id=1),
-        )
-        self.assertEqual(settings.dropped_movies, [42])
-
-    async def test_drop_by_tmdb_id_uses_existing_media_row(self):
-        settings = SimpleNamespace(dropped_movies=[])
-        db = _FakeSession([settings, SimpleNamespace(id=99)])
-        await history.drop_movie(
-            body=SimpleNamespace(media_id=None, tmdb_id=550),
-            db=db, current_user=SimpleNamespace(id=1),
-        )
-        self.assertEqual(settings.dropped_movies, [99])
-
-    async def test_drop_by_tmdb_id_creates_media_row_when_missing(self):
-        settings = SimpleNamespace(dropped_movies=[])
-        db = _FakeSession([settings, None])
-        with patch("routers.media.get_user_tmdb_key", new_callable=AsyncMock, return_value="k"), \
-             patch("routers.history.tmdb.get_movie", new_callable=AsyncMock, return_value={"title": "Fight Club"}), \
-             patch("routers.history.create_media_safely", new_callable=AsyncMock,
-                   return_value=(SimpleNamespace(id=123), True)), \
-             patch("routers.history.enrich_media", new_callable=AsyncMock):
-            await history.drop_movie(
-                body=SimpleNamespace(media_id=None, tmdb_id=550),
-                db=db, current_user=SimpleNamespace(id=1),
-            )
-        self.assertEqual(settings.dropped_movies, [123])
-
-    async def test_drop_with_neither_id_is_400(self):
-        db = _FakeSession([SimpleNamespace(dropped_movies=[])])
-        with self.assertRaises(HTTPException) as ctx:
-            await history.drop_movie(
-                body=SimpleNamespace(media_id=None, tmdb_id=None),
-                db=db, current_user=SimpleNamespace(id=1),
-            )
-        self.assertEqual(ctx.exception.status_code, 400)
-
-    async def test_undrop_by_tmdb_id_removes_the_resolved_row_without_creating(self):
-        settings = SimpleNamespace(dropped_movies=[99, 5])
-        db = _FakeSession([settings, SimpleNamespace(id=99)])
-        await history.undrop_movie(
-            media_id=None, tmdb_id=550, db=db, current_user=SimpleNamespace(id=1),
-        )
-        self.assertEqual(settings.dropped_movies, [5])
-
-
-class ListDroppedTests(unittest.IsolatedAsyncioTestCase):
-    """#330: GET /history/dropped feeds the dedicated Dropped page."""
-
-    async def test_returns_shows_and_movies_newest_first_skipping_unknown_ids(self):
-        settings = SimpleNamespace(dropped_shows=[10, 20, 99], dropped_movies=[5])
-        show10 = SimpleNamespace(id=10, tmdb_id=1399, tvdb_id=None, title="GoT",
-                                 poster_path="/got.jpg", first_air_date="2011-04-17", status="Ended")
-        show20 = SimpleNamespace(id=20, tmdb_id=None, tvdb_id=555, title="Old Show",
-                                 poster_path=None, first_air_date=None, status=None)
-        movie5 = SimpleNamespace(id=5, tmdb_id=550, title="Fight Club",
-                                 poster_path="/fc.jpg", release_date="1999-10-15")
-        db = _FakeSession([settings, [show10, show20], [movie5]])
-
-        out = await history.list_dropped(db=db, current_user=SimpleNamespace(id=1))
-
-        # id 99 has no Show row -> skipped; the rest come back newest-drop-first.
-        self.assertEqual([s["id"] for s in out["shows"]], [20, 10])
-        self.assertEqual(out["shows"][1]["year"], "2011")
-        self.assertEqual(out["shows"][0]["tvdb_id"], 555)
-        self.assertEqual(out["movies"], [
-            {"id": 5, "tmdb_id": 550, "title": "Fight Club", "poster_path": "/fc.jpg", "year": "1999"},
-        ])
-
-    async def test_empty_when_nothing_dropped(self):
-        db = _FakeSession([SimpleNamespace(dropped_shows=[], dropped_movies=None)])
-        out = await history.list_dropped(db=db, current_user=SimpleNamespace(id=1))
-        self.assertEqual(out, {"shows": [], "movies": []})
+# Dropping a show or movie is no longer a /history endpoint: it is a blocklist
+# entry, POST /media/blocklist with is_dropped=true, and the dropped list is
+# GET /media/blocklist. The tests that covered /history/drop/*, /history/dropped
+# and their undrop counterparts were removed with the endpoints; coverage for the
+# replacement belongs with the blocklist endpoints in routers/media.py.
 
 
 class RatePromptTests(unittest.IsolatedAsyncioTestCase):

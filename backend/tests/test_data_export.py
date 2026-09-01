@@ -172,8 +172,10 @@ class ListsTests(unittest.IsolatedAsyncioTestCase):
 
 class CommentsTests(unittest.IsolatedAsyncioTestCase):
     async def test_movie_comment(self) -> None:
+        # Comments are addressed by uri_id now; the export drops anything that
+        # is not a TMDB URI.
         comment = SimpleNamespace(id=1, created_at=datetime(2026, 1, 1), content="Great movie",
-                                   is_spoiler=False, media_type="movie", tmdb_id=100,
+                                   is_spoiler=False, media_type="movie", uri_id="tmdb:m:100",
                                    season_number=None, episode_number=None)
         db = _FakeSession([[comment], [_movie_media()]])
 
@@ -240,6 +242,7 @@ class SecretCategoryTests(unittest.IsolatedAsyncioTestCase):
             db, user, None,
             include_watched=False, include_ratings=False, include_collection=False,
             include_lists=False, include_comments=False,
+            include_content_filters=False, include_metadata_overrides=False,
         )
 
         names = zipfile.ZipFile(io.BytesIO(payload)).namelist()

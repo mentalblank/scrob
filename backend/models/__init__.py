@@ -1,65 +1,93 @@
-# app/models/__init__.py
-from .base import Base, UserRole, MediaType, CollectionSource
-from .users import User, UserSettings, TotpBackupCode
-from .connections import MediaServerConnection
-from .scrobble_connection import ScrobbleConnection
-from .profile import UserProfileData
-from .comments import Comment
-from .email_activation import EmailActivation
-from .password_reset import PasswordResetToken
-from .show import Show
-from .media import Media
+from .base import Base, UserRole, MediaType, CollectionSource, PrivacyLevel
+from .blocklist import BlocklistItem
+from .calendar_cache import UserCalendarCache
 from .collection import Collection, CollectionFile
+from .comments import Comment
+from .connections import MediaServerConnection
+from .email_activation import EmailActivation
+from .episode_movie_conversion import EpisodeMovieConversion
+from .episode_order import UserShowEpisodeOrder, EpisodeOrderMapping
 from .events import WatchEvent
-from .ratings import Rating
-from .lists import List, ListItem
-from .sync import SyncJob, SyncStatus
-from .library_selections import JellyfinLibrarySelection, EmbyLibrarySelection, PlexLibrarySelection
-from .playback_session import PlaybackSession
-from .playback_progress import PlaybackProgress
 from .follows import Follow
 from .global_settings import GlobalSettings
-from .season_override import ShowSeasonOverride
-from .media_request import MediaRequest
 from .image_cache import ImageCache
+from .image_override import MediaImageOverride
+from .library_selections import (
+    JellyfinLibrarySelection,
+    EmbyLibrarySelection,
+    PlexLibrarySelection,
+)
+from .lists import List, ListItem
+from .media import Media
+from .media_alias import MediaAlias
+from .media_request import MediaRequest
 from .media_translation import MediaTranslation
-from .show_translation import ShowTranslation
-from .episode_order import EpisodeOrderMapping, UserShowEpisodeOrder
-from .rewatch import ShowRewatch, RewatchProgress
-from .title_credits import TitleCredits
-from .calendar_cache import UserCalendarCache
-from .plex_pending_push import PlexPendingPush
 from .oauth_device import OAuthDeviceGrant
+from .password_reset import PasswordResetToken
+from .playback_progress import PlaybackProgress
+from .playback_session import PlaybackSession
+from .plex_pending_push import PlexPendingPush
+from .profile import UserProfileData
+from .provider_cache import ProviderCache
+from .ratings import Rating
+from .rewatch import ShowRewatch, RewatchProgress
+from .scrobble_connection import ScrobbleConnection
+from .season_override import ShowSeasonOverride, ShowEpisodeOverride
+from .show import Show
+from .show_translation import ShowTranslation
+from .sync import SyncJob, SyncStatus
+from .title_credits import TitleCredits
+from .users import User, UserSettings, TotpBackupCode
 
 __all__ = [
     "Base",
-    "UserRole", "MediaType", "CollectionSource",
-    "User", "UserSettings", "TotpBackupCode",
-    "MediaServerConnection",
-    "ScrobbleConnection",
-    "UserProfileData",
+    "UserRole",
+    "MediaType",
+    "CollectionSource",
+    "PrivacyLevel",
+    "BlocklistItem",
+    "UserCalendarCache",
+    "Collection",
+    "CollectionFile",
     "Comment",
+    "MediaServerConnection",
     "EmailActivation",
-    "PasswordResetToken",
-    "Show",
-    "Media",
-    "Collection", "CollectionFile",
+    "EpisodeMovieConversion",
+    "UserShowEpisodeOrder",
+    "EpisodeOrderMapping",
     "WatchEvent",
-    "Rating",
-    "List", "ListItem",
-    "SyncJob", "SyncStatus",
-    "JellyfinLibrarySelection", "EmbyLibrarySelection", "PlexLibrarySelection",
-    "PlaybackSession",
-    "PlaybackProgress",
     "Follow",
     "GlobalSettings",
-    "ShowSeasonOverride",
-    "MediaRequest",
     "ImageCache",
+    "MediaImageOverride",
+    "JellyfinLibrarySelection",
+    "EmbyLibrarySelection",
+    "PlexLibrarySelection",
+    "List",
+    "ListItem",
+    "Media",
+    "MediaAlias",
+    "MediaRequest",
     "MediaTranslation",
-    "ShowTranslation",
-    "EpisodeOrderMapping", "UserShowEpisodeOrder",
-    "ShowRewatch", "RewatchProgress",
-    "PlexPendingPush",
     "OAuthDeviceGrant",
+    "PasswordResetToken",
+    "PlaybackProgress",
+    "PlaybackSession",
+    "PlexPendingPush",
+    "UserProfileData",
+    "ProviderCache",
+    "Rating",
+    "ShowRewatch",
+    "RewatchProgress",
+    "ScrobbleConnection",
+    "ShowSeasonOverride",
+    "ShowEpisodeOverride",
+    "Show",
+    "ShowTranslation",
+    "SyncJob",
+    "SyncStatus",
+    "TitleCredits",
+    "User",
+    "UserSettings",
+    "TotpBackupCode",
 ]

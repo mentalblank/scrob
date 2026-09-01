@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 import unicodedata
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import date
 
 from sqlalchemy import delete, select, update
@@ -19,6 +19,7 @@ from models.media import Media
 from models.playback_progress import PlaybackProgress
 from models.ratings import Rating
 from models.rewatch import RewatchProgress
+from models.show import Show
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +251,12 @@ async def _match_tmdb_to_tvdb_episodes(
             continue
 
         mapped_tvdb_id = int(match["id"])
+        # Two TMDB episodes can carry the same TVDB external id — a split or a
+        # merged entry on one side. A TVDB episode maps to exactly one position,
+        # so the first claim wins; letting both through aborts the whole show's
+        # mapping on the unique constraint and leaves it with none at all.
+        if mapped_tvdb_id in used_tvdb_ids:
+            continue
         used_tvdb_ids.add(mapped_tvdb_id)
         mappings.append(
             EpisodeOrderMapping(
@@ -628,16 +635,16 @@ async def _merge_episode_media(db: AsyncSession, canonical: Media, divergent: Me
         else:
             row.media_id = canonical.id
 
-    # Comment: not Media-FK'd at all (keyed by media_type/tmdb_id/season/episode
-    # directly) - re-key rows matching the divergent identity to the canonical one.
+    # Comment: not Media-FK'd at all. An episode comment is keyed by the SHOW's
+    # uri_id plus the episode's season/episode numbers, so a merge only has to
+    # move the numbers - both rows belong to the same show, hence the same uri.
     await db.execute(
         update(Comment).where(
             Comment.media_type == "episode",
-            Comment.tmdb_id == divergent.tmdb_id,
+            Comment.uri_id.in_(select(Show.uri_id).where(Show.id == canonical.show_id)),
             Comment.season_number == divergent.season_number,
             Comment.episode_number == divergent.episode_number,
         ).values(
-            tmdb_id=canonical.tmdb_id,
             season_number=canonical.season_number,
             episode_number=canonical.episode_number,
         )
@@ -651,3 +658,47 @@ def validate_episode_order(value: str) -> str:
     if value not in _VALID_ORDERS:
         raise ValueError(f"Unsupported episode order: {value}")
     return value
+
+
+async def tmdb_episode_index(
+    series_tmdb_id: int,
+    api_key: str | None,
+    *,
+    season_numbers: Iterable[int] | None = None,
+    concurrency: int = 8,
+) -> dict[int, tuple[int, int, dict]]:
+    """Map each TMDB episode id of a show to the position TMDB gives it.
+
+    A media server can number a show its own way — TVDB seasons, absolute order,
+    story arcs — while still naming every episode by its TMDB id. The id is what
+    identifies an episode; the source's numbers only describe that server.
+
+    Returns {episode_tmdb_id: (season_number, episode_number, episode_payload)}.
+    """
+    if season_numbers is None:
+        show = await tmdb.get_show_light(series_tmdb_id, api_key=api_key)
+        season_numbers = [
+            s["season_number"]
+            for s in show.get("seasons", [])
+            if s.get("season_number") is not None
+        ]
+
+    semaphore = asyncio.Semaphore(concurrency)
+    index: dict[int, tuple[int, int, dict]] = {}
+
+    async def load(season_number: int) -> None:
+        async with semaphore:
+            try:
+                data = await tmdb.get_season(series_tmdb_id, season_number, api_key=api_key)
+            except Exception:
+                return
+            for episode in data.get("episodes", []):
+                if episode.get("id") and episode.get("episode_number") is not None:
+                    index[episode["id"]] = (
+                        season_number,
+                        episode["episode_number"],
+                        episode,
+                    )
+
+    await asyncio.gather(*[load(sn) for sn in sorted(set(season_numbers))])
+    return index

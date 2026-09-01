@@ -2,54 +2,81 @@
 import type { MediaItem } from "../lib/api";
 import { tmdbImageUrl } from "../lib/api";
 import CardActionBar from "./CardActionBar.astro";
-import { episodeHref } from "../lib/episodeHref";
+import { mediaUrl } from "../lib/urls";
+import { displayEpisodeCode } from "../lib/media-format";
 
 interface Props {
   item: MediaItem;
+  showDismiss?: boolean;
+  hideActionBar?: boolean;
+  /** Override the global metadata-source preference — pages that are already
+   *  pinned to one provider must keep their children on the same provider. */
+  preferTvdb?: boolean;
 }
 
-const { item } = Astro.props;
+const { item, showDismiss = false, hideActionBar = false, preferTvdb: preferTvdbProp } = Astro.props;
 
-const sxe =
-  item.season_number != null && item.episode_number != null
-    ? `S${String(item.season_number).padStart(2, "0")}E${String(item.episode_number).padStart(2, "0")}`
-    : null;
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
+const sxe = displayEpisodeCode(item, specialsLabel);
 
 const isSeries = item.type === "series";
 
-// This component only ever renders episode items in practice (Next Up,
-// Recently Added Episodes) - episodeHref's episode branch covers it. Keep
-// the original "no season_number at all -> incomplete metadata, no link"
-// guard explicitly: episodeHref's own generic tail fallback doesn't know
-// about this component's specific "Could not identify" empty state below.
-const href = item.season_number != null ? episodeHref(item) : null;
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+const preferTvdb = preferTvdbProp ?? (primaryMetadataSource === "tvdb");
+const href = mediaUrl(item, preferTvdb) || null;
 
-// Episodes: use episode still, fall back to show backdrop then show poster.
+// Episodes: use episode still, fall back to show backdrop then show poster. Movies/Series: use backdrop.
 const rawImage = isSeries
   ? (item.backdrop_path ?? item.poster_path)
-  : (item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
+  : item.type === "movie"
+    ? (item.backdrop_path ?? item.poster_path)
+    : (item.still_path ?? item.poster_path ?? item.show_backdrop_path ?? item.show_poster_path);
 const imageUrl = tmdbImageUrl(rawImage, "w780");
 
 const watched = item.watched ?? false;
+// The still of an episode nobody has watched can give the plot away, so it is
+// the blur target when that guard is on (see Base.astro / global.css).
+const spoilerImage = !watched && item.type === "episode" ? "ep-image" : undefined;
 const inLists = item.in_lists ?? [];
 const inLibrary = item.in_library ?? false;
 const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
+
+const progressPct = item.progress_percent ?? 0;
+const showProgress = progressPct > 0;
+
+// URI for action-bar ops (collect / watch-history). Prefer the explicit uri_id;
+// season-endpoint episodes don't carry one, so synthesise from the provider id.
+const cardUriId = item.uri_id
+  ? item.uri_id
+  : item.type === "episode"
+    ? (item.tmdb_id ? `tmdb:e:${item.tmdb_id}` : item.tvdb_id ? `tvdb:e:${item.tvdb_id}` : "")
+    : item.type === "movie"
+      ? (item.tmdb_id ? `tmdb:m:${item.tmdb_id}` : "")
+      : "";
 ---
 
 <div
-  class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70"
+  class="group relative flex flex-col h-full rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
   data-card
-  data-tmdb-id={String(item.tmdb_id)}
+  data-tmdb-id={item.tmdb_id != null ? String(item.tmdb_id) : ""}
+  data-uri-id={cardUriId}
+  data-media-id={item.id != null ? String(item.id) : ""}
   data-media-type={item.type}
   data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : ""}
-  data-show-tvdb-id={item.show_tvdb_id ? String(item.show_tvdb_id) : ""}
+  data-show-uri-id={item.show_uri_id ?? (item.show_tvdb_id && !item.show_tmdb_id ? `tvdb:s:${item.show_tvdb_id}` : item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : "")}
   data-season={item.season_number != null ? String(item.season_number) : ""}
   data-episode-number={item.episode_number != null ? String(item.episode_number) : ""}
+  data-watched={String(watched)}
+  data-collected={String(inLibrary)}
+  data-in-library={String(inLibrary)}
+  data-is-blocked={String(item.is_blocked ?? false)}
+  data-is-dropped={String(item.is_dropped ?? false)}
+  data-listed={String(inLists.length > 0)}
 >
   {href ? (
     <a href={href} class="block">
       <!-- Backdrop container: 3:2 (no title info here — info is below action bar) -->
-      <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300">
+      <div class="aspect-[3/2] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300" data-spoiler={spoilerImage}>
         {imageUrl ? (
           <img
             src={imageUrl}
@@ -59,23 +86,36 @@ const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
             decoding="async"
           />
         ) : (
-          <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-[#18181b]">
+          <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-zinc-900/40">
             <span class="text-3xl mb-2 opacity-30">📺</span>
-            <span class="text-xs font-bold uppercase tracking-widest text-[#52525b]">{item.show_title ?? item.title}</span>
+            <span class="text-xs font-bold uppercase tracking-widest text-zinc-500">{item.show_title ?? item.title}</span>
           </div>
         )}
 
         <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
-        {sxe && (
-          <div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">
-            {sxe}
+        {item.library?.resolution && (
+          <div class={`absolute top-1.5 ${showDismiss ? 'right-10' : 'right-1.5'} bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-xl border border-zinc-800/80 shadow-lg tracking-tighter`}>
+            {item.library.resolution}
           </div>
         )}
 
-        {item.library?.resolution && (
-          <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg tracking-tighter">
-            {item.library.resolution}
+        {showDismiss && (
+          <button
+            data-action="remove-progress"
+            class="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950 transition-all duration-200 cursor-pointer active:scale-90"
+            title="Remove from Continue Watching"
+            aria-label="Remove from continue watching"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        )}
+
+        {showProgress && (
+          <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+            <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
           </div>
         )}
       </div>
@@ -93,27 +133,112 @@ const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
             decoding="async"
           />
         ) : (
-          <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-[#18181b]">
+          <div class="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-zinc-900/40">
             <span class="text-3xl mb-2 opacity-30">📺</span>
-            <span class="text-xs font-bold uppercase tracking-widest text-[#52525b]">{item.show_title ?? item.title}</span>
+            <span class="text-xs font-bold uppercase tracking-widest text-zinc-500">{item.show_title ?? item.title}</span>
           </div>
         )}
 
         <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
-        {sxe && (
-          <div class="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-blue-500/30">
-            {sxe}
-          </div>
-        )}
-
         {item.library?.resolution && (
-          <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-2 py-0.5 rounded-md border border-white/10 shadow-lg tracking-tighter">
+          <div class={`absolute top-1.5 ${showDismiss ? 'right-10' : 'left-1.5'} bg-zinc-950/60 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-xl border border-zinc-800/80 shadow-lg tracking-tighter`}>
             {item.library.resolution}
           </div>
         )}
 
-        <div class="absolute bottom-2 left-2 right-2 bg-amber-500/90 backdrop-blur-md text-zinc-950 text-xs font-bold px-2 py-1 rounded-md text-center tracking-tight">
+        {!showDismiss && (() => {
+          const isBlocked = item.is_blocked ?? false;
+          const isDropped = item.is_dropped ?? false;
+          const showDrop = true;
+          const btnBase = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+          const btnBaseRight = `${btnBase} right-1.5`;
+          const btnBaseOffset = `${btnBase} right-[38px]`;
+
+          const btnInactiveDrop = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+          const btnInactiveBlock = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+          const btnActiveDrop  = `${btnBaseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+          const btnActiveBlock = `${btnBaseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+          const btnInactiveBlockOffset = `${btnBaseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
+          if (isDropped) {
+            return (
+              <>
+                <button
+                  data-action="unified-block"
+                  data-is-blocked="false"
+                  data-is-dropped="true"
+                  title="Resume tracking"
+                  class={btnActiveDrop}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+                </button>
+                <button
+                  data-action="unified-block"
+                  data-is-blocked="false"
+                  data-is-dropped="false"
+                  data-force-block="true"
+                  data-action-intent="block"
+                  title="Block"
+                  class={btnInactiveBlockOffset}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                </button>
+              </>
+            );
+          } else if (isBlocked) {
+            return (
+              <button
+                data-action="unified-block"
+                data-is-blocked="true"
+                data-is-dropped="false"
+                title="Unblock"
+                class={btnActiveBlock}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+              </button>
+            );
+          } else {
+            return (
+              <button
+                data-action="unified-block"
+                data-is-blocked="false"
+                data-is-dropped="false"
+                data-action-intent={showDrop ? 'drop' : 'block'}
+                title={showDrop ? 'Drop show' : 'Block'}
+                class={showDrop ? btnInactiveDrop : btnInactiveBlock}
+              >
+                {showDrop ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                )}
+              </button>
+            );
+          }
+        })()}
+
+        {showDismiss && (
+          <button
+            data-action="remove-progress"
+            class="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 bg-zinc-950/80 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950 transition-all duration-200 cursor-pointer active:scale-90"
+            title="Remove from Continue Watching"
+            aria-label="Remove from continue watching"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        )}
+
+        {showProgress && (
+          <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+            <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
+          </div>
+        )}
+
+        <div class="absolute bottom-2 left-2 right-2 bg-amber-500/90 backdrop-blur-md text-zinc-950 text-xs font-bold px-2 py-1 rounded-lg text-center tracking-tight">
           Could not identify — try pulling your library
         </div>
       </div>
@@ -121,35 +246,64 @@ const collectionPct = item.collection_pct ?? (inLibrary ? 100 : 0);
   )}
 
   <!-- Action bar (below image, above info) -->
-  <CardActionBar
-    watched={watched}
-    inLists={inLists}
-    inLibrary={inLibrary}
-    collectionPct={collectionPct}
-    watchPct={watched ? 100 : 0}
-    isSeries={isSeries}
-  />
+  {!showDismiss && !hideActionBar && (
+    <CardActionBar
+      watched={watched}
+      inLists={inLists}
+      inLibrary={inLibrary}
+      collectionPct={collectionPct}
+      watchPct={watched ? 100 : 0}
+      isSeries={isSeries}
+    />
+  )}
 
   <!-- Info -->
   {href ? (
-    <a href={href} class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+    <a href={href} class="block p-3 bg-transparent flex-1">
       {item.show_title && (
         <p class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</p>
       )}
-      <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors leading-tight">
-        {item.title}
-      </h3>
-      {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">{sxe}</span>}
+      <div class="flex items-start justify-between gap-2">
+        <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-300 transition-colors leading-tight">
+          {item.title}
+        </h3>
+      </div>
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide mt-0.5 block">{sxe}</span>}
+        </div>
+        <div class="flex items-center gap-2">
+          {showProgress && (
+            <span class="text-[10px] font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+          )}
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
+            {item.type === "movie" ? "MOVIE" : "EPISODE"}
+          </span>
+        </div>
+      </div>
     </a>
   ) : (
-    <div class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
+    <div class="block p-3 bg-transparent flex-1">
       {item.show_title && (
         <p class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</p>
       )}
       <h3 class="text-sm font-bold text-zinc-500 truncate leading-tight">
         {item.title}
       </h3>
-      {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide mt-0.5 block">{sxe}</span>}
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide mt-0.5 block">{sxe}</span>}
+        </div>
+        <div class="flex items-center gap-2">
+          {showProgress && (
+            <span class="text-[10px] font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+          )}
+          <span class="text-[9px] font-black text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
+            {item.type === "movie" ? "MOVIE" : "EPISODE"}
+          </span>
+        </div>
+      </div>
     </div>
   )}
 </div>
+

@@ -221,6 +221,27 @@ class ArvioApplyTests(unittest.IsolatedAsyncioTestCase):
         event = next(c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], WatchEvent))
         self.assertEqual(event.watched_at, datetime(2026, 8, 10, 12, 0, 0))
 
+    async def test_apply_arvio_watched_movie_with_no_date_records_unknown(self) -> None:
+        # #238: an item Arvio gives no timestamp for is an unknown watch date,
+        # not a play that happened at sync time. Stamping "now" flooded the
+        # activity feed with false "just watched" entries on every pull.
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute = AsyncMock(side_effect=[
+            _Result(scalars=[]),  # Media search
+            _Result(scalars=[]),  # WatchEvent search
+        ])
+
+        added = await _apply_arvio_watched_movie(
+            db,
+            user_id=1,
+            item={"tmdbId": 550, "title": "Fight Club"},
+            tmdb_api_key=None,
+        )
+        self.assertTrue(added)
+        event = next(c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], WatchEvent))
+        self.assertIsNone(event.watched_at)
+
     async def test_apply_arvio_watched_episode(self) -> None:
         db = AsyncMock()
         db.add = MagicMock()

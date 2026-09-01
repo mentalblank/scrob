@@ -1,0 +1,186 @@
+---
+/**
+ * Artwork picker.
+ *
+ * Renders one modal per page. Any button carrying `data-image-picker` opens it
+ * for the subject named by its data attributes:
+ *
+ *   data-subject-uri  provider uri of the show or movie (tmdb:s:1396)
+ *   data-kind         poster | backdrop | still
+ *   data-season       season number, for a season poster or an episode still
+ *   data-episode      episode number, for an episode still
+ *   data-label        what the heading calls it ("Season 2 poster")
+ *
+ * Choosing an option stores a per-user override, so nobody else's artwork moves.
+ */
+---
+
+<div id="image-picker" class="hidden fixed inset-0 z-[999] flex items-center justify-center p-4">
+  <div id="image-picker-backdrop" class="absolute inset-0 bg-zinc-950/85 backdrop-blur-sm"></div>
+
+  <div class="relative w-full max-w-4xl max-h-[88vh] bg-zinc-900/90 border border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col backdrop-blur-xl ring-1 ring-white/10">
+    <div class="flex items-start justify-between gap-4 p-5 border-b border-zinc-800/80">
+      <div>
+        <h2 id="image-picker-title" class="text-lg font-black text-zinc-100">Change image</h2>
+        <p class="text-xs text-zinc-500 mt-1">Artwork from TMDB and TheTVDB, or any image URL. Only you see the change.</p>
+      </div>
+      <button id="image-picker-close" class="shrink-0 p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100 rounded-full transition active:scale-95 cursor-pointer" aria-label="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-5">
+      <p id="image-picker-status" class="text-sm text-zinc-400 py-10 text-center">Loading artwork…</p>
+      <div id="image-picker-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"></div>
+    </div>
+
+    <div class="border-t border-zinc-800/80 p-5 space-y-3">
+      <label class="block text-xs font-bold text-zinc-400 uppercase tracking-widest" for="image-picker-url">Use an image URL</label>
+      <div class="flex gap-2">
+        <input
+          id="image-picker-url"
+          type="url"
+          placeholder="https://example.com/artwork.jpg"
+          class="flex-1 px-3 py-2.5 bg-zinc-950/60 border border-zinc-800 rounded-xl text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500/60"
+        />
+        <button id="image-picker-url-apply" class="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition active:scale-95 cursor-pointer">Use</button>
+      </div>
+      <button id="image-picker-reset" class="text-xs font-bold text-zinc-400 hover:text-zinc-100 uppercase tracking-widest transition cursor-pointer">Reset to provider default</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { tmdbImageUrl } from "../lib/api";
+  import type { ImageOption, ImageOptionsResponse } from "../lib/api";
+
+  const modal = document.getElementById('image-picker');
+  if (modal) {
+    const grid = document.getElementById('image-picker-grid') as HTMLElement;
+    const status = document.getElementById('image-picker-status') as HTMLElement;
+    const title = document.getElementById('image-picker-title') as HTMLElement;
+    const urlInput = document.getElementById('image-picker-url') as HTMLInputElement;
+
+    // The subject the modal is currently open for.
+    let current: { subject_uri: string; kind: string; season_number?: number; episode_number?: number } | null = null;
+    let busy = false;
+
+    // Posters are portrait; backdrops and stills are landscape.
+    const aspectFor = (kind: string) => (kind === 'poster' ? 'aspect-[2/3]' : 'aspect-video');
+    const previewSize = (kind: string) => (kind === 'poster' ? 'w342' : 'w780');
+
+    function close() {
+      modal!.classList.add('hidden');
+      document.body.style.overflow = '';
+      current = null;
+    }
+
+    function setStatus(text: string | null) {
+      status.textContent = text ?? '';
+      status.classList.toggle('hidden', !text);
+    }
+
+    function queryString(extra?: Record<string, string>) {
+      const params = new URLSearchParams({ subject_uri: current!.subject_uri, kind: current!.kind, ...extra });
+      if (current!.season_number !== undefined) params.set('season_number', String(current!.season_number));
+      if (current!.episode_number !== undefined) params.set('episode_number', String(current!.episode_number));
+      return params.toString();
+    }
+
+    function render(options: ImageOption[]) {
+      grid.replaceChildren();
+      if (!options.length) {
+        setStatus('Neither provider has other artwork for this. An image URL still works.');
+        return;
+      }
+      setStatus(null);
+      for (const option of options) {
+        const button = document.createElement('button');
+        button.className = `group relative ${aspectFor(option.kind)} rounded-xl overflow-hidden bg-zinc-950 ring-1 ring-white/10 hover:ring-blue-500/60 transition active:scale-95 cursor-pointer`;
+        button.innerHTML = `
+          <img src="${tmdbImageUrl(option.url, previewSize(option.kind))}" alt="" loading="lazy" decoding="async" class="w-full h-full object-cover" />
+          <span class="absolute bottom-0 inset-x-0 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-200 bg-zinc-950/70 flex justify-between gap-2">
+            <span>${option.source}</span>
+            <span>${option.language ?? ''}${option.width ? ` ${option.width}×${option.height}` : ''}</span>
+          </span>`;
+        button.addEventListener('click', () => apply({ source: option.source, path: option.path }));
+        grid.appendChild(button);
+      }
+    }
+
+    async function apply(body: Record<string, unknown>) {
+      if (!current || busy) return;
+      busy = true;
+      setStatus('Saving…');
+      try {
+        const response = await fetch('/api/proxy/images/override', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...current, ...body }),
+        });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Could not save that image');
+        location.reload();
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : 'Could not save that image');
+        busy = false;
+      }
+    }
+
+    async function open(trigger: HTMLElement) {
+      const season = trigger.dataset.season;
+      const episode = trigger.dataset.episode;
+      current = {
+        subject_uri: trigger.dataset.subjectUri ?? '',
+        kind: trigger.dataset.kind ?? 'poster',
+        season_number: season ? Number(season) : undefined,
+        episode_number: episode ? Number(episode) : undefined,
+      };
+      busy = false;
+      title.textContent = trigger.dataset.label || 'Change image';
+      urlInput.value = '';
+      grid.replaceChildren();
+      setStatus('Loading artwork…');
+      modal!.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+
+      try {
+        const response = await fetch(`/api/proxy/images/options?${queryString()}`);
+        if (!response.ok) throw new Error('Could not load artwork');
+        render(((await response.json()) as ImageOptionsResponse).options);
+      } catch {
+        setStatus('Could not load artwork from TMDB or TheTVDB. An image URL still works.');
+      }
+    }
+
+    document.addEventListener('click', (e) => {
+      const trigger = (e.target as Element).closest<HTMLElement>('[data-image-picker]');
+      if (trigger) {
+        e.preventDefault();
+        open(trigger);
+        return;
+      }
+      if ((e.target as Element).closest('#image-picker-close, #image-picker-backdrop')) close();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal!.classList.contains('hidden')) close();
+    });
+
+    document.getElementById('image-picker-url-apply')?.addEventListener('click', () => {
+      const url = urlInput.value.trim();
+      if (url) apply({ source: 'external', url });
+    });
+
+    document.getElementById('image-picker-reset')?.addEventListener('click', async () => {
+      if (!current || busy) return;
+      busy = true;
+      setStatus('Resetting…');
+      const response = await fetch(`/api/proxy/images/override?${queryString()}`, { method: 'DELETE' });
+      if (response.ok) location.reload();
+      else {
+        setStatus('Could not reset that image');
+        busy = false;
+      }
+    });
+  }
+</script>

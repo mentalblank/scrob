@@ -177,7 +177,8 @@ class _FakeSession:
 
 _EMPTY_INCLUDE = dict(
     include_watched=False, include_ratings=False, include_collection=False,
-    include_lists=False, include_comments=False, include_api_keys=False,
+    include_lists=False, include_comments=False,
+    include_content_filters=False, include_metadata_overrides=False, include_api_keys=False,
     include_media_connections=False, include_scrobble_connections=False, include_connections=False,
 )
 
@@ -231,11 +232,11 @@ class CommentsImportTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(stats["comments"], 1)
         comments = [o for o in db.added if type(o).__name__ == "Comment"]
-        self.assertEqual(comments[0].tmdb_id, 42)
+        self.assertEqual(comments[0].uri_id, "tmdb:m:42")
         self.assertEqual(comments[0].content, "Great flick")
 
     async def test_duplicate_comment_is_skipped(self) -> None:
-        existing = SimpleNamespace(media_type="movie", tmdb_id=42, season_number=None, episode_number=None, content="Great flick")
+        existing = SimpleNamespace(media_type="movie", uri_id="tmdb:m:42", season_number=None, episode_number=None, content="Great flick")
         data = ScrobImportData(comments={
             "movies": [{"comment": "Great flick", "spoiler": False, "movie": {"ids": {"tmdb": 42}}}],
             "shows": [], "seasons": [], "episodes": [],
@@ -273,7 +274,7 @@ class CommentsImportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["errors"], 1)
         comments = [o for o in db.added if type(o).__name__ == "Comment"]
         self.assertEqual(len(comments), 1)
-        self.assertEqual(comments[0].tmdb_id, 2)
+        self.assertEqual(comments[0].uri_id, "tmdb:m:2")
 
 
 class ApiKeysImportTests(unittest.IsolatedAsyncioTestCase):
@@ -386,6 +387,7 @@ class ImportEndpointValidationTests(unittest.IsolatedAsyncioTestCase):
                 background_tasks=SimpleNamespace(add_task=lambda *a, **k: None),
                 file=SimpleNamespace(filename="export.zip"),
                 watched=False, ratings=False, collection=False, lists=False, comments=False,
+                content_filters=False, metadata_overrides=False,
                 api_keys=False, media_connections=False, scrobble_connections=False, connections=False,
                 db=None, current_user=SimpleNamespace(id=1),
             )

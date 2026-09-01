@@ -30,9 +30,19 @@ class GlobalSettings(Base):
     tvdb_api_key                 : Mapped[Optional[str]] = mapped_column(String(255))
     tvdb_subscriber_pin          : Mapped[Optional[str]] = mapped_column(String(255))
     image_cache_enabled          : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="false")
-    image_cache_limit_gb         : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    image_cache_limit_gb         : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Days before a cached image is evicted regardless of size limit. NULL/0 = never expire.
+    image_cache_expiry_days      : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # NULL = fall back to the ENABLE_REGISTRATIONS / REGISTRATION_MAX_ALLOWED_USERS env vars.
+    enable_registrations         : Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    registration_max_allowed_users: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Admin setup wizard completed. New rows default False (needs setup);
+    # existing rows backfill True via server_default so current installs aren't interrupted.
+    setup_completed               : Mapped[bool]          = mapped_column(Boolean, nullable=False, default=False, server_default="true")
+
+    # Restored: the merge dropped these three from the model while leaving the
+    # columns in the database and their readers in the code.
     enable_logged_out_navigation : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="false")
     disable_comments             : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="false")
-    # Stable X-Plex-Client-Identifier for this Scrob instance. Generated on first
-    # use of "Login with Plex"; kept forever so Plex keeps recognising the device.
+    disable_user_ratings         : Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="false")
     plex_client_identifier       : Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

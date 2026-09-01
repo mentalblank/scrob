@@ -9,6 +9,7 @@ from typing import Any
 
 from dateutil import parser as dt_parser
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -1070,6 +1071,39 @@ async def push_mdblist(
     await db.refresh(job)
     background_tasks.add_task(run_mdblist_push, current_user.id, job.id)
     return {"status": "started", "job_id": job.id, "message": "MDBList push is running in the background"}
+
+
+class MdblistConnectBody(BaseModel):
+    api_key: str
+
+
+@router.post("/auth/connect")
+async def mdblist_connect(
+    body: MdblistConnectBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Validate and store an MDBList API key.
+
+    MDBList has no OAuth flow like Trakt/Simkl — the key *is* the credential —
+    so connecting is a validate-then-save rather than a device handshake.
+    """
+    api_key = (body.api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="An MDBList API key is required")
+
+    if not await mdblist_client.validate_api_key(api_key):
+        raise HTTPException(status_code=400, detail="MDBList rejected that API key")
+
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+    if not settings:
+        settings = UserSettings(user_id=current_user.id)
+        db.add(settings)
+    settings.mdblist_api_key = api_key
+    await db.commit()
+
+    return {"status": "connected"}
 
 
 @router.delete("/auth/disconnect")

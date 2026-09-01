@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: changeme
       POSTGRES_DB: scrob
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - ./data/db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U scrob -d scrob"]
       interval: 5s
@@ -17,7 +17,10 @@ services:
 
   scrob:
     container_name: scrob
-    image: bellamy/scrob:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mentalblank/scrob:main
     restart: unless-stopped
     depends_on:
       scrob-db:
@@ -71,8 +74,4 @@ services:
       # Override the internal backend port (only needed if 7331 conflicts on bare metal installations)
       # BACKEND_PORT: "7331"
     volumes:
-      - scrob_data:/app/backend/data
-
-volumes:
-  db_data:
-  scrob_data:
+      - ./data/app:/app/backend/data

@@ -9,6 +9,8 @@ os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/
 from fastapi import HTTPException
 
 from models.base import MediaType
+from models.season_override import ShowSeasonOverride
+from models.show import Show as ShowModel
 from routers import shows
 
 
@@ -40,10 +42,19 @@ class _Result:
 
 class _FakeSession:
     """Queues results for db.execute() in call order - mirrors the pattern
-    already established in tests/test_history.py."""
+    already established in tests/test_history.py.
+
+    Queries past the end of the queue return an empty result rather than
+    raising, so a test only has to declare the lookups it actually asserts on;
+    the override and remap lookups these endpoints now make are not among them."""
 
     def __init__(self, results):
-        self.execute = AsyncMock(side_effect=[_Result(item) for item in results])
+        queued = [_Result(item) for item in results]
+
+        async def _execute(*_args, **_kwargs):
+            return queued.pop(0) if queued else _Result(None)
+
+        self.execute = AsyncMock(side_effect=_execute)
 
 
 class _NestedTxn:
@@ -65,6 +76,64 @@ class _FakeSessionWithNesting(_FakeSession):
 
     def begin_nested(self):
         return _NestedTxn()
+
+
+class _FakeSessionWithGet(_FakeSession):
+    """_FakeSession plus db.get(), which the remap lookups use to read the
+    show a season was pulled in from."""
+
+    def __init__(self, results, gets=None):
+        super().__init__(results)
+        self._gets = gets or {}
+
+        async def _get(_model, pk):
+            return self._gets.get(pk)
+
+        self.get = _get
+
+
+class FormatShowForUserRemapTests(unittest.IsolatedAsyncioTestCase):
+    """A season page's navigation is built from the show block's seasons_meta,
+    so a season this show only holds through a remap has to appear there -
+    otherwise it is visible on the show page but unreachable from the season
+    before it."""
+
+    def _show(self, **kwargs):
+        return ShowModel(
+            id=1, tmdb_id=100, title="Source", custom_title=None,
+            custom_season_names=None,
+            tmdb_data={"seasons": [
+                {"season_number": 0, "name": "Specials", "episode_count": 1},
+                {"season_number": 1, "name": "Season 1", "episode_count": 10},
+            ]},
+            **kwargs,
+        )
+
+    async def test_remapped_season_is_merged_into_seasons_meta(self) -> None:
+        override = ShowSeasonOverride(
+            user_id=7, source_show_id=1, source_season_number=2,
+            target_show_id=2, target_season_number=1,
+        )
+        target = ShowModel(
+            id=2, tmdb_id=200, title="Target", custom_title=None,
+            overview="t", poster_path="p", first_air_date="2024-01-01",
+            tmdb_data={"seasons": [{"season_number": 1, "episode_count": 6}]},
+        )
+        db = _FakeSessionWithGet([[override]], gets={2: target})
+
+        data = await shows.format_show_for_user(db, 7, self._show())
+
+        self.assertEqual([s["season_number"] for s in data["seasons_meta"]], [0, 1, 2])
+        merged = data["seasons_meta"][2]
+        self.assertEqual(merged["name"], "Target")
+        self.assertEqual(merged["remapped_from"]["season_number"], 1)
+
+    async def test_no_remap_leaves_seasons_meta_alone(self) -> None:
+        db = _FakeSessionWithGet([[]])
+
+        data = await shows.format_show_for_user(db, 7, self._show())
+
+        self.assertEqual([s["season_number"] for s in data["seasons_meta"]], [0, 1])
 
 
 class GetEpisodeDetailTvdbFallbackMappingTests(unittest.IsolatedAsyncioTestCase):
@@ -162,6 +231,7 @@ class RefreshShowMetadataTvdbFallbackCorruptionTests(unittest.IsolatedAsyncioTes
         tvdb_ep = SimpleNamespace(
             id=102, media_type=MediaType.episode, season_number=1, episode_number=2, show_id=show.id,
             title="Stale Title", overview="stale", tmdb_id=888888,
+            uri_id="tvdb:e:888888",
             tmdb_data={"runtime": 20, "tvdb_episode_id": 888888, "source": "tvdb"},
         )
         db = _FakeSessionWithNesting([show, [tvdb_ep], []])

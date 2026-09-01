@@ -1,0 +1,540 @@
+---
+import Base from "../layouts/Base.astro";
+import { api } from "../lib/api";
+import type { PrivacyLevel } from "../lib/api";
+
+const { user, token } = Astro.locals;
+
+if (!user) {
+  return Astro.redirect("/login");
+}
+
+// Admins must complete the server setup wizard (API keys etc.) before the
+// personal walkthrough — /welcome is exempt from the middleware gate, so
+// enforce the ordering here too.
+if (user.is_admin && user.needs_setup) {
+  return Astro.redirect("/setup");
+}
+
+const [settings, profile, countriesRes, languagesRes, movieGenresRes, showGenresRes] = await Promise.all([
+  api.auth.getSettings(token!).catch(() => null),
+  api.profile.get(token!).catch(() => null),
+  api.media.getCountries(token!).catch(() => []),
+  api.media.getLanguages(token!).catch(() => []),
+  api.media.getGenres("movie", token!).catch(() => ({ genres: [] })),
+  api.media.getGenres("series", token!).catch(() => ({ genres: [] })),
+]);
+
+const COUNTRIES = (countriesRes || [])
+  .map((c) => [c.iso_3166_1, c.english_name] as [string, string])
+  .sort((a, b) => a[1].localeCompare(b[1]));
+
+const LANGUAGES = (languagesRes || [])
+  .filter((l) => l.iso_639_1 && l.english_name)
+  .map((l) => [l.iso_639_1, l.english_name] as [string, string])
+  .sort((a, b) => a[1].localeCompare(b[1]));
+
+// Genres from the API, falling back to the well-known TMDB lists when the
+// metadata endpoints aren't available yet (e.g. TMDB key not configured).
+const FALLBACK_GENRES = [
+  "Action", "Action & Adventure", "Adventure", "Animation", "Comedy", "Crime",
+  "Documentary", "Drama", "Family", "Fantasy", "History", "Horror", "Kids",
+  "Music", "Mystery", "News", "Reality", "Romance", "Sci-Fi & Fantasy",
+  "Science Fiction", "Soap", "Talk", "Thriller", "War", "War & Politics", "Western",
+];
+const apiGenres = [
+  ...new Set([
+    ...(movieGenresRes?.genres || []).map((g) => g.name),
+    ...(showGenresRes?.genres || []).map((g) => g.name),
+  ]),
+].sort();
+const ALL_GENRES = apiGenres.length > 0 ? apiGenres : FALLBACK_GENRES;
+
+const PRIVACY_LEVELS: [PrivacyLevel, string, string][] = [
+  ["private", "Private", "Only you can see your profile and activity."],
+  ["friends_only", "Friends Only", "Only mutual follows can see your activity."],
+  ["public", "Public", "Anyone on this instance can see your profile and activity."],
+];
+
+const displayName = profile?.display_name || user.display_name || "";
+const privacyLevel: PrivacyLevel = profile?.privacy_level ?? "private";
+const likedGenres = profile?.liked_genres ?? [];
+const country = profile?.country ?? null;
+const contentLanguage = profile?.content_language ?? null;
+
+const hasTvdbKey = settings?.has_effective_tvdb_key ?? false;
+const episodeOrder = settings?.default_episode_order === "tvdb" ? "tvdb" : "tmdb";
+const metadataSource = (settings?.preferences as Record<string, unknown> | null)?.primary_metadata_source === "tvdb" ? "tvdb" : "tmdb";
+const playbackTarget = settings?.playback_target ?? "web";
+
+const plexLinked = !!user.plex_linked;
+const plexError = Astro.url.searchParams.get("plex_error") || "";
+---
+
+<Base title="Welcome" hideNav>
+  <div class="max-w-lg mx-auto mt-10 md:mt-16 mb-16">
+    <div class="flex flex-col items-center mb-8 text-center">
+      <img src="/scrob.png" alt="Scrob Logo" class="w-20 object-contain mb-3" />
+      <h1 class="text-2xl font-bold text-zinc-100">Welcome, {user.display_name}</h1>
+      <p class="text-sm text-zinc-400 mt-1">Let's set things up the way you like. Every step is optional.</p>
+    </div>
+
+    <!-- Step indicator (dots are generated client-side to match the active step list) -->
+    <div class="flex items-center gap-2 mb-8 px-2" id="step-indicator"></div>
+
+    <div class="bg-zinc-900/40 border border-zinc-800 rounded-3xl shadow-2xl backdrop-blur-md p-8">
+      <div id="welcome-error" class="hidden bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-xl mb-6 text-sm"></div>
+
+      <!-- Step: Profile -->
+      <section class="welcome-step" data-step-key="profile">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Your Profile</h2>
+        <p class="text-sm text-zinc-400 mb-5">How you appear to others on this server.</p>
+        <div class="space-y-4">
+          <div>
+            <label for="wz-display-name" class="block text-sm font-medium text-zinc-400 mb-1">Display name</label>
+            <input
+              type="text"
+              id="wz-display-name"
+              maxlength="50"
+              value={displayName}
+              placeholder={user.username}
+              class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+            />
+          </div>
+          <div>
+            <p class="block text-sm font-medium text-zinc-400 mb-2">Profile visibility</p>
+            <div class="space-y-2">
+              {PRIVACY_LEVELS.map(([value, label, desc]) => (
+                <label class="flex items-center justify-between gap-4 p-3.5 bg-zinc-800/50 border border-zinc-700 rounded-xl cursor-pointer hover:bg-zinc-800 transition">
+                  <div>
+                    <p class="text-sm font-semibold text-zinc-100">{label}</p>
+                    <p class="text-xs text-zinc-500 mt-0.5">{desc}</p>
+                  </div>
+                  <input
+                    type="radio"
+                    name="wz_privacy"
+                    value={value}
+                    checked={privacyLevel === value}
+                    class="w-4 h-4 accent-blue-500 cursor-pointer shrink-0"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step: Appearance -->
+      <section class="welcome-step hidden" data-step-key="appearance">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Appearance</h2>
+        <p class="text-sm text-zinc-400 mb-5">Pick a look. You can change this anytime from the nav bar.</p>
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <button type="button" id="theme-dark-btn" class="theme-choice-btn px-4 py-3 rounded-xl border-2 text-sm font-semibold transition-all cursor-pointer">Dark</button>
+          <button type="button" id="theme-light-btn" class="theme-choice-btn px-4 py-3 rounded-xl border-2 text-sm font-semibold transition-all cursor-pointer">Light</button>
+        </div>
+        <div class="flex flex-wrap gap-2" id="accent-swatches">
+          {["blue", "purple", "green", "red", "orange", "pink"].map((c) => (
+            <button type="button" class="accent-swatch w-8 h-8 rounded-full border-2 border-transparent cursor-pointer transition-transform hover:scale-110" data-accent={c} style={`background: var(--accent-swatch-${c}, ${c})`}></button>
+          ))}
+        </div>
+      </section>
+
+      <!-- Step: Region & Language -->
+      <section class="welcome-step hidden" data-step-key="region">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Region & Language</h2>
+        <p class="text-sm text-zinc-400 mb-5">Used for streaming availability and to prioritize content in your language.</p>
+        {COUNTRIES.length === 0 && LANGUAGES.length === 0 ? (
+          <div class="p-5 rounded-xl border border-dashed border-zinc-700 bg-zinc-800/30 text-center">
+            <p class="text-sm text-zinc-400">Region and language lists aren't available right now.</p>
+            <p class="text-xs text-zinc-500 mt-1">You can configure these later in Settings → Preferences.</p>
+          </div>
+        ) : (
+          <div class="space-y-4">
+            {COUNTRIES.length > 0 ? (
+              <div>
+                <label for="wz-country" class="block text-sm font-medium text-zinc-400 mb-1">Region</label>
+                <select
+                  id="wz-country"
+                  class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer appearance-none"
+                >
+                  <option value="">— Not set —</option>
+                  {COUNTRIES.map(([code, name]) => (
+                    <option value={code} selected={country === code}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p class="text-xs text-zinc-500">The region list isn't available right now — set it later in Settings.</p>
+            )}
+            {LANGUAGES.length > 0 ? (
+              <div>
+                <label for="wz-language" class="block text-sm font-medium text-zinc-400 mb-1">Content language</label>
+                <select
+                  id="wz-language"
+                  class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer appearance-none"
+                >
+                  <option value="">— Any language —</option>
+                  {LANGUAGES.map(([code, name]) => (
+                    <option value={code} selected={contentLanguage === code}>{name}</option>
+                  ))}
+                </select>
+                <p class="text-xs text-zinc-500 mt-1.5">Prioritize recommendations in your preferred original language.</p>
+              </div>
+            ) : (
+              <p class="text-xs text-zinc-500">The language list isn't available right now — set it later in Settings.</p>
+            )}
+          </div>
+        )}
+      </section>
+
+      <!-- Step: Genres -->
+      <section class="welcome-step hidden" data-step-key="genres">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Favourite Genres</h2>
+        <p class="text-sm text-zinc-400 mb-5">Pick a few genres you enjoy — Discover will show dedicated rows for them.</p>
+        <div id="wz-genre-list" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-72 overflow-y-auto pr-1" data-selected={JSON.stringify(likedGenres)}>
+          {ALL_GENRES.map((genre) => {
+            const active = likedGenres.includes(genre);
+            return (
+              <button
+                type="button"
+                data-value={genre}
+                class={`wz-genre-toggle flex items-center justify-center p-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all hover:bg-zinc-800/50 cursor-pointer ${active ? "bg-blue-600/10 border-blue-500/40 text-blue-400" : "bg-zinc-950/60 border-zinc-800 text-zinc-500"}`}
+              >
+                {genre}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <!-- Step: Content preferences -->
+      <section class="welcome-step hidden" data-step-key="content">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Content Preferences</h2>
+        <p class="text-sm text-zinc-400 mb-5">You can fine-tune these anytime in Settings.</p>
+        <div class="space-y-3">
+          <label class="flex items-center justify-between p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl cursor-pointer">
+            <div>
+              <p class="text-sm font-semibold text-zinc-100">Blur explicit content</p>
+              <p class="text-xs text-zinc-500 mt-0.5">Blurs posters/backdrops flagged as adult until clicked</p>
+            </div>
+            <input type="checkbox" id="blur_explicit" checked={settings?.blur_explicit ?? true} class="w-5 h-5 accent-blue-500 cursor-pointer shrink-0" />
+          </label>
+          <label class="flex items-center justify-between p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl cursor-pointer">
+            <div>
+              <p class="text-sm font-semibold text-zinc-100">24-hour time format</p>
+              <p class="text-xs text-zinc-500 mt-0.5">Show times as 18:30 instead of 6:30 PM</p>
+            </div>
+            <input type="checkbox" id="time_format_24h" checked={settings?.time_format_24h ?? false} class="w-5 h-5 accent-blue-500 cursor-pointer shrink-0" />
+          </label>
+          <div class="p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl">
+            <label for="wz-metadata-source" class="block text-sm font-semibold text-zinc-100 mb-0.5">Primary metadata source</label>
+            <p class="text-xs text-zinc-500 mb-2.5">Which provider supplies TV show metadata. Movies always use TMDB.</p>
+            <select id="wz-metadata-source" class="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer appearance-none">
+              <option value="tmdb" selected={metadataSource !== "tvdb"}>TheMovieDB (TMDB) - Default</option>
+              <option value="tvdb" selected={metadataSource === "tvdb"}>TheTVDB (TVDB)</option>
+            </select>
+          </div>
+          <div class="p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl">
+            <label for="wz-episode-order" class="block text-sm font-semibold text-zinc-100 mb-0.5">Default episode order</label>
+            <p class="text-xs text-zinc-500 mb-2.5">Episode ordering scheme (TMDB vs TVDB) used when browsing TV shows.</p>
+            <select id="wz-episode-order" class="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer appearance-none">
+              <option value="tmdb" selected={episodeOrder !== "tvdb"}>TheMovieDB (TMDB) Order - Default</option>
+              <option value="tvdb" selected={episodeOrder === "tvdb"}>TheTVDB (TVDB) Order</option>
+            </select>
+          </div>
+          {!hasTvdbKey && (
+            <p class="text-xs text-amber-400/90 px-1">TVDB options only fully work once a TVDB API key is configured (Settings → Security &amp; API Keys).</p>
+          )}
+          <div class="p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl">
+            <label for="wz-playback-target" class="block text-sm font-semibold text-zinc-100 mb-0.5">Playback</label>
+            <p class="text-xs text-zinc-500 mb-2.5">What happens when you press Play on an item from a media server.</p>
+            <select id="wz-playback-target" class="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer appearance-none">
+              <option value="web" selected={playbackTarget !== "internal"}>Server Web Page — open the media server's web player</option>
+              <option value="internal" selected={playbackTarget === "internal"}>Built-in Player — stream inside Scrob</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step: Plex link (only shown when requested at registration and not yet linked) -->
+      <section class="welcome-step hidden" data-step-key="plex">
+        <div class="flex items-center gap-3 mb-1">
+          <div class="w-9 h-9 rounded-xl bg-[#e5a00d]/15 flex items-center justify-center shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e5a00d" class="w-5 h-5">
+              <path d="M12 0L4 6v12l8 6 8-6V6l-8-6zm0 4.3l4.8 3.6v8.2L12 19.7l-4.8-3.6V7.9L12 4.3z" />
+            </svg>
+          </div>
+          <h2 class="text-lg font-bold text-zinc-100">Link Plex</h2>
+        </div>
+        {plexError && (
+          <div class="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-xl my-4 text-sm">{plexError}</div>
+        )}
+        {plexLinked ? (
+          <div class="text-center py-4">
+            <div class="w-12 h-12 bg-green-500/10 border border-green-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-400"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <p class="text-sm font-semibold text-zinc-100">Plex account linked{user.plex_username ? ` as ${user.plex_username}` : ""}</p>
+            <p class="text-xs text-zinc-500 mt-1">Manage your Plex servers anytime in Settings → Media Servers.</p>
+          </div>
+        ) : (
+          <div>
+            <p class="text-sm text-zinc-400 mt-3 mb-5">Connect your plex.tv account to sign in with Plex and add your Plex servers for syncing watch history. You'll be sent to plex.tv and brought right back here.</p>
+            <button
+              type="button"
+              id="wz-plex-link-btn"
+              class="flex items-center justify-center gap-2 w-full bg-[#e5a00d] hover:bg-[#cc8f0b] text-zinc-950 font-bold py-3 rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
+                <path d="M12 0L4 6v12l8 6 8-6V6l-8-6zm0 4.3l4.8 3.6v8.2L12 19.7l-4.8-3.6V7.9L12 4.3z" />
+              </svg>
+              Link Plex account
+            </button>
+            <p class="text-xs text-zinc-500 mt-3 text-center">Your progress so far is saved first. You can also skip this and link later in Settings.</p>
+          </div>
+        )}
+      </section>
+
+      <!-- Step: Integrations (skippable) -->
+      <section class="welcome-step hidden" data-step-key="integrations">
+        <h2 class="text-lg font-bold text-zinc-100 mb-1">Connect Services <span class="text-zinc-500 font-normal text-sm">(optional)</span></h2>
+        <p class="text-sm text-zinc-400 mb-5">Sync your watch history with Trakt, Simkl, or a media server. This can be fully set up later.</p>
+        <button type="button" id="wz-open-integrations-btn" class="w-full text-left flex items-center justify-between p-4 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded-xl transition cursor-pointer group">
+          <div>
+            <p class="text-sm font-semibold text-zinc-100">Open Integrations settings</p>
+            <p class="text-xs text-zinc-500 mt-0.5">Trakt, Simkl, MDBList, Jellyfin, Plex, Emby, Nuvio</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-zinc-300 transition"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </section>
+
+      <!-- Step: Done -->
+      <section class="welcome-step hidden" data-step-key="done">
+        <div class="text-center py-2">
+          <div class="w-14 h-14 bg-green-500/10 border border-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-400"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <h2 class="text-lg font-bold text-zinc-100 mb-1">You're ready to go</h2>
+          <p class="text-sm text-zinc-400">Enjoy Scrob. Everything here can be changed later in Settings.</p>
+        </div>
+      </section>
+
+      <!-- Nav buttons -->
+      <div class="flex items-center justify-between mt-8">
+        <button id="welcome-back-btn" class="hidden px-4 py-2.5 text-sm text-zinc-400 hover:text-zinc-100 transition cursor-pointer">Back</button>
+        <div class="flex-1"></div>
+        <button id="welcome-skip-btn" class="px-4 py-2.5 text-sm text-zinc-500 hover:text-zinc-300 transition cursor-pointer">Skip</button>
+        <button id="welcome-next-btn" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-blue-600/20 active:scale-95 cursor-pointer ml-2">
+          Continue
+        </button>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<style>
+  .theme-choice-btn { border-color: var(--color-nav-border, #27272a); color: #a1a1aa; }
+  .theme-choice-btn.active { border-color: #3b82f6; color: #f4f4f5; background: rgba(59,130,246,0.1); }
+  .accent-swatch.active { border-color: #f4f4f5; }
+</style>
+
+<script define:vars={{ token, plexLinked }}>
+  // ── Step list (Plex step is conditional) ──
+  const urlParams = new URLSearchParams(window.location.search);
+  const wantsPlexLink = localStorage.getItem('link_plex_after_onboarding') === '1';
+  const resumeAtPlex = urlParams.get('step') === 'plex';
+  // Include the Plex step when the user asked for it at registration and hasn't
+  // linked yet, or when returning from the plex-link flow (to show the result).
+  const includePlex = resumeAtPlex || (wantsPlexLink && !plexLinked);
+
+  const STEP_KEYS = ['profile', 'appearance', 'region', 'genres', 'content'];
+  if (includePlex) STEP_KEYS.push('plex');
+  STEP_KEYS.push('integrations', 'done');
+
+  let step = resumeAtPlex ? STEP_KEYS.indexOf('plex') : 0;
+  if (step < 0) step = 0;
+
+  const steps = document.querySelectorAll('.welcome-step');
+  const backBtn = document.getElementById('welcome-back-btn');
+  const skipBtn = document.getElementById('welcome-skip-btn');
+  const nextBtn = document.getElementById('welcome-next-btn');
+  const errorEl = document.getElementById('welcome-error');
+
+  // Build step dots to match the active step list.
+  const indicator = document.getElementById('step-indicator');
+  STEP_KEYS.forEach((key, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'flex-1 h-1.5 rounded-full bg-zinc-800 step-dot';
+    dot.dataset.step = String(i);
+    indicator.appendChild(dot);
+  });
+  const dots = document.querySelectorAll('.step-dot');
+
+  function render() {
+    const key = STEP_KEYS[step];
+    steps.forEach(s => s.classList.toggle('hidden', s.dataset.stepKey !== key));
+    dots.forEach(d => d.classList.toggle('bg-blue-500', Number(d.dataset.step) <= step));
+    backBtn.classList.toggle('hidden', step === 0);
+    skipBtn.classList.toggle('hidden', step === STEP_KEYS.length - 1);
+    nextBtn.textContent = step === STEP_KEYS.length - 1 ? 'Finish' : 'Continue';
+    errorEl.classList.add('hidden');
+  }
+
+  // ── Appearance step ──
+  const darkBtn = document.getElementById('theme-dark-btn');
+  const lightBtn = document.getElementById('theme-light-btn');
+  const isLight = document.documentElement.classList.contains('light');
+  darkBtn.classList.toggle('active', !isLight);
+  lightBtn.classList.toggle('active', isLight);
+
+  darkBtn.addEventListener('click', () => {
+    document.documentElement.classList.remove('light');
+    localStorage.setItem('theme', 'dark');
+    darkBtn.classList.add('active');
+    lightBtn.classList.remove('active');
+  });
+  lightBtn.addEventListener('click', () => {
+    document.documentElement.classList.add('light');
+    localStorage.setItem('theme', 'light');
+    lightBtn.classList.add('active');
+    darkBtn.classList.remove('active');
+  });
+
+  const currentAccent = localStorage.getItem('accentTheme') || 'blue';
+  document.querySelectorAll('.accent-swatch').forEach(sw => {
+    sw.classList.toggle('active', sw.dataset.accent === currentAccent);
+    sw.addEventListener('click', () => {
+      const accent = sw.dataset.accent;
+      if (accent && accent !== 'blue') {
+        document.documentElement.setAttribute('data-accent', accent);
+        localStorage.setItem('accentTheme', accent);
+      } else {
+        document.documentElement.removeAttribute('data-accent');
+        localStorage.setItem('accentTheme', 'blue');
+      }
+      document.querySelectorAll('.accent-swatch').forEach(s => s.classList.toggle('active', s === sw));
+    });
+  });
+
+  // ── Genres step ──
+  const genreList = document.getElementById('wz-genre-list');
+  const selectedGenres = new Set(JSON.parse(genreList?.dataset.selected || '[]'));
+  const GENRE_ACTIVE = ['bg-blue-600/10', 'border-blue-500/40', 'text-blue-400'];
+  const GENRE_INACTIVE = ['bg-zinc-950/60', 'border-zinc-800', 'text-zinc-500'];
+  document.querySelectorAll('.wz-genre-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const value = btn.dataset.value;
+      const active = selectedGenres.has(value);
+      if (active) selectedGenres.delete(value); else selectedGenres.add(value);
+      btn.classList.remove(...(active ? GENRE_ACTIVE : GENRE_INACTIVE));
+      btn.classList.add(...(active ? GENRE_INACTIVE : GENRE_ACTIVE));
+    });
+  });
+
+  // ── Saving ──
+  // Profile fields are "optional" saves: a failure never blocks onboarding.
+  // The auth-settings PATCH carries onboarded:true when finishing and must succeed.
+  async function persist(finishing) {
+    const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+    const profileBody = { liked_genres: Array.from(selectedGenres) };
+    const dnEl = document.getElementById('wz-display-name');
+    if (dnEl && dnEl.value.trim()) profileBody.display_name = dnEl.value.trim();
+    const privEl = document.querySelector('input[name="wz_privacy"]:checked');
+    if (privEl) profileBody.privacy_level = privEl.value;
+    const countryEl = document.getElementById('wz-country');
+    if (countryEl) profileBody.country = countryEl.value || null;
+    const langEl = document.getElementById('wz-language');
+    if (langEl) profileBody.content_language = langEl.value || null;
+
+    try {
+      await fetch('/api/proxy/profile/me', { method: 'PATCH', headers, body: JSON.stringify(profileBody) });
+    } catch { /* optional — never blocks onboarding */ }
+
+    const blurExplicit = document.getElementById('blur_explicit').checked;
+    const timeFormat24h = document.getElementById('time_format_24h').checked;
+    const episodeOrder = document.getElementById('wz-episode-order')?.value || 'tmdb';
+    const metadataSource = document.getElementById('wz-metadata-source')?.value || 'tmdb';
+    const playbackTarget = document.getElementById('wz-playback-target')?.value || 'web';
+
+    const body = {
+      blur_explicit: blurExplicit,
+      time_format_24h: timeFormat24h,
+      default_episode_order: episodeOrder,
+      playback_target: playbackTarget,
+      // The backend merges the preferences bag, so this only touches this key.
+      preferences: { primary_metadata_source: metadataSource },
+    };
+    if (finishing) body.onboarded = true;
+
+    const res = await fetch('/api/proxy/auth/settings', { method: 'PATCH', headers, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || 'Failed to save preferences');
+    }
+
+    // Cookies consumed by server-rendered pages (mirrors settings.astro).
+    document.cookie = `time_format_24h=${timeFormat24h}; path=/; SameSite=Lax; Max-Age=31536000`;
+    document.cookie = `primary_metadata_source=${metadataSource}; path=/; SameSite=Lax; Max-Age=31536000`;
+    document.cookie = `playback_target=${playbackTarget}; path=/; SameSite=Lax; Max-Age=31536000`;
+  }
+
+  async function finish() {
+    nextBtn.disabled = true;
+    nextBtn.textContent = 'Saving…';
+    try {
+      await persist(true);
+      localStorage.removeItem('link_plex_after_onboarding');
+      window.location.href = '/';
+    } catch (err) {
+      errorEl.textContent = err instanceof Error ? err.message : 'Failed to save preferences';
+      errorEl.classList.remove('hidden');
+      nextBtn.disabled = false;
+      nextBtn.textContent = 'Finish';
+    }
+  }
+
+  // ── Plex link step ──
+  // Persist everything so far (best effort), then hand off to the plex-link
+  // flow, which returns to /welcome?step=plex thanks to the next param.
+  const openIntegrationsBtn = document.getElementById('wz-open-integrations-btn');
+  openIntegrationsBtn?.addEventListener('click', async () => {
+    try {
+      await persist(true);
+      localStorage.removeItem('link_plex_after_onboarding');
+      window.location.href = '/settings#integrations';
+    } catch (err) {
+      errorEl.textContent = err instanceof Error ? err.message : 'Failed to save preferences';
+      errorEl.classList.remove('hidden');
+    }
+  });
+
+  const plexLinkBtn = document.getElementById('wz-plex-link-btn');
+  plexLinkBtn?.addEventListener('click', async () => {
+    plexLinkBtn.disabled = true;
+    plexLinkBtn.textContent = 'Saving…';
+    try { await persist(false); } catch { /* best effort */ }
+    window.location.href = '/plex-link-start?next=' + encodeURIComponent('/welcome?step=plex');
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (step === STEP_KEYS.length - 1) {
+      finish();
+      return;
+    }
+    step++;
+    render();
+  });
+
+  skipBtn.addEventListener('click', () => {
+    step++;
+    render();
+  });
+
+  backBtn.addEventListener('click', () => {
+    if (step > 0) step--;
+    render();
+  });
+
+  render();
+</script>

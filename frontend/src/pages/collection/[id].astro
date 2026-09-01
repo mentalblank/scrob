@@ -1,8 +1,13 @@
 ---
 import Base from "../../layouts/Base.astro";
+import ErrorState from "../../components/ErrorState.astro";
 import MediaCard from "../../components/MediaCard.astro";
-import { api, type CollectionDetail } from "../../lib/api";
+import PosterModal from "../../components/PosterModal.astro";
+import { api, tmdbImageUrl, type CollectionDetail } from "../../lib/api";
+import { personUrl } from "../../lib/urls";
 export const prerender = false;
+
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
 
 const { id } = Astro.params;
 const { token } = Astro.locals;
@@ -22,24 +27,16 @@ if (!collection && !error) {
 ---
 
 <Base title={collection?.name || "Collection"}>
-  {error && !collection && (
-    <div class="max-w-md mx-auto mt-20 text-center">
-      <div class="bg-red-500/10 border border-red-500/20 text-red-500 p-6 rounded-2xl mb-6">
-        <p class="font-bold text-lg mb-2">Oops!</p>
-        <p class="text-sm opacity-80">{error}</p>
-      </div>
-      <a href="/" class="text-blue-500 hover:underline">Return to Dashboard</a>
-    </div>
-  )}
+  {error && !collection && <ErrorState error={error} />}
 
   {collection && (
     <div class="relative">
       <!-- Backdrop -->
       {collection.backdrop_path && (
-        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[500px] overflow-hidden">
+        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[500px] overflow-hidden" style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);">
           <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent z-10"></div>
           <img
-            src={collection.backdrop_path}
+            src={tmdbImageUrl(collection.backdrop_path, "w1280")}
             alt=""
             class="w-full h-full object-cover opacity-50 blur-[1px]"
             loading="eager"
@@ -60,7 +57,7 @@ if (!collection && !error) {
               {collection.poster_path ? (
                 <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${collection.name}`}>
                   <img
-                    src={collection.poster_path}
+                    src={tmdbImageUrl(collection.poster_path, "w500")}
                     alt={collection.name}
                     class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
                     loading="eager"
@@ -106,7 +103,7 @@ if (!collection && !error) {
             {collection.genres?.length > 0 && (
               <div class="flex flex-wrap gap-2 mt-6">
                 {collection.genres.map((g: string) => (
-                  <span class="px-4 py-1.5 bg-zinc-900/80 border border-zinc-800 hover:border-zinc-700 transition-colors text-zinc-400 text-xs rounded-full font-bold uppercase tracking-widest">
+                  <span class="px-4 py-1.5 bg-zinc-950/40 backdrop-blur-md border border-zinc-800/80 hover:border-zinc-700 transition-colors text-zinc-400 text-[10px] rounded-full font-bold uppercase tracking-widest">
                     {g}
                   </span>
                 ))}
@@ -130,32 +127,34 @@ if (!collection && !error) {
         <!-- Cast -->
         {collection.cast?.length > 0 && (
           <div class="border-t border-zinc-900 pt-16">
-            <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase mb-10">Top Cast</h2>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+            <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase mb-10">Cast</h2>
+            <div class="flex gap-3 overflow-x-auto pb-3 scrollbar-none -mx-6 px-6 md:mx-0 md:px-0">
               {collection.cast.map((person) => (
-                <a href={`/person/${person.tmdb_id}`} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-4 rounded-3xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10">
-                  <div class="aspect-square w-full rounded-2xl overflow-hidden mb-5 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
-                    {person.profile_path ? (
-                      <img
-                        src={person.profile_path}
-                        alt={person.name}
-                        class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-4xl">
-                        👤
-                      </div>
-                    )}
-                  </div>
-                  <div class="text-center">
-                    <p class="text-sm font-black text-zinc-100 group-hover/cast:text-blue-400 transition-colors line-clamp-1 leading-tight">{person.name}</p>
-                    {person.appearances > 1 && (
-                      <p class="text-[11px] text-zinc-500 font-bold uppercase tracking-wider mt-1">{person.appearances} films</p>
-                    )}
-                  </div>
-                </a>
+                <div class="flex-shrink-0 w-36">
+                  <a href={personUrl(person.tmdb_id, null, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-955/20 backdrop-blur-md border border-zinc-800/60 p-4 rounded-3xl hover:bg-zinc-800/30 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-955/30 flex flex-col h-full">
+                    <div class="aspect-square w-full rounded-2xl overflow-hidden mb-5 ring-1 ring-white/5 group-hover/cast:ring-blue-500/30 transition-all duration-500 shadow-lg">
+                      {person.profile_path ? (
+                        <img
+                          src={tmdbImageUrl(person.profile_path, "w185")}
+                          alt={person.name}
+                          class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : (
+                        <div class="w-full h-full bg-zinc-850 flex items-center justify-center text-zinc-400 text-4xl">
+                          👤
+                        </div>
+                      )}
+                    </div>
+                    <div class="text-center mt-auto">
+                      <p class="text-sm font-black text-zinc-100 group-hover/cast:text-blue-400 transition-colors line-clamp-1 leading-tight">{person.name}</p>
+                      {person.appearances > 1 && (
+                        <p class="text-[11px] text-zinc-500 font-bold uppercase tracking-wider mt-1">{person.appearances} films</p>
+                      )}
+                    </div>
+                  </a>
+                </div>
               ))}
             </div>
           </div>
@@ -165,37 +164,4 @@ if (!collection && !error) {
   )}
 </Base>
 
-{collection?.poster_path && (
-  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
-    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
-    <img
-      src={collection.poster_path}
-      alt={collection.name}
-      class="relative max-h-[90vh] max-w-[85vw] md:max-w-[50vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
-    />
-    <button
-      id="poster-modal-close"
-      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
-      aria-label="Close"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-      </svg>
-    </button>
-  </div>
-)}
-
-<script>
-  const zoomBtn = document.getElementById('poster-zoom-btn');
-  const modal = document.getElementById('poster-modal');
-  const backdrop = document.getElementById('poster-modal-backdrop');
-  const closeBtn = document.getElementById('poster-modal-close');
-  if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-    function closeModal() { modal.classList.add('hidden'); document.body.style.overflow = ''; }
-    zoomBtn.addEventListener('click', openModal);
-    backdrop?.addEventListener('click', closeModal);
-    closeBtn?.addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
-  }
-</script>
+<PosterModal posterPath={collection?.poster_path} title={collection?.name || ""} />

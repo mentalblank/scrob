@@ -1,24 +1,44 @@
 ---
 import Base from "../../layouts/Base.astro";
-import MediaRow from "../../components/MediaRow.astro";
+import PosterModal from "../../components/PosterModal.astro";
+import ImagePicker from "../../components/ImagePicker.astro";
+import ImagePickerButton from "../../components/ImagePickerButton.astro";
+import ErrorState from "../../components/ErrorState.astro";
+import RefreshMetadataButton from "../../components/RefreshMetadataButton.astro";
 import ActionBar from "../../components/ActionBar.astro";
+import MediaCard from "../../components/MediaCard.astro";
+import EpisodeCard from "../../components/EpisodeCard.astro";
+import VisibilityFilters from "../../components/VisibilityFilters.astro";
 import CommentsSection from "../../components/CommentsSection.astro";
+import ProgressStrip from "../../components/ProgressStrip.astro";
+import VideoPlayer from "../../components/VideoPlayer.astro";
+import TrailerButton from "../../components/TrailerButton.astro";
 import EpisodeOrderSelector from "../../components/EpisodeOrderSelector.astro";
-import { api, type Show } from "../../lib/api";
+import { api, tmdbImageUrl, type Show, type MediaItem } from "../../lib/api";
+import { parseShowId } from "../../lib/normalize";
+import { seasonDisplayName, seasonLabel } from "../../lib/media-format";
+import { personUrl } from "../../lib/urls";
 export const prerender = false;
 
 const { id } = Astro.params;
-const { token, user } = Astro.locals;
+const { token } = Astro.locals;
+
 Astro.response.headers.set("Cache-Control", "no-store");
 
+// Accept URI (tmdb:s:X / tvdb:s:Y) or raw integer.
+const { provider, numericId: resolvedShowId, uri: fetchKey } = parseShowId(id);
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
 let show: Show | null = null;
 let error = "";
 
-try {
-  show = await api.shows.get(Number(id), token);
-} catch (e: any) {
-  error = e.message;
-}
+// The backend still exposes separate TMDB (/shows/{id}) and TVDB (/shows/tvdb/{id})
+// endpoints rather than a single uri_id-aware one, so translate the parsed uri_id
+// into the right backend path here — this page's own routing/URLs stay uri_id-based.
+const showFetchPath = (p: "tmdb" | "tvdb", numId: number) => (p === "tvdb" ? `tvdb/${numId}` : String(numId));
+
+const isExplicitTmdbUrl = id?.startsWith("tmdb:s:");
+const isExplicitTvdbUrl = id?.startsWith("tvdb:s:");
 
 let hasTvdbKey = false;
 try {
@@ -26,17 +46,109 @@ try {
   hasTvdbKey = !!settings?.has_effective_tvdb_key;
 } catch {}
 
-if (!show && !error) {
+try {
+  show = await api.shows.get(showFetchPath(provider, resolvedShowId), token);
+  // Redirect to TVDB-shaped URL when TVDB is requested, unless per-show episode order is explicitly set to TMDB.
+  const perShowOrder = (show as any)?.episode_order;
+  const wantsTvdbData = show && provider !== "tvdb" && show.tvdb_id &&
+    (perShowOrder === "tvdb" || (!isExplicitTmdbUrl && perShowOrder !== "tmdb" && primaryMetadataSource === "tvdb"));
+  if (wantsTvdbData) {
+    return Astro.redirect(`/show/tvdb:s:${show!.tvdb_id}`);
+  }
+} catch (e: any) {
+  const status = (e as any)?.status ?? (e as any)?.response?.status;
+  if (status === 404 || String(e.message).includes("404") || String(e.message).includes("not found")) {
     return Astro.redirect("/404");
+  }
+  error = e.message;
 }
 
-if (show?.episode_order === "tvdb" && show.tvdb_id) {
-  return Astro.redirect(`/show/tvdb/${show.tvdb_id}`);
+if (!show && !error) {
+  return Astro.redirect("/404");
 }
+
+// Compatibility: frontend code reads `show.tmdb_id` as primary ID. For TVDB shows surface cross-id or tvdb id.
+const resolvedTmdbId = (show as any)?.tmdb_id ?? (show as any)?.tmdb_id_cross ?? (show as any)?.tvdb_id ?? resolvedShowId;
+const resolvedUriId = show?.uri_id ?? (provider === "tvdb" ? `tvdb:s:${resolvedShowId}` : `tmdb:s:${resolvedShowId}`);
+const isTvdbResponse = provider === "tvdb" || ((show as any)?.tvdb_id && !(show as any)?.tmdb_id);
+
+// Seasons/episodes below must stay on the provider this page is pinned to. The
+// redirect above already honours the global preference, so reaching here on a
+// TMDB url means TMDB was chosen deliberately.
+const pageProviderIsTvdb = provider === "tvdb";
+
+// Per-show (falling back to the global default) TVDB-vs-TMDB episode ordering.
+// episode-order/{tmdbId} endpoints are keyed by the real TMDB id, so don't fall
+// back to the TVDB id here the way resolvedTmdbId does.
+const episodeOrderTmdbId = show?.tmdb_id ?? (show as any)?.tmdb_id_cross ?? null;
+const selectedEpisodeOrder: "tmdb" | "tvdb" = (show as any)?.episode_order === "tvdb" ? "tvdb" : "tmdb";
+const showEpisodeOrderSelector = !!(episodeOrderTmdbId && show?.tvdb_id && hasTvdbKey);
+
+// The /refresh endpoint is also split between the tmdb and tvdb routers, keyed
+// by whichever numeric id matches the data shape currently being displayed.
+const refreshPath = isTvdbResponse
+  ? showFetchPath("tvdb", (show as any)?.tvdb_id ?? resolvedShowId)
+  : showFetchPath("tmdb", resolvedTmdbId);
 
 const seasons = Object.entries(show?.seasons ?? {}).sort(
   ([a], [b]) => Number(a.replace("season_", "")) - Number(b.replace("season_", ""))
 );
+
+const rawSeasonsMeta = show?.seasons_meta || seasons.map(([k]) => ({ 
+  season_number: Number(k.replace("season_","")), 
+  name: seasonLabel(Number(k.replace("season_","")), specialsLabel), 
+  overview: null, 
+  poster_path: null, 
+  episode_count: 0, 
+  air_date: null 
+}));
+
+// An episode is a placeholder if it has neither a title nor an air date.
+const hasRealEpisodeData = (ep: any) =>
+  (ep?.title ?? "").trim() !== "" || (ep?.air_date ?? "").trim() !== "";
+
+const activeSeasons = rawSeasonsMeta.filter((s) => {
+  const seasonNum = s.season_number;
+  const episodes = show?.seasons?.[`season_${seasonNum}`] || [];
+  const seasonState = show?.season_states?.[seasonNum] ?? { watched: false, in_library: episodes.length > 0, collection_pct: 0, watch_pct: 0, user_rating: null };
+  // If episodes are loaded, hide the season when all of them are placeholders.
+  if (episodes.length > 0) {
+    return episodes.some(hasRealEpisodeData);
+  }
+  const totalEpisodes = ('total_episodes_count' in seasonState ? seasonState.total_episodes_count : null) || s.episode_count || episodes.length;
+  return totalEpisodes > 0;
+});
+
+// Neither show endpoint populates `seasons`, so a show with a single season would
+// render an empty episode grid. Fetch that one season's episodes here — multi-season
+// shows are fine, since they render season cards that link out to the season page.
+if (show && activeSeasons.length === 1) {
+  const onlySeason = activeSeasons[0].season_number;
+  const loaded = show.seasons?.[`season_${onlySeason}`] ?? [];
+  if (loaded.length === 0) {
+    try {
+      const seasonData = await api.shows.getSeason(fetchKey, onlySeason, token);
+      if (seasonData?.episodes?.length) {
+        show.seasons = { ...(show.seasons ?? {}), [`season_${onlySeason}`]: seasonData.episodes as unknown as MediaItem[] };
+      }
+    } catch {
+      // Leave the grid empty rather than failing the whole page.
+    }
+  }
+}
+
+// Progress stats
+const watchedEpisodesCount = show?.watched_episodes_count ?? 0;
+const totalEpisodesCount = show?.total_episodes_count ?? 0;
+const remainingEpisodesCount = Math.max(0, totalEpisodesCount - watchedEpisodesCount);
+
+const allEpisodes = Object.values(show?.seasons ?? {}).flat();
+const includeSpecials = show?.include_specials === true;
+const remainingDuration = allEpisodes
+  .filter(e => !e.watched && (includeSpecials || e.season_number !== 0))
+  .reduce((acc, e) => acc + (e.runtime || 0), 0);
+const overallProgress = totalEpisodesCount > 0 ? (watchedEpisodesCount / totalEpisodesCount) * 100 : 0;
+const showProgress = overallProgress > 0; // Show progress even if 100% to match GridCard behavior
 
 const year = show?.first_air_date?.slice(0, 4) ?? null;
 const rating = show?.tmdb_rating ? show.tmdb_rating.toFixed(1) : null;
@@ -44,27 +156,28 @@ const langNames = new Intl.DisplayNames(["en"], { type: "language" });
 const originalLanguage = show?.original_language
   ? langNames.of(show.original_language) ?? show.original_language
   : null;
+const trailerYoutubeId = show?.trailer_youtube_id ?? null;
+const tmdbShowUrl = (show?.tmdb_id || (show as any)?.tmdb_id_cross) ? `https://www.themoviedb.org/tv/${show?.tmdb_id || (show as any)?.tmdb_id_cross}` : null;
+const logoPath = show?.logo_path ?? null;
+
+const activeButtonsCount = [
+  show && show.in_library,
+  show && show.in_library,
+  !!trailerYoutubeId
+].filter(Boolean).length;
 ---
 
 <Base title={show?.title || "Show Details"}>
-  {error && !show && (
-    <div class="max-w-md mx-auto mt-20 text-center">
-        <div class="bg-red-500/10 border border-red-500/20 text-red-500 p-6 rounded-2xl mb-6">
-            <p class="font-bold text-lg mb-2">Oops!</p>
-            <p class="text-sm opacity-80">{error}</p>
-        </div>
-        <a href="/" class="text-blue-500 hover:underline">Return to Dashboard</a>
-    </div>
-  )}
+  {error && !show && <ErrorState error={error} />}
 
   {show && (
     <div class="relative">
       <!-- Backdrop -->
       {show.backdrop_path && (
-        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[600px] overflow-hidden" data-adult-backdrop={show.adult ? "true" : undefined}>
-          <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent z-10"></div>
+        <div class="absolute -top-20 md:-top-32 left-1/2 -translate-x-1/2 w-screen h-[600px] lg:h-[700px] xl:h-[780px] 2xl:h-[880px] overflow-hidden" style="mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%);" data-adult-backdrop={show.adult ? "true" : undefined}>
+          <div class="absolute inset-0 bg-gradient-to-t from-[var(--color-hero-fade)] via-[var(--color-hero-fade)]/40 to-transparent z-10"></div>
           <img
-            src={show.backdrop_path}
+            src={tmdbImageUrl(show.backdrop_path, "w1280")}
             alt=""
             class="w-full h-full object-cover opacity-50 blur-[1px]"
             loading="eager"
@@ -80,255 +193,465 @@ const originalLanguage = show?.original_language
           <span class="text-zinc-100 font-bold truncate">{show.title}</span>
         </nav>
 
-        <div class="flex flex-col md:flex-row gap-8 lg:gap-12">
-          <!-- Poster -->
-          <div class="w-64 shrink-0 mx-auto md:mx-0">
-            <div class="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative" data-adult={show.adult ? "true" : undefined}>
-              {show.poster_path ? (
-                <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${show.title}`}>
-                  <img
-                    src={show.poster_path}
-                    alt={show.title}
-                    class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
-                    loading="eager"
-                    decoding="async"
-                  />
-                  <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover/poster:opacity-100 transition-opacity duration-200 bg-black/30">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8 text-white drop-shadow-lg">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
-                    </svg>
-                  </div>
-                </button>
-              ) : (
-                <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
-                  <span class="text-4xl mb-2">📺</span>
-                  <span class="text-sm font-medium">No Poster Available</span>
-                </div>
-              )}
+        <!-- Title / Logo / Tagline Header -->
+        <div class="mb-10 text-center md:text-left">
+          {logoPath ? (
+            <div class="mb-4 flex flex-col items-center md:items-start">
+              <img
+                src={tmdbImageUrl(logoPath, "w500")}
+                alt={show.title}
+                class="max-h-20 md:max-h-28 max-w-xs md:max-w-sm object-contain drop-shadow-2xl mx-auto md:mx-0"
+                loading="eager"
+                decoding="async"
+              />
             </div>
-          </div>
+          ) : (
+            <div class="flex flex-col items-center md:flex-row gap-3 mb-3 justify-center md:justify-start">
+              <h1 class="text-4xl md:text-6xl font-black text-zinc-100 tracking-tight leading-none text-center md:text-left">{show.title}</h1>
+            </div>
+          )}
 
-          <!-- Info -->
-          <div class="flex-1 min-w-0 pt-4">
-            <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none">{show.title}</h1>
+          {show.tagline && (
+            <p class="text-lg md:text-xl italic text-zinc-400 font-light leading-relaxed text-center md:text-left mb-4">"{show.tagline}"</p>
+          )}
 
-            {show.tagline && (
-              <p class="text-xl italic text-zinc-400 mb-8 font-light leading-relaxed">"{show.tagline}"</p>
-            )}
 
-            <div class="flex flex-wrap items-center gap-3 mb-10">
-              <div class="flex flex-wrap items-center gap-4 text-zinc-300 text-sm bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm">
-                {year && <span class="font-bold">{year}</span>}
-                {rating && (
-                  <span class="flex items-center gap-1.5 text-yellow-400 font-black">
-                    <span class="text-lg leading-none">★</span> {rating}
-                  </span>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+          
+          <!-- LEFT COLUMN: Poster & Metadata Sidebar (4 cols on desktop) -->
+          <div class="lg:col-span-4 space-y-6 min-w-0">
+            <!-- Poster -->
+            <div class="w-64 lg:w-full max-w-full shrink-0 mx-auto lg:mx-0">
+              <div class="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative" data-adult={show.adult ? "true" : undefined}>
+                {show.poster_path ? (
+                  <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${show.title}`}>
+                    <img
+                      src={tmdbImageUrl(show.poster_path, "w500")}
+                      alt={show.title}
+                      class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
+                      loading="eager"
+                      decoding="async"
+                    />
+                    <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover/poster:opacity-100 transition-opacity duration-200 bg-black/30">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8 text-white drop-shadow-lg">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
+                      </svg>
+                    </div>
+                  </button>
+                ) : (
+                  <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
+                    <span class="text-4xl mb-2">📺</span>
+                    <span class="text-sm font-medium">No Poster Available</span>
+                  </div>
                 )}
-                <span class="font-medium text-zinc-400">{show.seasons_meta?.length || seasons.length} Seasons</span>
-                {show.age_rating && (
-                  <span class="px-2 py-0.5 border border-zinc-600 rounded text-[10px] font-black text-zinc-400 tracking-widest">
-                    {show.age_rating}
-                  </span>
+                <ImagePickerButton subjectUri={resolvedUriId} kind="poster" label={`${show.title} poster`} />
+                <ImagePickerButton subjectUri={resolvedUriId} kind="backdrop" label={`${show.title} backdrop`} class="!top-14" />
+                {showProgress && (
+                  <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+                    <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${overallProgress}%`}></div>
+                  </div>
                 )}
-                {show.imdb_id && (
-                  <a href={`https://www.imdb.com/title/${show.imdb_id}/`} target="_blank" rel="noopener noreferrer" class="px-2 py-0.5 bg-[#f5c518] rounded text-[10px] font-black text-black tracking-widest hover:bg-[#e6b800] transition-colors">
-                    IMDb
-                  </a>
-                )}
-                {show.status && (
-                  <span class="capitalize px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-[10px] font-black text-zinc-400 tracking-widest">
-                    {show.status}
-                  </span>
-                )}
-                {originalLanguage && (
-                  <span class="flex items-center gap-1.5 font-medium text-zinc-400">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 text-zinc-500">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802" />
-                    </svg>
-                    {originalLanguage}
-                  </span>
-                )}
-                {show.created_by?.length > 0 && (
+                {(show.created_by?.length ?? 0) > 0 && (
                   <span class="flex items-center gap-1.5 font-medium text-zinc-400">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 text-zinc-500">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75.125v-.125A1.125 1.125 0 0 1 3.375 18H21m-18 0v-1.5A1.125 1.125 0 0 1 3.375 15h17.25M3.375 15v-1.5m0 1.5h17.25M3.375 15a1.125 1.125 0 0 1-1.125-1.125v-1.5M21 13.5V18a1.125 1.125 0 0 1-1.125 1.125H21m0-7.5v1.5m0-1.5a1.125 1.125 0 0 0-1.125-1.125H4.125A1.125 1.125 0 0 0 3 13.5m18 0v-7.5A1.125 1.125 0 0 0 19.875 4.5H4.125A1.125 1.125 0 0 0 3 5.625v7.875" />
                     </svg>
-                    {show.created_by.map((c: any) => (
+                    {show.created_by?.map((c: any) => (
                       <a href={`/person/${c.tmdb_id}`} class="hover:text-zinc-100 transition-colors">{c.name}</a>
                     )).reduce((acc: any[], el: any, i: number) => i === 0 ? [el] : [...acc, ', ', el], [])}
                   </span>
                 )}
               </div>
-              {(() => { const n = show.networks?.find(n => n.logo_path); return n ? <div class="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm flex items-center"><img src={n.logo_path!} alt={n.name} title={n.name} class="h-5 max-w-[80px] object-contain" loading="lazy" /></div> : null; })()}
             </div>
 
-            {user && (
-              <div class="mb-6">
-                <ActionBar
-                  tmdbId={Number(id)}
-                  mediaType="series"
-                  watched={show.watched ?? false}
-                  inLists={show.in_lists ?? []}
-                  inLibrary={show.in_library ?? false}
-                  collectionPct={show.collection_pct ?? 0}
-                  watchPct={show.watch_pct ?? 0}
-                  watchStarted={show.watch_started ?? false}
-                  showTmdbId={Number(id)}
-                  isMonitored={show.is_monitored ?? false}
-                  requestEnabled={show.request_enabled ?? false}
-                  requestStatus={show.request_status ?? null}
-                  userRating={show.user_rating ?? null}
-                  ratingTitle={show.title}
-                  ratingPosterPath={show.poster_path}
-                  showRewatch={true}
-                  rewatch={show.rewatch ?? null}
-                  showDrop={true}
-                  showId={show.id ?? null}
-                  dropped={show.dropped ?? false}
-                />
-              </div>
-            )}
-            {user && show.tvdb_id && hasTvdbKey && (
-              <div class="mb-6">
-                <EpisodeOrderSelector
-                  tmdbId={show.tmdb_id}
-                  tvdbId={show.tvdb_id}
-                  selected="tmdb"
-                  token={token}
-                />
-              </div>
-            )}
-
-            {user && show.id && (
-              <div class="mb-8">
-                <button
-                  id="refresh-metadata-btn"
-                  class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
-                >
-                  <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                    <path d="M21 3v5h-5"/>
-                    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                    <path d="M8 16H3v5"/>
-                  </svg>
-                  <span id="refresh-label">Refresh Metadata</span>
-                </button>
-              </div>
-            )}
-
-            <div class="mb-12">
-              <h2 class="text-xl font-black text-zinc-100 mb-4 flex items-center gap-2 uppercase tracking-tight">
-                <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                Overview
-              </h2>
-              <p class="text-zinc-300 leading-relaxed text-lg max-w-4xl font-medium opacity-90">
-                {show.overview}
-              </p>
-            </div>
-
-            {show.genres?.length > 0 && (
-              <div class="flex flex-wrap gap-2 mb-12">
-                {show.genres.map(g => (
-                  <span class="px-4 py-1.5 bg-zinc-900/80 border border-zinc-800 hover:border-zinc-700 transition-colors text-zinc-400 text-xs rounded-full font-bold uppercase tracking-widest">
-                    {g}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            <!-- Where to Watch -->
-            {show.where_to_watch && show.where_to_watch.length > 0 && (
-              <div class="mb-8">
-                <h2 class="text-sm font-black text-zinc-500 mb-3 uppercase tracking-widest">Where to Watch</h2>
-                <div class="flex flex-wrap gap-2">
-                  {show.where_to_watch.map(s => (
-                    <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg">
-                      {s.logo ? (
-                        <img src={s.logo} alt={s.name} class="w-5 h-5 rounded object-cover" />
-                      ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
-                        <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-5 h-5 rounded object-cover" />
-                      ) : (
-                        <span class="text-zinc-400 text-xs">▶</span>
-                      )}
-                      <span class="text-zinc-300 text-xs font-semibold">{s.name}</span>
-                    </div>
-                  ))}
+            <!-- ActionBar & Progress -->
+            <div class="bg-zinc-900/20 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-2xl space-y-4">
+              <ActionBar
+                uriId={resolvedUriId}
+                tmdbId={resolvedTmdbId}
+                mediaType="series"
+                watched={show.watched ?? false}
+                inLists={show.in_lists ?? []}
+                inLibrary={show.in_library ?? false}
+                collectionPct={show.collection_pct ?? 0}
+                watchPct={show.watch_pct ?? 0}
+                showTmdbId={show.tmdb_id ?? undefined}
+                isMonitored={show.is_monitored ?? false}
+                requestEnabled={show.request_enabled ?? false}
+                requestStatus={show.request_status ?? null}
+                userRating={show.user_rating ?? null}
+                isBlocked={show.is_blocked ?? false}
+                isDropped={show.is_dropped ?? false}
+                episodeOrder={selectedEpisodeOrder}
+                tvdbId={show.tvdb_id ?? undefined}
+                centered={true}
+              />
+              {showProgress && (
+                <div class="pt-2 border-t border-zinc-800/60">
+                  <ProgressStrip
+                    watchedEpisodesCount={watchedEpisodesCount}
+                    totalEpisodesCount={totalEpisodesCount}
+                    remainingDuration={remainingDuration}
+                    className="mt-0"
+                  />
                 </div>
+              )}
+            </div>
+
+            <!-- Episode Order (TVDB vs TMDB numbering) -->
+            {showEpisodeOrderSelector && (
+              <EpisodeOrderSelector
+                tmdbId={episodeOrderTmdbId as number}
+                tvdbId={show.tvdb_id as number}
+                selected={isTvdbResponse ? "tvdb" : selectedEpisodeOrder}
+                token={token ?? ''}
+              />
+            )}
+
+            <!-- Header Buttons (Trailer, Refresh) -->
+            {activeButtonsCount > 0 && (
+              <div class="flex flex-col gap-2.5 w-full [&>*]:w-full [&>*]:min-w-0">
+                {show.in_library && (
+                  <VideoPlayer
+                    uriId={show.uri_id ?? (show.tmdb_id ? `tmdb:s:${show.tmdb_id}` : undefined)}
+                    tmdbId={show.tmdb_id}
+                    mediaType="series"
+                    inLibrary={show.in_library}
+                    title={show.title}
+                    token={token ?? ''}
+                    secondary={false}
+                  />
+                )}
+                <RefreshMetadataButton refreshUrl={`/api/proxy/shows/${refreshPath}/refresh`} showRefreshBtn={show.in_library} />
+                {show.id && (
+                <button
+                  id="rename-show-btn"
+                  class="w-full h-11 flex items-center justify-center gap-2 px-4 min-w-0 overflow-hidden text-sm font-bold leading-none text-zinc-400 hover:text-zinc-100 bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all duration-200 cursor-pointer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+                    <path d="M12 20h9"/>
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                  </svg>
+                  <span class="truncate">Rename Show</span>
+                </button>
+                )}
+                <TrailerButton youtubeId={trailerYoutubeId} />
               </div>
             )}
-          </div>
-        </div>
 
-        <!-- Seasons -->
-        <div class="mt-24">
-          <div class="flex items-center justify-between mb-10 border-b border-zinc-900 pb-6">
-            <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase">Seasons</h2>
+
+            {show.where_to_watch && show.where_to_watch.length > 0 && (() => {
+              const subscribed = show.where_to_watch.filter(s => s.is_subscribed);
+              const others = show.where_to_watch.filter(s => !s.is_subscribed);
+              
+              return (
+                <div class="w-full flex flex-col">
+                  <h3 class="text-xs font-bold text-zinc-400 mb-3 uppercase tracking-widest flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v2"/><path d="M2 12V4"/><path d="M22 12V4"/><path d="M2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6"/><path d="M2 12h20"/><path d="M7 15h.01"/><path d="M11 15h.01"/><path d="M15 15h.01"/><path d="M19 15h.01"/><path d="M7 18h.01"/><path d="M11 18h.01"/><path d="M15 18h.01"/><path d="M19 18h.01"/></svg>
+                    Where to Watch
+                  </h3>
+                  
+                  <div class="space-y-4 w-full">
+                    {subscribed.length > 0 && (
+                      <div class="space-y-2">
+                        <p class="text-[9px] font-bold text-blue-400 uppercase tracking-wider">Your Services</p>
+                        <div class="grid grid-cols-1 gap-2">
+                          {subscribed.map(s => {
+                            const isLocal = s.category === 'local';
+                            const content = (
+                              <>
+                                {s.logo ? (
+                                  <img src={tmdbImageUrl(s.logo, "w92")} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
+                                ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
+                                  <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-6 h-6 rounded-md object-contain shadow-lg" />
+                                ) : (
+                                  <div class="w-6 h-6 bg-zinc-800 rounded-md flex items-center justify-center text-[10px]">
+                                    ▶
+                                  </div>
+                                )}
+                                <div class="min-w-0 text-left">
+                                  <p class="text-zinc-200 text-xs font-bold truncate group-hover:text-blue-400 transition-colors">{s.name}</p>
+                                  <p class="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter truncate">{s.category === 'flatrate' ? 'Stream' : s.category === 'local' ? 'Local' : s.category}</p>
+                                </div>
+                              </>
+                            );
+
+                            if (isLocal) {
+                              return (
+                                <button 
+                                  type="button" 
+                                  class="wtw-local-link w-full text-left flex items-center gap-2.5 p-2 bg-zinc-900/60 border border-zinc-800 rounded-xl hover:border-blue-500/30 transition-colors group cursor-pointer"
+                                  data-connection-id={s.connection_id}
+                                >
+                                  {content}
+                                </button>
+                              );
+                            } else {
+                              return (
+                                <div class="w-full text-left flex items-center gap-2.5 p-2 bg-zinc-900/60 border border-zinc-800 rounded-xl transition-colors group">
+                                  {content}
+                                </div>
+                              );
+                            }
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {others.length > 0 && (
+                      <details class="w-full group/details watch-providers-details" open>
+                        <summary class="list-none flex items-center gap-1 cursor-pointer select-none text-[9px] font-bold text-zinc-500 hover:text-zinc-300 uppercase tracking-wider transition-colors outline-none mb-2">
+                          <span>{subscribed.length > 0 ? "Other Options" : "Available On"}</span>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="transition-transform duration-200 group-open/details:rotate-180 text-zinc-600"><polyline points="6 9 12 15 18 9"/></svg>
+                        </summary>
+                        <div class="flex flex-wrap gap-2">
+                          {others.map(s => {
+                            const isLocal = s.category === 'local';
+                            const content = (
+                              <>
+                                {s.logo ? (
+                                  <img src={tmdbImageUrl(s.logo, "w92")} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                                ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
+                                  <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-4 h-4 rounded-sm object-contain opacity-70 group-hover:opacity-100 transition-opacity" />
+                                ) : (
+                                  <span class="text-[10px]">▶</span>
+                                )}
+                                <span class="text-zinc-400 text-[10px] font-medium group-hover:text-zinc-200 transition-colors">{s.name}</span>
+                              </>
+                            );
+
+                            if (isLocal) {
+                              return (
+                                <button 
+                                  type="button"
+                                  class="wtw-local-link flex items-center gap-1.5 px-2 py-1 bg-zinc-900/40 border border-zinc-800/50 rounded-lg hover:border-zinc-700 transition-colors group cursor-pointer"
+                                  data-connection-id={s.connection_id}
+                                >
+                                  {content}
+                                </button>
+                              );
+                            } else {
+                              return (
+                                <div class="flex items-center gap-1.5 px-2 py-1 bg-zinc-900/40 border border-zinc-800/50 rounded-lg transition-colors group">
+                                  {content}
+                                </div>
+                              );
+                            }
+                          })}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <!-- Details Sidebar Card -->
+            <div class="bg-zinc-900/40 border border-zinc-800/50 backdrop-blur-sm rounded-2xl p-5 space-y-4">
+              <h3 class="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-800 pb-2">Information</h3>
+              
+              <div class="space-y-3.5 text-xs">
+                {year && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">First Aired</span>
+                    <span class="text-zinc-200 font-semibold">{year}</span>
+                  </div>
+                )}
+                {rating && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Rating</span>
+                    <span class="flex items-center gap-1 text-yellow-400 font-bold">★ {rating}</span>
+                  </div>
+                )}
+                <div class="flex justify-between items-center">
+                  <span class="text-zinc-500">Seasons</span>
+                  <span class="text-zinc-200 font-semibold">{show.seasons_meta?.length || seasons.length}</span>
+                </div>
+                {show.age_rating && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Content Rating</span>
+                    <span class="px-1.5 py-0.5 border border-zinc-700 rounded text-[9px] font-bold text-zinc-400">{show.age_rating}</span>
+                  </div>
+                )}
+                {originalLanguage && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Language</span>
+                    <span class="text-zinc-200 font-semibold">{originalLanguage}</span>
+                  </div>
+                )}
+                {show.status && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Status</span>
+                    <span class="capitalize px-1.5 py-0.5 bg-zinc-800 border border-zinc-800 rounded text-[9px] font-bold text-zinc-300">{show.status}</span>
+                  </div>
+                )}
+                {(show.has_mid_credits_scene || show.has_post_credits_scene) && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Credits Scene</span>
+                    <span
+                      class="credits-scene-badge px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded text-[9px] font-bold text-amber-400"
+                      title={show.has_mid_credits_scene && show.has_post_credits_scene
+                        ? "Has a mid-credits and a post-credits scene"
+                        : show.has_mid_credits_scene
+                        ? "Has a mid-credits scene"
+                        : "Has a post-credits scene"}
+                    >
+                      {show.has_mid_credits_scene && show.has_post_credits_scene
+                        ? "Mid + Post"
+                        : show.has_mid_credits_scene
+                        ? "Mid-Credits"
+                        : "Post-Credits"}
+                    </span>
+                  </div>
+                )}
+                
+                {/* External links */}
+                <div class="pt-3 border-t border-zinc-800/60 flex items-center gap-2">
+                  {show.imdb_id && (
+                    <a href={`https://www.imdb.com/title/${show.imdb_id}/`} target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-1.5 bg-[#f5c518] rounded text-[10px] font-bold text-black hover:bg-[#e6b800] transition-colors">
+                      IMDb
+                    </a>
+                  )}
+                  {tmdbShowUrl && (
+                    <a href={tmdbShowUrl} target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-1.5 bg-[#01b4e4] rounded text-[10px] font-bold text-black hover:bg-[#00a8d8] transition-colors">
+                      TMDB
+                    </a>
+                  )}
+                  {show.tvdb_id && (
+                    <a href={`https://thetvdb.com/series/${show.tvdb_id}`} target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-1.5 bg-[#005a2b] rounded text-[10px] font-bold text-white hover:bg-[#008c44] transition-colors">
+                      TVDB
+                    </a>
+                  )}
+                </div>
+
+                {/* Networks */}
+                {(() => {
+                  const n = show.networks?.find(n => n.logo_path);
+                  return n ? (
+                    <div class="pt-3 border-t border-zinc-800/60 flex flex-col gap-1.5">
+                      <span class="text-zinc-500 text-[10px]">Network</span>
+                      <div class="flex items-center gap-2">
+                        <img src={tmdbImageUrl(n.logo_path, "w154")} alt={n.name} title={n.name} class="h-4 max-w-[90px] object-contain opacity-70" />
+                        <span class="text-zinc-300 text-[11px] font-medium">{n.name}</span>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            </div>
           </div>
+
+          <!-- RIGHT COLUMN: Main Content Details (8 cols on desktop) -->
+          <div class="lg:col-span-8 space-y-8 lg:pt-0">
+            <!-- Overview -->
+            {show.overview && (
+              <div class="space-y-3">
+                <h2 class="text-sm font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
+                  Overview
+                </h2>
+                <p class="text-zinc-300 leading-relaxed text-base md:text-lg opacity-90">
+                  {show.overview}
+                </p>
+              </div>
+            )}
+
+            <!-- Genres -->
+            {show.genres?.length > 0 && (
+              <div class="flex flex-wrap gap-2">
+                {show.genres.map((g: any) => {
+                  const name = typeof g === 'object' && g !== null ? g.name : g;
+                  return (
+                    <span class="px-3 py-1 bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 text-zinc-400 text-xs rounded-full font-bold uppercase tracking-wider transition-colors">
+                      {name}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+        <!-- Seasons / Episodes -->
+        {activeSeasons.length === 1 ? (() => {
+          const s = activeSeasons[0];
+          const seasonNum = s.season_number;
+          const episodes = show.seasons?.[`season_${seasonNum}`] || [];
           
-          <div class="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-8">
-            {(show.seasons_meta || seasons.map(([k]) => ({ season_number: Number(k.replace("season_","")), name: `Season ${k.replace("season_","")}`, overview: null, poster_path: null, episode_count: 0, air_date: null }))).map((s) => {
+          return (
+            <div class="mt-24">
+              <div class="border-b border-zinc-900 pb-4 mb-4 flex items-center justify-between">
+                <h2 class="text-2xl font-black text-zinc-100 tracking-tighter uppercase flex items-center gap-3">
+                  <span class="w-1.5 h-6 bg-blue-600 rounded-full"></span>
+                  Episodes
+                </h2>
+                <VisibilityFilters />
+              </div>
+              
+              <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+                {episodes.map((ep) => {
+                  const item: MediaItem = {
+                    ...ep,
+                    type: "episode",
+                    show_title: show?.title,
+                    show_uri_id: show?.uri_id ?? id,
+                    show_poster_path: show?.poster_path || null,
+                    show_backdrop_path: show?.backdrop_path || null,
+                    season_number: seasonNum,
+                    collection_pct: ep.in_library ? 100 : 0,
+                    library: null,
+                  };
+                  return <EpisodeCard item={item} preferTvdb={pageProviderIsTvdb} />;
+                })}
+              </div>
+            </div>
+          );
+        })() : (
+          <div class="mt-24">
+            <div class="flex items-center justify-between mb-10 border-b border-zinc-900 pb-6">
+              <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase">Seasons</h2>
+              <VisibilityFilters />
+            </div>
+            
+            <div class="grid grid-cols-2 min-[480px]:grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-3 md:gap-4">
+              {activeSeasons.map((s) => {
                 const seasonNum = s.season_number;
                 const episodes = show.seasons?.[`season_${seasonNum}`] || [];
                 const poster = s.poster_path || show.poster_path;
                 const seasonState = show.season_states?.[seasonNum] ?? { watched: false, in_library: episodes.length > 0, collection_pct: 0, user_rating: null };
+                const totalEpisodes = ('total_episodes_count' in seasonState ? seasonState.total_episodes_count : null) || s.episode_count || episodes.length;
+                const watchedCount = typeof seasonState.watched_episodes_count === 'number' ? seasonState.watched_episodes_count : episodes.filter(e => e.watched).length;
+
+                const item: MediaItem = {
+                  id: null,
+                  remapped_from: (s as any).remapped_from ?? null,
+                  tmdb_id: show.tmdb_id ?? show.tmdb_id_cross ?? null,
+                  tvdb_id: show.tvdb_id ?? null,
+                  type: "season",
+                  title: seasonDisplayName(seasonNum, s.name, specialsLabel),
+                  show_title: show.title,
+                  poster_path: poster,
+                  total_episodes_count: totalEpisodes,
+                  watched_episodes_count: watchedCount,
+                  show_tmdb_id: show.tmdb_id ?? show.tmdb_id_cross ?? null,
+                  show_tvdb_id: show.tvdb_id || (provider === "tvdb" ? resolvedShowId : undefined),
+                  show_uri_id: resolvedUriId,
+                  season_number: seasonNum,
+                  watched: seasonState.watched,
+                  in_library: seasonState.in_library,
+                  collection_pct: seasonState.collection_pct,
+                  watch_pct: seasonState.watch_pct ?? 0,
+                  in_lists: [],
+                  library: null,
+                };
 
                 return (
-                  <div class="group/season bg-zinc-900/50 border border-zinc-800 rounded-3xl p-5 hover:bg-zinc-800/60 hover:border-blue-500/50 transition-all duration-300 hover:shadow-2xl hover:shadow-blue-900/10">
-                    <a href={`/show/${show.tmdb_id}/season/${seasonNum}`} class="flex gap-6 block mb-4 active:opacity-70 transition-opacity duration-100">
-                        <div class="w-28 shrink-0">
-                            <div class="aspect-[2/3] rounded-2xl overflow-hidden border border-zinc-800 shadow-lg group-hover/season:ring-2 group-hover/season:ring-blue-500/50 transition-all duration-500">
-                                {poster ? (
-                                    <img src={poster} alt={s.name} class="w-full h-full object-cover group-hover/season:scale-110 transition-transform duration-700" />
-                                ) : (
-                                    <div class="w-full h-full bg-zinc-900 flex flex-col items-center justify-center text-zinc-500 gap-1">
-                                        <span class="text-3xl">📺</span>
-                                        <span class="text-[10px] font-bold uppercase tracking-widest">No Poster</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div class="flex-1 py-2">
-                            <div class="flex items-start justify-between gap-4 mb-1">
-                                <h3 class="text-xl font-black text-zinc-100 group-hover/season:text-blue-400 transition-colors">{s.name || `Season ${seasonNum}`}</h3>
-                                {s.tmdb_rating != null && s.tmdb_rating > 0 && (
-                                    <div class="bg-zinc-950 border border-zinc-800 px-2 py-1 rounded-xl flex items-center gap-1.5 shrink-0 shadow-sm">
-                                        <span class="text-yellow-400 text-xs">★</span>
-                                        <span class="text-zinc-100 text-xs font-bold">{s.tmdb_rating.toFixed(1)}</span>
-                                    </div>
-                                )}
-                            </div>
-                            <div class="flex items-center gap-2 mb-3">
-                                <span class="text-[10px] font-black text-zinc-500 uppercase tracking-widest bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">
-                                    {s.episode_count || episodes.length} Episodes
-                                </span>
-                            </div>
-                            <p class="text-xs text-zinc-400 line-clamp-3 leading-relaxed opacity-80">{s.overview || "No overview available."}</p>
-                        </div>
-                    </a>
-                    {user && (
-                      <ActionBar
-                        tmdbId={Number(id)}
-                        mediaType="series"
-                        watched={seasonState.watched}
-                        inLists={seasonState.in_lists ?? []}
-                        inLibrary={seasonState.in_library}
-                        collectionPct={seasonState.collection_pct}
-                        watchPct={seasonState.watch_pct ?? 0}
-                        watchStarted={seasonState.watch_started ?? false}
-                        seasonNumber={seasonNum}
-                        hideRequest={true}
-                        hideLists={false}
-                        userRating={seasonState.user_rating ?? null}
-                        ratingTitle={show.title}
-                        ratingSubtitle={s.name || `Season ${seasonNum}`}
-                        ratingPosterPath={poster}
-                      />
-                    )}
-                  </div>
-                )
-            })}
+                  <MediaCard item={item} preferTvdb={pageProviderIsTvdb} />
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         <!-- Cast -->
         {show.cast?.length > 0 && (
@@ -336,27 +659,27 @@ const originalLanguage = show?.original_language
             <div class="flex items-center justify-between mb-10">
               <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase">Top Cast</h2>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-              {show.cast.slice(0, 12).map((person) => (
-                <a href={`/person/${person.tmdb_id}`} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-4 rounded-3xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70">
-                  <div class="aspect-square w-full rounded-2xl overflow-hidden mb-5 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
+            <div class="grid grid-cols-3 min-[480px]:grid-cols-4 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-4 gap-3">
+              {(show.cast ?? []).slice(0, 12).map((person: any) => (
+                <a href={personUrl(person.tmdb_id, person.tvdb_id || person.person_id, primaryMetadataSource === "tvdb")} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-2 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70 flex flex-col h-full">
+                  <div class="aspect-square w-full rounded-xl overflow-hidden mb-2 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
                     {person.profile_path ? (
                       <img
-                        src={person.profile_path}
+                        src={tmdbImageUrl(person.profile_path, "w185")}
                         alt={person.name}
                         class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
                         loading="lazy"
                         decoding="async"
                       />
                     ) : (
-                      <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-4xl">
+                      <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-2xl">
                         👤
                       </div>
                     )}
                   </div>
-                  <div class="space-y-1.5 text-center">
-                    <p class="text-sm font-black text-zinc-100 group-hover/cast:text-blue-400 transition-colors line-clamp-1 leading-tight">{person.name}</p>
-                    <p class="text-[11px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-1 opacity-80">{person.character}</p>
+                  <div class="flex-1 flex flex-col items-center justify-center text-center px-0.5 py-1">
+                    <p class="text-xs font-black text-zinc-100 group-hover/cast:text-blue-400 transition-colors line-clamp-2 leading-tight">{person.name}</p>
+                    <p class="text-[10px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-2 opacity-80 mt-0.5">{person.character}</p>
                   </div>
                 </a>
               ))}
@@ -366,49 +689,18 @@ const originalLanguage = show?.original_language
 
         <CommentsSection
           mediaType="series"
-          tmdbId={show.tmdb_id}
+          uriId={resolvedUriId}
         />
 
-        <div id="recommendations-container" data-type="series" data-id={show.tmdb_id}></div>
+        <div id="recommendations-container" data-type="series" data-id={resolvedUriId}></div>
       </div>
+      </div>
+      </div>
+      <PosterModal posterPath={show.poster_path} title={show.title} />
+      <ImagePicker />
     </div>
   )}
 </Base>
-
-{show?.poster_path && (
-  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
-    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
-    <img
-      src={show.poster_path}
-      alt={show.title}
-      class="relative max-h-[90vh] max-w-[85vw] md:max-w-[50vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
-    />
-    <button
-      id="poster-modal-close"
-      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
-      aria-label="Close"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-      </svg>
-    </button>
-  </div>
-)}
-
-<script>
-  const zoomBtn = document.getElementById('poster-zoom-btn');
-  const modal = document.getElementById('poster-modal');
-  const backdrop = document.getElementById('poster-modal-backdrop');
-  const closeBtn = document.getElementById('poster-modal-close');
-  if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-    function closeModal() { modal.classList.add('hidden'); document.body.style.overflow = ''; }
-    zoomBtn.addEventListener('click', openModal);
-    backdrop?.addEventListener('click', closeModal);
-    closeBtn?.addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
-  }
-</script>
 
 <script>
   // Async load recommendations
@@ -429,38 +721,55 @@ const originalLanguage = show?.original_language
   }
 </script>
 
-<script define:vars={{ showId: id, token: Astro.locals.token }}>
-  const btn = document.getElementById('refresh-metadata-btn');
-  if (btn) {
-    btn.addEventListener('click', async () => {
-      const icon = document.getElementById('refresh-icon');
-      const label = document.getElementById('refresh-label');
-      if (!label || !icon) return;
 
-      btn.setAttribute('disabled', 'true');
-      btn.classList.add('opacity-60', 'cursor-not-allowed');
-      icon.classList.add('animate-spin');
-      label.textContent = 'Refreshing...';
+
+<script define:vars={{ showId: fetchKey, token: Astro.locals.token, currentTitle: show?.custom_title || show?.title }}>
+  const renameShowBtn = document.getElementById('rename-show-btn');
+  if (renameShowBtn) {
+    renameShowBtn.addEventListener('click', async () => {
+      const newName = prompt('Enter a custom title for this show (leave empty to reset to default TMDB title):', currentTitle);
+      if (newName === null) return; // Cancelled
 
       try {
-        const res = await fetch(`/api/proxy/shows/${showId}/refresh`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
+        const res = await fetch('/api/proxy/sync/custom-title', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            show_uri_id: showId,
+            custom_title: newName.trim() === '' ? null : newName.trim()
+          })
         });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.detail || 'Refresh failed');
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          window.showToast?.('Failed to rename show', 'error');
         }
-        label.textContent = 'Done!';
-        icon.classList.remove('animate-spin');
-        setTimeout(() => { window.location.reload(); }, 800);
       } catch (err) {
-        icon.classList.remove('animate-spin');
-        label.textContent = 'Refresh failed';
-        btn.removeAttribute('disabled');
-        btn.classList.remove('opacity-60', 'cursor-not-allowed');
-        setTimeout(() => { label.textContent = 'Refresh Metadata'; }, 3000);
+        window.showToast?.('Error renaming show', 'error');
       }
     });
   }
+</script>
+
+<script>
+  if (window.innerWidth < 768) {
+    document.querySelectorAll('.watch-providers-details').forEach(el => {
+      el.removeAttribute('open');
+    });
+  }
+</script>
+
+<script define:vars={{ showTmdbId: show?.tmdb_id ?? null }}>
+  document.querySelectorAll('.wtw-local-link').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const connectionId = btn.getAttribute('data-connection-id');
+      document.dispatchEvent(new CustomEvent(`start-playback-${showTmdbId}`, {
+        detail: { connectionId: connectionId ? parseInt(connectionId) : undefined }
+      }));
+    });
+  });
 </script>

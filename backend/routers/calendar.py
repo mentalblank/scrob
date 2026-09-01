@@ -18,13 +18,12 @@ exists and warms it in the background otherwise.
 
 import asyncio
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from core.config import settings
+from core.user_timezone import user_today
 from db import get_db
 from dependencies import get_current_user_or_api_key
 from models.base import MediaType
@@ -45,16 +44,11 @@ FETCH_CONCURRENCY = 8
 _computing: set[int] = set()
 
 
-def _server_today() -> date:
-    """Server-configured TZ (same reference used everywhere else that syncs/
-    dates against a single instance-wide clock) - not a per-browser value. A
-    naive UTC boundary would put "today" off by a day near midnight in the
-    server's real timezone."""
-    try:
-        tz = ZoneInfo(settings.tz)
-    except (ZoneInfoNotFoundError, KeyError):
-        tz = ZoneInfo("UTC")
-    return datetime.now(tz).date()
+async def _today_for(db: AsyncSession, user_id: int) -> date:
+    """This user's calendar date: their own timezone setting, else the server's
+    configured TZ. A naive UTC boundary would put "today" off by a day near
+    midnight for anyone not actually living in UTC."""
+    return await user_today(db, user_id)
 
 
 async def _candidate_shows(db: AsyncSession, user_id: int) -> list[Show]:
@@ -111,7 +105,7 @@ async def compute_calendar(db: AsyncSession, user_id: int) -> dict:
     # Handed back in the payload too, so the frontend's Today/Yesterday/
     # Tomorrow labels use this same reference instead of the viewer's own
     # browser clock.
-    today = _server_today()
+    today = await _today_for(db, user_id)
 
     candidates = await _candidate_shows(db, user_id)
 
@@ -219,7 +213,7 @@ async def compute_calendar(db: AsyncSession, user_id: int) -> dict:
     }
 
 
-def _is_cache_fresh(row: UserCalendarCache | None) -> bool:
+def _is_cache_fresh(row: UserCalendarCache | None, today: date) -> bool:
     if not row or (datetime.utcnow() - row.computed_at) >= CALENDAR_TTL:
         return False
     payload = row.payload or {}
@@ -231,7 +225,7 @@ def _is_cache_fresh(row: UserCalendarCache | None) -> bool:
     # payload computed at 17:20 yesterday would otherwise still read as
     # fresh this morning with every Today/Yesterday/Tomorrow label (and the
     # airing-today widget's "today" filter) pointing at yesterday.
-    return payload.get("today") == _server_today().isoformat()
+    return payload.get("today") == today.isoformat()
 
 
 def _is_cache_usable(
@@ -255,7 +249,7 @@ async def _load_or_compute(db: AsyncSession, user_id: int, force: bool) -> dict:
     row = (
         await db.execute(select(UserCalendarCache).where(UserCalendarCache.user_id == user_id))
     ).scalars().first()
-    if not force and _is_cache_fresh(row):
+    if not force and _is_cache_fresh(row, await _today_for(db, user_id)):
         return {"computed_at": row.computed_at.isoformat(), "cached": True, "calendar": row.payload}
     payload = await compute_calendar(db, user_id)
     if row:
@@ -295,7 +289,7 @@ async def get_calendar(
         row = (
             await db.execute(select(UserCalendarCache).where(UserCalendarCache.user_id == current_user.id))
         ).scalars().first()
-        if _is_cache_fresh(row):
+        if _is_cache_fresh(row, await _today_for(db, current_user.id)):
             return {"computed_at": row.computed_at.isoformat(), "cached": True, "calendar": row.payload}
         asyncio.create_task(_background_compute(current_user.id))
         return {"computed_at": None, "cached": False, "calendar": {"entries": []}}

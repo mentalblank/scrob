@@ -36,8 +36,18 @@ class ParseImageUrlTests(unittest.TestCase):
     def test_unknown_host_is_ignored(self):
         self.assertEqual(image_cache.parse_image_url("https://evil.example/x.jpg"), (None, None))
 
-    def test_back_compat_alias(self):
-        self.assertIs(image_cache.parse_tmdb_url, image_cache.parse_image_url)
+    def test_parse_tmdb_url_is_tmdb_only(self):
+        # parse_tmdb_url handles TMDB; parse_image_url dispatches between it and
+        # parse_tvdb_url. They are deliberately not the same function.
+        self.assertIsNot(image_cache.parse_tmdb_url, image_cache.parse_image_url)
+        self.assertEqual(image_cache.parse_tmdb_url("/a.jpg"), ("w500", "/a.jpg"))
+        self.assertEqual(
+            image_cache.parse_tmdb_url("https://artworks.thetvdb.com/banners/x.jpg"), (None, None)
+        )
+        self.assertEqual(
+            image_cache.parse_image_url("https://artworks.thetvdb.com/banners/x.jpg"),
+            ("tvdb", "/banners/x.jpg"),
+        )
 
     def test_upstream_url_by_bucket(self):
         self.assertEqual(

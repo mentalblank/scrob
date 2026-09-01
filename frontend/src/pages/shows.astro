@@ -1,38 +1,37 @@
 ---
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
+import VisibilityFilters from "../components/VisibilityFilters.astro";
 import Pagination from "../components/Pagination.astro";
+import InfiniteScroll from "../components/InfiniteScroll.astro";
 import FilterPanel from "../components/FilterPanel.astro";
 import SortButton from "../components/SortButton.astro";
 import { api, type MediaItem } from "../lib/api";
 export const prerender = false;
 
+
+
 const category = Astro.url.searchParams.get("category") ?? "popular";
 const genre = Astro.url.searchParams.getAll("genre");
 const year = Astro.url.searchParams.getAll("year").map(Number);
 const minRating = Astro.url.searchParams.get("min_rating") ? Number(Astro.url.searchParams.get("min_rating")) : undefined;
-const status = Astro.url.searchParams.get("status") ?? "";
 const collection = Astro.url.searchParams.getAll("collection");
 const watch = Astro.url.searchParams.getAll("watch");
 const arr = Astro.url.searchParams.getAll("arr");
 const langs = Astro.url.searchParams.getAll("lang");
 const inList = Astro.url.searchParams.getAll("in_list");
+const status = Astro.url.searchParams.get("status") ?? "";
+const providerId = Astro.url.searchParams.get("provider_id") ? Number(Astro.url.searchParams.get("provider_id")) : undefined;
+const providerName = Astro.url.searchParams.get("provider_name") ?? "";
 const page = Number(Astro.url.searchParams.get("page") ?? 1);
 const { token, user } = Astro.locals;
 Astro.response.headers.set("Cache-Control", "no-store");
 
-let hasTmdbKey = false;
-let hasSonarr = false;
-if (token) {
-  const settings = await api.auth.getSettings(token);
-  hasTmdbKey = !!settings?.has_effective_tmdb_key;
-  hasSonarr = !!settings?.has_effective_sonarr;
-} else {
-  // Anonymous visitor - only reachable at all when the admin enabled
-  // logged-out navigation, which already implies a global TMDB key.
-  const status = await api.profile.publicAccessStatus().catch(() => ({ enable_logged_out_navigation: false }));
-  hasTmdbKey = status.enable_logged_out_navigation;
-}
+const settings = await api.auth.getSettings(token!);
+const profile = await api.profile.get(token!);
+const hasTmdbKey = !!settings?.has_effective_tmdb_key;
+const hasSonarr = !!settings?.has_effective_sonarr;
+const paginationType = profile?.pagination_type ?? "infinite_scroll";
 
 let data: { results: MediaItem[]; total_pages: number; page: number } = { results: [], total_pages: 0, page: 1 };
 if (hasTmdbKey) {
@@ -44,12 +43,13 @@ if (hasTmdbKey) {
       ...(genre.length ? { genre } : {}),
       ...(year.length ? { year } : {}),
       ...(minRating ? { min_rating: minRating } : {}),
-      ...(status ? { status } : {}),
       ...(collection.length ? { collection } : {}),
       ...(watch.length ? { watch } : {}),
       ...(hasSonarr && arr.length ? { arr } : {}),
       ...(langs.length ? { original_language: langs.join("|") } : {}),
       ...(inList.length ? { in_list: inList } : {}),
+      ...(status ? { status } : {}),
+      ...(providerId ? { provider_id: providerId } : {}),
     }, token);
   } catch (e) {
     console.error("Failed to fetch TMDB show list:", e);
@@ -85,26 +85,24 @@ genre.forEach((v) => baseParams.append("genre", v));
 year.forEach((v) => baseParams.append("year", String(v)));
 if (minRating) baseParams.set("min_rating", String(minRating));
 if (status) baseParams.set("status", status);
-collection.forEach((v) => baseParams.append("collection", v));
-watch.forEach((v) => baseParams.append("watch", v));
-if (hasSonarr) arr.forEach((v) => baseParams.append("arr", v));
-langs.forEach((l) => baseParams.append("lang", l));
-inList.forEach((v) => baseParams.append("in_list", v));
+if (providerId) baseParams.set("provider_id", String(providerId));
+if (providerName) baseParams.set("provider_name", providerName);
 const baseUrl = `/shows?${baseParams.toString()}`;
 ---
 
 <Base title="Explore Shows">
-  {user && (
-    <div class="flex items-center gap-1 mb-6 bg-zinc-900 border border-zinc-800 rounded-xl p-1 w-fit">
-      <a href="/shows" class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 text-white transition-colors active:scale-95 active:opacity-70">Explore</a>
-      <a href="/collection/shows" class="px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors active:scale-95 active:opacity-70">My Collection</a>
-    </div>
-  )}
+  <div class="flex items-center gap-1 mb-6 bg-zinc-900/40 border border-zinc-800/50 rounded-xl p-1 w-fit backdrop-blur-md">
+    <a href="/shows" class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 text-white transition-colors active:scale-95 active:opacity-70">Explore</a>
+    <a href="/collection/shows" class="px-4 py-1.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-zinc-100 transition-colors active:scale-95 active:opacity-70">My Collection</a>
+  </div>
   <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
-    <h1 class="page-title">Explore Shows</h1>
+    <h1 class="page-title">
+      {providerName ? `Shows on ${providerName}` : 'Explore Shows'}
+    </h1>
 
     {hasTmdbKey && (
       <div class="flex items-center gap-3">
+        <VisibilityFilters />
         <SortButton
           id="explore-show-category"
           current={category}
@@ -153,15 +151,24 @@ const baseUrl = `/shows?${baseParams.toString()}`;
     </div>
   ) : (
     <>
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+      <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
         {data.results.map(item => <MediaCard item={item} />)}
       </div>
 
-      <Pagination
-        currentPage={data.page}
-        totalPages={data.total_pages}
-        baseUrl={baseUrl}
-      />
+      {paginationType === "pagination" ? (
+        <Pagination
+          currentPage={data.page}
+          totalPages={data.total_pages}
+          baseUrl={baseUrl}
+        />
+      ) : (
+        <InfiniteScroll
+          type="shows"
+          currentPage={data.page}
+          totalPages={data.total_pages}
+          params={{ category, genre, year, min_rating: minRating, status, provider_id: providerId, provider_name: providerName }}
+        />
+      )}
     </>
   )}
 </Base>

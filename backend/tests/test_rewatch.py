@@ -248,7 +248,9 @@ class ClearHistoryAndUnwatchShowRewatchCleanupTests(unittest.IsolatedAsyncioTest
             [(11,), (12,)],  # episode id rows
         ])
         with patch("routers.history._push_watch_state", new_callable=AsyncMock):
-            response = await history.unwatch_show(series_tmdb_id=100, db=db, current_user=SimpleNamespace(id=1))
+            response = await history.unwatch_show(
+                series_tmdb_id=100, show_uri_id=None, db=db, current_user=SimpleNamespace(id=1),
+            )
         self.assertEqual(response["status"], "ok")
         self.assertEqual(db._deleted_tables(), ["show_rewatches", "watch_events"])
 
@@ -259,6 +261,9 @@ class _RowsResult:
 
     def all(self):
         return self._rows
+
+    def scalars(self):
+        return self
 
 
 class _ScalarResult:
@@ -282,67 +287,34 @@ class _EventsFakeSession:
 
 
 class GetItemEventsTests(unittest.IsolatedAsyncioTestCase):
-    """Regression tests for: deleting a rewatch-cycle play left an episode
-    that also had an older, pre-rewatch play looking "watched" in the modal
-    and on the ActionBar, because watched status was being read off raw
-    event history (len(events) > 0) instead of the active rewatch's own
-    progress."""
+    """This endpoint returns the play list the watch-history modal renders.
 
-    async def test_watched_false_when_no_events(self):
+    It used to also return a rewatch-aware "watched" flag; watched status is
+    computed by enrich_with_state now and the modal only reads events, so what
+    is left to protect here is the payload shape and its ordering."""
+
+    async def test_no_events_returns_an_empty_list(self):
         db = _EventsFakeSession([_RowsResult([])])
         result = await history.get_item_events(
-            tmdb_id=1, media_type=MediaType.movie, series_tmdb_id=None,
+            tmdb_id=None, id=200, uri_id=None, show_uri_id=None,
+            season_number=None, episode_number=None, media_type=MediaType.movie,
             db=db, current_user=SimpleNamespace(id=1),
         )
-        self.assertEqual(result, {"watched": False, "events": []})
+        self.assertEqual(result, {"events": []})
 
-    async def test_watched_true_from_raw_history_when_no_active_rewatch(self):
-        event = WatchEvent(id=9, watched_at=None)
-        db = _EventsFakeSession([
-            _RowsResult([(event, 200)]),  # the join query: (WatchEvent, media_id)
-            _ScalarResult(Show(id=55, tmdb_id=100, title="Test Show")),  # show lookup
-            _ScalarResult(None),  # get_active_rewatch -> none
-        ])
+    async def test_events_are_returned_newest_first(self):
+        older = WatchEvent(id=9, watched_at=None, progress_seconds=None,
+                           progress_percent=None, completed=True, play_count=1)
+        newer = WatchEvent(id=10, watched_at=None, progress_seconds=None,
+                           progress_percent=None, completed=True, play_count=1)
+        db = _EventsFakeSession([_RowsResult([newer, older])])
         result = await history.get_item_events(
-            tmdb_id=5000, media_type=MediaType.episode, series_tmdb_id=100,
+            tmdb_id=None, id=200, uri_id=None, show_uri_id=None,
+            season_number=None, episode_number=None, media_type=MediaType.episode,
             db=db, current_user=SimpleNamespace(id=1),
         )
-        self.assertTrue(result["watched"])
-        self.assertEqual([e["id"] for e in result["events"]], [9])
-
-    async def test_watched_false_when_old_play_survives_but_rewatch_progress_was_removed(self):
-        """The exact reported bug: an episode has one old (pre-rewatch) play
-        left after the user deleted the rewatch-cycle one - it must read as
-        unwatched while the rewatch is active, even though history isn't empty."""
-        event = WatchEvent(id=9, watched_at=None)
-        rewatch = ShowRewatch(id=7, user_id=1, show_id=55)
-        db = _EventsFakeSession([
-            _RowsResult([(event, 200)]),
-            _ScalarResult(Show(id=55, tmdb_id=100, title="Test Show")),
-            _ScalarResult(rewatch),
-            _ScalarResult(None),  # no RewatchProgress row for this episode
-        ])
-        result = await history.get_item_events(
-            tmdb_id=5000, media_type=MediaType.episode, series_tmdb_id=100,
-            db=db, current_user=SimpleNamespace(id=1),
-        )
-        self.assertFalse(result["watched"])
-        self.assertEqual(len(result["events"]), 1)
-
-    async def test_watched_true_when_rewatch_progress_exists(self):
-        event = WatchEvent(id=9, watched_at=None)
-        rewatch = ShowRewatch(id=7, user_id=1, show_id=55)
-        db = _EventsFakeSession([
-            _RowsResult([(event, 200)]),
-            _ScalarResult(Show(id=55, tmdb_id=100, title="Test Show")),
-            _ScalarResult(rewatch),
-            _ScalarResult(42),  # RewatchProgress.id found
-        ])
-        result = await history.get_item_events(
-            tmdb_id=5000, media_type=MediaType.episode, series_tmdb_id=100,
-            db=db, current_user=SimpleNamespace(id=1),
-        )
-        self.assertTrue(result["watched"])
+        self.assertEqual([e["id"] for e in result["events"]], [10, 9])
+        self.assertTrue(all("watched_at" in e and "completed" in e for e in result["events"]))
 
 
 class _UnwatchFakeSession:

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import re
 from datetime import datetime, timezone, timedelta
@@ -22,11 +23,28 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p"
 TVDB_IMAGE_BASE = "https://artworks.thetvdb.com"
 
 # Valid TMDB image sizes to prevent traversal / arbitrary requests
-ALLOWED_SIZES = {"w92", "w154", "w185", "w342", "w500", "w780", "w1280", "original"}
+ALLOWED_SIZES = {"w45", "w92", "w154", "w185", "w300", "w342", "w500", "w780", "w1280", "h632", "original",}
 
 # Synthetic "size" bucket for TheTVDB artwork, which has no size variants - the
 # path alone identifies the image. Stored under image_cache/tvdb/<path>.
 TVDB_SIZE = "tvdb"
+
+# Synthetic bucket for user-supplied external artwork. There is no upstream to
+# re-fetch from once the override is stored, so these files are the only copy
+# and are exempt from both the size prune and the expiry sweep.
+EXTERNAL_SIZE = "ext"
+EXTERNAL_IMAGE_TYPE = "external"
+
+# Images larger than this are refused rather than cached.
+_MAX_EXTERNAL_BYTES = 10 * 1024 * 1024
+
+_EXTERNAL_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/avif": ".avif",
+    "image/gif": ".gif",
+}
 
 
 def upstream_image_url(size: str, path: str) -> str:
@@ -43,10 +61,8 @@ _PRUNE_INTERVAL = timedelta(minutes=5)
 _MAX_IN_PARAMS = 30_000
 
 
-def parse_image_url(url: str) -> tuple[Optional[str], Optional[str]]:
-    """Parse a TMDB or TheTVDB image URL (or bare TMDB path) into a
-    (size, path) tuple the cache is keyed by. TheTVDB artwork uses the
-    synthetic ``tvdb`` size bucket. Returns (None, None) for anything else."""
+def parse_tmdb_url(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Parse a TMDB URL or bare path into a (size, path) cache key."""
     if not url:
         return None, None
 
@@ -55,24 +71,41 @@ def parse_image_url(url: str) -> tuple[Optional[str], Optional[str]]:
         if match:
             return match.group(1), match.group(2)
 
-    if "artworks.thetvdb.com" in url:
-        match = re.search(r"artworks\.thetvdb\.com(/.+)$", url)
-        if match:
-            return TVDB_SIZE, match.group(1)
-
     if url.startswith("/"):
         return "w500", url
 
     return None, None
 
 
-# Back-compat alias (was the only public name before TheTVDB support).
-parse_tmdb_url = parse_image_url
+def parse_tvdb_url(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Parse a TVDB artwork URL into (TVDB_SIZE, path) tuple."""
+    if not url:
+        return None, None
+
+    match = re.search(r"artworks\.thetvdb\.com(/[^?#]+)", url)
+    if match:
+        return TVDB_SIZE, match.group(1)
+
+    return None, None
+
+
+def parse_image_url(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Parse a TMDB or TVDB image URL/path into a (size, path) cache key."""
+    if url and "artworks.thetvdb.com" in url:
+        return parse_tvdb_url(url)
+    return parse_tmdb_url(url)
+
+
+def source_image_url(size: str, path: str) -> str:
+    """Reconstruct the upstream image URL for a (size, path) cache key."""
+    if size == TVDB_SIZE:
+        return f"{TVDB_IMAGE_BASE}{path}"
+    return f"https://image.tmdb.org/t/p/{size}{path}"
 
 
 async def download_and_cache_image(db, size: str, path: str, image_type: str = "ondemand") -> Optional[str]:
-    """Download an image from TMDB or TheTVDB and cache it locally."""
-    if size != TVDB_SIZE and size not in ALLOWED_SIZES:
+    """Download image from TMDB or TVDB and cache it locally."""
+    if size not in ALLOWED_SIZES and size != TVDB_SIZE:
         return None
     if ".." in path or not path.startswith("/"):
         return None
@@ -93,8 +126,8 @@ async def download_and_cache_image(db, size: str, path: str, image_type: str = "
             await db.delete(cached)
             await db.commit()
 
-    # Fetch from the origin (TMDB or TheTVDB)
-    url = upstream_image_url(size, path)
+    # Fetch from the upstream image host (TMDB or TVDB)
+    url = source_image_url(size, path)
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             r = await client.get(url)
@@ -130,6 +163,66 @@ async def download_and_cache_image(db, size: str, path: str, image_type: str = "
     return None
 
 
+def local_image_path(size: str, path: str):
+    """On-disk location of a cached image, by (size, path) cache key."""
+    return settings.data_dir / "image_cache" / size / path.lstrip("/")
+
+
+async def store_external_image(db, url: str) -> tuple[str, int]:
+    """Download a user-supplied image URL into the external cache bucket.
+
+    Returns the (path, file_size) cache key. The URL is content-addressed, so
+    the same artwork used by several overrides is stored once. Raises
+    HTTPException on anything that isn't a reasonably sized image.
+    """
+    from fastapi import HTTPException
+    from core.url_validator import validate_service_url
+
+    url = await validate_service_url(url, "Image URL")
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+            body = response.content
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not fetch image URL: {exc}")
+
+    extension = _EXTERNAL_EXTENSIONS.get(content_type)
+    if not extension:
+        raise HTTPException(status_code=400, detail=f"URL is not a supported image ({content_type or 'unknown type'})")
+    if len(body) > _MAX_EXTERNAL_BYTES:
+        raise HTTPException(status_code=400, detail="Image is larger than 10 MB")
+
+    path = f"/{hashlib.sha256(body).hexdigest()}{extension}"
+    local_path = local_image_path(EXTERNAL_SIZE, path)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.write_bytes(body)
+
+    existing = (await db.execute(
+        select(ImageCache).where(ImageCache.path == path, ImageCache.size == EXTERNAL_SIZE)
+    )).scalar_one_or_none()
+    if existing:
+        existing.last_accessed = datetime.now(timezone.utc)
+    else:
+        db.add(ImageCache(
+            path=path,
+            size=EXTERNAL_SIZE,
+            image_type=EXTERNAL_IMAGE_TYPE,
+            file_size=len(body),
+        ))
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Another request cached the same bytes first; its row is equivalent.
+            await db.rollback()
+        return path, len(body)
+
+    await db.commit()
+    return path, len(body)
+
+
 async def _prune_type(db, image_type: str, total_size: int, limit_bytes: int) -> int:
     """Delete oldest images of the given type until total_size is within limit. Returns updated total_size."""
     rows = (await db.execute(
@@ -158,7 +251,40 @@ async def _prune_type(db, image_type: str, total_size: int, limit_bytes: int) ->
     return total_size
 
 
-async def prune_cache(db, limit_gb: float):
+async def expire_stale_images(db, expiry_days: int | None) -> int:
+    """Delete cached images older than expiry_days. Returns the number removed."""
+    if not expiry_days or expiry_days <= 0:
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=expiry_days)
+    rows = (await db.execute(
+        select(ImageCache.id, ImageCache.size, ImageCache.path)
+        .where(ImageCache.created_at < cutoff)
+        .where(ImageCache.image_type != EXTERNAL_IMAGE_TYPE)
+    )).all()
+    if not rows:
+        return 0
+
+    ids_to_delete = []
+    for row in rows:
+        local_path = settings.data_dir / "image_cache" / row.size / row.path.lstrip("/")
+        try:
+            if local_path.exists():
+                local_path.unlink()
+        except Exception as e:
+            logger.error(f"Failed to delete expired cached image {local_path}: {e}")
+        ids_to_delete.append(row.id)
+
+    for i in range(0, len(ids_to_delete), _MAX_IN_PARAMS):
+        chunk = ids_to_delete[i : i + _MAX_IN_PARAMS]
+        await db.execute(sa_delete(ImageCache).where(ImageCache.id.in_(chunk)))
+    await db.commit()
+
+    logger.info(f"Expired {len(ids_to_delete)} cached images older than {expiry_days} day(s).")
+    return len(ids_to_delete)
+
+
+async def prune_cache(db, limit_gb: int):
     """Evict images from cache when exceeding the limit. Prunes on-demand first, then collected."""
     if not limit_gb or limit_gb <= 0:
         return
@@ -178,16 +304,17 @@ async def prune_cache(db, limit_gb: float):
     await db.commit()
 
 
-async def prune_cache_bg(limit_gb: float):
-    """Throttled background prune: runs at most once every 5 minutes."""
+async def prune_cache_bg(limit_gb: int, expiry_days: int | None = None):
+    """Throttled background maintenance: expiry sweep then size prune, at most every 5 minutes."""
     global _last_prune_at
-    if not limit_gb or limit_gb <= 0:
+    if (not limit_gb or limit_gb <= 0) and (not expiry_days or expiry_days <= 0):
         return
     now = datetime.now(timezone.utc)
     if now - _last_prune_at < _PRUNE_INTERVAL:
         return
     _last_prune_at = now
     async with AsyncSessionLocal() as db:
+        await expire_stale_images(db, expiry_days)
         await prune_cache(db, limit_gb)
 
 
@@ -221,7 +348,11 @@ async def pre_cache_all_collected(db):
             for season in tmdb_data["seasons"]:
                 sp = season.get("poster_path")
                 if sp:
-                    urls_to_cache.add(f"https://image.tmdb.org/t/p/w500{sp}")
+                    # TVDB-sourced shows store full artwork URLs; TMDB stores bare paths
+                    if sp.startswith("http"):
+                        urls_to_cache.add(sp)
+                    else:
+                        urls_to_cache.add(f"https://image.tmdb.org/t/p/w500{sp}")
 
     parsed_images = [
         (size, path)
@@ -251,11 +382,16 @@ async def pre_cache_all_collected_bg():
     """Run pre-caching in the background with a dedicated session."""
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
-            select(GlobalSettings.image_cache_enabled, GlobalSettings.image_cache_limit_gb)
+            select(
+                GlobalSettings.image_cache_enabled,
+                GlobalSettings.image_cache_limit_gb,
+                GlobalSettings.image_cache_expiry_days,
+            )
             .where(GlobalSettings.id == 1)
         )).one_or_none()
         if not row or not row.image_cache_enabled:
             return
+        await expire_stale_images(db, row.image_cache_expiry_days)
         await pre_cache_all_collected(db)
         if row.image_cache_limit_gb:
             await prune_cache(db, row.image_cache_limit_gb)

@@ -235,6 +235,40 @@ async def get_ratings(client_id: str, access_token: str) -> dict:
     return {"movies": movies, "shows": shows, "seasons": seasons, "episodes": episodes}
 
 
+async def get_last_activities(client_id: str, access_token: str) -> dict:
+    """Fetch user's last activities (timestamps for watched, rated, etc.)."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.get(
+            f"{TRAKT_BASE}/sync/last_activities",
+            headers=_headers(client_id, access_token),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def get_history(
+    client_id: str, access_token: str, start_at: Optional[datetime] = None
+) -> list[dict]:
+    """Fetch user's playback history.
+    
+    If start_at is provided, only items watched after that date are returned.
+    Returns list of: {id, watched_at, action, type, movie: {...}, show: {...}, season: {...}, episode: {...}}
+    """
+    params = {"limit": 100}
+    if start_at:
+        # Trakt expects ISO 8601 with Z for UTC
+        params["start_at"] = start_at.isoformat() + "Z"
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get(
+            f"{TRAKT_BASE}/sync/history",
+            headers=_headers(client_id, access_token),
+            params=params,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def get_collection(client_id: str, access_token: str) -> dict:
     """Fetch the user's Trakt collection (movies + shows with nested seasons/
     episodes). Used to dedup the outbound collection push so a steady-state run

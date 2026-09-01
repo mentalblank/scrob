@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from models.lists import List as ListModel, ListItem
 from models.media import Media
 from models.base import MediaType, PrivacyLevel
 from models.show import Show as ShowModel
+from models.media_request import MediaRequest, RequestStatus
 from models.users import UserSettings
 from dependencies import get_current_user, get_current_user_or_api_key, get_optional_user_or_api_key
 from models.users import User
@@ -74,12 +75,31 @@ class ListUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     privacy_level: Optional[PrivacyLevel] = None
+    radarr_auto_add: Optional[bool] = None
+    radarr_root_folder: Optional[str] = None
+    radarr_quality_profile: Optional[int] = None
+    radarr_tags: Optional[list[int]] = None
+    radarr_monitor: Optional[str] = None
+    sonarr_auto_add: Optional[bool] = None
+    sonarr_root_folder: Optional[str] = None
+    sonarr_quality_profile: Optional[int] = None
+    sonarr_tags: Optional[list[int]] = None
+    sonarr_series_type: Optional[str] = None
+    sonarr_season_folder: Optional[bool] = None
+    sonarr_monitor: Optional[str] = None
 
 
 class ListItemAdd(BaseModel):
-    tmdb_id: int
-    media_type: MediaType
+    # The frontend identifies everything by uri_id ("tmdb:m:1", "tvdb:s:2", …);
+    # tmdb_id stays accepted for older clients and internal callers.
+    tmdb_id: Optional[int] = None
+    uri_id: Optional[str] = None
+    # "season" arrives from season cards — lists store whole shows, so it is
+    # folded into the parent series rather than rejected.
+    media_type: str
+    show_uri_id: Optional[str] = None
     season_number: Optional[int] = None
+    episode_number: Optional[int] = None
 
 
 def _format_list(lst: ListModel) -> dict:
@@ -353,6 +373,18 @@ async def get_list(
 
     return {
         **_format_list(lst),
+        "radarr_auto_add": lst.radarr_auto_add,
+        "radarr_root_folder": lst.radarr_root_folder,
+        "radarr_quality_profile": lst.radarr_quality_profile,
+        "radarr_tags": lst.radarr_tags or [],
+        "radarr_monitor": lst.radarr_monitor,
+        "sonarr_auto_add": lst.sonarr_auto_add,
+        "sonarr_root_folder": lst.sonarr_root_folder,
+        "sonarr_quality_profile": lst.sonarr_quality_profile,
+        "sonarr_tags": lst.sonarr_tags or [],
+        "sonarr_series_type": lst.sonarr_series_type,
+        "sonarr_season_folder": lst.sonarr_season_folder,
+        "sonarr_monitor": lst.sonarr_monitor,
         "items": formatted_items,
         "is_owner": bool(current_user and lst.user_id == current_user.id),
     }
@@ -378,6 +410,16 @@ async def update_list(
         lst.description = body.description
     if body.privacy_level is not None:
         lst.privacy_level = body.privacy_level
+
+    supplied = body.model_dump(exclude_unset=True)
+    for field in (
+        "radarr_auto_add", "radarr_root_folder", "radarr_quality_profile",
+        "radarr_tags", "radarr_monitor",
+        "sonarr_auto_add", "sonarr_root_folder", "sonarr_quality_profile",
+        "sonarr_tags", "sonarr_series_type", "sonarr_season_folder", "sonarr_monitor",
+    ):
+        if field in supplied:
+            setattr(lst, field, supplied[field])
 
     await db.commit()
 
@@ -618,6 +660,140 @@ async def _push_list_item_to_mdblist(
         )
 
 
+async def _queue_request_if_approval_required(
+    db: AsyncSession,
+    user: User,
+    media: Media,
+    media_type_str: str,
+    *,
+    uses_global: bool,
+    require_approval: bool,
+) -> bool:
+    """Queue a pending request instead of adding. Returns True if the caller should stop."""
+    if not (uses_global and require_approval):
+        return False
+
+    req_uri = f"tmdb:{'m' if media_type_str == 'movie' else 's'}:{media.tmdb_id}"
+    existing_q = await db.execute(
+        select(MediaRequest).where(
+            MediaRequest.user_id == user.id,
+            MediaRequest.uri_id == req_uri,
+            MediaRequest.media_type == media_type_str,
+        )
+    )
+    existing = existing_q.scalar_one_or_none()
+    if existing:
+        if existing.status != RequestStatus.approved:
+            existing.status = RequestStatus.pending
+    else:
+        db.add(MediaRequest(
+            user_id=user.id,
+            uri_id=req_uri,
+            media_type=media_type_str,
+            title=media.title or "",
+            poster_path=media.poster_path,
+            status=RequestStatus.pending,
+        ))
+    await db.commit()
+    logger.info(
+        "Auto-add for %r queued for admin approval (user %s)", media.title, user.id
+    )
+    return True
+
+
+async def _auto_add_to_arr(
+    db: AsyncSession,
+    user: User,
+    lst: ListModel,
+    media: Media,
+) -> None:
+    from routers.media import _effective_radarr, _effective_sonarr, _get_global_settings
+
+    is_movie = media.media_type == MediaType.movie
+    is_series = media.media_type == MediaType.series
+    is_admin = bool(getattr(user, "is_admin", False))
+    if not (is_movie or is_series):
+        return
+    if is_movie and not lst.radarr_auto_add:
+        return
+    if is_series and not lst.sonarr_auto_add:
+        return
+    if not media.tmdb_id:
+        return
+
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    user_settings = settings_result.scalar_one_or_none()
+    global_settings = await _get_global_settings(db)
+
+    if is_movie:
+        cfg = _effective_radarr(user_settings, global_settings)
+        if not cfg:
+            logger.warning("List %s has Radarr auto-add on but Radarr isn't configured", lst.id)
+            return
+        # Same gate as the Request button, so auto-add can't sidestep approval.
+        if await _queue_request_if_approval_required(
+            db, user, media, "movie",
+            uses_global=(global_settings is not None and cfg is global_settings and not is_admin),
+            require_approval=bool(global_settings and global_settings.radarr_require_approval),
+        ):
+            return
+        from core import radarr as radarr_client
+        try:
+            await radarr_client.add_movie(
+                url=cfg.radarr_url,
+                token=cfg.radarr_token,
+                tmdb_id=media.tmdb_id,
+                title=media.title or "",
+                root_folder=lst.radarr_root_folder or cfg.radarr_root_folder,
+                quality_profile_id=lst.radarr_quality_profile or cfg.radarr_quality_profile,
+                tags=lst.radarr_tags if lst.radarr_tags is not None else cfg.radarr_tags,
+                monitor=lst.radarr_monitor or "movieOnly",
+            )
+        except Exception as exc:
+            logger.warning("Radarr auto-add failed for %r (list %s): %s", media.title, lst.id, exc)
+        return
+
+    show_result = await db.execute(select(ShowModel).where(ShowModel.tmdb_id == media.tmdb_id))
+    show = show_result.scalars().first()
+    tvdb_id = show.tvdb_id if show else None
+    if not tvdb_id:
+        logger.warning(
+            "Sonarr auto-add skipped for %r (list %s): no TVDB id known for TMDB %s",
+            media.title, lst.id, media.tmdb_id,
+        )
+        return
+
+    cfg = _effective_sonarr(user_settings, global_settings)
+    if not cfg:
+        logger.warning("List %s has Sonarr auto-add on but Sonarr isn't configured", lst.id)
+        return
+    if await _queue_request_if_approval_required(
+        db, user, media, "series",
+        uses_global=(global_settings is not None and cfg is global_settings and not is_admin),
+        require_approval=bool(global_settings and global_settings.sonarr_require_approval),
+    ):
+        return
+    from core import sonarr as sonarr_client
+    try:
+        await sonarr_client.add_series(
+            url=cfg.sonarr_url,
+            token=cfg.sonarr_token,
+            tvdb_id=tvdb_id,
+            root_folder=lst.sonarr_root_folder or cfg.sonarr_root_folder,
+            quality_profile_id=lst.sonarr_quality_profile or cfg.sonarr_quality_profile,
+            tags=lst.sonarr_tags if lst.sonarr_tags is not None else cfg.sonarr_tags,
+            season_folder=(
+                lst.sonarr_season_folder
+                if lst.sonarr_season_folder is not None
+                else cfg.sonarr_season_folder
+            ),
+            series_type=lst.sonarr_series_type or "standard",
+            monitor=lst.sonarr_monitor or "all",
+        )
+    except Exception as exc:
+        logger.warning("Sonarr auto-add failed for %r (list %s): %s", media.title, lst.id, exc)
+
+
 @router.post("/{list_id}/items", status_code=201)
 async def add_list_item(
     list_id: int,
@@ -632,28 +808,61 @@ async def add_list_item(
     if not lst:
         raise HTTPException(status_code=404, detail="List not found")
 
-    if body.season_number is not None and body.media_type != MediaType.series:
-        raise HTTPException(status_code=400, detail="season_number is only valid for media_type=series")
+    if body.tmdb_id is None and not body.uri_id:
+        raise HTTPException(status_code=400, detail="uri_id or tmdb_id is required")
 
-    media_result = await db.execute(
-        select(Media)
-        .options(selectinload(Media.show))
-        .where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
-        .order_by(Media.id)
-    )
-    media = media_result.scalars().first()
-
-    from routers.media import get_user_tmdb_key
+    from routers.media import get_user_tmdb_key, resolve_media_by_uri, resolve_show_by_uri
     from core import tmdb
 
+    # A season entry stands in for its show, so resolve it as the parent series.
+    raw_type = body.media_type
+    if raw_type == "season":
+        media_type = MediaType.series
+        identifier = body.show_uri_id or body.uri_id
+    else:
+        try:
+            media_type = MediaType(raw_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Unsupported media type: {raw_type}")
+        identifier = body.uri_id
+
+    if media_type == MediaType.series:
+        show, tmdb_id = await resolve_show_by_uri(db, body.tmdb_id, identifier, user_id=current_user.id)
+        media_result = await db.execute(
+            select(Media)
+            .options(selectinload(Media.show))
+            .where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.series)
+        ) if tmdb_id is not None else None
+        media = media_result.scalar_one_or_none() if media_result is not None else None
+        if not media and show and show.tmdb_id:
+            tmdb_id = show.tmdb_id
+    else:
+        media, tmdb_id = await resolve_media_by_uri(db, media_type, identifier, body.tmdb_id)
+        if media:
+            # resolve_media_by_uri doesn't eager-load the show relationship.
+            media_result = await db.execute(
+                select(Media)
+                .options(selectinload(Media.show))
+                .where(Media.id == media.id)
+            )
+            media = media_result.scalar_one()
+
+    if not media and tmdb_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail="This item has no TMDB match yet, so it can't be added to a list",
+        )
+
     api_key = await get_user_tmdb_key(db, current_user.id)
+    body_tmdb_id = tmdb_id
 
     if not media:
         try:
-            if body.media_type == MediaType.movie:
-                data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
+            if media_type == MediaType.movie:
+                data = await tmdb.get_movie(body_tmdb_id, api_key=api_key)
                 media, _created = await create_media_safely(
-                    db, body.tmdb_id, MediaType.movie,
+                    db, body_tmdb_id, MediaType.movie,
+                    uri_id=body.uri_id,
                     title=data.get("title", "Unknown"),
                     poster_path=tmdb.poster_url(data.get("poster_path")),
                     backdrop_path=tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
@@ -662,18 +871,20 @@ async def add_list_item(
                     overview=data.get("overview"),
                     adult=data.get("adult", False),
                 )
-            elif body.media_type == MediaType.person:
-                data = await tmdb.get_person(body.tmdb_id, api_key=api_key)
+            elif media_type == MediaType.person:
+                data = await tmdb.get_person(body_tmdb_id, api_key=api_key)
                 media, _created = await create_media_safely(
-                    db, body.tmdb_id, MediaType.person,
+                    db, body_tmdb_id, MediaType.person,
+                    uri_id=body.uri_id,
                     title=data.get("name", "Unknown"),
                     poster_path=tmdb.poster_url(data.get("profile_path"), size="w185"),
                     overview=data.get("biography"),
                 )
             else:
-                data = await tmdb.get_show(body.tmdb_id, api_key=api_key)
+                data = await tmdb.get_show(body_tmdb_id, api_key=api_key)
                 media, _created = await create_media_safely(
-                    db, body.tmdb_id, MediaType.series,
+                    db, body_tmdb_id, MediaType.series,
+                    uri_id=body.uri_id if raw_type != "season" else None,
                     title=data.get("name", "Unknown"),
                     poster_path=tmdb.poster_url(data.get("poster_path")),
                     backdrop_path=tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
@@ -684,13 +895,13 @@ async def add_list_item(
                 )
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"Media not found: {e}")
-    elif not media.adult and body.media_type in (MediaType.movie, MediaType.series):
+    elif not media.adult and media_type in (MediaType.movie, MediaType.series) and media.tmdb_id:
         # Existing record may pre-date the adult flag — refresh from TMDB
         try:
-            if body.media_type == MediaType.movie:
-                data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
+            if media_type == MediaType.movie:
+                data = await tmdb.get_movie(media.tmdb_id, api_key=api_key)
             else:
-                data = await tmdb.get_show(body.tmdb_id, api_key=api_key)
+                data = await tmdb.get_show(media.tmdb_id, api_key=api_key)
             if data.get("adult", False):
                 media.adult = True
         except Exception:
@@ -698,7 +909,7 @@ async def add_list_item(
 
     if body.season_number is not None:
         try:
-            await tmdb.get_season(body.tmdb_id, body.season_number, api_key=api_key)
+            await tmdb.get_season(media.tmdb_id or body_tmdb_id, body.season_number, api_key=api_key)
         except Exception:
             raise HTTPException(status_code=404, detail="Season not found")
 
@@ -726,6 +937,8 @@ async def add_list_item(
         await _push_list_item_to_mdblist(
             db, current_user.id, lst.mdblist_slug, media, season_number=body.season_number, remove=False
         )
+
+    await _auto_add_to_arr(db, current_user, lst, media)
 
     item_result = await db.execute(
         select(ListItem)
@@ -784,3 +997,91 @@ async def remove_list_item(
         )
 
     return {"message": "Item removed"}
+
+
+class ListCleanupRequest(BaseModel):
+    # When given, only these list-item ids are removed. Absent means every
+    # collected item, which is what the old caller expected.
+    item_ids: Optional[list[int]] = None
+
+
+@router.post("/{list_id}/items/cleanup-collection")
+async def cleanup_list_collection(
+    list_id: int,
+    dry_run: bool = Query(False),
+    payload: Optional[ListCleanupRequest] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ListModel)
+        .options(
+            selectinload(ListModel.items)
+            .selectinload(ListItem.media)
+            .selectinload(Media.show)
+        )
+        .where(ListModel.id == list_id, ListModel.user_id == current_user.id)
+    )
+    lst = result.scalar_one_or_none()
+    if not lst:
+        raise HTTPException(status_code=404, detail="List not found")
+
+    items = sorted(lst.items, key=lambda x: (x.sort_order, x.added_at))
+    if not items:
+        return {"candidates": [], "removed_count": 0}
+
+    states = [_format_item(item)["media"] for item in items]
+    await enrich_with_state(db, current_user.id, states)
+
+    candidates: list[tuple[ListItem, dict]] = []
+    for item, state in zip(items, states):
+        # A series only counts as collected once every aired episode is present.
+        if state.get("type") in (MediaType.series, "series"):
+            collected = state.get("collection_pct", 0) >= 100
+        else:
+            collected = bool(state.get("in_library"))
+        if collected:
+            candidates.append((item, state))
+
+    if dry_run:
+        return {
+            "candidates": [
+                {
+                    "item_id": item.id,
+                    "title": state.get("title"),
+                    "type": state.get("type"),
+                    "poster_path": state.get("poster_path"),
+                    "release_date": state.get("release_date"),
+                    "season_number": state.get("season_number"),
+                    "episode_number": state.get("episode_number"),
+                    "adult": state.get("adult"),
+                }
+                for item, state in candidates
+            ],
+            "removed_count": 0,
+        }
+
+    selected = set(payload.item_ids) if payload and payload.item_ids is not None else None
+    removed_media: list[Media] = []
+    for item, _state in candidates:
+        if selected is not None and item.id not in selected:
+            continue
+        removed_media.append(item.media)
+        await db.delete(item)
+
+    if not removed_media:
+        return {"candidates": [], "removed_count": 0}
+
+    await db.commit()
+
+    for media in removed_media:
+        if lst.trakt_slug and media:
+            await _push_list_item_to_trakt(db, current_user.id, lst.trakt_slug, media, remove=True)
+            if lst.trakt_slug == "__plex_watchlist__":
+                await _push_list_item_to_plex_watchlist(db, current_user.id, media, remove=True)
+        if lst.mdblist_slug and media:
+            await _push_list_item_to_mdblist(
+                db, current_user.id, lst.mdblist_slug, media, remove=True
+            )
+
+    return {"removed_count": len(removed_media)}

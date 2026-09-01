@@ -21,6 +21,9 @@ class User(Base):
     email_confirmed : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     totp_enabled  : Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False)
     totp_secret   : Mapped[Optional[str]]  = mapped_column(String(255))
+    # Plex account link (SSO via plex.tv PIN OAuth)
+    plex_account_id : Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    plex_username   : Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at    : Mapped[datetime]       = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at    : Mapped[datetime]       = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -31,8 +34,18 @@ class User(Base):
         return self.username
 
     @property
+    def avatar_url(self) -> Optional[str]:
+        if self.profile and self.profile.avatar_path:
+            return f"/profile/avatar/{self.id}"
+        return None
+
+    @property
     def has_password(self) -> bool:
         return self.password_hash is not None
+
+    @property
+    def plex_linked(self) -> bool:
+        return self.plex_account_id is not None
 
     settings          : Mapped[Optional["UserSettings"]]   = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     profile           : Mapped[Optional["UserProfileData"]] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
@@ -56,7 +69,6 @@ class UserSettings(Base):
     radarr_root_folder     : Mapped[Optional[str]] = mapped_column(String(500))
     radarr_quality_profile : Mapped[Optional[int]] = mapped_column(Integer)
     radarr_tags            : Mapped[Optional[list[int]]] = mapped_column(JSONB)
-    radarr_customize_on_add : Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     # Sonarr integration
     sonarr_url              : Mapped[Optional[str]] = mapped_column(String(500))
@@ -65,7 +77,6 @@ class UserSettings(Base):
     sonarr_quality_profile  : Mapped[Optional[int]] = mapped_column(Integer)
     sonarr_tags             : Mapped[Optional[list[int]]] = mapped_column(JSONB)
     sonarr_season_folder    : Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-    sonarr_customize_on_add : Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     # Trakt OAuth app credentials (per-user)
     trakt_client_id          : Mapped[Optional[str]]      = mapped_column(String(255))
@@ -80,17 +91,12 @@ class UserSettings(Base):
     # Trakt inbound sync flags (Trakt → Scrob)
     trakt_sync_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     trakt_sync_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    # Defaults off, like trakt_sync_lists - pulling a dropped show could
-    # silently hide something from Next Up/Calendar the user never touched
-    # in Scrob, which would be a surprising side effect for existing users.
-    trakt_sync_dropped       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_history_cursor_at  : Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     # Trakt outbound push flags (Scrob → Trakt)
     trakt_push_watched       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_push_ratings       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_push_collection    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    trakt_push_dropped       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     trakt_scrobble           : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # Trakt list import/export
@@ -102,10 +108,8 @@ class UserSettings(Base):
     trakt_auto_sync_interval : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     trakt_auto_push_interval : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # TVDB API key (optional personal override) + optional subscriber PIN, which
-    # TheTVDB v4 requires alongside a subscriber-supported key on /login (#322).
+    # TVDB API key (optional personal override)
     tvdb_api_key             : Mapped[Optional[str]]  = mapped_column(String(255))
-    tvdb_subscriber_pin      : Mapped[Optional[str]]  = mapped_column(String(255))
 
     # Simkl OAuth credentials (PIN flow — client_id only, no secret needed)
     simkl_client_id          : Mapped[Optional[str]]  = mapped_column(String(255))
@@ -129,43 +133,78 @@ class UserSettings(Base):
     simkl_auto_push_interval : Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     preferences    : Mapped[Optional[dict]] = mapped_column(JSONB)
-    blur_explicit   : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    blur_explicit  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    show_comments  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    show_user_ratings : Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     time_format_24h : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # IANA zone name used to render this user's times and to date their
+    # "today" boundaries. NULL means "no explicit choice" - the app then
+    # falls back to the viewer's browser zone, and finally to the server's
+    # own TZ, so one user's pick never moves anyone else's clock.
+    timezone        : Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     use_hls_player  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # How "Play" behaves: "web" (open server web page) or "internal" (built-in player)
+    playback_target : Mapped[str]  = mapped_column(String(20), nullable=False, default="web", server_default="web")
+    # Default episode ordering preference ("tmdb" or "tvdb")
+    default_episode_order : Mapped[str] = mapped_column(String(20), nullable=False, default="tmdb", server_default="tmdb")
+    # Personal-prefs onboarding wizard completed. New rows default False (needs onboarding);
+    # existing rows backfill True via server_default so current users aren't interrupted.
+    onboarded      : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="true")
+
+    # Sync scheduling
+    trakt_full_sync_interval    : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    trakt_partial_sync_interval : Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_trakt_full_sync        : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_trakt_partial_sync     : Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Next Up display. Hidden shows live in blocklist_items (see migration
+    # n1o2p3q4r5s6), so no next_up_hidden_shows column here.
     shuffle_next_up : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     minimalist_next_up : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    next_up_hidden_shows : Mapped[Optional[list[int]]] = mapped_column(JSONB, server_default="'[]'")
-    # Dropped is stronger than hidden - unlike next_up_hidden_shows, dropped
-    # items are also excluded from the Calendar and from Discover/
-    # recommendations (#117). dropped_shows holds local Show.id values (same
-    # convention as next_up_hidden_shows); dropped_movies holds local
-    # Media.id values (movies have no next-up/hidden precedent to match).
-    dropped_shows  : Mapped[Optional[list[int]]] = mapped_column(JSONB, server_default="'[]'")
-    dropped_movies : Mapped[Optional[list[int]]] = mapped_column(JSONB, server_default="'[]'")
-    hide_watched_from_recently_added : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    # Prompt to rate an item right after it finishes playing (homepage Now
-    # Playing bar drops the session -> star-rating popup), separately per type (#177).
-    rate_prompt_movies   : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    rate_prompt_episodes : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # MDBList — API key authentication
     mdblist_api_key: Mapped[Optional[str]] = mapped_column(String(255))
     mdblist_sync_watched: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     mdblist_sync_ratings: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     mdblist_sync_watchlist: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
-    mdblist_sync_dropped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     mdblist_push_watched: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     mdblist_push_ratings: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     mdblist_push_watchlist: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     mdblist_push_collection: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    mdblist_push_dropped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     mdblist_scrobble: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # MDBList auto sync/push interval, in hours (null = disabled)
     mdblist_auto_sync_interval: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     mdblist_auto_push_interval: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # Bingebase integration
+    # --- Columns the forkedmain merge dropped from this model while leaving
+    # the columns in the database and the readers in the code. Restored so the
+    # settings they back keep working; no migration is involved.
+    radarr_customize_on_add : Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    sonarr_customize_on_add : Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+    trakt_sync_dropped       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    trakt_push_dropped       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    tvdb_subscriber_pin      : Mapped[Optional[str]]  = mapped_column(String(255))
+
+    next_up_hidden_shows : Mapped[Optional[list[int]]] = mapped_column(JSONB, server_default="'[]'")
+    dropped_shows  : Mapped[Optional[list[int]]] = mapped_column(JSONB, server_default="'[]'")
+    dropped_movies : Mapped[Optional[list[int]]] = mapped_column(JSONB, server_default="'[]'")
+    hide_watched_from_recently_added : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    rate_prompt_movies   : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    rate_prompt_episodes : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    # Spoiler guards for anything not yet watched. Blurred rather than removed,
+    # so a click still reveals the still or the synopsis on demand.
+    blur_unwatched_episode_images     : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    blur_unwatched_episode_overviews  : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    blur_unwatched_movie_images       : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    blur_unwatched_movie_overviews    : Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    mdblist_sync_dropped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    mdblist_push_dropped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     bingebase_webhook_url: Mapped[Optional[str]] = mapped_column(String(500))
     bingebase_api_key: Mapped[Optional[str]] = mapped_column(String(255))
     bingebase_scrobble: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")

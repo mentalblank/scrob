@@ -131,15 +131,22 @@ async def simkl_disconnect(
 # ── Sync helpers (shared with run_simkl_sync) ─────────────────────────────────
 
 async def _get_or_create_show(db: AsyncSession, tmdb_id: int, title: str, api_key: str | None) -> Show | None:
+    from utils.alias_lookup import link_show_provider_ids
+
     result = await db.execute(select(Show).where(Show.tmdb_id == tmdb_id))
     show = result.scalars().first()
     if show:
+        if not show.tvdb_id:
+            await link_show_provider_ids(
+                db, show, external_ids=(show.tmdb_data or {}).get("external_ids")
+            )
         return show
     from core import tmdb
     try:
         d = await tmdb.get_show(tmdb_id, api_key=api_key)
         show = Show(
             tmdb_id=tmdb_id,
+            uri_id=f"tmdb:s:{tmdb_id}" if tmdb_id else None,
             title=d.get("name") or title,
             original_title=d.get("original_name"),
             overview=d.get("overview"),
@@ -153,6 +160,7 @@ async def _get_or_create_show(db: AsyncSession, tmdb_id: int, title: str, api_ke
             tmdb_data={
                 "genres": [g["name"] for g in d.get("genres", [])],
                 "external_ids": d.get("external_ids", {}),
+                **tmdb.credits_stinger_fields(d),
                 "original_language": d.get("original_language"),
                 "seasons": [
                     {
@@ -167,6 +175,7 @@ async def _get_or_create_show(db: AsyncSession, tmdb_id: int, title: str, api_ke
         )
         db.add(show)
         await db.flush()
+        await link_show_provider_ids(db, show, external_ids=d.get("external_ids"))
         return show
     except Exception as exc:
         logger.warning("Could not fetch show tmdb=%s: %s", tmdb_id, exc)

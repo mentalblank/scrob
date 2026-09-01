@@ -205,6 +205,31 @@ class CappedSeasonCountsFromCacheTests(unittest.TestCase):
         self.assertEqual(counts[1], 4)
         self.assertEqual(counts[2], 0)
 
+    def test_unstarted_season_is_zeroed_without_last_episode_to_air(self):
+        # An announced season TMDB has dated in the future carries a full
+        # episode_count. Shows whose cached metadata has no last_episode_to_air
+        # (or whose live fetch timed out) used to count all of it.
+        future = (date.today() + timedelta(days=30)).isoformat()
+        show = self._Show({"seasons": [
+            {"season_number": 1, "episode_count": 10, "air_date": "2020-01-01"},
+            {"season_number": 2, "episode_count": 8, "air_date": future},
+        ]})
+        counts = capped_season_episode_counts(show)
+        self.assertEqual(counts[1], 10)
+        self.assertEqual(counts[2], 0)
+        # All 10 aired episodes watched: the caller clamps to 1, not to the 8
+        # episodes of the season that hasn't started.
+        stats = _remaining_episode_stats(counts, {1: 10}, avg_runtime=50.0)
+        self.assertEqual(stats["episodes_left"], 1)
+
+    def test_already_premiered_season_keeps_its_count(self):
+        past = (date.today() - timedelta(days=30)).isoformat()
+        show = self._Show({"seasons": [
+            {"season_number": 1, "episode_count": 10, "air_date": "2020-01-01"},
+            {"season_number": 2, "episode_count": 8, "air_date": past},
+        ]})
+        self.assertEqual(capped_season_episode_counts(show)[2], 8)
+
     def test_fractional_average_runtime_rounds(self):
         stats = _remaining_episode_stats({1: 4}, {1: 1}, avg_runtime=42.5)
         self.assertEqual(stats["episodes_left"], 3)

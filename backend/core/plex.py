@@ -5,6 +5,7 @@ import httpx
 import xmltodict
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
+from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,28 @@ def extract_tmdb_id(guids: List[Dict]) -> Optional[int]:
 
 
 def extract_tvdb_id(guids: List[Dict]) -> Optional[str]:
-    return _first_guid_match(guids, _TVDB_GUID_RE)
+    ids = extract_all_tvdb_ids(guids)
+    return ids[0] if ids else None
+
+
+# The HAMA agent writes the series id inline instead of as a scheme -
+# "com.plexapp.agents.hama://tvdb-73762/1/1" - and uses tvdb2-/tvdb3-... for
+# TheTVDB's alternate episode orders, where the series id is still the part we
+# want. Matching on the prefix alone missed every one of those.
+_TVDB_GUID_RE = re.compile(r"tvdb://(\d+)|://tvdb[2-9]?-(\d+)")
+
+
+def extract_all_tvdb_ids(guids: List[Dict]) -> List[str]:
+    """Return ALL TVDB IDs from Plex GUIDs."""
+    ids: List[str] = []
+    for guid in guids or []:
+        match = _TVDB_GUID_RE.search(guid.get("id", "") or "")
+        if not match:
+            continue
+        val = (match.group(1) or match.group(2) or "").strip()
+        if val and val not in ids:
+            ids.append(val)
+    return ids
 
 
 def extract_imdb_id(guids: List[Dict]) -> Optional[str]:
@@ -205,29 +227,92 @@ async def validate_connection(url: str, token: str) -> bool:
     except Exception:
         return False
 
+async def get_machine_identifier(url: str, token: str) -> Optional[str]:
+    """Return the server's machineIdentifier from the Plex root endpoint."""
+    try:
+        data = await _get(f"{url.rstrip('/')}/", token)
+        return data.get("MediaContainer", {}).get("machineIdentifier")
+    except Exception:
+        return None
+
 async def get_libraries(url: str, token: str) -> List[Dict]:
     data = await _get(f"{url.rstrip('/')}/library/sections", token)
     return data.get("MediaContainer", {}).get("Directory", [])
 
-async def get_movies(url: str, token: str, section_id: str) -> List[Dict]:
-    params = {"includeGuids": 1}
-    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
+async def get_history(url: str, token: str, mindate: int) -> List[Dict]:
+    """Fetch playback history from Plex since a given epoch timestamp."""
+    data = await _get(
+        f"{url.rstrip('/')}/status/sessions/history/all",
+        token,
+        params={"mindate": mindate}
+    )
     return data.get("MediaContainer", {}).get("Metadata", [])
 
-async def get_shows(url: str, token: str, section_id: str) -> List[Dict]:
-    params = {"includeGuids": 1}
-    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
-    return data.get("MediaContainer", {}).get("Metadata", [])
+async def _get_all_plex_items(
+    url: str,
+    token: str,
+    section_id: str,
+    plex_type: int,
+    sort: Optional[str] = None,
+    offset: int = 0,
+    limit: Optional[int] = None
+) -> List[Dict]:
+    all_items = []
+    current_offset = offset
+    page_size = 500 if limit is None else min(limit, 500)
+    while True:
+        params = {"type": plex_type, "includeGuids": 1}
+        if sort:
+            params["sort"] = sort
+        params["X-Plex-Container-Start"] = current_offset
+        params["X-Plex-Container-Size"] = page_size
+
+        data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
+        mc = data.get("MediaContainer", {})
+        items = mc.get("Metadata", [])
+        all_items.extend(items)
+
+        total = mc.get("totalSize", 0)
+        current_offset += len(items)
+
+        if limit is not None and len(all_items) >= limit:
+            all_items = all_items[:limit]
+            break
+        if not items or current_offset >= total:
+            break
+
+    return all_items
+
+
+async def get_movies(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
+    return await _get_all_plex_items(url, token, section_id, 1, sort, offset, limit)
+
+
+async def get_shows(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
+    return await _get_all_plex_items(url, token, section_id, 2, sort, offset, limit)
+
+
+async def get_episodes(url: str, token: str, section_id: str, sort: Optional[str] = None, offset: int = 0, limit: Optional[int] = None) -> List[Dict]:
+    return await _get_all_plex_items(url, token, section_id, 4, sort, offset, limit)
+
+async def get_items_by_ids(url: str, token: str, section_id: str, rating_keys: List[str], chunk_size: int = 200) -> List[Dict]:
+    if not rating_keys:
+        return []
+
+    all_items: List[Dict] = []
+    base_url = f"{url.rstrip('/')}/library/sections/{section_id}/all"
+
+    for i in range(0, len(rating_keys), chunk_size):
+        chunk = rating_keys[i : i + chunk_size]
+        params = {"includeGuids": 1, "id": ",".join(chunk)}
+        data = await _get(base_url, token, params=params)
+        all_items.extend(data.get("MediaContainer", {}).get("Metadata", []))
+
+    return all_items
 
 async def get_seasons(url: str, token: str, section_id: str) -> List[Dict]:
     """Fetch season metadata, including user ratings, from a TV library."""
     params = {"type": 3, "includeGuids": 1}
-    data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
-    return data.get("MediaContainer", {}).get("Metadata", [])
-
-
-async def get_episodes(url: str, token: str, section_id: str) -> List[Dict]:
-    params = {"type": 4, "includeGuids": 1}
     data = await _get(f"{url.rstrip('/')}/library/sections/{section_id}/all", token, params=params)
     return data.get("MediaContainer", {}).get("Metadata", [])
 
@@ -311,201 +396,124 @@ PLEX_TV_BASE  = "https://plex.tv"
 APP_AUTH_BASE = "https://app.plex.tv/auth"
 COMMUNITY_BASE = "https://community.plex.tv"
 
-
-# ── plex.tv account auth (PIN / "Login with Plex") ─────────────────────────────
-
-def _plextv_headers(client_id: str, token: Optional[str] = None) -> Dict:
-    headers = {
-        "Accept": "application/json",
-        "X-Plex-Product": "Scrob",
-        "X-Plex-Version": "1.0",
-        "X-Plex-Client-Identifier": client_id,
-        "X-Plex-Device": "Scrob",
-        "X-Plex-Device-Name": "Scrob",
-        "X-Plex-Platform": "Web",
-    }
-    if token:
-        headers["X-Plex-Token"] = token
-    return headers
+# ── Plex account SSO (plex.tv PIN OAuth) ───────────────────────────────────────
+PLEX_AUTH_CLIENT_ID = "scrob-login"
+PLEX_AUTH_PRODUCT = "Scrob"
+_AUTH_HEADERS = {
+    "Accept": "application/json",
+    "X-Plex-Product": PLEX_AUTH_PRODUCT,
+    "X-Plex-Client-Identifier": PLEX_AUTH_CLIENT_ID,
+}
 
 
-async def create_auth_pin(client_id: str) -> Dict:
-    """Create a plex.tv auth PIN. Returns {id, code}.
-
-    The user then visits build_auth_url(client_id, code) and signs in; once they
-    do, poll_auth_pin() returns the account auth token.
-    """
-    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
-        res = await client.post(
-            f"{PLEX_TV_BASE}/api/v2/pins",
-            headers=_plextv_headers(client_id),
-            params={"strong": "true"},
-        )
-        res.raise_for_status()
-        data = res.json()
-        return {"id": data["id"], "code": data["code"]}
-
-
-async def poll_auth_pin(client_id: str, pin_id: int) -> Optional[str]:
-    """Return the account auth token once the PIN has been claimed, else None."""
-    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
-        res = await client.get(
-            f"{PLEX_TV_BASE}/api/v2/pins/{pin_id}",
-            headers=_plextv_headers(client_id),
-        )
-        res.raise_for_status()
-        return res.json().get("authToken") or None
-
-
-def build_auth_url(client_id: str, code: str) -> str:
-    """The app.plex.tv URL the user opens to authorize the PIN."""
-    from urllib.parse import urlencode
-
-    params = {
-        "clientID": client_id,
-        "code": code,
-        "context[device][product]": "Scrob",
-        "context[device][device]": "Scrob",
-        "context[device][platform]": "Web",
-    }
-    return f"{APP_AUTH_BASE}#?{urlencode(params)}"
-
-
-async def get_account(client_id: str, token: str) -> Optional[Dict]:
-    """Fetch the signed-in plex.tv account. Returns {id, username, title, email}."""
+async def create_auth_pin() -> Optional[Dict]:
+    """Create a strong Plex auth PIN. Returns {id, code} or None."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
-            res = await client.get(
-                f"{PLEX_TV_BASE}/api/v2/user",
-                headers=_plextv_headers(client_id, token),
+            res = await client.post(
+                f"{PLEX_TV_BASE}/api/v2/pins",
+                headers=_AUTH_HEADERS,
+                params={"strong": "true"},
             )
-            if res.status_code >= 400:
-                return None
-            d = res.json()
-        return {
-            "id": str(d.get("id") or ""),
-            "username": d.get("username") or d.get("title") or "",
-            "title": d.get("title") or "",
-            "email": d.get("email") or "",
-        }
+            res.raise_for_status()
+            data = res.json()
+            return {"id": data["id"], "code": data["code"]}
     except Exception:
         return None
 
 
-async def get_servers(client_id: str, token: str) -> List[Dict]:
-    """List the Plex Media Servers this account can reach.
+def build_auth_url(code: str, forward_url: str) -> str:
+    """Build the app.plex.tv URL the browser is sent to for authentication."""
+    params = {
+        "clientID": PLEX_AUTH_CLIENT_ID,
+        "code": code,
+        "forwardUrl": forward_url,
+        "context[device][product]": PLEX_AUTH_PRODUCT,
+    }
+    return f"https://app.plex.tv/auth#?{urlencode(params)}"
 
-    Each entry: {name, machine_identifier, owned, access_token, connections:
-    [{uri, local, relay, protocol}]}. The per-server access_token is scoped to
-    that server and is what belongs in MediaServerConnection.token.
+
+async def check_auth_pin(pin_id: str) -> Optional[str]:
+    """Poll a PIN; return the authToken once the user has authorised, else None."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
+            res = await client.get(
+                f"{PLEX_TV_BASE}/api/v2/pins/{pin_id}",
+                headers=_AUTH_HEADERS,
+            )
+            res.raise_for_status()
+            return res.json().get("authToken") or None
+    except Exception:
+        return None
+
+
+async def get_account(auth_token: str) -> Optional[Dict]:
+    """Fetch the Plex account for an authToken. Returns {id, username, email, thumb} or None."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
+            res = await client.get(
+                f"{PLEX_TV_BASE}/api/v2/user",
+                headers={**_AUTH_HEADERS, "X-Plex-Token": auth_token},
+            )
+            res.raise_for_status()
+            data = res.json()
+            if not data.get("id"):
+                return None
+            return {
+                "id": str(data["id"]),
+                "username": data.get("username") or data.get("title") or "",
+                "email": data.get("email") or "",
+                "thumb": data.get("thumb"),
+            }
+    except Exception:
+        return None
+
+
+def _connection_rank(conn: Dict) -> tuple:
+    """Sort key for a server connection: non-relay https remote first, relay last."""
+    relay = 1 if conn.get("relay") else 0
+    uri = str(conn.get("uri", ""))
+    https = 0 if (conn.get("protocol") == "https" or uri.startswith("https")) else 1
+    local = 1 if conn.get("local") else 0
+    return (relay, https, local)
+
+
+async def get_servers(auth_token: str) -> List[Dict]:
+    """List reachable Plex servers as [{name, client_identifier, token, url, owned}].
+
+    url is the first connection that responds; token is the per-server access token.
     """
-    async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=True) as client:
-        res = await client.get(
-            f"{PLEX_TV_BASE}/api/v2/resources",
-            headers=_plextv_headers(client_id, token),
-            params={"includeHttps": 1, "includeRelay": 1},
-        )
-        res.raise_for_status()
-        resources = res.json()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=True) as client:
+            res = await client.get(
+                f"{PLEX_TV_BASE}/api/v2/resources",
+                headers={**_AUTH_HEADERS, "X-Plex-Token": auth_token},
+                params={"includeHttps": 1, "includeRelay": 1},
+            )
+            res.raise_for_status()
+            devices = res.json()
+    except Exception:
+        return []
 
     servers: List[Dict] = []
-    for r in resources:
-        provides = (r.get("provides") or "").split(",")
-        if "server" not in provides:
+    for dev in devices:
+        if "server" not in (dev.get("provides") or "").split(","):
             continue
-        conns = [
-            {
-                "uri": c.get("uri"),
-                "local": bool(c.get("local")),
-                "relay": bool(c.get("relay")),
-                "protocol": c.get("protocol"),
-            }
-            for c in (r.get("connections") or [])
-            if c.get("uri")
-        ]
-        servers.append({
-            "name": r.get("name") or "Plex Server",
-            "machine_identifier": r.get("clientIdentifier") or "",
-            "owned": bool(r.get("owned")),
-            "access_token": r.get("accessToken") or token,
-            "connections": conns,
-        })
+        token = dev.get("accessToken")
+        if not token:
+            continue
+        for conn in sorted(dev.get("connections") or [], key=_connection_rank):
+            uri = conn.get("uri")
+            if uri and await validate_connection(uri, token):
+                servers.append({
+                    "name": dev.get("name") or "Plex",
+                    "client_identifier": dev.get("clientIdentifier"),
+                    "token": token,
+                    "url": uri,
+                    "owned": bool(dev.get("owned")),
+                })
+                break
     return servers
-
-
-def _connection_rank(conn: Dict) -> int:
-    if conn.get("relay"):
-        return 2
-    if conn.get("local"):
-        return 0
-    return 1
-
-
-def connection_label(conn: Dict) -> str:
-    """Human label for a Plex connection URI, e.g. 'Local · https://10-0-0-2.plex.direct:32400'."""
-    if conn.get("relay"):
-        kind = "Relay"
-    elif conn.get("local"):
-        kind = "Local"
-    else:
-        kind = "Remote"
-    return f"{kind} · {conn.get('uri', '')}"
-
-
-async def _probe_connection(client: httpx.AsyncClient, uri: str, token: str, want_mid: Optional[str]) -> bool:
-    try:
-        r = await client.get(
-            f"{uri.rstrip('/')}/identity",
-            headers={"X-Plex-Token": token, "Accept": "application/json"},
-        )
-        if r.status_code != 200:
-            return False
-        got = r.json().get("MediaContainer", {}).get("machineIdentifier")
-        return not want_mid or got == want_mid
-    except Exception:
-        return False
-
-
-async def resolve_connections(server: Dict) -> Dict:
-    """Probe every advertised connection for a server and return them all, ordered
-    local → remote → relay, each tagged with a `reachable` flag and a display
-    `label`. `recommended` is the first reachable URI, or the best-ranked one if
-    none respond (the user can still pick another or edit the field).
-
-    URIs that resolve to a blocked (cloud-metadata) range are dropped entirely -
-    a Plex server can advertise arbitrary custom-access URLs and the backend
-    fetches these, so they go through the same SSRF filter as manual entry."""
-    from core.url_validator import is_safe_service_url
-
-    candidates = sorted(server.get("connections") or [], key=_connection_rank)
-    ordered = [
-        c for c in candidates
-        if c.get("uri") and await is_safe_service_url(c["uri"])
-    ]
-    if not ordered:
-        return {"recommended": None, "connections": []}
-
-    want_mid = server.get("machine_identifier")
-    token = server.get("access_token")
-    async with httpx.AsyncClient(timeout=httpx.Timeout(4.0), follow_redirects=False) as client:
-        flags = await asyncio.gather(
-            *(_probe_connection(client, c["uri"], token, want_mid) for c in ordered)
-        )
-
-    conns = [
-        {
-            "uri": c["uri"],
-            "local": c["local"],
-            "relay": c["relay"],
-            "protocol": c.get("protocol"),
-            "reachable": bool(ok),
-            "label": connection_label(c),
-        }
-        for c, ok in zip(ordered, flags)
-    ]
-    recommended = next((c["uri"] for c in conns if c["reachable"]), conns[0]["uri"])
-    return {"recommended": recommended, "connections": conns}
-
 
 _CLOUD_HEADERS = {
     "Accept": "application/json",

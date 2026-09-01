@@ -4,13 +4,16 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, or_, select, desc, func, delete, case
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, or_, select, desc, func, delete
 from sqlalchemy.orm import selectinload, aliased
+from sqlalchemy import case
 from db import get_db, AsyncSessionLocal
 from models.media import Media
 from models.show import Show
+from utils.media_uri import MediaURI
+from utils.alias_lookup import link_show_provider_ids
 from models.events import WatchEvent
 from models.playback_session import PlaybackSession
 from models.playback_progress import PlaybackProgress
@@ -18,14 +21,15 @@ from models.collection import Collection, CollectionFile
 from models.base import MediaType, CollectionSource
 from models.users import UserSettings
 from models.connections import MediaServerConnection
-from models.episode_order import EpisodeOrderMapping, UserShowEpisodeOrder
-from models.rewatch import ShowRewatch, RewatchProgress
-from models.ratings import Rating
-from routers.media import enrich_with_state, get_user_tmdb_key, check_tmdb_key, _attach_episode_order_fields
-from core.translations import get_user_metadata_language, get_media_translations, apply_media_translations
-from core.rewatch import get_active_rewatch, record_rewatch_progress, get_already_watched_for_bulk_mark, capped_season_episode_counts
-from core.enrichment import create_media_safely
+from models.episode_order import EpisodeOrderMapping
+from models.season_override import ShowEpisodeOverride, ShowSeasonOverride
 from core.episode_order import get_episode_orders_for_series, get_tmdb_to_tvdb_positions
+from models.ratings import Rating
+from models.rewatch import ShowRewatch, RewatchProgress
+from core.rewatch import get_active_rewatch, get_active_rewatches_for_shows, capped_season_episode_counts
+from core import user_timezone
+from routers.media import enrich_with_state, get_user_tmdb_key, check_tmdb_key, _attach_episode_order_fields, _effective_episode_order
+from core.translations import get_user_metadata_language, get_media_translations, apply_media_translations
 
 from dependencies import get_current_user, get_current_user_or_api_key
 from models.users import User
@@ -37,6 +41,9 @@ import core.nuvio as nuvio_client
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# How long after a completed play the homepage may still offer the rate popup (#177).
+RATE_PROMPT_WINDOW = timedelta(minutes=15)
 
 
 async def _push_watch_state(
@@ -87,18 +94,12 @@ async def _push_watch_state(
     # would otherwise swallow errors here silently.
     tasks: list[tuple[str, Any]] = []
 
-    async def _push_plex_watched_and_record(conn: MediaServerConnection, source_id: str, uid: int, mid: int) -> bool:
-        ok = await plex_client.mark_watched(conn.url, conn.token, source_id)
-        if ok:
-            from routers.sync import _record_plex_pending_push
-            await _record_plex_pending_push(uid, mid)
-        return ok
-
     # Jellyfin/Emby's UserDataSaved webhook echoes an outbound mark-watched
     # straight back, and a backdated watched_at slips past _write_watch_event's
     # recent-event guard - so each such push is registered here so the echo is
-    # recognised as our own, not a second play stamped "now" (GitHub #324).
-    # Mirrors the same registration in routers/sync.py's fan-out.
+    # recognised as our own, not a second play stamped "now" (#324). Mirrors the
+    # same registration in routers/sync.py's fan-out. The media_id comes back as
+    # a second column because that is what the registration is keyed on.
     from routers.webhooks import mark_pushed_watched
 
     if connections:
@@ -124,7 +125,7 @@ async def _push_watch_state(
                 if coll_file.source == CollectionSource.plex:
                     label = f"plex connection {conn.id}"
                     if watched:
-                        tasks.append((label, _push_plex_watched_and_record(conn, coll_file.source_id, user_id, coll_media_id)))
+                        tasks.append((label, plex_client.mark_watched(conn.url, conn.token, coll_file.source_id)))
                     else:
                         tasks.append((label, plex_client.mark_unwatched(conn.url, conn.token, coll_file.source_id)))
                 elif coll_file.source == CollectionSource.jellyfin:
@@ -168,6 +169,9 @@ async def _push_watch_state(
                     else:
                         tasks.append((f"simkl remove episode {show.tmdb_id} S{media.season_number}E{media.episode_number}", simkl_client.remove_episode_from_history(settings.simkl_client_id, settings.simkl_access_token, show.tmdb_id, media.season_number, media.episode_number)))
 
+    # An expired Trakt token has to be refreshed before the push, not pushed
+    # with: every call would fail and nothing would ever renew it, so Trakt
+    # sync just stops working silently until the user reconnects.
     trakt_token: str | None = None
     if push_trakt and settings.trakt_client_id:
         from routers.trakt import TraktTokenError, ensure_valid_trakt_token
@@ -233,10 +237,7 @@ async def _push_watch_state(
         results = await asyncio.gather(*(coro for _, coro in tasks), return_exceptions=True)
         for (label, _), result in zip(tasks, results):
             if isinstance(result, Exception):
-                # A warning with a plain reason, not a full traceback dump -
-                # these are almost always an expired/revoked credential on
-                # the remote service, not a bug here.
-                logger.warning("Can't send history event to %s because %s", label, result)
+                logger.exception("Failed to push watch state to %s", label, exc_info=result)
 
     nuvio_connections = [conn for conn in connections if conn.type == "nuvio"]
     if nuvio_connections:
@@ -283,10 +284,6 @@ async def _push_watch_state(
                     await db.commit()
 
                 async with nuvio_client.connection_lock(conn.id):
-                    # See core/nuvio.py's connection_lock docstring - conn may
-                    # have been loaded before another request already rotated
-                    # this single-use refresh token while this one waited.
-                    await db.refresh(conn)
                     if watched and nuvio_items:
                         await nuvio_client.push_watched_items(
                             conn.url, conn.token, profile_id, nuvio_items, on_refresh=_persist_refresh
@@ -297,8 +294,8 @@ async def _push_watch_state(
                         )
                     else:
                         continue
-            except Exception as e:
-                logger.warning("Can't send history event to Nuvio (connection %s) because %s", conn.id, e)
+            except Exception:
+                logger.exception("Failed to push watch state to Nuvio connection %s", conn.id)
                 continue
         await db.commit()
 
@@ -326,8 +323,11 @@ async def _push_watch_state(
                     changed_media_ids=stremio_eligible_ids,
                     watch_overrides=watch_overrides,
                 )
-            except Exception as e:
-                logger.warning("Can't send history event to Stremio (connection %s) because %s", conn.id, e)
+            except Exception:
+                logger.exception(
+                    "Failed to push watch state to Stremio connection %s",
+                    conn.id,
+                )
         await db.commit()
 
 
@@ -341,6 +341,7 @@ def format_event(event: WatchEvent | PlaybackProgress, media: Media) -> dict:
         "media": {
             "id": media.id,
             "tmdb_id": media.tmdb_id,
+            "uri_id": media.uri_id,
             "type": media.media_type,
             "title": media.title,
             "overview": media.overview,
@@ -367,8 +368,10 @@ def format_event(event: WatchEvent | PlaybackProgress, media: Media) -> dict:
     if media.media_type == MediaType.episode and media.show:
         data["media"]["show_title"] = media.show.title
         data["media"]["show_poster_path"] = media.show.poster_path
+        data["media"]["show_backdrop_path"] = media.show.backdrop_path
         data["media"]["show_tmdb_id"] = media.show.tmdb_id
         data["media"]["show_tvdb_id"] = media.show.tvdb_id
+        data["media"]["show_uri_id"] = media.show.uri_id
 
     return data
 
@@ -378,22 +381,39 @@ async def get_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     type: str | None = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    undated: bool = Query(False),  # plays logged without a date, which sort past the last page
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_api_key),
 ):
     offset = (page - 1) * page_size
 
-    base_query = (
+    filters = [WatchEvent.user_id == current_user.id, WatchEvent.completed == True]
+    if type and type in ("movie", "episode"):
+        filters.append(Media.media_type == type)
+    if undated:
+        filters.append(WatchEvent.watched_at.is_(None))
+    else:
+        for raw, op in ((start_date, ">="), (end_date, "<=")):
+            if not raw:
+                continue
+            try:
+                parsed = datetime.fromisoformat(raw)
+            except ValueError:
+                continue
+            if len(raw) <= 10 and op == "<=":
+                parsed = parsed + timedelta(days=1)
+            filters.append(
+                WatchEvent.watched_at >= parsed if op == ">=" else WatchEvent.watched_at < parsed
+            )
+
+    total_result = await db.execute(
         select(func.count())
         .select_from(WatchEvent)
         .join(Media, Media.id == WatchEvent.media_id)
-        .where(WatchEvent.user_id == current_user.id)
-        .where(WatchEvent.completed == True)
+        .where(*filters)
     )
-    if type and type in ("movie", "episode"):
-        base_query = base_query.where(Media.media_type == type)
-
-    total_result = await db.execute(base_query)
     total_count = total_result.scalar_one()
     total_pages = max(1, (total_count + page_size - 1) // page_size)
 
@@ -401,14 +421,11 @@ async def get_history(
         select(WatchEvent, Media)
         .join(Media, Media.id == WatchEvent.media_id)
         .options(selectinload(WatchEvent.media).selectinload(Media.show))
-        .where(WatchEvent.user_id == current_user.id)
-        .where(WatchEvent.completed == True)
+        .where(*filters)
         .order_by(WatchEvent.watched_at.desc().nulls_last(), WatchEvent.id.desc())
+        .offset(offset)
+        .limit(page_size)
     )
-    if type and type in ("movie", "episode"):
-        query = query.where(Media.media_type == type)
-
-    query = query.offset(offset).limit(page_size)
 
     result = await db.execute(query)
     rows = result.all()
@@ -490,26 +507,38 @@ async def get_now_playing(
             if hint:
                 item["media"]["show_title"] = hint
         sessions.append(item)
-
-    # Episode-order preference / TVDB position translation (#186) - this
-    # endpoint builds its own dict inline rather than going through
-    # enrich_with_state, so it needs the same batched lookups + attach step
-    # done separately, in a second pass now that every session's show_tmdb_id
-    # is known. Session counts here are always small (active playback only),
-    # so a second pass over `sessions` costs nothing.
+    # Route episode/season links by the user's per-show numbering preference, the
+    # same as every other listing does through enrich_with_state (#186).
     series_ids = {
         s["media"]["show_tmdb_id"] for s in sessions if s["media"].get("show_tmdb_id")
     }
     if series_ids:
+        settings_q = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == current_user.id)
+        )
+        viewer_settings = settings_q.scalar_one_or_none()
+        _prefs = (viewer_settings.preferences or {}) if viewer_settings else {}
+        # A show with no per-show row follows the account's primary source, so a
+        # TVDB-primary viewer gets TVDB numbering here too rather than a link
+        # that pairs a TVDB show id with a TMDB position.
+        default_order = (
+            "tvdb"
+            if _prefs.get("primary_metadata_source") == "tvdb"
+            or (viewer_settings.default_episode_order if viewer_settings else None) == "tvdb"
+            else "tmdb"
+        )
         episode_orders = await get_episode_orders_for_series(db, current_user.id, list(series_ids))
         tvdb_series_ids = [
-            sid for sid, pref in episode_orders.items() if pref.episode_order == "tvdb"
+            sid for sid in series_ids
+            if _effective_episode_order(episode_orders.get(sid), default_order) == "tvdb"
         ]
         tmdb_to_tvdb = (
             await get_tmdb_to_tvdb_positions(db, tvdb_series_ids) if tvdb_series_ids else {}
         )
         for s in sessions:
-            _attach_episode_order_fields(s["media"], episode_orders, tmdb_to_tvdb)
+            _attach_episode_order_fields(
+                s["media"], episode_orders, tmdb_to_tvdb, default_order
+            )
 
     return {"now_playing": sessions}
 
@@ -517,7 +546,7 @@ async def get_now_playing(
 @router.delete("/sessions")
 async def clear_now_playing_sessions(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete all active playback sessions for the current user."""
     await db.execute(
@@ -527,116 +556,22 @@ async def clear_now_playing_sessions(
     return {"status": "ok"}
 
 
-# How recently a completed WatchEvent must have landed for the "rate it now"
-# popup to still be worth showing when a session drops off the Now Playing bar.
-RATE_PROMPT_WINDOW = timedelta(minutes=15)
-
-
-@router.get("/rate-prompt")
-async def rate_prompt(
-    media_id: int = Query(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Should the homepage show a "rate this" popup for a just-finished item? (#177)
-
-    Called by the Now Playing poller when a session disappears from the bar.
-    Returns should_prompt=True only when the user opted in for this media type,
-    a completed WatchEvent for it landed within RATE_PROMPT_WINDOW, and they
-    have not already rated it. The media block feeds the popup's poster/title.
-    """
-    none_response = {"should_prompt": False, "media": None}
-
-    media = (await db.execute(
-        select(Media).options(selectinload(Media.show)).where(Media.id == media_id)
-    )).scalar_one_or_none()
-    if media is None or not media.tmdb_id or is_unmapped_tvdb_episode(media):
-        return none_response
-
-    settings_row = (await db.execute(
-        select(UserSettings).where(UserSettings.user_id == current_user.id)
-    )).scalar_one_or_none()
-    if media.media_type == MediaType.movie:
-        opted_in = bool(settings_row and settings_row.rate_prompt_movies)
-    elif media.media_type == MediaType.episode:
-        opted_in = bool(settings_row and settings_row.rate_prompt_episodes)
-    else:
-        opted_in = False
-    if not opted_in:
-        return none_response
-
-    recent_completion = (await db.execute(
-        select(WatchEvent.id).where(
-            WatchEvent.user_id == current_user.id,
-            WatchEvent.media_id == media_id,
-            WatchEvent.completed == True,
-            WatchEvent.watched_at >= datetime.utcnow() - RATE_PROMPT_WINDOW,
-        ).limit(1)
-    )).scalar_one_or_none()
-    if recent_completion is None:
-        return none_response
-
-    # Movie and episode ratings are both stored with season_number NULL
-    # (submit_rating collapses an episode's season to None), so one check covers both.
-    already_rated = (await db.execute(
-        select(Rating.id).where(
-            Rating.media_id == media_id,
-            Rating.user_id == current_user.id,
-            Rating.season_number.is_(None),
-        ).limit(1)
-    )).scalar_one_or_none()
-    if already_rated is not None:
-        return none_response
-
-    show = media.show if media.media_type == MediaType.episode else None
-    # Episodes: the still (media.poster_path) shown landscape in the popup, show
-    # poster as the fallback. Movies: their own poster.
-    poster = media.poster_path or (show.poster_path if show else None)
-    return {
-        "should_prompt": True,
-        "media": {
-            "id": media.id,
-            "tmdb_id": media.tmdb_id,
-            "type": media.media_type.value,
-            "title": media.title,
-            "show_title": show.title if show else None,
-            "season_number": media.season_number,
-            "episode_number": media.episode_number,
-            "poster_path": poster,
-        },
-    }
-
-
 @router.get("/continue-watching")
 async def get_continue_watching(
-    limit: int | None = Query(20),
-    include_hidden: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_api_key),
 ):
     """Items currently in progress."""
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    dropped_movie_ids = set(settings.dropped_movies or []) if settings else set()
-
-    filters = [PlaybackProgress.user_id == current_user.id]
-    if dropped_movie_ids and not include_hidden:
-        filters.append(Media.id.notin_(dropped_movie_ids))
-    query = (
+    result = await db.execute(
         select(PlaybackProgress, Media)
         .join(Media, Media.id == PlaybackProgress.media_id)
         .options(selectinload(PlaybackProgress.media).selectinload(Media.show))
-        .where(*filters)
+        .where(PlaybackProgress.user_id == current_user.id)
         .order_by(desc(PlaybackProgress.updated_at))
+        .limit(20)
     )
-    if limit is not None:
-        query = query.limit(limit)
-    result = await db.execute(query)
     rows = result.all()
     items = [format_event(e, m) for e, m in rows]
-    for item in items:
-        # Only ever true for movies - episodes have no drop concept.
-        item["media"]["dropped"] = item["media"]["id"] in dropped_movie_ids
     if items:
         await enrich_with_state(db, current_user.id, [i["media"] for i in items])
         lang = await get_user_metadata_language(db, current_user.id)
@@ -655,15 +590,25 @@ async def get_continue_watching(
 
 @router.delete("/continue-watching")
 async def dismiss_continue_watching(
-    media_id: int = Query(...),
+    media_id: int | None = Query(None, alias="id"),
+    uri_id: str | None = Query(None),
+    media_type: MediaType = Query(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Remove a single item from the continue-watching list."""
+    resolved_id = await _resolve_media_id(
+        db, media_type, media_id=media_id, uri_id=uri_id,
+    )
+    if resolved_id is None:
+        if not (media_id or uri_id):
+            raise HTTPException(status_code=400, detail="A media identifier is required")
+        return {"status": "ok"}
+
     await db.execute(
         delete(PlaybackProgress).where(
             PlaybackProgress.user_id == current_user.id,
-            PlaybackProgress.media_id == media_id,
+            PlaybackProgress.media_id == resolved_id,
         )
     )
     await db.commit()
@@ -674,6 +619,7 @@ def _format_media_item(media: Media) -> dict:
     data = {
         "id": media.id,
         "tmdb_id": media.tmdb_id,
+        "uri_id": media.uri_id,
         "type": media.media_type,
         "title": media.title,
         "overview": media.overview,
@@ -696,12 +642,601 @@ def _format_media_item(media: Media) -> dict:
         data["show_backdrop_path"] = media.show.backdrop_path
         data["show_tmdb_id"] = media.show.tmdb_id
         data["show_tvdb_id"] = media.show.tvdb_id
+        data["show_uri_id"] = media.show.uri_id
     return data
 
 
-# Shows whose stored status says they're finished can never gain a new episode.
-# Revivals (e.g. Futurama) are caught by main.py's daily metadata sweep flipping
-# this status back within a day (#307).
+def _aired_episode_total(show: Show, include_specials: bool) -> int:
+    """Episodes of a show that have aired, from its stored TMDB metadata."""
+    data = show.tmdb_data or {}
+    seasons = data.get("seasons", [])
+    last_ep = data.get("last_episode_to_air") or {}
+    last_season = last_ep.get("season_number")
+    last_number = last_ep.get("episode_number")
+
+    total = 0
+    for season in seasons:
+        season_number = season.get("season_number", 0)
+        if season_number == 0 and not include_specials:
+            continue
+        count = season.get("episode_count", 0) or 0
+        if last_season is not None and season_number > last_season:
+            continue
+        if last_season is not None and season_number == last_season and last_number:
+            count = min(count, last_number)
+        total += count
+    return total
+
+
+async def _duplicate_history_clusters(db: AsyncSession, user_id: int, window_minutes: int) -> list[list[int]]:
+    """Group a user's watch events that look like the same play logged twice.
+
+    Imports from several providers rarely agree on the exact second, so events
+    for one episode within `window_minutes` of each other are one play.
+    """
+    rows = await db.execute(
+        select(WatchEvent.id, WatchEvent.media_id, WatchEvent.watched_at)
+        .where(WatchEvent.user_id == user_id, WatchEvent.watched_at.isnot(None))
+        .order_by(WatchEvent.media_id, WatchEvent.watched_at)
+    )
+    clusters: list[list[int]] = []
+    current: list[int] = []
+    current_media: int | None = None
+    previous_at = None
+    window = timedelta(minutes=window_minutes)
+
+    for event_id, media_id, watched_at in rows.all():
+        if media_id != current_media or previous_at is None or watched_at - previous_at > window:
+            if len(current) > 1:
+                clusters.append(current)
+            current = [event_id]
+            current_media = media_id
+        else:
+            current.append(event_id)
+        previous_at = watched_at
+
+    if len(current) > 1:
+        clusters.append(current)
+    return clusters
+
+
+@router.get("/duplicates")
+async def duplicate_history_report(
+    window_minutes: int = Query(5, ge=1, le=1440),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Dry run: how many watch events look like the same play logged twice."""
+    clusters = await _duplicate_history_clusters(db, current_user.id, window_minutes)
+    removable = sum(len(c) - 1 for c in clusters)
+
+    titles: list[str] = []
+    if clusters:
+        sample_ids = [c[0] for c in clusters[:5]]
+        rows = await db.execute(
+            select(Media.title, Show.title, Media.season_number, Media.episode_number)
+            .join(WatchEvent, WatchEvent.media_id == Media.id)
+            .outerjoin(Show, Show.id == Media.show_id)
+            .where(WatchEvent.id.in_(sample_ids))
+        )
+        for title, show_title, season, episode in rows.all():
+            label = f"{show_title} S{season:02d}E{episode:02d}" if show_title and season is not None else (title or "")
+            titles.append(label)
+
+    return {
+        "window_minutes": window_minutes,
+        "groups": len(clusters),
+        "removable_events": removable,
+        "sample": titles,
+    }
+
+
+@router.post("/duplicates/cleanup")
+async def cleanup_duplicate_history(
+    window_minutes: int = Query(5, ge=1, le=1440),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete the extra events in each duplicate cluster, keeping the earliest."""
+    clusters = await _duplicate_history_clusters(db, current_user.id, window_minutes)
+    doomed = [event_id for cluster in clusters for event_id in cluster[1:]]
+    if not doomed:
+        return {"status": "ok", "removed": 0, "groups": 0}
+
+    for start in range(0, len(doomed), 500):
+        await db.execute(
+            delete(WatchEvent).where(
+                WatchEvent.id.in_(doomed[start:start + 500]),
+                WatchEvent.user_id == current_user.id,
+            )
+        )
+    await db.commit()
+    return {"status": "ok", "removed": len(doomed), "groups": len(clusters)}
+
+
+# Upper bound on TVDB lookups for one page of progress rows. Above any real
+# page size, so it only ever caps a pathological request.
+_TVDB_PROGRESS_FETCH_LIMIT = 200
+
+
+async def _fill_tvdb_progress_meta(db: AsyncSession, user_id: int, rows: list[dict]) -> None:
+    """Fill TVDB name/poster on the rows whose show has none stored locally.
+
+    Only the page being returned is looked up, and each lookup is behind the
+    shared provider cache, so a page of the same shows costs one round trip per
+    show per day rather than one per view.
+    """
+    pending = [r for r in rows if r.pop("_needs_tvdb_meta", False) and r.get("tvdb_id")]
+    for row in rows:
+        row.pop("_needs_tvdb_meta", None)
+    if not pending:
+        return
+
+    from core import tvdb as tvdb_client
+    from core.enrichment import tvdb_series_meta_cached
+    from routers.shows import get_user_tvdb_key
+
+    api_key = await get_user_tvdb_key(db, user_id)
+    if not api_key:
+        return
+    lang = tvdb_client.tvdb_language(await get_user_metadata_language(db, user_id)) or "eng"
+    semaphore = asyncio.Semaphore(8)
+
+    async def fetch(row: dict) -> None:
+        async with semaphore:
+            try:
+                meta = await tvdb_series_meta_cached(row["tvdb_id"], api_key, lang)
+            except Exception:
+                return
+        if not meta:
+            return
+        if meta.get("name") and not row.get("custom_title"):
+            row["title"] = meta["name"]
+        if meta.get("poster_path"):
+            row["poster_path"] = meta["poster_path"]
+
+    await asyncio.gather(*[fetch(r) for r in pending[:_TVDB_PROGRESS_FETCH_LIMIT]])
+
+
+@router.get("/progress")
+async def get_show_progress(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    sort: str = Query("recent"),
+    status: str = Query("all"),
+    genre: list[str] = Query(default=[]),
+    search: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(60, ge=1, le=200),
+):
+    """Watched progress per show, counted against aired episodes only."""
+    today = (await user_timezone.user_today(db, current_user.id)).isoformat()
+
+    watched_filters = [
+        WatchEvent.user_id == current_user.id,
+        WatchEvent.completed == True,
+        Media.media_type == MediaType.episode,
+        Media.show_id.isnot(None),
+        Media.season_number.isnot(None),
+        Media.season_number != 0,
+        Media.episode_number.isnot(None),
+    ]
+
+    # One row per episode, whatever the play count, plus the runtime used for
+    # the time-watched totals.
+    watched_sq = (
+        select(
+            Media.show_id.label("show_id"),
+            Media.season_number.label("season_number"),
+            Media.episode_number.label("episode_number"),
+            func.max(func.coalesce(Media.runtime, 0)).label("runtime"),
+            func.count(WatchEvent.id).label("plays"),
+        )
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(*watched_filters)
+        .group_by(Media.show_id, Media.season_number, Media.episode_number)
+        .subquery()
+    )
+    watched_rows = (await db.execute(select(watched_sq))).all()
+    if not watched_rows:
+        return {"results": [], "page": page, "total_pages": 1, "total_results": 0, "totals": {"watched_minutes": 0, "replay_minutes": 0, "watched_episodes": 0}}
+
+    watched_positions: dict[int, set[tuple[int, int]]] = {}
+    watched_plays: dict[int, list[tuple[int, int]]] = {}
+    for row in watched_rows:
+        watched_positions.setdefault(row.show_id, set()).add((row.season_number, row.episode_number))
+        watched_plays.setdefault(row.show_id, []).append((row.runtime or 0, row.plays))
+
+    last_watched_result = await db.execute(
+        select(Media.show_id, func.max(WatchEvent.watched_at))
+        .join(WatchEvent, WatchEvent.media_id == Media.id)
+        .where(*watched_filters)
+        .group_by(Media.show_id)
+    )
+    last_watched = {row[0]: row[1] for row in last_watched_result.all()}
+
+    # Local rows only cover what the library holds, so runtimes come from them
+    # but the episode totals come from the show's own season metadata below.
+    local_result = await db.execute(
+        select(Media.show_id, Media.season_number, Media.episode_number, Media.runtime, Media.release_date)
+        .where(
+            Media.media_type == MediaType.episode,
+            Media.show_id.in_(list(watched_positions.keys())),
+            Media.season_number.isnot(None),
+            Media.season_number != 0,
+            Media.episode_number.isnot(None),
+        )
+    )
+    local_aired_seasons: dict[int, set[int]] = {}
+    local_aired_counts: dict[tuple[int, int], int] = {}
+    local_positions: dict[int, set[tuple[int, int]]] = {}
+    runtime_samples: dict[int, list[int]] = {}
+    for show_id, season_number, episode_number, runtime, release_date in local_result.all():
+        if release_date and release_date <= today:
+            local_aired_seasons.setdefault(show_id, set()).add(season_number)
+            key = (show_id, season_number)
+            local_aired_counts[key] = local_aired_counts.get(key, 0) + 1
+            # Real positions, for the per-episode segments the UI draws. They
+            # come from the rows themselves rather than being counted from one,
+            # which a continuously numbered season never matches.
+            local_positions.setdefault(show_id, set()).add((season_number, episode_number))
+        if runtime:
+            runtime_samples.setdefault(show_id, []).append(runtime)
+
+    # --- Remapped seasons/episodes ---
+    # Applying a remap moves the Media rows onto the target show, so a season
+    # the user pulled in from elsewhere reads as entirely unwatched here while
+    # the show page counts it. Fold those episodes back in under the position
+    # they are browsed at, exactly as routers/shows.py does.
+    #
+    # Positions only: watched_plays (which feeds the time totals) is left
+    # alone, so an episode still contributes its runtime once, under the show
+    # whose library actually holds it.
+    remapped_totals: dict[tuple[int, int], int] = {}
+    season_overrides = (await db.execute(
+        select(ShowSeasonOverride).where(
+            ShowSeasonOverride.user_id == current_user.id,
+            ShowSeasonOverride.target_show_id.isnot(None),
+        )
+    )).scalars().all()
+    episode_overrides = (await db.execute(
+        select(ShowEpisodeOverride).where(
+            ShowEpisodeOverride.user_id == current_user.id,
+            ShowEpisodeOverride.target_show_id.isnot(None),
+        )
+    )).scalars().all()
+    if season_overrides or episode_overrides:
+        target_show_ids = {o.target_show_id for o in season_overrides}
+        target_show_ids |= {o.target_show_id for o in episode_overrides}
+        target_rows = (await db.execute(
+            select(Media.id, Media.show_id, Media.season_number, Media.episode_number, Media.release_date)
+            .where(
+                Media.media_type == MediaType.episode,
+                Media.show_id.in_(list(target_show_ids)),
+                Media.season_number.isnot(None),
+                Media.episode_number.isnot(None),
+            )
+        )).all()
+        target_watched: set[int] = set()
+        if target_rows:
+            target_watched = {
+                row[0] for row in (await db.execute(
+                    select(WatchEvent.media_id).where(
+                        WatchEvent.user_id == current_user.id,
+                        WatchEvent.completed == True,
+                        WatchEvent.media_id.in_([r.id for r in target_rows]),
+                    )
+                )).all()
+            }
+
+        def _fold_in(source_show_id: int, position: tuple[int, int], row) -> None:
+            local_positions.setdefault(source_show_id, set()).add(position)
+            if row.release_date and row.release_date <= today:
+                local_aired_seasons.setdefault(source_show_id, set()).add(position[0])
+                key = (source_show_id, position[0])
+                local_aired_counts[key] = local_aired_counts.get(key, 0) + 1
+            remapped_totals[(source_show_id, position[0])] = (
+                remapped_totals.get((source_show_id, position[0]), 0) + 1
+            )
+            if row.id in target_watched:
+                watched_positions.setdefault(source_show_id, set()).add(position)
+
+        for override in season_overrides:
+            for row in target_rows:
+                if row.show_id != override.target_show_id or row.season_number != override.target_season_number:
+                    continue
+                _fold_in(
+                    override.source_show_id,
+                    (override.source_season_number, row.episode_number),
+                    row,
+                )
+        for override in episode_overrides:
+            for row in target_rows:
+                if (
+                    row.show_id != override.target_show_id
+                    or row.season_number != override.target_season_number
+                    or row.episode_number != override.target_episode_number
+                ):
+                    continue
+                _fold_in(
+                    override.source_show_id,
+                    (override.source_season_number, override.source_episode_number),
+                    row,
+                )
+
+    hidden_show_ids = await _hidden_next_up_show_ids(db, current_user.id)
+    settings_q = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )
+    viewer_settings = settings_q.scalar_one_or_none()
+    _prefs = (viewer_settings.preferences or {}) if viewer_settings else {}
+    prefers_tvdb = (
+        _prefs.get("primary_metadata_source") == "tvdb"
+        or (viewer_settings.default_episode_order if viewer_settings else None) == "tvdb"
+    )
+    shows_result = await db.execute(
+        select(Show).where(Show.id.in_([sid for sid in watched_positions if sid not in hidden_show_ids]))
+    )
+
+    results = []
+    for show in shows_result.scalars().all():
+        tvdb_meta = (show.tvdb_data or {}) if prefers_tvdb else {}
+        watched_pos = watched_positions.get(show.id, set())
+
+        # Count every episode of a season that has started, from the show's own
+        # metadata — the library often holds only part of a season, and counting
+        # local rows made the denominator smaller than the season really is.
+        seasons_meta = (show.tmdb_data or {}).get("seasons", [])
+        # Some shows carry no season air dates at all; for those, fall back to
+        # the show's own first air date so a dateless season still counts.
+        any_season_dated = any((m.get("air_date") or "").strip() for m in seasons_meta)
+        show_started = bool((show.first_air_date or "").strip() and (show.first_air_date or "") <= today)
+        aired_seasons = local_aired_seasons.get(show.id, set())
+        # TMDB's own marker for how far a show has actually got. The estimates
+        # below only bound a season by wall-clock time, so without this a
+        # hiatus or an announced-but-unstarted season counts episodes that
+        # haven't aired.
+        last_ep = (show.tmdb_data or {}).get("last_episode_to_air") or {}
+        last_sn = last_ep.get("season_number")
+        last_en = last_ep.get("episode_number")
+
+        # Counted per season, never by inventing episode numbers: a catalogue is
+        # free to number a season 62-77 rather than 1-16, and positions built by
+        # counting from one then miss every real episode.
+        total = 0
+        watched = 0
+        watched_by_season: dict[int, int] = {}
+        for season_number, _episode_number in watched_pos:
+            watched_by_season[season_number] = watched_by_season.get(season_number, 0) + 1
+
+        for meta in seasons_meta:
+            season_number = meta.get("season_number")
+            air_date = (meta.get("air_date") or "").strip()
+            if not season_number or season_number == 0:
+                continue
+            if last_sn is not None and season_number > last_sn:
+                continue
+            if air_date:
+                started = air_date <= today
+            else:
+                started = season_number in aired_seasons or (not any_season_dated and show_started)
+            if not started:
+                continue
+
+            episode_count = meta.get("episode_count") or 0
+            # Only episodes that have aired count. The library knows the real
+            # dates for episodes it holds; for the rest, a weekly cadence from
+            # the season's air date is the closest estimate available without
+            # fetching every season from TMDB.
+            aired = local_aired_counts.get((show.id, season_number), 0)
+            if air_date:
+                try:
+                    weeks = (date.fromisoformat(today) - date.fromisoformat(air_date)).days // 7
+                    aired = max(aired, weeks + 1)
+                except ValueError:
+                    aired = max(aired, episode_count)
+            else:
+                aired = max(aired, episode_count)
+            aired = min(aired, episode_count) if episode_count else aired
+            if last_sn is not None and season_number == last_sn and last_en:
+                aired = min(aired, last_en)
+
+            total += aired
+            # A library can hold the same episodes twice under two numbering
+            # schemes, so a season never counts more watched than it has aired.
+            watched += min(watched_by_season.get(season_number, 0), aired)
+
+        # A season pulled in by a remap is absent from this show's own provider
+        # metadata - that absence is why it was remapped - so it has to be
+        # counted from the rows themselves or it lands in watched without ever
+        # appearing in the total.
+        meta_season_numbers = {m.get("season_number") for m in seasons_meta}
+        for (remap_show_id, remap_season), remap_count in remapped_totals.items():
+            if remap_show_id != show.id or remap_season in meta_season_numbers or not remap_season:
+                continue
+            total += remap_count
+            watched += min(watched_by_season.get(remap_season, 0), remap_count)
+
+        if not seasons_meta:
+            total = len(watched_pos)
+            watched = len(watched_pos)
+        watched_at = last_watched.get(show.id)
+
+        # Episodes with no stored runtime borrow this show's average, so a few
+        # gaps don't silently drop time from the total.
+        plays = watched_plays.get(show.id, [])
+        samples = [r for r, _ in plays if r] or (runtime_samples.get(show.id) or [])
+        average_runtime = round(sum(samples) / len(samples)) if samples else 0
+        # Episode time counts each episode once; replays are reported separately
+        # so imports that logged the same play twice can't inflate the headline.
+        minutes = sum(runtime or average_runtime for runtime, _ in plays)
+        replay_minutes = sum((runtime or average_runtime) * max(0, count - 1) for runtime, count in plays)
+
+        results.append({
+            "id": show.id,
+            "tmdb_id": show.tmdb_id,
+            "tvdb_id": show.tvdb_id,
+            "uri_id": show.uri_id,
+            "type": "series",
+            # A rename the viewer typed outranks either catalogue; failing that
+            # the title follows the viewer's provider, the same as every other
+            # card. Applied here rather than after paging so that sorting and
+            # the search box see the name actually shown.
+            "title": show.custom_title or tvdb_meta.get("name") or show.title,
+            "custom_title": show.custom_title,
+            # Artwork follows the viewer's provider too; the row carries both,
+            # so this needs no extra fetch.
+            "poster_path": tvdb_meta.get("poster_path") or show.poster_path,
+            # Shows synced before names/artwork were stored have neither, and
+            # are filled from TVDB after paging - one page of lookups rather
+            # than one per show in the whole library.
+            "_needs_tvdb_meta": bool(
+                prefers_tvdb and show.tvdb_id and not (tvdb_meta.get("name") and tvdb_meta.get("poster_path"))
+            ),
+            "status": show.status,
+            "genres": [g["name"] if isinstance(g, dict) else g for g in (show.tmdb_data or {}).get("genres", [])],
+            "watched_episodes": watched,
+            "total_episodes": total,
+            "remaining_episodes": max(0, total - watched),
+            "watch_pct": min(100, int((watched / total) * 100)) if total else 0,
+            "watched_minutes": minutes,
+            "replay_minutes": replay_minutes,
+            "last_watched_at": watched_at.isoformat() if watched_at else None,
+            # Sorted watched positions let the UI draw one segment per episode.
+            "episodes": [
+                {"season": season, "episode": episode, "watched": (season, episode) in watched_pos}
+                for season, episode in sorted(local_positions.get(show.id, set()) | watched_pos)
+            ],
+        })
+
+    lang = await get_user_metadata_language(db, current_user.id)
+    if lang:
+        from core.translations import get_show_translations, apply_show_translations
+
+        translations = await get_show_translations(db, [r["id"] for r in results], lang)
+        apply_show_translations(results, translations)
+
+    if status == "in_progress":
+        results = [r for r in results if 0 < r["watch_pct"] < 100]
+    elif status == "completed":
+        results = [r for r in results if r["watch_pct"] >= 100]
+    elif status == "unfinished":
+        results = [r for r in results if r["watch_pct"] < 100]
+    if genre:
+        wanted = {g.lower() for g in genre}
+        results = [r for r in results if wanted & {g.lower() for g in r["genres"]}]
+    if search:
+        needle = search.strip().lower()
+        results = [r for r in results if needle in (r["title"] or "").lower()]
+
+    if sort == "title":
+        results.sort(key=lambda r: (r["title"] or "").lower())
+    elif sort == "progress":
+        results.sort(key=lambda r: r["watch_pct"], reverse=True)
+    elif sort == "remaining":
+        results.sort(key=lambda r: r["remaining_episodes"])
+    elif sort == "time":
+        results.sort(key=lambda r: r["watched_minutes"], reverse=True)
+    else:
+        results.sort(key=lambda r: (r["last_watched_at"] or ""), reverse=True)
+
+    totals = {
+        "watched_minutes": sum(r["watched_minutes"] for r in results),
+        "replay_minutes": sum(r["replay_minutes"] for r in results),
+        "watched_episodes": sum(r["watched_episodes"] for r in results),
+    }
+    total_results = len(results)
+    total_pages = max(1, (total_results + page_size - 1) // page_size)
+    offset = (page - 1) * page_size
+
+    page_rows = results[offset:offset + page_size]
+    await _fill_tvdb_progress_meta(db, current_user.id, page_rows)
+
+    return {
+        "results": page_rows,
+        "page": page,
+        "total_pages": total_pages,
+        "total_results": total_results,
+        "totals": totals,
+    }
+
+
+async def _hidden_next_up_show_ids(db: AsyncSession, user_id: int) -> set[int]:
+    """Local Show.id values the user has dropped or blocked, so Next Up can skip them."""
+    from models.blocklist import BlocklistItem
+
+    rows = await db.execute(
+        select(BlocklistItem.uri_id).where(BlocklistItem.user_id == user_id)
+    )
+    tmdb_ids: set[int] = set()
+    tvdb_ids: set[int] = set()
+    for (uri,) in rows.all():
+        try:
+            parsed = MediaURI.parse(uri)
+        except ValueError:
+            continue
+        if parsed.type_prefix != "s":
+            continue
+        if parsed.provider == "tvdb":
+            tvdb_ids.add(int(parsed.id))
+        elif parsed.provider == "tmdb":
+            tmdb_ids.add(int(parsed.id))
+
+    if not tmdb_ids and not tvdb_ids:
+        return set()
+
+    conditions = []
+    if tmdb_ids:
+        conditions.append(Show.tmdb_id.in_(tmdb_ids))
+    if tvdb_ids:
+        conditions.append(Show.tvdb_id.in_(tvdb_ids))
+    show_rows = await db.execute(select(Show.id).where(or_(*conditions)))
+    return {row[0] for row in show_rows.all()}
+
+
+def _compute_next_episode(seasons: list[dict], season: int, episode: int) -> tuple[int, int] | None:
+    """Given a show's TMDB season metadata and the last-watched (season, episode),
+    returns the next (season, episode), or None if the show has no more aired/
+    known episodes after it. Specials (season 0) are never returned."""
+    real_seasons = sorted(
+        (s for s in seasons if s.get("season_number", 0) > 0),
+        key=lambda s: s["season_number"],
+    )
+    current_season = next((s for s in real_seasons if s["season_number"] == season), None)
+    if current_season and episode < current_season.get("episode_count", 0):
+        return season, episode + 1
+    upcoming = next(
+        (s for s in real_seasons if s["season_number"] > season and s.get("episode_count", 0) > 0),
+        None,
+    )
+    if upcoming:
+        return upcoming["season_number"], 1
+    return None
+
+
+def _group_last_watched(
+    rows: list[tuple[int, int, int, datetime | None]],
+) -> tuple[dict[int, tuple[int, int]], dict[int, datetime]]:
+    """Reduce next-up candidate rows (ordered by show, season desc, episode desc)
+    to each show's furthest-watched (season, episode) and its most recent
+    watched_at. watched_at may be NULL (e.g. imported history with no date), so
+    a show with no timestamped watch simply gets no last_watched_at entry."""
+    last_per_show: dict[int, tuple[int, int]] = {}
+    last_watched_at: dict[int, datetime] = {}
+    for show_id, season, episode, watched_at in rows:
+        if season is None or episode is None:
+            # Faulty history entry with an unknown season/episode (e.g. a
+            # pre-fix scrobble that lost season 0) - skip it rather than let
+            # it corrupt this show's position or crash the fallback lookup
+            # below, which assumes season/episode are always ints (#132).
+            continue
+        if show_id not in last_per_show:
+            last_per_show[show_id] = (season, episode)
+        if watched_at and (show_id not in last_watched_at or watched_at > last_watched_at[show_id]):
+            last_watched_at[show_id] = watched_at
+    return last_per_show, last_watched_at
+
+
 FINAL_STATUSES = {"Ended", "Canceled"}
 
 # How stale a show's tmdb_data snapshot may get before Next Up stops trusting it
@@ -710,7 +1245,6 @@ FINAL_STATUSES = {"Ended", "Canceled"}
 # path stays fetch-free; if the sweep is down, each show degrades to one live
 # fetch per ~26h instead of the snapshot going permanently stale (#287).
 _NEXT_UP_SNAPSHOT_MAX_AGE = timedelta(hours=26)
-
 
 def _next_up_needs_live_fetch(show, today: date, now: datetime) -> bool:
     """Whether get_next_up's missing-episode fallback must ask TMDB about this
@@ -759,80 +1293,6 @@ def _next_up_needs_live_fetch(show, today: date, now: datetime) -> bool:
         refreshed = refreshed.replace(tzinfo=timezone.utc)
     return now - refreshed > _NEXT_UP_SNAPSHOT_MAX_AGE
 
-
-def _compute_next_episode(seasons: list[dict], season: int, episode: int) -> tuple[int, int] | None:
-    """Given a show's TMDB season metadata and the last-watched (season, episode),
-    returns the next (season, episode), or None if the show has no more aired/
-    known episodes after it. Specials (season 0) are never returned."""
-    real_seasons = sorted(
-        (s for s in seasons if s.get("season_number", 0) > 0),
-        key=lambda s: s["season_number"],
-    )
-    current_season = next((s for s in real_seasons if s["season_number"] == season), None)
-    if current_season and episode < current_season.get("episode_count", 0):
-        return season, episode + 1
-    upcoming = next(
-        (s for s in real_seasons if s["season_number"] > season and s.get("episode_count", 0) > 0),
-        None,
-    )
-    if upcoming:
-        return upcoming["season_number"], 1
-    return None
-
-
-def _group_last_watched(
-    rows: list[tuple[int, int, int, datetime | None]],
-) -> tuple[dict[int, tuple[int, int]], dict[int, datetime]]:
-    """Reduce next-up candidate rows (ordered by show, season desc, episode desc)
-    to each show's furthest-watched (season, episode) and its most recent
-    watched_at. watched_at may be NULL (e.g. imported history with no date), so
-    a show with no timestamped watch simply gets no last_watched_at entry."""
-    last_per_show: dict[int, tuple[int, int]] = {}
-    last_watched_at: dict[int, datetime] = {}
-    for show_id, season, episode, watched_at in rows:
-        if season is None or episode is None:
-            # Faulty history entry with an unknown season/episode (e.g. a
-            # pre-fix scrobble that lost season 0) - skip it rather than let
-            # it corrupt this show's position or crash the fallback lookup
-            # below, which assumes season/episode are always ints.
-            continue
-        if show_id not in last_per_show:
-            last_per_show[show_id] = (season, episode)
-        if watched_at and (show_id not in last_watched_at or watched_at > last_watched_at[show_id]):
-            last_watched_at[show_id] = watched_at
-    return last_per_show, last_watched_at
-
-
-def _has_aired(release_date: str | None, today: date) -> bool:
-    """True if release_date (ISO 8601, e.g. from TMDB air_date) is on or before
-    today, or unknown. ISO 8601 strings sort lexicographically the same as their
-    dates, so a plain string comparison is safe here.
-
-    Used for episodes already confirmed to exist (they're in a season's own
-    episode list, e.g. the bulk mark-season/show-watched loops) - there, an
-    unknown date is a metadata gap, not a sign the episode isn't real yet, so
-    it's treated as aired rather than hidden. See _has_confirmed_air_date for
-    the opposite case."""
-    return not release_date or release_date <= today.isoformat()
-
-
-def _has_confirmed_air_date(release_date: str | None, today: date) -> bool:
-    """True only if release_date is set AND on or before today.
-
-    Used for Next Up specifically (issue #111): the suggested "next" episode
-    is often a placeholder TMDB has pre-created for a renewed show before an
-    air date is announced. Unlike _has_aired's callers, there's no other
-    confirmation this episode actually exists yet, so an unknown date must
-    NOT be treated as "aired" here - that would suggest watching something
-    that may not even be out."""
-    return bool(release_date) and release_date <= today.isoformat()
-
-
-class _NextUpEpisodeNotOnTmdb(Exception):
-    """Internal signal to roll back a speculative next-up episode row when TMDB
-    doesn't actually have it — not a real error, never raised past get_next_up."""
-
-
 def _remaining_episode_stats(
     season_ep_counts: dict[int, int],
     watched_per_season: dict[int, int],
@@ -860,12 +1320,12 @@ def _remaining_episode_stats(
     remaining_runtime = int(round(episodes_left * float(avg_runtime))) if avg_runtime else None
     return {"episodes_left": episodes_left, "remaining_runtime": remaining_runtime}
 
-
 async def _next_up_remaining_stats(
     db: AsyncSession,
     user_id: int,
     next_up_media: list[Media],
     active_rewatch_by_show: dict[int, ShowRewatch],
+    today: date,
 ) -> dict[int, dict]:
     """Batched per-show remaining-episode estimates for the Next Up items (#170).
 
@@ -986,7 +1446,7 @@ async def _next_up_remaining_stats(
 
     stats: dict[int, dict] = {}
     for sid, show in shows_by_id.items():
-        season_counts = capped_season_episode_counts(show, last_ep_by_show.get(sid))
+        season_counts = capped_season_episode_counts(show, last_ep_by_show.get(sid), today)
         avg_runtime = avg_by_show.get(sid)
         if not avg_runtime:
             run_times = (show.tmdb_data or {}).get("episode_run_time") or []
@@ -998,6 +1458,25 @@ async def _next_up_remaining_stats(
     return stats
 
 
+def _has_confirmed_air_date(release_date: str | None, today: date) -> bool:
+    """True only if release_date is set AND on or before today.
+
+    Used for Next Up specifically (issue #111): the suggested "next" episode
+    is often a placeholder TMDB has pre-created for a renewed show before an
+    air date is announced. Unlike _has_aired's callers, there's no other
+    confirmation this episode actually exists yet, so an unknown date must
+    NOT be treated as "aired" here - that would suggest watching something
+    that may not even be out."""
+    return bool(release_date) and release_date <= today.isoformat()
+
+
+def _has_aired(release_date: str | None, today: date) -> bool:
+    """True if release_date (ISO 8601, e.g. from TMDB air_date) is on or before
+    today, or unknown. ISO 8601 strings sort lexicographically the same as their
+    dates, so a plain string comparison is safe here."""
+    return not release_date or release_date <= today.isoformat()
+
+
 @router.get("/next-up")
 async def get_next_up(
     db: AsyncSession = Depends(get_db),
@@ -1006,62 +1485,23 @@ async def get_next_up(
     include_hidden: bool = Query(False),
 ):
     """Next unwatched episode for each show the user is actively watching."""
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    dropped_show_ids = set(settings.dropped_shows or []) if settings else set()
-
-    # Shows the user is mid-rewatch on read their Next Up position from that
-    # rewatch's progress instead of full history - excluded from the Step 1
-    # history query below and handled separately in Step 1b, so a show
-    # already fully watched (the common rewatch case) still surfaces here.
-    active_rewatches_result = await db.execute(
-        select(ShowRewatch).where(ShowRewatch.user_id == current_user.id)
-    )
-    active_rewatches = active_rewatches_result.scalars().all()
-    active_rewatch_show_ids = {r.show_id for r in active_rewatches}
-    active_rewatch_by_show = {r.show_id: r for r in active_rewatches}
-
     # Step 1: Find the last watched / significantly-viewed episode per show,
     # and the most recent watch timestamp per show for final sorting.
-    watch_filters = [
-        WatchEvent.user_id == current_user.id,
-        Media.media_type == MediaType.episode,
-        Media.show_id.isnot(None),
-        or_(WatchEvent.completed == True, WatchEvent.progress_percent >= 0.5),
-    ]
-    if active_rewatch_show_ids:
-        watch_filters.append(Media.show_id.notin_(active_rewatch_show_ids))
     result = await db.execute(
         select(Media.show_id, Media.season_number, Media.episode_number, WatchEvent.watched_at)
         .join(WatchEvent, WatchEvent.media_id == Media.id)
-        .where(*watch_filters)
+        .where(
+            WatchEvent.user_id == current_user.id,
+            Media.media_type == MediaType.episode,
+            Media.show_id.isnot(None),
+            or_(WatchEvent.completed == True, WatchEvent.progress_percent >= 0.5),
+        )
         .order_by(Media.show_id, desc(Media.season_number), desc(Media.episode_number))
     )
     rows = result.all()
 
     # Keep only the furthest episode per show, and the most recent watched_at per show.
     last_per_show, last_watched_at = _group_last_watched(rows)
-
-    # Step 1b: Rewatching shows - candidate position comes from that rewatch's
-    # progress (furthest re-watched episode so far), defaulting to "before
-    # S1E1" so a freshly-started rewatch with no progress yet still surfaces
-    # the first episode instead of being skipped like a never-watched show.
-    if active_rewatch_show_ids:
-        progress_result = await db.execute(
-            select(ShowRewatch.show_id, Media.season_number, Media.episode_number, WatchEvent.watched_at)
-            .select_from(RewatchProgress)
-            .join(ShowRewatch, ShowRewatch.id == RewatchProgress.rewatch_id)
-            .join(Media, Media.id == RewatchProgress.media_id)
-            .join(WatchEvent, WatchEvent.id == RewatchProgress.watch_event_id)
-            .where(ShowRewatch.user_id == current_user.id)
-            .order_by(ShowRewatch.show_id, desc(Media.season_number), desc(Media.episode_number))
-        )
-        progress_last_per_show, progress_last_watched_at = _group_last_watched(progress_result.all())
-        for show_id in active_rewatch_show_ids:
-            last_per_show[show_id] = progress_last_per_show.get(show_id, (1, 0))
-            last_watched_at[show_id] = progress_last_watched_at.get(
-                show_id, active_rewatch_by_show[show_id].started_at
-            )
 
     if not last_per_show:
         return {"next_up": []}
@@ -1105,194 +1545,119 @@ async def get_next_up(
     # once it's actually played. Compute the next episode from the show's TMDB
     # season metadata and create/enrich it on demand instead of requiring it to
     # already exist locally.
-    #
-    # Dropped shows are excluded from this fallback specifically (not from
-    # last_per_show/next_per_show above) - the point of dropping is to stop
-    # paying attention to a show, so it shouldn't cost a live TMDB fetch on
-    # every Next Up load just to compute a candidate nobody will see by
-    # default (#117 follow-up). A dropped show that already has a locally
-    # synced next-episode row still surfaces fine under "Show hidden" below;
-    # only the on-demand computation is skipped for it.
-    missing_show_ids = set(last_per_show) - set(next_per_show) - dropped_show_ids
+    # Resolve the position from the show's own season metadata first — that needs no
+    # network call, so every watched show gets a Next Up slot whether or not the
+    # episode is in the collection. Creating and enriching the row is deferred until
+    # after sorting/limiting so a large library doesn't fan out hundreds of requests.
+    missing_show_ids = set(last_per_show) - set(next_per_show)
+    pending_next: dict[int, tuple[Show, int, int]] = {}
     if missing_show_ids:
-        api_key = await get_user_tmdb_key(db, current_user.id)
-        if check_tmdb_key(api_key):
-            shows_result = await db.execute(select(Show).where(Show.id.in_(missing_show_ids)))
-            shows_by_id = {s.id: s for s in shows_result.scalars().all()}
+        shows_result = await db.execute(select(Show).where(Show.id.in_(missing_show_ids)))
+        for show in shows_result.scalars().all():
+            if not show.tmdb_id:
+                continue
+            season, episode = last_per_show[show.id]
+            next_ep = _compute_next_episode((show.tmdb_data or {}).get("seasons", []), season, episode)
+            if next_ep is None:
+                continue
+            pending_next[show.id] = (show, next_ep[0], next_ep[1])
 
-            # A show with no locally-synced next episode is commonly just a
-            # fully-watched one, so a user with many completed shows can have
-            # hundreds of these on every cold Next Up load - fetched live
-            # per-request, that fan-out was the entire multi-minute cold-load
-            # cost (#294, #307, #332). Only shows whose stored metadata says
-            # something new could exist since it was last written are fetched
-            # (see _next_up_needs_live_fetch); everything else is answered
-            # from the tmdb_data snapshot, which main.py's daily metadata
-            # sweep keeps at most ~a day old - so unlike #287, trusting it
-            # here can't hide a newly-aired episode for good.
-            fetch_today = date.today()
-            fetch_now = datetime.now(timezone.utc)
-            live_fetch_ids = [
-                sid for sid in missing_show_ids
-                if _next_up_needs_live_fetch(shows_by_id.get(sid), fetch_today, fetch_now)
-            ]
-
-            fetched_by_show: dict[int, dict] = {}
-            if live_fetch_ids:
-                _fetch_sem = asyncio.Semaphore(10)
-
-                async def _fetch_show(show_id: int) -> tuple[int, dict | None]:
-                    async with _fetch_sem:
-                        try:
-                            return show_id, await tmdb.get_show(shows_by_id[show_id].tmdb_id, api_key=api_key)
-                        except Exception:
-                            return show_id, None
-
-                # Cap the whole fan-out: if TMDB is slow/down, render Next Up
-                # from the stored snapshots rather than block the home page
-                # (the per-show except above falls back the same way).
-                try:
-                    fetch_results = await asyncio.wait_for(
-                        asyncio.gather(*[_fetch_show(sid) for sid in live_fetch_ids]),
-                        timeout=8.0,
-                    )
-                except (asyncio.TimeoutError, tmdb.TMDBUnavailable):
-                    fetch_results = []
-                fetched_by_show = {sid: data for sid, data in fetch_results if data}
-
-            from routers.shows import apply_show_metadata
-
-            for show_id in missing_show_ids:
-                show = shows_by_id.get(show_id)
-                if not show or not show.tmdb_id:
-                    continue
-                fresh_show_data = fetched_by_show.get(show_id)
-                if fresh_show_data is not None:
-                    # Persist the fresh payload (incl. next_episode_to_air and
-                    # refreshed_at) so this show stops needing a live fetch on
-                    # the next load - committed together with the speculative
-                    # episode rows below. Safe to write: TVDB-sourced
-                    # snapshots are never in live_fetch_ids (#335).
-                    apply_show_metadata(show, fresh_show_data)
-                    seasons = fresh_show_data.get("seasons", [])
-                else:
-                    seasons = (show.tmdb_data or {}).get("seasons", [])
-                season, episode = last_per_show[show_id]
-                next_ep = _compute_next_episode(seasons, season, episode)
-                if next_ep is None:
-                    continue
-                next_season_num, next_episode_num = next_ep
-
-                media = Media(
-                    media_type=MediaType.episode,
-                    title="",  # title is NOT NULL; enrich_media below fills in the
-                    # real one — it now runs after the flush, not before, so this
-                    # placeholder is needed for that first INSERT to succeed.
-                    show_id=show.id,
-                    season_number=next_season_num,
-                    episode_number=next_episode_num,
-                )
-                # Flush inside a savepoint before enriching, not after — gives the
-                # row a real id for enrich_media's own failure logging, without
-                # permanently persisting a phantom episode if the TMDB lookup
-                # below turns out to fail (e.g. unreleased episode, or a
-                # provider numbering mismatch): the savepoint rolls the insert
-                # back on that path instead of ever committing it.
-                #
-                # The episode's real tmdb_id isn't known until enrich_media
-                # resolves it, so it can't go through create_media_safely up
-                # front — flushed explicitly here instead, inside the same
-                # savepoint, so a conflict with a concurrently-created row for
-                # this exact episode is caught right here instead of surfacing
-                # at the batched db.commit() below and crashing the endpoint.
-                try:
-                    async with db.begin_nested():
-                        db.add(media)
-                        await db.flush()
-                        from routers.webhooks import _resolve_tvdb_fallback
-
-                        tvdb_id, tvdb_api_key, tvdb_lang = await _resolve_tvdb_fallback(db, show, current_user.id)
-                        await enrich_media(
-                            media, api_key=api_key, series_tmdb_id=show.tmdb_id,
-                            tvdb_id=tvdb_id, tvdb_api_key=tvdb_api_key, tvdb_lang=tvdb_lang,
-                        )
-                        if not media.tmdb_id:
-                            raise _NextUpEpisodeNotOnTmdb()
-                        resolved_tmdb_id = media.tmdb_id
-                        await db.flush()
-                except _NextUpEpisodeNotOnTmdb:
-                    continue
-                except IntegrityError:
-                    existing_result = await db.execute(
-                        select(Media)
-                        .where(Media.tmdb_id == resolved_tmdb_id, Media.media_type == MediaType.episode)
-                        .order_by(Media.id)
-                    )
-                    media = existing_result.scalars().first()
-                    if not media:
-                        continue
-                media.show = show
-                next_per_show[show_id] = media
-            await db.commit()
-
-    if not next_per_show:
+    if not next_per_show and not pending_next:
         return {"next_up": []}
 
-    # Remove episodes the user has already (re)watched. For a rewatching show
-    # this must check that rewatch's own progress, not full history - the
-    # candidate episode is very likely already in history from before the
-    # rewatch started, which shouldn't hide it again.
-    non_rewatch_ids = [m.id for m in next_per_show.values() if m.show_id not in active_rewatch_show_ids]
-    rewatch_ids = [m.id for m in next_per_show.values() if m.show_id in active_rewatch_show_ids]
-
+    # Remove episodes the user has already completed
     completed_ids: set[int] = set()
-    if non_rewatch_ids:
+    if next_per_show:
         completed_result = await db.execute(
             select(WatchEvent.media_id)
             .where(
                 WatchEvent.user_id == current_user.id,
                 WatchEvent.completed == True,
-                WatchEvent.media_id.in_(non_rewatch_ids),
+                WatchEvent.media_id.in_([m.id for m in next_per_show.values()]),
             )
         )
         completed_ids = {row[0] for row in completed_result.all()}
-    if rewatch_ids:
-        rewatch_completed_result = await db.execute(
-            select(RewatchProgress.media_id)
-            .join(ShowRewatch, ShowRewatch.id == RewatchProgress.rewatch_id)
-            .where(
-                ShowRewatch.user_id == current_user.id,
-                RewatchProgress.media_id.in_(rewatch_ids),
-            )
-        )
-        completed_ids |= {row[0] for row in rewatch_completed_result.all()}
 
-    hidden_set = set(settings.next_up_hidden_shows or []) if settings else set()
+    # Dropped and blocked shows live in blocklist_items now (the old
+    # next_up_hidden_shows column was migrated away), keyed by uri_id.
+    hidden_set = await _hidden_next_up_show_ids(db, current_user.id)
 
-    today = date.today()
-    next_up = [
-        m for m in next_per_show.values()
-        if m.id not in completed_ids
-        and (include_hidden or (m.show_id not in hidden_set and m.show_id not in dropped_show_ids))
-        # Don't surface an episode that hasn't aired yet — the immediately-next
-        # episode for the show, not a later one, so we simply show nothing for
-        # this show until it airs rather than skipping ahead. An episode with
-        # no air date at all (a renewal placeholder TMDB hasn't dated yet) is
-        # treated the same as "not aired" here, not "assume it's fine" (#111).
-        and _has_confirmed_air_date(m.release_date, today)
+    def _visible(show_id: int) -> bool:
+        return include_hidden or show_id not in hidden_set
+
+    # Rank real rows and not-yet-materialised ones together by recency of viewing.
+    ranked_show_ids = [
+        show_id for show_id in (set(next_per_show) | set(pending_next))
+        if _visible(show_id)
+        and not (show_id in next_per_show and next_per_show[show_id].id in completed_ids)
     ]
-    next_up.sort(key=lambda m: last_watched_at.get(m.show_id) or datetime.min, reverse=True)
+    ranked_show_ids.sort(key=lambda sid: last_watched_at.get(sid) or datetime.min, reverse=True)
     if limit is not None:
-        next_up = next_up[:limit]
+        ranked_show_ids = ranked_show_ids[:limit]
 
+    to_materialise = [sid for sid in ranked_show_ids if sid in pending_next]
+    if to_materialise:
+        api_key = await get_user_tmdb_key(db, current_user.id)
+        if check_tmdb_key(api_key):
+            # Bounded fan-out: an unlimited request on a large library can cover
+            # hundreds of shows, and one-at-a-time enrichment would time out.
+            semaphore = asyncio.Semaphore(8)
+
+            async def _build(show_id: int) -> tuple[int, Media, Show] | None:
+                show, next_season_num, next_episode_num = pending_next[show_id]
+                media = Media(
+                    media_type=MediaType.episode,
+                    show_id=show.id,
+                    season_number=next_season_num,
+                    episode_number=next_episode_num,
+                )
+                async with semaphore:
+                    try:
+                        await enrich_media(media, api_key=api_key, series_tmdb_id=show.tmdb_id)
+                    except Exception:
+                        return None
+                if not media.tmdb_id:
+                    return None  # TMDB lookup failed (e.g. unreleased episode) — nothing to show yet
+                return show_id, media, show
+
+            results = await asyncio.gather(*[_build(sid) for sid in to_materialise])
+            created: dict[int, Media] = {}
+            for result in results:
+                if not result:
+                    continue
+                show_id, media, show = result
+                media.show = show
+                db.add(media)
+                created[show_id] = media
+            if created:
+                await db.flush()
+                next_per_show.update(created)
+                await db.commit()
+
+    next_up = [next_per_show[sid] for sid in ranked_show_ids if sid in next_per_show]
+
+    # Drop episodes that haven't aired yet — "next up" is what you can watch now,
+    # not a countdown. Episodes with no usable air date are dropped too: an unknown
+    # date most often means an unreleased placeholder episode, not a watchable one.
+    # Dated in the user's own timezone: an episode that aired "today" in Sydney
+    # is watchable there hours before UTC agrees.
+    today = await user_timezone.user_today(db, current_user.id)
+
+    next_up = [
+        m for m in next_up
+        if _has_confirmed_air_date((m.release_date or "").strip()[:10] or None, today)
+    ]
+
+    active_rewatch_by_show = await get_active_rewatches_for_shows(
+        db, current_user.id, [m.show_id for m in next_up if m.show_id]
+    )
     remaining_stats = await _next_up_remaining_stats(
-        db, current_user.id, next_up, active_rewatch_by_show
+        db, current_user.id, next_up, active_rewatch_by_show, today
     )
 
     items = [_format_media_item(m) for m in next_up]
     for item in items:
         item["next_up_hidden"] = item.get("show_id") in hidden_set
-        item["dropped"] = item.get("show_id") in dropped_show_ids
         show_stats = remaining_stats.get(item.get("show_id"))
         if show_stats:
             item["episodes_left"] = show_stats["episodes_left"]
@@ -1306,57 +1671,6 @@ async def get_next_up(
             apply_media_translations(items, translations)
 
     return {"next_up": items}
-
-
-import schemas
-from core import tmdb
-from core.enrichment import enrich_media, enrich_episode_from_tvdb, tmdb_season_covers, is_unmapped_tvdb_episode, enrich_media_safely
-from datetime import datetime
-from fastapi import HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from sqlalchemy.orm.attributes import flag_modified
-
-
-class NextUpHideRequest(BaseModel):
-    show_id: int
-
-
-@router.post("/next-up/hide")
-async def hide_next_up_show(
-    body: NextUpHideRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if not settings:
-        raise HTTPException(status_code=404, detail="Settings not found")
-    hidden = list(settings.next_up_hidden_shows or [])
-    if body.show_id not in hidden:
-        hidden.append(body.show_id)
-        settings.next_up_hidden_shows = hidden
-        flag_modified(settings, "next_up_hidden_shows")
-        await db.commit()
-    return {"status": "ok"}
-
-
-@router.delete("/next-up/hide")
-async def unhide_next_up_show(
-    show_id: int = Query(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if settings:
-        hidden = list(settings.next_up_hidden_shows or [])
-        if show_id in hidden:
-            hidden.remove(show_id)
-            settings.next_up_hidden_shows = hidden
-            flag_modified(settings, "next_up_hidden_shows")
-            await db.commit()
-    return {"status": "ok"}
 
 
 # Concurrency for the "Refresh from TMDB" fan-out. TMDB's rate limit is ~50
@@ -1466,236 +1780,93 @@ async def refresh_next_up(
     )
 
 
-async def _push_show_dropped_to_providers(db: AsyncSession, settings: UserSettings, tmdb_id: int, *, remove: bool) -> None:
-    """Best-effort push of a show's dropped state to Trakt/MDBList - never
-    raises, mirrors _push_list_item_to_trakt's error-swallowing pattern
-    (routers/lists.py) since a failed provider push shouldn't block the local
-    drop/undrop action itself."""
-    if settings.trakt_push_dropped and settings.trakt_access_token and settings.trakt_client_id:
-        try:
-            from routers.trakt import ensure_valid_trakt_token
-            token = await ensure_valid_trakt_token(db, settings)
-            if remove:
-                await trakt_client.remove_from_hidden(settings.trakt_client_id, token, "dropped", tmdb_id)
-            else:
-                await trakt_client.add_to_hidden(settings.trakt_client_id, token, "dropped", tmdb_id)
-        except Exception as exc:
-            logger.warning("Failed to push dropped show to Trakt (tmdb_id=%s, remove=%s): %s", tmdb_id, remove, exc)
-
-    if settings.mdblist_push_dropped and settings.mdblist_api_key:
-        from core import mdblist as mdblist_client
-        try:
-            if remove:
-                await mdblist_client.remove_dropped(settings.mdblist_api_key, tmdb_id)
-            else:
-                await mdblist_client.push_dropped(settings.mdblist_api_key, tmdb_id, _iso_utc_now())
-        except Exception as exc:
-            logger.warning("Failed to push dropped show to MDBList (tmdb_id=%s, remove=%s): %s", tmdb_id, remove, exc)
+import schemas
+from core import tmdb
+from core.enrichment import enrich_media, enrich_episode_from_tvdb, tmdb_season_covers, is_unmapped_tvdb_episode
+from datetime import datetime
+from fastapi import HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm.attributes import flag_modified
 
 
-def _iso_utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-class DropShowRequest(BaseModel):
+class NextUpHideRequest(BaseModel):
     show_id: int
 
 
-@router.post("/drop/show")
-async def drop_show(
-    body: DropShowRequest,
+@router.post("/next-up/hide")
+async def hide_next_up_show(
+    body: NextUpHideRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
-    """Drop a show: excluded from Next Up, Calendar, and Discover/
-    recommendations, without touching watch history (#117)."""
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if not settings:
-        raise HTTPException(status_code=404, detail="Settings not found")
-    dropped = list(settings.dropped_shows or [])
-    if body.show_id not in dropped:
-        dropped.append(body.show_id)
-        settings.dropped_shows = dropped
-        flag_modified(settings, "dropped_shows")
-        await db.commit()
+    """Drop a show from Next Up. Stored in blocklist_items as a dropped series."""
+    from models.blocklist import BlocklistItem
 
     show_result = await db.execute(select(Show).where(Show.id == body.show_id))
     show = show_result.scalar_one_or_none()
-    if show and show.tmdb_id:
-        await _push_show_dropped_to_providers(db, settings, show.tmdb_id, remove=False)
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+
+    uri_id = show.uri_id or (
+        f"tmdb:s:{show.tmdb_id}" if show.tmdb_id else f"tvdb:s:{show.tvdb_id}" if show.tvdb_id else None
+    )
+    if not uri_id:
+        raise HTTPException(status_code=400, detail="Show has no provider id to block by")
+
+    existing_result = await db.execute(
+        select(BlocklistItem).where(
+            BlocklistItem.user_id == current_user.id,
+            BlocklistItem.uri_id == uri_id,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        existing.is_dropped = True
+    else:
+        db.add(BlocklistItem(
+            user_id=current_user.id,
+            uri_id=uri_id,
+            media_type=MediaType.series,
+            is_dropped=True,
+        ))
+    await db.commit()
     return {"status": "ok"}
 
 
-@router.delete("/drop/show")
-async def undrop_show(
+@router.delete("/next-up/hide")
+async def unhide_next_up_show(
     show_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if not settings:
-        raise HTTPException(status_code=404, detail="Settings not found")
-    dropped = list(settings.dropped_shows or [])
-    if show_id in dropped:
-        dropped.remove(show_id)
-        settings.dropped_shows = dropped
-        flag_modified(settings, "dropped_shows")
-        await db.commit()
+    """Resume tracking a show in Next Up by clearing its dropped blocklist entry."""
+    from models.blocklist import BlocklistItem
 
     show_result = await db.execute(select(Show).where(Show.id == show_id))
     show = show_result.scalar_one_or_none()
-    if show and show.tmdb_id:
-        await _push_show_dropped_to_providers(db, settings, show.tmdb_id, remove=True)
-    return {"status": "ok"}
+    if not show:
+        return {"status": "ok"}
 
-
-class DropMovieRequest(BaseModel):
-    # dropped_movies stores local Media.id. Callers with a local row send it
-    # directly; a movie opened straight from TMDB (not watched/collected) has
-    # no local row yet, so it sends tmdb_id and we resolve/create one (#330).
-    media_id: int | None = None
-    tmdb_id: int | None = None
-
-
-async def _resolve_movie_media_id(
-    db: AsyncSession, user_id: int, media_id: int | None, tmdb_id: int | None, *, create: bool
-) -> int | None:
-    """Turn a (media_id | tmdb_id) drop/undrop request into a local movie
-    Media.id. create=True materialises the row from TMDB when it doesn't
-    exist yet (drop); create=False just looks (undrop - nothing to remove
-    if there's no row)."""
-    if media_id and media_id > 0:
-        return media_id
-    if not tmdb_id:
-        return None
-    existing = (await db.execute(
-        select(Media)
-        .where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.movie)
-        .order_by(Media.id)
-    )).scalars().first()
-    if existing:
-        return existing.id
-    if not create:
-        return None
-    from routers.media import get_user_tmdb_key
-    api_key = await get_user_tmdb_key(db, user_id)
-    try:
-        data = await tmdb.get_movie(tmdb_id, api_key=api_key)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Movie not found on TMDB: {e}")
-    media, _created = await create_media_safely(db, tmdb_id, MediaType.movie, title=data.get("title") or "")
-    await enrich_media(media, api_key=api_key)
-    await db.flush()
-    return media.id
-
-
-@router.post("/drop/movie")
-async def drop_movie(
-    body: DropMovieRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Drop a movie: excluded from Continue Watching and Discover/
-    recommendations, without touching watch history (#117). Neither Trakt
-    nor MDBList support a dropped-movie concept, so this is local-only.
-
-    The underlying PlaybackProgress row is left alone rather than deleted -
-    get_continue_watching already filters it out by dropped_movies, and
-    keeping it means the resume position survives if the movie is later
-    undropped, instead of being lost."""
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if not settings:
-        raise HTTPException(status_code=404, detail="Settings not found")
-    media_id = await _resolve_movie_media_id(db, current_user.id, body.media_id, body.tmdb_id, create=True)
-    if not media_id:
-        raise HTTPException(status_code=400, detail="media_id or tmdb_id is required")
-    dropped = list(settings.dropped_movies or [])
-    if media_id not in dropped:
-        dropped.append(media_id)
-        settings.dropped_movies = dropped
-        flag_modified(settings, "dropped_movies")
+    candidate_uris = [u for u in (
+        show.uri_id,
+        f"tmdb:s:{show.tmdb_id}" if show.tmdb_id else None,
+        f"tvdb:s:{show.tvdb_id}" if show.tvdb_id else None,
+    ) if u]
+    if candidate_uris:
+        await db.execute(
+            delete(BlocklistItem).where(
+                BlocklistItem.user_id == current_user.id,
+                BlocklistItem.uri_id.in_(candidate_uris),
+                BlocklistItem.is_dropped == True,
+            )
+        )
         await db.commit()
     return {"status": "ok"}
 
 
-@router.delete("/drop/movie")
-async def undrop_movie(
-    media_id: int | None = Query(None),
-    tmdb_id: int | None = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    if settings:
-        resolved = await _resolve_movie_media_id(db, current_user.id, media_id, tmdb_id, create=False)
-        dropped = list(settings.dropped_movies or [])
-        if resolved is not None and resolved in dropped:
-            dropped.remove(resolved)
-            settings.dropped_movies = dropped
-            flag_modified(settings, "dropped_movies")
-            await db.commit()
-    return {"status": "ok"}
-
-
-@router.get("/dropped")
-async def list_dropped(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Every dropped show and movie, for the dedicated Dropped page (#330).
-
-    dropped_shows / dropped_movies store bare local ids with no timestamps;
-    they're returned newest-drop-first (drop appends to the list)."""
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
-    settings = settings_result.scalar_one_or_none()
-    show_ids = list(settings.dropped_shows or []) if settings else []
-    movie_ids = list(settings.dropped_movies or []) if settings else []
-
-    shows_out: list[dict] = []
-    if show_ids:
-        rows = (await db.execute(select(Show).where(Show.id.in_(show_ids)))).scalars().all()
-        by_id = {s.id: s for s in rows}
-        for sid in reversed(show_ids):
-            s = by_id.get(sid)
-            if not s:
-                continue
-            shows_out.append({
-                "id": s.id,
-                "tmdb_id": s.tmdb_id,
-                "tvdb_id": s.tvdb_id,
-                "title": s.title,
-                "poster_path": s.poster_path,
-                "year": (s.first_air_date or "")[:4] or None,
-                "status": s.status,
-            })
-
-    movies_out: list[dict] = []
-    if movie_ids:
-        rows = (await db.execute(
-            select(Media).where(Media.id.in_(movie_ids), Media.media_type == MediaType.movie)
-        )).scalars().all()
-        by_id = {m.id: m for m in rows}
-        for mid in reversed(movie_ids):
-            m = by_id.get(mid)
-            if not m:
-                continue
-            movies_out.append({
-                "id": m.id,
-                "tmdb_id": m.tmdb_id,
-                "title": m.title,
-                "poster_path": m.poster_path,
-                "year": (m.release_date or "")[:4] or None,
-            })
-
-    return {"shows": shows_out, "movies": movies_out}
-
-
 class SeasonWatchRequest(BaseModel):
-    series_tmdb_id: int
+    series_tmdb_id: int | None = None
+    show_uri_id: str | None = None
     series_tvdb_id: int | None = None  # links the show to TVDB on demand, see #101
     season_number: int
     episode_order: str | None = None
@@ -1703,7 +1874,8 @@ class SeasonWatchRequest(BaseModel):
 
 
 class ShowWatchRequest(BaseModel):
-    series_tmdb_id: int
+    series_tmdb_id: int | None = None
+    show_uri_id: str | None = None
     series_tvdb_id: int | None = None  # links the show to TVDB on demand, see #101
     watched_at: datetime | None = None  # omitted = now; explicit null = unknown date
 
@@ -1712,28 +1884,46 @@ class ShowWatchRequest(BaseModel):
 async def mark_as_watched(
     event_in: schemas.WatchEventCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     # 1. Check if Media exists locally
     media = None
     show = None
     api_key = None
+    # The show can arrive as a TMDB id or as a uri ("tvdb:s:123"); episode pages
+    # routed by uri only ever send the latter.
     episode_has_context = (
         event_in.media_type == MediaType.episode
-        and event_in.series_tmdb_id is not None
+        and (event_in.series_tmdb_id is not None or event_in.show_uri_id)
         and event_in.season_number is not None
         and event_in.episode_number is not None
     )
+    series_tmdb_id = event_in.series_tmdb_id
 
     if episode_has_context:
         from routers.media import get_user_tmdb_key
+        from routers.media import resolve_show_by_uri
         from routers.webhooks import _find_or_create_show
 
         api_key = await get_user_tmdb_key(db, current_user.id)
-        try:
-            show = await _find_or_create_show(db, event_in.series_tmdb_id, api_key)
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
+        if series_tmdb_id is not None:
+            try:
+                show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            except Exception as e:
+                raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
+        else:
+            show, series_tmdb_id = await resolve_show_by_uri(
+                db, None, event_in.show_uri_id, user_id=current_user.id
+            )
+            if not show and series_tmdb_id is not None:
+                try:
+                    show = await _find_or_create_show(db, series_tmdb_id, api_key)
+                except Exception as e:
+                    raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
+            if not show:
+                raise HTTPException(status_code=404, detail="Show not found for this episode")
+            if series_tmdb_id is None:
+                series_tmdb_id = show.tmdb_id
 
         # Link this show to TVDB right away if the client already knows the id
         # (e.g. a Next Up/list card carrying show_tvdb_id) — don't require the
@@ -1757,9 +1947,15 @@ async def mark_as_watched(
         media = ep_result.scalars().first()
 
     if not media:
-        result = await db.execute(
-            select(Media).where(Media.tmdb_id == event_in.tmdb_id, Media.media_type == event_in.media_type)
-        )
+        if event_in.media_id:
+            media_query = select(Media).where(Media.id == event_in.media_id)
+        elif event_in.uri_id:
+            media_query = select(Media).where(
+                Media.uri_id == event_in.uri_id, Media.media_type == event_in.media_type
+            )
+        else:
+            media_query = select(Media).where(Media.id.is_(None))  # no identifier given
+        result = await db.execute(media_query)
         media = result.scalars().first()
 
     # A previous manual mark may have created the episode before its parent show
@@ -1770,13 +1966,7 @@ async def mark_as_watched(
         media.season_number = event_in.season_number
         media.episode_number = event_in.episode_number
         if not media.poster_path or media.tmdb_data is None:
-            from routers.webhooks import _resolve_tvdb_fallback
-
-            tvdb_id, tvdb_api_key, tvdb_lang = await _resolve_tvdb_fallback(db, show, current_user.id)
-            media = await enrich_media_safely(
-                db, media, api_key=api_key, series_tmdb_id=event_in.series_tmdb_id,
-                tvdb_id=tvdb_id, tvdb_api_key=tvdb_api_key, tvdb_lang=tvdb_lang,
-            )
+            await enrich_media(media, api_key=api_key, series_tmdb_id=event_in.series_tmdb_id)
 
     # 2. If not, create Media record from TMDB
     if not media:
@@ -1787,31 +1977,44 @@ async def mark_as_watched(
 
         try:
             if event_in.media_type == MediaType.movie:
-                data = await tmdb.get_movie(event_in.tmdb_id, api_key=api_key)
-                media, _created = await create_media_safely(
-                    db, event_in.tmdb_id, event_in.media_type, title=data.get("title")
+                movie_tmdb_id = None
+                if event_in.uri_id:
+                    try:
+                        parsed_uri = MediaURI.parse(event_in.uri_id)
+                        if parsed_uri.provider == "tmdb":
+                            movie_tmdb_id = int(parsed_uri.id)
+                    except ValueError:
+                        pass
+                if movie_tmdb_id is None:
+                    raise HTTPException(status_code=404, detail="Movie not found locally and no TMDB URI provided")
+                data = await tmdb.get_movie(movie_tmdb_id, api_key=api_key)
+                media = Media(
+                    tmdb_id=movie_tmdb_id, uri_id=event_in.uri_id, media_type=event_in.media_type, title=data.get("title")
                 )
+                db.add(media)
+                await db.flush()
                 await enrich_media(media, api_key=api_key)
             elif episode_has_context:
                 ep_data = None
                 try:
                     ep_data = await tmdb.get_episode(
-                        event_in.series_tmdb_id, event_in.season_number, event_in.episode_number, api_key=api_key
-                    )
+                        series_tmdb_id, event_in.season_number, event_in.episode_number, api_key=api_key
+                    ) if series_tmdb_id else None
                 except Exception:
                     ep_data = None
 
                 if ep_data:
-                    media, _created = await create_media_safely(
-                        db,
-                        ep_data.get("id"),
-                        MediaType.episode,
+                    media = Media(
+                        tmdb_id=ep_data.get("id"),
+                        media_type=MediaType.episode,
                         title=ep_data.get("name"),
                         season_number=event_in.season_number,
                         episode_number=event_in.episode_number,
                         show_id=show.id,
                     )
-                    await enrich_media(media, api_key=api_key, series_tmdb_id=event_in.series_tmdb_id)
+                    db.add(media)
+                    await db.flush()
+                    await enrich_media(media, api_key=api_key, series_tmdb_id=series_tmdb_id)
                 elif show.tvdb_id:
                     # Not on TMDB (e.g. TMDB is sparse for this show, see #101)
                     # — fall back to TVDB, which this show is also linked to.
@@ -1821,9 +2024,8 @@ async def mark_as_watched(
                     tvdb_api_key = await get_user_tvdb_key(db, current_user.id)
                     if not tvdb_api_key:
                         raise HTTPException(status_code=404, detail="Episode not found on TMDB, and no TVDB key configured to check TVDB")
-                    tvdb_lang = tvdb_client.tvdb_language(await get_user_metadata_language(db, current_user.id))
                     try:
-                        raw_eps = await tvdb_client.get_series_episodes(show.tvdb_id, event_in.season_number, tvdb_api_key, language=tvdb_lang)
+                        raw_eps = await tvdb_client.get_series_episodes(show.tvdb_id, event_in.season_number, tvdb_api_key)
                     except Exception as e:
                         raise HTTPException(status_code=404, detail=f"Episode not found on TMDB or TVDB: {e}")
                     tvdb_ep = next(
@@ -1838,29 +2040,9 @@ async def mark_as_watched(
                         episode_number=event_in.episode_number,
                         show_id=show.id,
                     )
-                    # tmdb_id isn't known until enrich_episode_from_tvdb resolves it
-                    # (it stores the TVDB episode id there), so this can't go
-                    # through create_media_safely up front - flushed explicitly
-                    # here instead, inside a savepoint, so a conflict with a
-                    # concurrently-created row for this exact episode is caught
-                    # right here instead of poisoning the whole transaction.
-                    try:
-                        async with db.begin_nested():
-                            db.add(media)
-                            await db.flush()
-                            await enrich_episode_from_tvdb(media, tvdb_ep)
-                            resolved_tmdb_id = media.tmdb_id
-                            await db.flush()
-                    except IntegrityError:
-                        existing_result = await db.execute(
-                            select(Media)
-                            .where(Media.tmdb_id == resolved_tmdb_id, Media.media_type == MediaType.episode)
-                            .order_by(Media.id)
-                        )
-                        existing = existing_result.scalars().first()
-                        if not existing:
-                            raise
-                        media = existing
+                    db.add(media)
+                    await db.flush()
+                    await enrich_episode_from_tvdb(media, tvdb_ep)
                 else:
                     raise HTTPException(status_code=404, detail="Episode not found on TMDB")
             else:
@@ -1896,10 +2078,6 @@ async def mark_as_watched(
         )
     await db.commit()
 
-    if event_in.completed:
-        await record_rewatch_progress(db, current_user.id, media.id, event.id)
-        await db.commit()
-
     # 4. Push to media servers if outbound push is enabled
     if event_in.completed:
         await _push_watch_state(
@@ -1910,65 +2088,109 @@ async def mark_as_watched(
     return {"status": "ok", "message": f"Marked {media.title} as watched"}
 
 
+async def _resolve_media_id(
+    db: AsyncSession,
+    media_type: MediaType,
+    tmdb_id: int | None = None,
+    media_id: int | None = None,
+    uri_id: str | None = None,
+    show_uri_id: str | None = None,
+    season_number: int | None = None,
+    episode_number: int | None = None,
+) -> int | None:
+    """Resolve any of the identifier shapes the frontend sends into an internal Media.id."""
+    if media_id:
+        return media_id
+
+    if uri_id:
+        row = await db.execute(
+            select(Media.id).where(Media.uri_id == uri_id, Media.media_type == media_type)
+        )
+        # A library can hold the same episode twice (two numbering schemes), so
+        # take the first match rather than raising on the duplicate.
+        return row.scalars().first()
+
+    if show_uri_id and season_number is not None and episode_number is not None:
+        # Almost no show row carries a uri_id, so match the provider id the uri
+        # names as well — otherwise every uri-routed episode resolves to nothing.
+        show_q = await db.execute(select(Show.id).where(Show.uri_id == show_uri_id))
+        show_id = show_q.scalar_one_or_none()
+        if show_id is None:
+            try:
+                parsed = MediaURI.parse(show_uri_id)
+            except ValueError:
+                return None
+            column = Show.tvdb_id if parsed.provider == "tvdb" else Show.tmdb_id
+            try:
+                provider_id = int(parsed.id)
+            except (TypeError, ValueError):
+                return None
+            show_q = await db.execute(select(Show.id).where(column == provider_id))
+            show_id = show_q.scalars().first()
+        if show_id is None:
+            return None
+        row = await db.execute(
+            select(Media.id).where(
+                Media.show_id == show_id,
+                Media.season_number == season_number,
+                Media.episode_number == episode_number,
+            )
+        )
+        return row.scalar_one_or_none()
+
+    if tmdb_id:
+        row = await db.execute(
+            select(Media.id).where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
+        )
+        return row.scalar_one_or_none()
+
+    return None
+
+
 @router.get("/item-events")
+@router.get("/item/events")
 async def get_item_events(
-    tmdb_id: int = Query(...),
+    tmdb_id: int | None = Query(None),
+    id: int | None = Query(None),
+    uri_id: str | None = Query(None),
+    show_uri_id: str | None = Query(None),
+    season_number: int | None = Query(None),
+    episode_number: int | None = Query(None),
     media_type: MediaType = Query(...),
-    series_tmdb_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_api_key),
 ):
-    """Return all completed watch events for a specific movie or episode,
-    plus whether it currently counts as watched. Full play history is always
-    returned as-is - but for an episode whose show has an active rewatch,
-    "watched" reflects that rewatch's own progress rather than raw history,
-    since a pre-rewatch play shouldn't make an episode look watched again."""
+    """Return all watch events for a specific movie or episode."""
+    media_id = await _resolve_media_id(
+        db, media_type,
+        tmdb_id=tmdb_id, media_id=id, uri_id=uri_id,
+        show_uri_id=show_uri_id, season_number=season_number, episode_number=episode_number,
+    )
+    if media_id is None:
+        return {"events": []}
+
     query = (
-        select(WatchEvent, Media.id)
-        .join(Media, Media.id == WatchEvent.media_id)
+        select(WatchEvent)
         .where(
             WatchEvent.user_id == current_user.id,
-            WatchEvent.completed == True,
-            Media.tmdb_id == tmdb_id,
-            Media.media_type == media_type,
+            WatchEvent.media_id == media_id,
         )
         .order_by(WatchEvent.watched_at.desc().nulls_last(), WatchEvent.id.desc())
     )
     result = await db.execute(query)
-    rows = result.all()
-    events = [row[0] for row in rows]
-    media_id = rows[0][1] if rows else None
-
-    watched = len(events) > 0
-    if media_type == MediaType.episode and series_tmdb_id:
-        show_q = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
-        show = show_q.scalar_one_or_none()
-        if show:
-            active_rewatch = await get_active_rewatch(db, current_user.id, show.id)
-            if active_rewatch:
-                if media_id is None:
-                    media_q = await db.execute(
-                        select(Media.id)
-                        .where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.episode)
-                        .order_by(Media.id)
-                    )
-                    media_id = media_q.scalars().first()
-                watched = False
-                if media_id is not None:
-                    progress_q = await db.execute(
-                        select(RewatchProgress.id).where(
-                            RewatchProgress.rewatch_id == active_rewatch.id,
-                            RewatchProgress.media_id == media_id,
-                        )
-                    )
-                    watched = progress_q.scalar_one_or_none() is not None
-
+    events = result.scalars().all()
     return {
-        "watched": watched,
         "events": [
-            {"id": e.id, "watched_at": e.watched_at.isoformat() if e.watched_at else None}
+            {
+                "id": e.id,
+                "watched_at": e.watched_at.isoformat() if e.watched_at else None,
+                "progress_seconds": e.progress_seconds,
+                "progress_percent": e.progress_percent,
+                "completed": e.completed,
+                "play_count": e.play_count,
+            }
             for e in events
-        ],
+        ]
     }
 
 
@@ -1976,7 +2198,7 @@ async def get_item_events(
 async def delete_single_event(
     event_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a single watch event by its ID."""
     result = await db.execute(
@@ -2014,17 +2236,15 @@ async def delete_single_event(
 @router.delete("")
 async def clear_history(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
-    # Any active rewatch is meaningless once its underlying history is gone -
     # RewatchProgress cascades from WatchEvent deletion already, but the
     # ShowRewatch "currently rewatching" marker itself doesn't depend on any
-    # WatchEvent and would otherwise survive a full clear, stuck at 0
-    # progress forever with nothing left to progress it.
+    # WatchEvent and would otherwise survive a full clear, stuck at 0 watched.
     await db.execute(delete(ShowRewatch).where(ShowRewatch.user_id == current_user.id))
     await db.execute(delete(WatchEvent).where(WatchEvent.user_id == current_user.id))
-    # Continue Watching is sourced from PlaybackProgress, not WatchEvent -
-    # without this, in-progress items kept showing up there after a clear.
+    # Continue Watching is sourced from PlaybackProgress, not WatchEvent - without
+    # this, clearing history leaves every in-progress item sitting on the home page.
     await db.execute(delete(PlaybackProgress).where(PlaybackProgress.user_id == current_user.id))
     await db.commit()
     return {"status": "ok", "message": "Watch history cleared"}
@@ -2034,57 +2254,68 @@ async def clear_history(
 async def unwatch_item(
     tmdb_id: int | None = Query(None),
     media_id: int | None = Query(None, alias="id"),
+    uri_id: str | None = Query(None),
+    show_uri_id: str | None = Query(None),
+    season_number: int | None = Query(None),
+    episode_number: int | None = Query(None),
     media_type: MediaType = Query(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Remove all watch events for a specific item."""
-    if not tmdb_id and not media_id:
-        raise HTTPException(status_code=400, detail="Either tmdb_id or id is required")
-
-    if tmdb_id:
-        media_q = await db.execute(
-            select(Media)
-            .where(Media.tmdb_id == tmdb_id, Media.media_type == media_type)
-            .order_by(Media.id)
-        )
-        media = media_q.scalars().first()
-    else:
-        media_q = await db.execute(
-            select(Media).where(Media.id == media_id, Media.media_type == media_type)
-        )
-        media = media_q.scalar_one_or_none()
-    if not media:
+    resolved_id = await _resolve_media_id(
+        db, media_type,
+        tmdb_id=tmdb_id, media_id=media_id, uri_id=uri_id,
+        show_uri_id=show_uri_id, season_number=season_number, episode_number=episode_number,
+    )
+    if resolved_id is None:
+        if not (tmdb_id or media_id or uri_id or (show_uri_id and season_number is not None and episode_number is not None)):
+            raise HTTPException(status_code=400, detail="A media identifier is required")
         return {"status": "ok", "count": 0}
+
     await db.execute(
         delete(WatchEvent).where(
             WatchEvent.user_id == current_user.id,
-            WatchEvent.media_id == media.id,
+            WatchEvent.media_id == resolved_id,
         )
     )
     await db.commit()
-    await _push_watch_state(db, current_user.id, [media.id], watched=False)
+    await _push_watch_state(db, current_user.id, [resolved_id], watched=False)
     return {"status": "ok"}
+
+
+async def _resolve_show_and_tmdb_id(
+    db: AsyncSession,
+    user_id: int,
+    series_tmdb_id: int | None = None,
+    show_uri_id: str | None = None,
+) -> tuple[Show | None, int | None]:
+    """Thin wrapper over the shared resolver so TVDB uris for shows whose tvdb_id
+    hasn't been backfilled still resolve (via TVDB's TMDB cross-reference)."""
+    from routers.media import resolve_show_by_uri
+
+    return await resolve_show_by_uri(db, series_tmdb_id, show_uri_id, user_id=user_id)
 
 
 @router.post("/season")
 async def mark_season_watched(
     body: SeasonWatchRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Mark all aired episodes of a season as watched, fetching from TMDB if needed."""
-    # 1. Ensure show exists
-    show_q = await db.execute(select(Show).where(Show.tmdb_id == body.series_tmdb_id))
-    show = show_q.scalar_one_or_none()
-    
+    show, tmdb_id_val = await _resolve_show_and_tmdb_id(db, current_user.id, body.series_tmdb_id, body.show_uri_id)
+    if not show and not tmdb_id_val:
+        raise HTTPException(status_code=400, detail="Show URI or TMDB ID required")
+
     api_key = await get_user_tmdb_key(db, current_user.id)
     if not show:
         if not check_tmdb_key(api_key):
             raise HTTPException(status_code=404, detail="Show not found and TMDB key not configured")
-        data = await tmdb.get_show(body.series_tmdb_id, api_key=api_key)
+        data = await tmdb.get_show(tmdb_id_val, api_key=api_key)
         show = Show(
-            tmdb_id=body.series_tmdb_id,
+            tmdb_id=tmdb_id_val,
+            uri_id=f"tmdb:s:{tmdb_id_val}" if tmdb_id_val else None,
             title=data.get("name") or "Unknown",
             poster_path=tmdb.poster_url(data.get("poster_path")),
             backdrop_path=tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
@@ -2093,6 +2324,7 @@ async def mark_season_watched(
             first_air_date=data.get("first_air_date"),
             tmdb_data={
                 "genres": [g["name"] for g in data.get("genres", [])],
+                **tmdb.credits_stinger_fields(data),
                 "seasons": [
                     {
                         "season_number": s["season_number"],
@@ -2104,11 +2336,12 @@ async def mark_season_watched(
         )
         db.add(show)
         await db.flush()
+        await link_show_provider_ids(db, show, external_ids=data.get("external_ids"))
 
-    if body.series_tvdb_id and not show.tvdb_id:
-        show.tvdb_id = body.series_tvdb_id
-        await db.flush()
-        await db.commit()
+    if not show.tvdb_id:
+        await link_show_provider_ids(db, show, tvdb_id=body.series_tvdb_id)
+        if show.tvdb_id:
+            await db.commit()
 
     target_positions: set[tuple[int, int]] | None = None
     canonical_seasons = [body.season_number]
@@ -2116,7 +2349,7 @@ async def mark_season_watched(
     if body.episode_order == "tvdb":
         mapping_result = await db.execute(
             select(EpisodeOrderMapping).where(
-                EpisodeOrderMapping.series_tmdb_id == body.series_tmdb_id,
+                EpisodeOrderMapping.series_tmdb_id == tmdb_id_val,
                 EpisodeOrderMapping.tvdb_season_number == body.season_number,
             )
         )
@@ -2138,9 +2371,8 @@ async def mark_season_watched(
             tvdb_api_key = await get_user_tvdb_key(db, current_user.id)
             if not tvdb_api_key:
                 raise HTTPException(status_code=400, detail="TVDB API key not configured")
-            tvdb_lang = tvdb_client.tvdb_language(await get_user_metadata_language(db, current_user.id))
             try:
-                raw_eps = await tvdb_client.get_series_episodes(show.tvdb_id, body.season_number, tvdb_api_key, language=tvdb_lang)
+                raw_eps = await tvdb_client.get_series_episodes(show.tvdb_id, body.season_number, tvdb_api_key)
             except Exception as e:
                 raise HTTPException(status_code=404, detail=f"TVDB season fetch failed: {e}")
             tvdb_fallback_episodes = [tvdb_client.format_episode(e) for e in raw_eps]
@@ -2152,10 +2384,11 @@ async def mark_season_watched(
             canonical_seasons = sorted({season for season, _ in target_positions})
 
     now = datetime.utcnow()
-    today = now.date()
-    # "Has this episode aired yet" stays tied to the real current date, independent
-    # of what date the user says they watched it. Omitted watched_at retains the
-    # existing API default ("now"); explicit null marks it watched without a known date.
+    today = await user_timezone.user_today(db, current_user.id)
+    # "Has this episode aired yet" stays tied to the real current date in the user's
+    # own timezone, independent of what date the user says they watched it. Stored
+    # timestamps stay naive UTC. Omitted watched_at retains the existing API default
+    # ("now"); explicit null marks it watched without a known date.
     resolved_watched_at = (
         body.watched_at.replace(tzinfo=None) if body.watched_at is not None
         else None if "watched_at" in body.model_fields_set
@@ -2189,41 +2422,25 @@ async def mark_season_watched(
                 season_number=body.season_number,
                 episode_number=tvdb_ep["episode_number"],
             )
-            # tmdb_id isn't known until enrich_episode_from_tvdb resolves it, so
-            # this can't go through create_media_safely up front - flushed
-            # explicitly here instead, inside a savepoint, so a conflict with a
-            # concurrently-created row for this exact episode is caught right
-            # here instead of failing the whole batch's flush later.
             await enrich_episode_from_tvdb(new_ep, tvdb_ep)
-            try:
-                async with db.begin_nested():
-                    db.add(new_ep)
-                    await db.flush()
-            except IntegrityError:
-                existing_result = await db.execute(
-                    select(Media)
-                    .where(Media.tmdb_id == new_ep.tmdb_id, Media.media_type == MediaType.episode)
-                    .order_by(Media.id)
-                )
-                existing = existing_result.scalars().first()
-                if not existing:
-                    raise
-                new_ep = existing
+            db.add(new_ep)
             all_season_episodes.append(new_ep)
     else:
-        try:
-            season_payloads = await asyncio.gather(
-                *(
-                    tmdb.get_season(
-                        body.series_tmdb_id,
-                        canonical_season,
-                        api_key=api_key,
+        season_payloads = []
+        if tmdb_id_val and check_tmdb_key(api_key):
+            try:
+                season_payloads = await asyncio.gather(
+                    *(
+                        tmdb.get_season(
+                            tmdb_id_val,
+                            canonical_season,
+                            api_key=api_key,
+                        )
+                        for canonical_season in canonical_seasons
                     )
-                    for canonical_season in canonical_seasons
                 )
-            )
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"Season not found: {e}")
+            except Exception:
+                season_payloads = []
 
         existing_q = await db.execute(
             select(Media).where(
@@ -2256,11 +2473,10 @@ async def mark_season_watched(
                 if existing:
                     all_season_episodes.append(existing)
                     continue
-                new_ep, _created = await create_media_safely(
-                    db,
-                    ep["id"],
-                    MediaType.episode,
+                new_ep = Media(
                     show_id=show.id,
+                    tmdb_id=ep["id"],
+                    media_type=MediaType.episode,
                     title=ep.get("name") or f"Episode {ep['episode_number']}",
                     season_number=canonical_season,
                     episode_number=ep["episode_number"],
@@ -2268,7 +2484,20 @@ async def mark_season_watched(
                     release_date=air_date_str,
                     tmdb_rating=ep.get("vote_average"),
                 )
+                db.add(new_ep)
                 all_season_episodes.append(new_ep)
+
+    if not all_season_episodes:
+        # Nothing resolvable from TMDB or TVDB — fall back to whatever episodes
+        # of this season already exist locally.
+        existing_local_q = await db.execute(
+            select(Media).where(
+                Media.show_id == show.id,
+                Media.media_type == MediaType.episode,
+                Media.season_number == body.season_number,
+            )
+        )
+        all_season_episodes = list(existing_local_q.scalars().all())
 
     await db.flush() # Get IDs for new episodes
     
@@ -2276,26 +2505,28 @@ async def mark_season_watched(
     if not all_season_episodes:
         return {"status": "ok", "count": 0}
 
-    already_watched = await get_already_watched_for_bulk_mark(
-        db, current_user.id, show, [ep.id for ep in all_season_episodes]
+    already_q = await db.execute(
+        select(WatchEvent.media_id).where(
+            WatchEvent.user_id == current_user.id,
+            WatchEvent.media_id.in_([ep.id for ep in all_season_episodes]),
+            WatchEvent.completed == True
+        )
     )
-
+    already_watched = {r[0] for r in already_q.all()}
+    
     newly_watched = []
-    new_events = []
     for ep in all_season_episodes:
         if ep.id not in already_watched:
-            event = WatchEvent(
+            db.add(WatchEvent(
                 user_id=current_user.id,
                 media_id=ep.id,
                 watched_at=resolved_watched_at,
                 completed=True,
                 play_count=1,
                 progress_percent=1.0,
-            )
-            db.add(event)
-            new_events.append(event)
+            ))
             newly_watched.append(ep.id)
-
+            
     if newly_watched:
         await db.execute(
             delete(PlaybackProgress).where(
@@ -2304,25 +2535,21 @@ async def mark_season_watched(
             )
         )
     await db.commit()
-    if new_events:
-        for event in new_events:
-            await record_rewatch_progress(db, current_user.id, event.media_id, event.id)
-        await db.commit()
     await _push_watch_state(db, current_user.id, newly_watched, watched=True)
     return {"status": "ok", "count": len(newly_watched)}
 
 
 @router.delete("/season")
 async def unwatch_season(
-    series_tmdb_id: int = Query(...),
+    series_tmdb_id: int | None = Query(None),
+    show_uri_id: str | None = Query(None),
     season_number: int = Query(...),
     episode_order: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Remove all watch events for a season."""
-    show_q = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
-    show = show_q.scalar_one_or_none()
+    show, tmdb_id_val = await _resolve_show_and_tmdb_id(db, current_user.id, series_tmdb_id, show_uri_id)
     if not show:
         return {"status": "ok", "count": 0}
 
@@ -2330,10 +2557,10 @@ async def unwatch_season(
         Media.show_id == show.id,
         Media.media_type == MediaType.episode,
     ]
-    if episode_order == "tvdb":
+    if episode_order == "tvdb" and tmdb_id_val:
         mapping_result = await db.execute(
             select(EpisodeOrderMapping).where(
-                EpisodeOrderMapping.series_tmdb_id == series_tmdb_id,
+                EpisodeOrderMapping.series_tmdb_id == tmdb_id_val,
                 EpisodeOrderMapping.tvdb_season_number == season_number,
             )
         )
@@ -2381,20 +2608,21 @@ async def unwatch_season(
 async def mark_show_watched(
     body: ShowWatchRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Mark all aired episodes of all seasons as watched."""
-    # 1. Ensure show exists and get its metadata
-    show_q = await db.execute(select(Show).where(Show.tmdb_id == body.series_tmdb_id))
-    show = show_q.scalar_one_or_none()
-    
+    show, tmdb_id_val = await _resolve_show_and_tmdb_id(db, current_user.id, body.series_tmdb_id, body.show_uri_id)
+    if not show and not tmdb_id_val:
+        raise HTTPException(status_code=400, detail="Show URI or TMDB ID required")
+
     api_key = await get_user_tmdb_key(db, current_user.id)
     if not show:
         if not check_tmdb_key(api_key):
             raise HTTPException(status_code=404, detail="Show not found and TMDB key not configured")
-        data = await tmdb.get_show(body.series_tmdb_id, api_key=api_key)
+        data = await tmdb.get_show(tmdb_id_val, api_key=api_key)
         show = Show(
-            tmdb_id=body.series_tmdb_id,
+            tmdb_id=tmdb_id_val,
+            uri_id=f"tmdb:s:{tmdb_id_val}" if tmdb_id_val else None,
             title=data.get("name") or "Unknown",
             poster_path=tmdb.poster_url(data.get("poster_path")),
             backdrop_path=tmdb.poster_url(data.get("backdrop_path"), size="w1280"),
@@ -2403,6 +2631,7 @@ async def mark_show_watched(
             first_air_date=data.get("first_air_date"),
             tmdb_data={
                 "genres": [g["name"] for g in data.get("genres", [])],
+                **tmdb.credits_stinger_fields(data),
                 "seasons": [
                     {
                         "season_number": s["season_number"],
@@ -2414,105 +2643,141 @@ async def mark_show_watched(
         )
         db.add(show)
         await db.flush()
+        await link_show_provider_ids(db, show, external_ids=data.get("external_ids"))
     else:
-        # We need TMDB data for season/episode counts
-        if not show.tmdb_data or "seasons" not in show.tmdb_data:
-            data = await tmdb.get_show(body.series_tmdb_id, api_key=api_key)
-            show.tmdb_data = {
-                "genres": [g["name"] for g in data.get("genres", [])],
-                "last_episode_to_air": data.get("last_episode_to_air"),
-                "seasons": [
-                    {
-                        "season_number": s["season_number"],
-                        "episode_count": s["episode_count"],
-                        "name": s["name"],
-                    } for s in data.get("seasons", [])
-                ]
-            }
-            await db.flush()
+        if tmdb_id_val and check_tmdb_key(api_key) and (not show.tmdb_data or "seasons" not in show.tmdb_data):
+            try:
+                data = await tmdb.get_show(tmdb_id_val, api_key=api_key)
+                show.tmdb_data = {
+                    "genres": [g["name"] for g in data.get("genres", [])],
+                    **tmdb.credits_stinger_fields(data),
+                    "seasons": [
+                        {
+                            "season_number": s["season_number"],
+                            "episode_count": s["episode_count"],
+                            "name": s["name"],
+                        } for s in data.get("seasons", [])
+                    ]
+                }
+                await db.flush()
+            except Exception:
+                pass
 
-    if body.series_tvdb_id and not show.tvdb_id:
-        show.tvdb_id = body.series_tvdb_id
-        await db.flush()
-        await db.commit()
+    if not show.tvdb_id:
+        await link_show_provider_ids(db, show, tvdb_id=body.series_tvdb_id)
+        if show.tvdb_id:
+            await db.commit()
 
     # 2. For each season, fetch episodes and ensure they exist + mark watched
-    seasons = [s["season_number"] for s in show.tmdb_data["seasons"] if s["season_number"] > 0]
     all_newly_watched_ids = []
-    all_new_events = []
-
     now = datetime.utcnow()
-    today = now.date()
-    # See mark_season_watched: aired-cutoff stays tied to the real current date;
-    # omitted watched_at retains "now", explicit null means unknown watch date.
+    today = await user_timezone.user_today(db, current_user.id)
+    # See mark_season_watched: aired-cutoff stays tied to the real current date in
+    # the user's timezone; omitted watched_at retains "now" (naive UTC), explicit
+    # null means unknown watch date.
     resolved_watched_at = (
         body.watched_at.replace(tzinfo=None) if body.watched_at is not None
         else None if "watched_at" in body.model_fields_set
         else now
     )
 
-    for sn in seasons:
-        try:
-            season_data = await tmdb.get_season(body.series_tmdb_id, sn, api_key=api_key)
-        except Exception: continue # Skip failed seasons
+    if tmdb_id_val and check_tmdb_key(api_key) and show.tmdb_data and "seasons" in show.tmdb_data:
+        seasons = [s["season_number"] for s in show.tmdb_data["seasons"] if s["season_number"] > 0]
+        for sn in seasons:
+            try:
+                season_data = await tmdb.get_season(tmdb_id_val, sn, api_key=api_key)
+            except Exception:
+                continue
 
-        existing_q = await db.execute(
+            existing_q = await db.execute(
+                select(Media).where(
+                    Media.show_id == show.id,
+                    Media.media_type == MediaType.episode,
+                    Media.season_number == sn
+                )
+            )
+            existing_map = {m.episode_number: m for m in existing_q.scalars().all()}
+            
+            season_eps_to_watch = []
+            for ep in season_data.get("episodes", []):
+                air_date_str = ep.get("air_date")
+                if not air_date_str: continue
+                try:
+                    air_date = datetime.strptime(air_date_str, "%Y-%m-%d").date()
+                    if air_date > today: continue
+                except Exception: continue
+                
+                ep_num = ep["episode_number"]
+                if ep_num in existing_map:
+                    season_eps_to_watch.append(existing_map[ep_num])
+                else:
+                    new_ep = Media(
+                        show_id=show.id,
+                        tmdb_id=ep["id"],
+                        media_type=MediaType.episode,
+                        title=ep.get("name") or f"Episode {ep_num}",
+                        season_number=sn,
+                        episode_number=ep_num,
+                        poster_path=tmdb.poster_url(ep.get("still_path"), size="w500"),
+                        release_date=air_date_str,
+                        tmdb_rating=ep.get("vote_average"),
+                    )
+                    db.add(new_ep)
+                    season_eps_to_watch.append(new_ep)
+            
+            await db.flush()
+            
+            if not season_eps_to_watch: continue
+
+            already_q = await db.execute(
+                select(WatchEvent.media_id).where(
+                    WatchEvent.user_id == current_user.id,
+                    WatchEvent.media_id.in_([ep.id for ep in season_eps_to_watch]),
+                    WatchEvent.completed == True
+                )
+            )
+            already_watched = {r[0] for r in already_q.all()}
+            
+            for ep in season_eps_to_watch:
+                if ep.id not in already_watched:
+                    db.add(WatchEvent(
+                        user_id=current_user.id,
+                        media_id=ep.id,
+                        watched_at=resolved_watched_at,
+                        completed=True,
+                        play_count=1,
+                        progress_percent=1.0,
+                    ))
+                    all_newly_watched_ids.append(ep.id)
+    else:
+        # Fallback to local Media episodes for this show
+        local_eps_q = await db.execute(
             select(Media).where(
                 Media.show_id == show.id,
                 Media.media_type == MediaType.episode,
-                Media.season_number == sn
             )
         )
-        existing_map = {m.episode_number: m for m in existing_q.scalars().all()}
-        
-        season_eps_to_watch = []
-        for ep in season_data.get("episodes", []):
-            air_date_str = ep.get("air_date")
-            if not air_date_str: continue
-            try:
-                air_date = datetime.strptime(air_date_str, "%Y-%m-%d").date()
-                if air_date > today: continue
-            except Exception: continue
-            
-            ep_num = ep["episode_number"]
-            if ep_num in existing_map:
-                season_eps_to_watch.append(existing_map[ep_num])
-            else:
-                new_ep, _created = await create_media_safely(
-                    db,
-                    ep["id"],
-                    MediaType.episode,
-                    show_id=show.id,
-                    title=ep.get("name") or f"Episode {ep_num}",
-                    season_number=sn,
-                    episode_number=ep_num,
-                    poster_path=tmdb.poster_url(ep.get("still_path"), size="w500"),
-                    release_date=air_date_str,
-                    tmdb_rating=ep.get("vote_average"),
+        local_eps = list(local_eps_q.scalars().all())
+        if local_eps:
+            already_q = await db.execute(
+                select(WatchEvent.media_id).where(
+                    WatchEvent.user_id == current_user.id,
+                    WatchEvent.media_id.in_([ep.id for ep in local_eps]),
+                    WatchEvent.completed == True
                 )
-                season_eps_to_watch.append(new_ep)
-        
-        await db.flush()
-        
-        if not season_eps_to_watch: continue
-
-        already_watched = await get_already_watched_for_bulk_mark(
-            db, current_user.id, show, [ep.id for ep in season_eps_to_watch]
-        )
-
-        for ep in season_eps_to_watch:
-            if ep.id not in already_watched:
-                event = WatchEvent(
-                    user_id=current_user.id,
-                    media_id=ep.id,
-                    watched_at=resolved_watched_at,
-                    completed=True,
-                    play_count=1,
-                    progress_percent=1.0,
-                )
-                db.add(event)
-                all_new_events.append(event)
-                all_newly_watched_ids.append(ep.id)
+            )
+            already_watched = {r[0] for r in already_q.all()}
+            for ep in local_eps:
+                if ep.id not in already_watched:
+                    db.add(WatchEvent(
+                        user_id=current_user.id,
+                        media_id=ep.id,
+                        watched_at=resolved_watched_at,
+                        completed=True,
+                        play_count=1,
+                        progress_percent=1.0,
+                    ))
+                    all_newly_watched_ids.append(ep.id)
 
     # 3. Seasons TVDB has but TMDB doesn't (see #101) — mirrors step 2 above
     # but sourced from TVDB, only reachable if this show is also linked to a
@@ -2523,10 +2788,9 @@ async def mark_show_watched(
 
         tvdb_api_key = await get_user_tvdb_key(db, current_user.id)
         if tvdb_api_key:
-            tvdb_lang = tvdb_client.tvdb_language(await get_user_metadata_language(db, current_user.id))
             tmdb_season_numbers = {s["season_number"] for s in show.tmdb_data.get("seasons", [])}
             try:
-                tvdb_show_data = tvdb_client.format_series(await tvdb_client.get_series(show.tvdb_id, tvdb_api_key), language=tvdb_lang)
+                tvdb_show_data = tvdb_client.format_series(await tvdb_client.get_series(show.tvdb_id, tvdb_api_key))
             except Exception:
                 tvdb_show_data = None
 
@@ -2537,7 +2801,7 @@ async def mark_show_watched(
                 ]
                 for sn in tvdb_only_seasons:
                     try:
-                        tvdb_eps = [tvdb_client.format_episode(e) for e in await tvdb_client.get_series_episodes(show.tvdb_id, sn, tvdb_api_key, language=tvdb_lang)]
+                        tvdb_eps = [tvdb_client.format_episode(e) for e in await tvdb_client.get_series_episodes(show.tvdb_id, sn, tvdb_api_key)]
                     except Exception:
                         continue
 
@@ -2564,50 +2828,33 @@ async def mark_show_watched(
                                 season_number=sn,
                                 episode_number=ep_num,
                             )
-                            # tmdb_id isn't known until enrich_episode_from_tvdb
-                            # resolves it, so this can't go through
-                            # create_media_safely up front - flushed explicitly
-                            # here instead, inside a savepoint, so a conflict
-                            # with a concurrently-created row for this exact
-                            # episode is caught right here instead of failing
-                            # the whole batch's flush later.
                             await enrich_episode_from_tvdb(new_ep, ep)
-                            try:
-                                async with db.begin_nested():
-                                    db.add(new_ep)
-                                    await db.flush()
-                            except IntegrityError:
-                                existing_result = await db.execute(
-                                    select(Media)
-                                    .where(Media.tmdb_id == new_ep.tmdb_id, Media.media_type == MediaType.episode)
-                                    .order_by(Media.id)
-                                )
-                                existing = existing_result.scalars().first()
-                                if not existing:
-                                    raise
-                                new_ep = existing
+                            db.add(new_ep)
                             season_eps_to_watch.append(new_ep)
 
                     await db.flush()
                     if not season_eps_to_watch:
                         continue
 
-                    already_watched = await get_already_watched_for_bulk_mark(
-                        db, current_user.id, show, [ep.id for ep in season_eps_to_watch]
+                    already_q = await db.execute(
+                        select(WatchEvent.media_id).where(
+                            WatchEvent.user_id == current_user.id,
+                            WatchEvent.media_id.in_([ep.id for ep in season_eps_to_watch]),
+                            WatchEvent.completed == True
+                        )
                     )
+                    already_watched = {r[0] for r in already_q.all()}
 
                     for ep in season_eps_to_watch:
                         if ep.id not in already_watched:
-                            event = WatchEvent(
+                            db.add(WatchEvent(
                                 user_id=current_user.id,
                                 media_id=ep.id,
                                 watched_at=resolved_watched_at,
                                 completed=True,
                                 play_count=1,
                                 progress_percent=1.0,
-                            )
-                            db.add(event)
-                            all_new_events.append(event)
+                            ))
                             all_newly_watched_ids.append(ep.id)
 
     if all_newly_watched_ids:
@@ -2618,23 +2865,19 @@ async def mark_show_watched(
             )
         )
     await db.commit()
-    if all_new_events:
-        for event in all_new_events:
-            await record_rewatch_progress(db, current_user.id, event.media_id, event.id)
-        await db.commit()
     await _push_watch_state(db, current_user.id, all_newly_watched_ids, watched=True)
     return {"status": "ok", "count": len(all_newly_watched_ids)}
 
 
 @router.delete("/show-all")
 async def unwatch_show(
-    series_tmdb_id: int = Query(...),
+    series_tmdb_id: int | None = Query(None),
+    show_uri_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Remove all watch events for all episodes of a show."""
-    show_q = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
-    show = show_q.scalar_one_or_none()
+    show, _ = await _resolve_show_and_tmdb_id(db, current_user.id, series_tmdb_id, show_uri_id)
     if not show:
         return {"status": "ok", "count": 0}
 
@@ -2648,12 +2891,14 @@ async def unwatch_show(
     if not episode_ids:
         return {"status": "ok", "count": 0}
 
-    # Same reasoning as clear_history: an active rewatch for this show is
-    # meaningless once all of its history is gone, and would otherwise
-    # survive stuck at 0 progress. Unwatching a single season (unwatch_season,
-    # above) deliberately doesn't do this - the rewatch may still be
-    # legitimately in progress on the show's other seasons.
-    await db.execute(delete(ShowRewatch).where(ShowRewatch.user_id == current_user.id, ShowRewatch.show_id == show.id))
+    # An active rewatch is a marker over this show's history; unwatching the
+    # show leaves it stuck at zero watched otherwise.
+    await db.execute(
+        delete(ShowRewatch).where(
+            ShowRewatch.user_id == current_user.id,
+            ShowRewatch.show_id == show.id,
+        )
+    )
     result = await db.execute(
         delete(WatchEvent).where(
             WatchEvent.user_id == current_user.id,
@@ -2663,6 +2908,336 @@ async def unwatch_show(
     await db.commit()
     await _push_watch_state(db, current_user.id, episode_ids, watched=False)
     return {"status": "ok", "count": result.rowcount}
+
+
+# ---------------------------------------------------------------------------
+# Manual scrobble session endpoints
+# ---------------------------------------------------------------------------
+
+async def _get_or_create_media_for_session(
+    db: AsyncSession,
+    body: schemas.ManualSessionStart,
+    user_id: int,
+) -> Media:
+    # Prefer direct media_id lookup (used for TVDB-only episodes with no tmdb_id)
+    if body.media_id:
+        result = await db.execute(select(Media).where(Media.id == body.media_id))
+        media = result.scalar_one_or_none()
+        if media:
+            return media
+
+    if body.tmdb_id:
+        result = await db.execute(
+            select(Media).where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
+        )
+        media = result.scalar_one_or_none()
+        if media:
+            return media
+
+    api_key = await get_user_tmdb_key(db, user_id)
+
+    if body.media_type == MediaType.movie:
+        if not body.tmdb_id:
+            raise HTTPException(status_code=400, detail="tmdb_id required for movies")
+        if not check_tmdb_key(api_key):
+            raise HTTPException(status_code=404, detail="Movie not in library and TMDB key not configured")
+        try:
+            data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
+            title = data.get("title") or body.title or "Unknown"
+        except Exception:
+            title = body.title or "Unknown"
+        media = Media(tmdb_id=body.tmdb_id, media_type=body.media_type, title=title)
+        db.add(media)
+        await db.flush()
+        try:
+            await enrich_media(media, api_key=api_key)
+        except Exception:
+            pass
+    else:
+        # Episode: create a minimal row from request data
+        media = Media(
+            tmdb_id=body.tmdb_id,
+            media_type=body.media_type,
+            title=body.title or "Unknown",
+            runtime=body.runtime,
+            season_number=body.season_number,
+            episode_number=body.episode_number,
+        )
+        if body.show_tmdb_id:
+            show_q = await db.execute(select(Show).where(Show.tmdb_id == body.show_tmdb_id))
+            show = show_q.scalar_one_or_none()
+            if show:
+                media.show_id = show.id
+        db.add(media)
+        await db.flush()
+
+    return media
+
+
+@router.post("/session/start")
+async def start_manual_session(
+    body: schemas.ManualSessionStart,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Start a manual scrobble session for any movie or episode."""
+    media = await _get_or_create_media_for_session(db, body, current_user.id)
+
+    if media.runtime is None and body.runtime:
+        media.runtime = body.runtime
+
+    session_key = f"manual-{current_user.id}-{media.id}"
+
+    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
+    session = PlaybackSession(
+        user_id=current_user.id,
+        media_id=media.id,
+        session_key=session_key,
+        source="manual",
+        state="playing",
+        progress_seconds=0,
+        progress_percent=0.0,
+    )
+    db.add(session)
+    await db.commit()
+
+    return {"session_key": session_key, "media_id": media.id, "runtime": media.runtime}
+
+
+@router.patch("/session/{session_key}")
+async def update_manual_session(
+    session_key: str,
+    body: schemas.ManualSessionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Heartbeat / pause / resume for a manual session."""
+    result = await db.execute(
+        select(PlaybackSession).where(
+            PlaybackSession.session_key == session_key,
+            PlaybackSession.user_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    media_q = await db.execute(select(Media).where(Media.id == session.media_id))
+    media = media_q.scalar_one_or_none()
+
+    runtime_seconds = (media.runtime * 60) if (media and media.runtime) else 0
+    progress_pct = (body.progress_seconds / runtime_seconds) if runtime_seconds > 0 else 0.0
+    progress_pct = min(1.0, max(0.0, progress_pct))
+
+    session.progress_seconds = body.progress_seconds
+    session.progress_percent = progress_pct
+    if body.state in ("playing", "paused"):
+        session.state = body.state
+    session.updated_at = datetime.utcnow()
+
+    if 0.05 <= progress_pct < 0.90:
+        prog_q = await db.execute(
+            select(PlaybackProgress).where(
+                PlaybackProgress.user_id == current_user.id,
+                PlaybackProgress.media_id == session.media_id,
+            )
+        )
+        prog = prog_q.scalar_one_or_none()
+        if prog:
+            prog.progress_seconds = body.progress_seconds
+            prog.progress_percent = progress_pct
+        else:
+            db.add(PlaybackProgress(
+                user_id=current_user.id,
+                media_id=session.media_id,
+                progress_seconds=body.progress_seconds,
+                progress_percent=progress_pct,
+            ))
+
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/session/{session_key}")
+async def stop_manual_session(
+    session_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Stop and discard a manual session without marking as watched."""
+    result = await db.execute(
+        select(PlaybackSession).where(
+            PlaybackSession.session_key == session_key,
+            PlaybackSession.user_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    media_id = session.media_id
+    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
+    await db.execute(
+        delete(PlaybackProgress).where(
+            PlaybackProgress.user_id == current_user.id,
+            PlaybackProgress.media_id == media_id,
+        )
+    )
+    await db.commit()
+    return {"status": "ok"}
+
+
+async def auto_complete_manual_sessions(db: AsyncSession) -> None:
+    """Complete any manual sessions where enough time has elapsed since the last heartbeat."""
+    now = datetime.utcnow()
+    result = await db.execute(
+        select(PlaybackSession, Media)
+        .join(Media, Media.id == PlaybackSession.media_id)
+        .where(PlaybackSession.source == "manual", PlaybackSession.state == "playing")
+    )
+    completed: list[tuple[int, int]] = []  # (user_id, media_id)
+    for session, media in result.all():
+        runtime_seconds = (media.runtime or 0) * 60
+        if runtime_seconds <= 0:
+            continue
+        elapsed = session.progress_seconds + (now - session.updated_at).total_seconds()
+        if elapsed < runtime_seconds:
+            continue
+        await db.execute(delete(PlaybackSession).where(PlaybackSession.id == session.id))
+        await db.execute(
+            delete(PlaybackProgress).where(
+                PlaybackProgress.user_id == session.user_id,
+                PlaybackProgress.media_id == session.media_id,
+            )
+        )
+        db.add(WatchEvent(
+            user_id=session.user_id,
+            media_id=session.media_id,
+            watched_at=now,
+            completed=True,
+            play_count=1,
+            progress_percent=1.0,
+        ))
+        completed.append((session.user_id, session.media_id))
+    if completed:
+        await db.commit()
+        for user_id, media_id in completed:
+            await _push_watch_state(db, user_id, [media_id], watched=True)
+
+
+@router.post("/session/{session_key}/complete")
+async def complete_manual_session(
+    session_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mark as fully watched and end the session."""
+    result = await db.execute(
+        select(PlaybackSession).where(
+            PlaybackSession.session_key == session_key,
+            PlaybackSession.user_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    media_id = session.media_id
+    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
+    await db.execute(
+        delete(PlaybackProgress).where(
+            PlaybackProgress.user_id == current_user.id,
+            PlaybackProgress.media_id == media_id,
+        )
+    )
+
+    db.add(WatchEvent(
+        user_id=current_user.id,
+        media_id=media_id,
+        watched_at=datetime.utcnow(),
+        completed=True,
+        play_count=1,
+        progress_percent=1.0,
+    ))
+    await db.commit()
+
+    await _push_watch_state(db, current_user.id, [media_id], watched=True)
+    return {"status": "ok"}
+
+
+@router.get("/rate-prompt")
+async def rate_prompt(
+    media_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
+):
+    """Should the homepage show a "rate this" popup for a just-finished item? (#177)
+
+    Called by the Now Playing poller when a session disappears from the bar.
+    Returns should_prompt=True only when the user opted in for this media type,
+    a completed WatchEvent for it landed within RATE_PROMPT_WINDOW, and they
+    have not already rated it. The media block feeds the popup's poster/title.
+    """
+    none_response = {"should_prompt": False, "media": None}
+
+    media = (await db.execute(
+        select(Media).options(selectinload(Media.show)).where(Media.id == media_id)
+    )).scalar_one_or_none()
+    if media is None or not media.tmdb_id or is_unmapped_tvdb_episode(media):
+        return none_response
+
+    settings_row = (await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )).scalar_one_or_none()
+    if media.media_type == MediaType.movie:
+        opted_in = bool(settings_row and settings_row.rate_prompt_movies)
+    elif media.media_type == MediaType.episode:
+        opted_in = bool(settings_row and settings_row.rate_prompt_episodes)
+    else:
+        opted_in = False
+    if not opted_in:
+        return none_response
+
+    recent_completion = (await db.execute(
+        select(WatchEvent.id).where(
+            WatchEvent.user_id == current_user.id,
+            WatchEvent.media_id == media_id,
+            WatchEvent.completed == True,
+            WatchEvent.watched_at >= datetime.utcnow() - RATE_PROMPT_WINDOW,
+        ).limit(1)
+    )).scalar_one_or_none()
+    if recent_completion is None:
+        return none_response
+
+    # Movie and episode ratings are both stored with season_number NULL
+    # (submit_rating collapses an episode's season to None), so one check covers both.
+    already_rated = (await db.execute(
+        select(Rating.id).where(
+            Rating.media_id == media_id,
+            Rating.user_id == current_user.id,
+            Rating.season_number.is_(None),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if already_rated is not None:
+        return none_response
+
+    show = media.show if media.media_type == MediaType.episode else None
+    # Episodes: the still (media.poster_path) shown landscape in the popup, show
+    # poster as the fallback. Movies: their own poster.
+    poster = media.poster_path or (show.poster_path if show else None)
+    return {
+        "should_prompt": True,
+        "media": {
+            "id": media.id,
+            "tmdb_id": media.tmdb_id,
+            "type": media.media_type.value,
+            "title": media.title,
+            "show_title": show.title if show else None,
+            "season_number": media.season_number,
+            "episode_number": media.episode_number,
+            "poster_path": poster,
+        },
+    }
 
 
 @router.post("/rewatch")
@@ -2716,268 +3291,3 @@ async def cancel_rewatch(
 
 
 # ---------------------------------------------------------------------------
-# Manual scrobble session endpoints
-# ---------------------------------------------------------------------------
-
-async def _get_or_create_media_for_session(
-    db: AsyncSession,
-    body: schemas.ManualSessionStart,
-    user_id: int,
-) -> Media:
-    # Prefer direct media_id lookup (used for TVDB-only episodes with no tmdb_id)
-    if body.media_id:
-        result = await db.execute(select(Media).where(Media.id == body.media_id))
-        media = result.scalar_one_or_none()
-        if media:
-            return media
-
-    if body.tmdb_id:
-        result = await db.execute(
-            select(Media)
-            .where(Media.tmdb_id == body.tmdb_id, Media.media_type == body.media_type)
-            .order_by(Media.id)
-        )
-        media = result.scalars().first()
-        if media:
-            return media
-
-    api_key = await get_user_tmdb_key(db, user_id)
-
-    if body.media_type == MediaType.movie:
-        if not body.tmdb_id:
-            raise HTTPException(status_code=400, detail="tmdb_id required for movies")
-        if not check_tmdb_key(api_key):
-            raise HTTPException(status_code=404, detail="Movie not in library and TMDB key not configured")
-        try:
-            data = await tmdb.get_movie(body.tmdb_id, api_key=api_key)
-            title = data.get("title") or body.title or "Unknown"
-        except Exception:
-            title = body.title or "Unknown"
-        media, _created = await create_media_safely(db, body.tmdb_id, body.media_type, title=title)
-        try:
-            await enrich_media(media, api_key=api_key)
-        except Exception:
-            pass
-    else:
-        # Episode: create a minimal row from request data
-        show_id = None
-        if body.show_tmdb_id:
-            show_q = await db.execute(select(Show).where(Show.tmdb_id == body.show_tmdb_id))
-            show = show_q.scalar_one_or_none()
-            if show:
-                show_id = show.id
-        media, _created = await create_media_safely(
-            db,
-            body.tmdb_id,
-            body.media_type,
-            title=body.title or "Unknown",
-            runtime=body.runtime,
-            season_number=body.season_number,
-            episode_number=body.episode_number,
-            show_id=show_id,
-        )
-        if show_id is not None and media.show_id is None:
-            media.show_id = show_id
-
-    return media
-
-
-@router.post("/session/start")
-async def start_manual_session(
-    body: schemas.ManualSessionStart,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Start a manual scrobble session for any movie or episode."""
-    media = await _get_or_create_media_for_session(db, body, current_user.id)
-
-    if media.runtime is None and body.runtime:
-        media.runtime = body.runtime
-
-    session_key = f"manual-{current_user.id}-{media.id}"
-
-    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
-    session = PlaybackSession(
-        user_id=current_user.id,
-        media_id=media.id,
-        session_key=session_key,
-        source="manual",
-        state="playing",
-        progress_seconds=0,
-        progress_percent=0.0,
-    )
-    db.add(session)
-    await db.commit()
-
-    return {"session_key": session_key, "media_id": media.id, "runtime": media.runtime}
-
-
-@router.patch("/session/{session_key}")
-async def update_manual_session(
-    session_key: str,
-    body: schemas.ManualSessionUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Heartbeat / pause / resume for a manual session."""
-    result = await db.execute(
-        select(PlaybackSession).where(
-            PlaybackSession.session_key == session_key,
-            PlaybackSession.user_id == current_user.id,
-        )
-    )
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    media_q = await db.execute(select(Media).where(Media.id == session.media_id))
-    media = media_q.scalar_one_or_none()
-
-    runtime_seconds = (media.runtime * 60) if (media and media.runtime) else 0
-    progress_pct = (body.progress_seconds / runtime_seconds) if runtime_seconds > 0 else 0.0
-    progress_pct = min(1.0, max(0.0, progress_pct))
-
-    session.progress_seconds = body.progress_seconds
-    session.progress_percent = progress_pct
-    if body.state in ("playing", "paused"):
-        session.state = body.state
-    session.updated_at = datetime.utcnow()
-
-    if 0.05 <= progress_pct < 0.90:
-        prog_q = await db.execute(
-            select(PlaybackProgress).where(
-                PlaybackProgress.user_id == current_user.id,
-                PlaybackProgress.media_id == session.media_id,
-            )
-        )
-        prog = prog_q.scalar_one_or_none()
-        if prog:
-            prog.progress_seconds = body.progress_seconds
-            prog.progress_percent = progress_pct
-        else:
-            db.add(PlaybackProgress(
-                user_id=current_user.id,
-                media_id=session.media_id,
-                progress_seconds=body.progress_seconds,
-                progress_percent=progress_pct,
-            ))
-
-    await db.commit()
-    return {"status": "ok"}
-
-
-@router.delete("/session/{session_key}")
-async def stop_manual_session(
-    session_key: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Stop and discard a manual session without marking as watched."""
-    result = await db.execute(
-        select(PlaybackSession).where(
-            PlaybackSession.session_key == session_key,
-            PlaybackSession.user_id == current_user.id,
-        )
-    )
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    media_id = session.media_id
-    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
-    await db.execute(
-        delete(PlaybackProgress).where(
-            PlaybackProgress.user_id == current_user.id,
-            PlaybackProgress.media_id == media_id,
-        )
-    )
-    await db.commit()
-    return {"status": "ok"}
-
-
-async def auto_complete_manual_sessions(db: AsyncSession) -> None:
-    """Complete any manual sessions where enough time has elapsed since the last heartbeat."""
-    now = datetime.utcnow()
-    result = await db.execute(
-        select(PlaybackSession, Media)
-        .join(Media, Media.id == PlaybackSession.media_id)
-        .where(PlaybackSession.source == "manual", PlaybackSession.state == "playing")
-    )
-    completed: list[tuple[int, int]] = []  # (user_id, media_id)
-    new_events: list[WatchEvent] = []
-    for session, media in result.all():
-        runtime_seconds = (media.runtime or 0) * 60
-        if runtime_seconds <= 0:
-            continue
-        elapsed = session.progress_seconds + (now - session.updated_at).total_seconds()
-        if elapsed < runtime_seconds:
-            continue
-        await db.execute(delete(PlaybackSession).where(PlaybackSession.id == session.id))
-        await db.execute(
-            delete(PlaybackProgress).where(
-                PlaybackProgress.user_id == session.user_id,
-                PlaybackProgress.media_id == session.media_id,
-            )
-        )
-        event = WatchEvent(
-            user_id=session.user_id,
-            media_id=session.media_id,
-            watched_at=now,
-            completed=True,
-            play_count=1,
-            progress_percent=1.0,
-        )
-        db.add(event)
-        new_events.append(event)
-        completed.append((session.user_id, session.media_id))
-    if completed:
-        await db.commit()
-        for event in new_events:
-            await record_rewatch_progress(db, event.user_id, event.media_id, event.id)
-        await db.commit()
-        for user_id, media_id in completed:
-            await _push_watch_state(db, user_id, [media_id], watched=True)
-
-
-@router.post("/session/{session_key}/complete")
-async def complete_manual_session(
-    session_key: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Mark as fully watched and end the session."""
-    result = await db.execute(
-        select(PlaybackSession).where(
-            PlaybackSession.session_key == session_key,
-            PlaybackSession.user_id == current_user.id,
-        )
-    )
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    media_id = session.media_id
-    await db.execute(delete(PlaybackSession).where(PlaybackSession.session_key == session_key))
-    await db.execute(
-        delete(PlaybackProgress).where(
-            PlaybackProgress.user_id == current_user.id,
-            PlaybackProgress.media_id == media_id,
-        )
-    )
-
-    event = WatchEvent(
-        user_id=current_user.id,
-        media_id=media_id,
-        watched_at=datetime.utcnow(),
-        completed=True,
-        play_count=1,
-        progress_percent=1.0,
-    )
-    db.add(event)
-    await db.commit()
-
-    await record_rewatch_progress(db, current_user.id, media_id, event.id)
-    await db.commit()
-
-    await _push_watch_state(db, current_user.id, [media_id], watched=True)
-    return {"status": "ok"}
