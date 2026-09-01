@@ -47,8 +47,8 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.branch.outputs.tag }}-dev
           tags: |
-            bellamy/scrob:${{ steps.branch.outputs.tag }}
-            ghcr.io/ellite/scrob:${{ steps.branch.outputs.tag }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ steps.branch.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/scrob:${{ steps.branch.outputs.tag }}
           cache-from: type=gha,scope=scrob-${{ steps.branch.outputs.tag }}
           cache-to: type=gha,mode=max,scope=scrob-${{ steps.branch.outputs.tag }}
 
@@ -62,7 +62,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.branch.outputs.tag }}-dev
           tags: |
-            bellamy/scrob:${{ steps.branch.outputs.tag }}-omnibus
-            ghcr.io/ellite/scrob:${{ steps.branch.outputs.tag }}-omnibus
+            ${{ secrets.DOCKERHUB_USERNAME }}/scrob:${{ steps.branch.outputs.tag }}-omnibus
+            ghcr.io/${{ github.repository_owner }}/scrob:${{ steps.branch.outputs.tag }}-omnibus
           cache-from: type=gha,scope=scrob-omnibus-${{ steps.branch.outputs.tag }}
           cache-to: type=gha,mode=max,scope=scrob-omnibus-${{ steps.branch.outputs.tag }}

@@ -26,10 +26,21 @@ class User(UserBase):
     api_key: str
     display_name: str
     is_admin: bool = False
+    avatar_url: Optional[str] = None
     totp_enabled: bool = False
     email_confirmed: bool = True
     has_password: bool = True
+    plex_linked: bool = False
+    plex_username: Optional[str] = None
     created_at: datetime
+    needs_setup: bool = False        # admin only — global setup wizard not yet completed
+    needs_onboarding: bool = False   # personal-prefs wizard not yet completed
+    # Display preferences the frontend middleware mirrors into cookies so
+    # server-rendered pages can read them without a second round trip.
+    preferences: Optional[dict] = None
+    # Explicit per-user timezone, or null when the user has never picked one
+    # (the frontend then keeps auto-detecting the browser's).
+    timezone: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -37,6 +48,9 @@ class User(UserBase):
 class UserLogin(BaseModel):
     username: str
     password: str
+
+class UsernameUpdate(BaseModel):
+    username: str
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
@@ -135,6 +149,7 @@ class UserSettings(BaseModel):
     radarr_quality_profile: Optional[int] = None
     radarr_tags: Optional[list[int]] = None
     radarr_customize_on_add: Optional[bool] = None
+    has_global_radarr_config: bool = False
     has_effective_radarr: bool = False  # read-only, user-or-global config fully set
 
     # Sonarr integration
@@ -145,6 +160,7 @@ class UserSettings(BaseModel):
     sonarr_tags: Optional[list[int]] = None
     sonarr_season_folder: Optional[bool] = None
     sonarr_customize_on_add: Optional[bool] = None
+    has_global_sonarr_config: bool = False
     has_effective_sonarr: bool = False  # read-only, user-or-global config fully set
 
     # Trakt — app credentials + sync flags; OAuth tokens managed via /trakt/* endpoints
@@ -164,6 +180,11 @@ class UserSettings(BaseModel):
     trakt_scrobble: Optional[bool] = None
     trakt_auto_sync_interval: Optional[float] = None
     trakt_auto_push_interval: Optional[float] = None
+
+    trakt_full_sync_interval: Optional[int] = None
+    trakt_partial_sync_interval: Optional[int] = None
+    last_trakt_full_sync: Optional[datetime] = None
+    last_trakt_partial_sync: Optional[datetime] = None
 
     # Simkl — client_id only (PIN flow, no secret); OAuth token managed via /simkl/* endpoints
     simkl_client_id: Optional[str] = None
@@ -203,13 +224,23 @@ class UserSettings(BaseModel):
 
     preferences: Optional[dict] = None
     blur_explicit: Optional[bool] = None
+    show_comments: Optional[bool] = None
+    show_user_ratings: Optional[bool] = None
     time_format_24h: Optional[bool] = None
+    timezone: Optional[str] = None  # IANA zone name; null = fall back to browser, then server TZ
     use_hls_player: Optional[bool] = None
+    playback_target: Optional[str] = None  # "web" | "internal"
+    default_episode_order: Optional[str] = None  # "tmdb" | "tvdb"
+    onboarded: Optional[bool] = None
     shuffle_next_up: Optional[bool] = None
     minimalist_next_up: Optional[bool] = None
     hide_watched_from_recently_added: Optional[bool] = None
     rate_prompt_movies: Optional[bool] = None
     rate_prompt_episodes: Optional[bool] = None
+    blur_unwatched_episode_images: Optional[bool] = None
+    blur_unwatched_episode_overviews: Optional[bool] = None
+    blur_unwatched_movie_images: Optional[bool] = None
+    blur_unwatched_movie_overviews: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -273,6 +304,7 @@ class MediaServerConnectionBase(BaseModel):
     token: str
     server_user_id: Optional[str] = None
     server_username: Optional[str] = None
+    external_server_url: Optional[str] = None
     sync_collection: bool = True
     sync_watched: bool = True
     sync_ratings: bool = True
@@ -282,6 +314,7 @@ class MediaServerConnectionBase(BaseModel):
     push_playback: bool = False
     push_ratings: bool = False
     auto_sync_interval: Optional[float] = None
+    partial_sync_interval: Optional[float] = None
     auto_push_interval: Optional[float] = None
     watchlist_to_radarr: bool = False
     watchlist_to_sonarr: bool = False
@@ -304,6 +337,7 @@ class MediaServerConnectionUpdate(BaseModel):
     token: Optional[str] = None
     server_user_id: Optional[str] = None
     server_username: Optional[str] = None
+    external_server_url: Optional[str] = None
     sync_collection: Optional[bool] = None
     sync_watched: Optional[bool] = None
     sync_ratings: Optional[bool] = None
@@ -313,6 +347,7 @@ class MediaServerConnectionUpdate(BaseModel):
     push_playback: Optional[bool] = None
     push_ratings: Optional[bool] = None
     auto_sync_interval: Optional[float] = None
+    partial_sync_interval: Optional[float] = None
     auto_push_interval: Optional[float] = None
     watchlist_to_radarr: Optional[bool] = None
     watchlist_to_sonarr: Optional[bool] = None
@@ -325,6 +360,8 @@ class MediaServerConnectionUpdate(BaseModel):
 class MediaServerConnectionResponse(MediaServerConnectionBase):
     id: int
     user_id: int
+    last_full_sync: Optional[datetime] = None
+    last_partial_sync: Optional[datetime] = None
     created_at: datetime
 
     @model_validator(mode="after")
@@ -347,6 +384,7 @@ class ScrobbleConnectionCreate(BaseModel):
 
 
 class ScrobbleConnectionUpdate(BaseModel):
+    name: Optional[str] = None
     sync_collection: Optional[bool] = None
     sync_watched: Optional[bool] = None
     sync_playback: Optional[bool] = None
@@ -361,15 +399,19 @@ class ScrobbleConnectionResponse(ScrobbleConnectionCreate):
         from_attributes = True
 
 
+
+
 class PasswordUpdate(BaseModel):
     current_password: Optional[str] = None
     new_password: str
 
 class WatchEventCreate(BaseModel):
-    tmdb_id: int
+    uri_id: Optional[str] = None         # media URI (movie/series/episode)
+    media_id: Optional[int] = None       # when row already exists locally
     media_type: MediaType
     watched_at: Optional[datetime] = None  # omitted = now; explicit null = unknown date
     completed: bool = True
+    show_uri_id: Optional[str] = None
     series_tmdb_id: Optional[int] = None
     series_tvdb_id: Optional[int] = None  # lets the show be linked to TVDB (see #101) without requiring a prior visit to its TVDB page
     season_number: Optional[int] = None
@@ -377,12 +419,12 @@ class WatchEventCreate(BaseModel):
 
 
 class ManualSessionStart(BaseModel):
-    tmdb_id: Optional[int] = None
-    media_id: Optional[int] = None      # local DB id, preferred over tmdb_id for TVDB-only episodes
+    uri_id: str                          # REQUIRED — media URI
+    media_id: Optional[int] = None       # alternative when row already exists locally
     media_type: MediaType
     title: Optional[str] = None
-    runtime: Optional[int] = None       # minutes, used if Media.runtime is null
-    show_tmdb_id: Optional[int] = None  # episode context
+    runtime: Optional[int] = None
+    show_uri_id: Optional[str] = None    # episode context
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
 
@@ -396,28 +438,28 @@ class UserProfileUpdate(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     country: Optional[str] = None
-    movie_genres: Optional[list[str]] = None
-    show_genres: Optional[list[str]] = None
+    liked_genres: Optional[list[str]] = None
     disliked_genres: Optional[list[str]] = None
     streaming_services: Optional[list[str]] = None
     content_language: Optional[str] = None
     metadata_language: Optional[str] = None
     privacy_level: Optional[PrivacyLevel] = None
+    pagination_type: Optional[str] = None
 
 class UserProfileResponse(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     country: Optional[str] = None
-    movie_genres: list[str] = []
-    show_genres: list[str] = []
+    liked_genres: list[str] = []
     disliked_genres: list[str] = []
     streaming_services: list[str] = []
     content_language: Optional[str] = None
     metadata_language: Optional[str] = None
     privacy_level: PrivacyLevel = PrivacyLevel.private
     avatar_url: Optional[str] = None
+    pagination_type: str = "infinite_scroll"
 
-    @field_validator('movie_genres', 'show_genres', 'disliked_genres', 'streaming_services', mode='before')
+    @field_validator('liked_genres', 'disliked_genres', 'streaming_services', mode='before')
     @classmethod
     def _none_to_list(cls, v: object) -> list:
         return v if v is not None else []
@@ -431,8 +473,7 @@ class PublicProfileResponse(BaseModel):
     display_name: str
     bio: Optional[str] = None
     country: Optional[str] = None
-    movie_genres: list[str] = []
-    show_genres: list[str] = []
+    liked_genres: list[str] = []
     created_at: datetime
     # Stats
     total_watched: int = 0
@@ -441,6 +482,7 @@ class PublicProfileResponse(BaseModel):
     shows_watched: int = 0
     total_rated: int = 0
     avatar_url: Optional[str] = None
+    pagination_type: str = "infinite_scroll"
     # Activity
     recently_watched_movies: list[dict] = []
     recently_watched_shows: list[dict] = []
@@ -475,9 +517,14 @@ class GlobalSettings(BaseModel):
     radarr_customize_on_add     : bool = False
     sonarr_customize_on_add     : bool = False
     image_cache_enabled         : bool = False
-    image_cache_limit_gb        : Optional[float] = None
-    enable_logged_out_navigation: bool = False
+    image_cache_limit_gb        : Optional[int] = None
+    image_cache_expiry_days     : Optional[int] = None
+    enable_registrations        : Optional[bool] = None
+    registration_max_allowed_users: Optional[int] = None
+    setup_completed             : bool = False
     disable_comments            : bool = False
+    disable_user_ratings        : bool = False
+    enable_logged_out_navigation: bool = False
 
     class Config:
         from_attributes = True
@@ -486,7 +533,7 @@ class GlobalSettings(BaseModel):
 class MediaRequestOut(BaseModel):
     id          : int
     user_id     : int
-    tmdb_id     : int
+    uri_id      : str
     media_type  : str
     title       : str
     poster_path : Optional[str]
@@ -517,3 +564,4 @@ class AdminUserCreate(BaseModel):
     email    : EmailStr
     password : str = Field(min_length=1)
     is_admin : bool = False
+

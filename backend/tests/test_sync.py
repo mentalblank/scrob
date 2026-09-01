@@ -1,3 +1,5 @@
+import ast
+import inspect
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -941,6 +943,46 @@ class HealStuckUnwatchedTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"status": "ok", "healed": 0})
         self.assertEqual(len(db.executed_statements), 1)
         db.commit.assert_not_awaited()
+
+
+class PlexHistoryBackfillIsWiredUpTests(unittest.TestCase):
+    """_backfill_plex_watch_history is the only account-scoped, per-play source
+    of Plex watch dates — without it a pull falls back to the aggregate
+    lastViewedAt, which Plex rewrites on a bulk mark-watched and so stamps whole
+    seasons with the same wrong timestamp. A merge once dropped the call while
+    leaving the function (and all its own tests) in place, and nothing caught
+    it, so assert the call site itself exists."""
+
+    def _plex_sync_source(self) -> ast.FunctionDef:
+        tree = ast.parse(inspect.getsource(sync))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_run_plex_sync":
+                return node
+        self.fail("_run_plex_sync not found in routers/sync.py")
+
+    def _called_names(self, node) -> set:
+        return {
+            call.func.id
+            for call in ast.walk(node)
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+        }
+
+    def test_plex_sync_calls_the_history_backfill(self):
+        self.assertIn("_backfill_plex_watch_history", self._called_names(self._plex_sync_source()))
+
+    def test_plex_sync_removes_stale_collection_files(self):
+        """Dropped by the same merge as the history backfill. Without it, items
+        deleted from a Plex library stay in the collection forever, while
+        Jellyfin and Emby prune theirs."""
+        self.assertIn("_remove_stale_collection_files", self._called_names(self._plex_sync_source()))
+
+    def test_bulk_watched_state_is_gated_on_the_reliability_flag(self):
+        """The bulk library pass must stay gated on plex_watched_state_is_reliable,
+        not conn.sync_watched — a token shared with another Home user otherwise
+        attributes that user's plays to this account."""
+        source = ast.unparse(self._plex_sync_source())
+        self.assertIn("sync_watched=plex_watched_state_is_reliable", source)
+        self.assertNotIn("sync_watched=conn.sync_watched", source)
 
 
 if __name__ == "__main__":

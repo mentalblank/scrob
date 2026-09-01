@@ -1,0 +1,861 @@
+---
+import Base from "../layouts/Base.astro";
+import MediaCard from "../components/MediaCard.astro";
+import { api, type MediaItem, type ContentFilters } from "../lib/api";
+
+const { token } = Astro.locals;
+if (!token) {
+  return Astro.redirect("/login");
+}
+
+const tab = Astro.url.searchParams.get("tab") ?? "items";
+
+let blockedItems: MediaItem[] = [];
+let blockedItemsCount = 0;
+let filters: ContentFilters = { blocked_genres: [], blocked_keywords: [], blocked_regexes: [], filter_languages: [], language_filter_mode: "blacklist", blocked_ratings: [], available_genres: [], available_ratings: [] };
+let error = "";
+
+try {
+  const [blocklistEnriched, cf] = await Promise.all([
+    api.media.getBlocklistEnriched(token),
+    api.contentFilters.get(token),
+  ]);
+  
+  blockedItems = blocklistEnriched?.filter(i => !i.is_dropped) || [];
+  blockedItemsCount = blockedItems.length;
+  filters = cf;
+
+} catch (e: any) {
+  error = e.message;
+}
+
+const GENRE_CATEGORIES: Record<string, string[]> = {
+  "Movies": ["Action","Adventure","Animation","Comedy","Crime","Documentary","Drama","Family","Fantasy","History","Horror","Music","Mystery","Romance","Science Fiction","Thriller","War","Western"],
+  "TV": ["Action & Adventure","Animation","Comedy","Crime","Documentary","Drama","Family","Kids","Mystery","News","Reality","Sci-Fi & Fantasy","Soap","Talk","War & Politics","Western"],
+};
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  ja: "Japanese",
+  ko: "Korean",
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
+  zh: "Chinese",
+  hi: "Hindi",
+  ru: "Russian",
+  ar: "Arabic",
+  sv: "Swedish",
+  nl: "Dutch",
+  pl: "Polish",
+  tr: "Turkish",
+  da: "Danish",
+  fi: "Finnish",
+  no: "Norwegian",
+  vi: "Vietnamese",
+  th: "Thai",
+  id: "Indonesian",
+};
+---
+
+<Base title="Content Filters">
+  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+
+  <!-- Header -->
+  <div class="mb-8">
+    <div class="flex items-center gap-4 mb-3">
+      <a href="/settings" class="p-2 hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-zinc-100 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      </a>
+      <h1 class="text-3xl font-bold text-zinc-100 tracking-tight">Content Filters</h1>
+    </div>
+    <p class="text-zinc-400 ml-12">Block individual titles, entire genres, or keywords/languages from your explore pages.</p>
+  </div>
+
+  {error && (
+    <div class="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 mb-8">{error}</div>
+  )}
+
+  <!-- Tab Bar -->
+  <div class="flex flex-nowrap gap-2 mb-8 border-b border-zinc-800/80 pb-4 w-full overflow-x-auto no-scrollbar">
+    {[
+      { id: "items",     label: "Blocked Titles",       icon: "M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" },
+      { id: "genres",    label: "Genre Filters",       icon: "M3.5 5.5h17M3.5 9.5h17M3.5 13.5h17M3.5 17.5h17" },
+      { id: "languages", label: "Language Filters",    icon: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-18a8 8 0 1 1 0 16 8 8 0 0 1 0-16z M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" },
+      { id: "ratings",   label: "Rating Filters",      icon: "M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.3 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8L12 2z" },
+      { id: "keywords",  label: "Keywords & Regex",    icon: "m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" },
+    ].map(t => (
+      <a
+        href={`/blocklist?tab=${t.id}`}
+        class={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shrink-0 cursor-pointer ${tab === t.id ? "bg-blue-600/10 border border-blue-500/30 text-zinc-100 shadow-md shadow-blue-500/5" : "border border-transparent bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"}`}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d={t.icon}/></svg>
+        {t.label}
+        {t.id === "items" && blockedItemsCount > 0 && (
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-blue-500/20 text-blue-300" : "bg-zinc-800 text-zinc-400"}`}>{blockedItemsCount}</span>
+        )}
+        {t.id === "genres" && filters.blocked_genres.length > 0 && (
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{filters.blocked_genres.length}</span>
+        )}
+        {t.id === "languages" && (filters.filter_languages || []).length > 0 && (
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{(filters.filter_languages || []).length}</span>
+        )}
+        {t.id === "ratings" && filters.blocked_ratings.length > 0 && (
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{filters.blocked_ratings.length}</span>
+        )}
+        {t.id === "keywords" && (filters.blocked_keywords.length + filters.blocked_regexes.length) > 0 && (
+          <span class={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-rose-500/20 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{filters.blocked_keywords.length + filters.blocked_regexes.length}</span>
+        )}
+      </a>
+    ))}
+  </div>
+
+  <!-- ── Tab: Blocked Items ─────────────────────────────── -->
+  {tab === "items" && (
+    blockedItems.length === 0 ? (
+      <div class="flex flex-col items-center justify-center text-center px-4 py-20 bg-zinc-900/30 border border-dashed border-zinc-800 rounded-3xl">
+        <span class="text-4xl mb-4">🛡️</span>
+        <h2 class="text-xl font-bold text-zinc-100 mb-2">No blocked titles</h2>
+        <p class="text-zinc-500 text-sm">Block individual items from their detail pages to hide them here.</p>
+      </div>
+    ) : (
+      <div id="blocklist-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        {blockedItems.map(item => (
+          <div class="relative group/blocked" data-tmdb-id={item.tmdb_id} data-uri-id={item.uri_id} data-media-type={item.type}>
+            <MediaCard item={item} hideBlock={true} hideRating={true} hideActionBar={true} />
+            <div class="absolute inset-x-0 top-0 p-2 flex justify-end opacity-0 group-hover/blocked:opacity-100 transition-opacity z-20 pointer-events-none">
+              <button
+                data-action="unblock-direct"
+                class="pointer-events-auto bg-zinc-900/90 backdrop-blur-md border border-zinc-700 hover:border-red-500/50 hover:bg-red-500/20 text-zinc-100 hover:text-red-400 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xl cursor-pointer flex items-center gap-1.5"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                Unblock
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  )}
+  
+  <!-- ── Tab: Genre Filters ─────────────────────────────── -->
+  {tab === "genres" && (
+    <div id="genre-panel">
+      <p class="text-sm text-zinc-400 mb-6">
+        Click a genre chip to block it. Any discovery result (trending, popular, search) matching a blocked genre will be hidden. Changes are saved automatically.
+      </p>
+
+      {Object.entries(GENRE_CATEGORIES).map(([cat, genres]) => (
+        <div class="mb-8">
+          <h2 class="text-xs font-black uppercase tracking-widest text-zinc-500 mb-3">{cat}</h2>
+          <div class="flex flex-wrap gap-2">
+            {genres.map(genre => {
+              const isBlocked = filters.blocked_genres.includes(genre);
+              return (
+                <button
+                  data-action="toggle-genre"
+                  data-genre={genre}
+                  class={`genre-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none ${
+                    isBlocked
+                      ? "bg-rose-600/20 border-rose-500/50 text-rose-300 hover:bg-rose-600/30"
+                      : "bg-zinc-900/60 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                  }`}
+                >
+                  {isBlocked && (
+                    <svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  )}
+                  {genre}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      <div id="genre-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
+    </div>
+  )}
+
+  <!-- ── Tab: Content Rating Filters ────────────────────── -->
+  {tab === "ratings" && (
+    <div id="rating-panel">
+      <p class="text-sm text-zinc-400 mb-6">
+        Click a rating to block it. Anything carrying a blocked certification is hidden from browsing, search and discovery. Ratings are region-specific (<span class="text-zinc-300">MA15+</span>, <span class="text-zinc-300">TV-MA</span>, <span class="text-zinc-300">+18</span>…) — the list below shows what's in your library plus common values, and you can add any other. Changes are saved automatically.
+      </p>
+
+      <div class="mb-6">
+        <h2 class="text-xs font-black uppercase tracking-widest text-zinc-500 mb-3">Ratings</h2>
+        <div id="rating-chips" class="flex flex-wrap gap-2">
+          {[...new Set([...filters.available_ratings, ...filters.blocked_ratings])].map(rating => {
+            const isBlocked = filters.blocked_ratings.includes(rating);
+            return (
+              <button
+                data-action="toggle-rating"
+                data-rating={rating}
+                class={`rating-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none ${
+                  isBlocked
+                    ? "bg-rose-600/20 border-rose-500/50 text-rose-300 hover:bg-rose-600/30"
+                    : "bg-zinc-900/60 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                }`}
+              >
+                {isBlocked && (
+                  <svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                )}
+                {rating}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div class="mb-4 max-w-md">
+        <h2 class="text-xs font-black uppercase tracking-widest text-zinc-500 mb-3">Add another rating</h2>
+        <div class="flex gap-2">
+          <input
+            type="text"
+            id="rating-custom-input"
+            maxlength="16"
+            placeholder="e.g. MA15+, R18+, 15"
+            class="flex-1 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
+          />
+          <button
+            id="rating-custom-add"
+            class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors cursor-pointer"
+          >
+            Block
+          </button>
+        </div>
+        <p class="text-xs text-zinc-500 mt-2">Use the exact value shown on the title's page, e.g. "Content Rating MA15+".</p>
+      </div>
+
+      <div id="rating-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
+    </div>
+  )}
+
+  <!-- ── Tab: Keyword & Regex Filters ──────────────────── -->
+  {tab === "keywords" && (
+    <div class="grid md:grid-cols-2 gap-8" id="kw-re-panel">
+
+      <!-- Keywords -->
+      <div>
+        <h2 class="text-base font-bold text-zinc-100 mb-1">Keyword Filters</h2>
+        <p class="text-sm text-zinc-400 mb-5">Any title containing this text (case-insensitive) will be hidden.</p>
+
+        <ul id="kw-list" class="space-y-2 mb-4">
+          {filters.blocked_keywords.map(kw => (
+            <li class="flex items-center justify-between bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5" data-kw={kw}>
+              <span class="font-mono text-sm text-zinc-200">{kw}</span>
+              <button data-action="remove-keyword" data-value={kw} class="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer ml-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </li>
+          ))}
+          {filters.blocked_keywords.length === 0 && (
+            <li id="kw-empty" class="text-sm text-zinc-500 italic py-2">No keyword filters yet.</li>
+          )}
+        </ul>
+
+        <div class="flex gap-2">
+          <input
+            id="kw-input"
+            type="text"
+            placeholder="e.g. reality"
+            class="flex-1 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
+          />
+          <button id="kw-add-btn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">Add</button>
+        </div>
+        <div id="kw-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
+      </div>
+
+      <!-- Regexes -->
+      <div>
+        <h2 class="text-base font-bold text-zinc-100 mb-1">Regex Filters</h2>
+        <p class="text-sm text-zinc-400 mb-5">Applied via <code class="text-zinc-300 bg-zinc-800 px-1 rounded">re.search(pattern, title, IGNORECASE)</code>. Invalid patterns are rejected.</p>
+
+        <ul id="re-list" class="space-y-2 mb-4">
+          {filters.blocked_regexes.map(re => (
+            <li class="flex items-center justify-between bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5" data-re={re}>
+              <span class="font-mono text-sm text-violet-300">{re}</span>
+              <button data-action="remove-regex" data-value={re} class="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer ml-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </li>
+          ))}
+          {filters.blocked_regexes.length === 0 && (
+            <li id="re-empty" class="text-sm text-zinc-500 italic py-2">No regex filters yet.</li>
+          )}
+        </ul>
+
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <input
+              id="re-input"
+              type="text"
+              placeholder="e.g. ^The\s"
+              class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 pr-10 text-sm text-violet-300 font-mono placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
+            />
+            <span id="re-validity" class="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold hidden"></span>
+          </div>
+          <button id="re-add-btn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">Add</button>
+        </div>
+        <div id="re-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
+      </div>
+
+    </div>
+  )}
+
+  <!-- ── Tab: Language Filters ────────────────────────── -->
+  {tab === "languages" && (
+    <div class="grid md:grid-cols-2 gap-8" id="lang-panel">
+      <div>
+        <h2 class="text-base font-bold text-zinc-100 mb-1">Language Filter Mode</h2>
+        <p class="text-sm text-zinc-400 mb-5">Choose whether to block the selected languages (Blacklist) or only show them (Whitelist).</p>
+        
+        <div class="flex items-center gap-2 sm:gap-3 p-1.5 bg-zinc-900/60 border border-zinc-800 rounded-2xl w-full sm:w-fit mb-6">
+          <button
+            id="mode-blacklist-btn"
+            data-mode="blacklist"
+            class={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center ${
+              (filters.language_filter_mode || "blacklist") === "blacklist"
+                ? "bg-zinc-700 text-zinc-100 shadow-sm"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Blacklist (Exclude)
+          </button>
+          <button
+            id="mode-whitelist-btn"
+            data-mode="whitelist"
+            class={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center ${
+              filters.language_filter_mode === "whitelist"
+                ? "bg-zinc-700 text-zinc-100 shadow-sm"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Whitelist (Only Keep)
+          </button>
+        </div>
+
+        <h2 class="text-base font-bold text-zinc-100 mb-1">Languages</h2>
+        <p class="text-sm text-zinc-400 mb-5" id="lang-description">
+          {(filters.language_filter_mode || "blacklist") === "blacklist"
+            ? "Discovery results matching these languages will be hidden."
+            : "Only discovery results matching these languages will be shown."}
+        </p>
+
+        <ul id="lang-list" class="space-y-2 mb-6">
+          {(filters.filter_languages || []).map(lang => (
+            <li class="flex items-center justify-between bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5" data-lang={lang}>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-sm bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded uppercase">{lang}</span>
+                <span class="text-sm text-zinc-200">{LANGUAGE_NAMES[lang] || lang.toUpperCase()}</span>
+              </div>
+              <button data-action="remove-language" data-value={lang} class="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer ml-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </li>
+          ))}
+          {(!filters.filter_languages || filters.filter_languages.length === 0) && (
+            <li id="lang-empty" class="text-sm text-zinc-500 italic py-2">No language filters configured yet.</li>
+          )}
+        </ul>
+
+        <div class="flex flex-col gap-2">
+          <div class="flex flex-col sm:flex-row gap-2">
+            <select
+              id="lang-select"
+              class="w-full sm:flex-1 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
+            >
+              <option value="">Select a common language...</option>
+              {Object.entries(LANGUAGE_NAMES)
+                .sort((a, b) => a[1].localeCompare(b[1]))
+                .map((entry) => (
+                  <option value={entry[0]}>{entry[1]} ({entry[0].toUpperCase()})</option>
+                ))}
+            </select>
+            <input
+              id="lang-custom-input"
+              type="text"
+              placeholder="Or code (e.g. ja)"
+              class="w-full sm:w-32 bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all font-mono text-center"
+              maxlength="3"
+            />
+            <button id="lang-add-btn" class="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer shrink-0">Add</button>
+          </div>
+        </div>
+        <div id="lang-save-status" class="text-xs text-zinc-500 mt-2 h-4"></div>
+      </div>
+    </div>
+  )}
+</Base>
+
+<script>
+  // ── Unblock items ─────────────────────────────────────────────────────────
+  document.addEventListener('click', async (e) => {
+    const btn = (e.target as HTMLElement).closest('[data-action="unblock-direct"]') as HTMLButtonElement;
+    if (!btn) return;
+    const container = btn.closest('[data-uri-id]') as HTMLElement;
+    const uriId = container?.dataset.uriId;
+    const mediaType = container?.dataset.mediaType;
+    if (!uriId || !mediaType) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="animate-spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full"></span>';
+    const token = (document.getElementById('app-data') as HTMLElement)?.dataset.token;
+    try {
+      const res = await fetch(`/api/proxy/media/blocklist?uri_id=${encodeURIComponent(uriId)}&media_type=${mediaType}`, {
+        method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        container.remove();
+        const grid = document.getElementById('blocklist-grid');
+        if (grid && grid.children.length === 0) window.location.reload();
+      } else throw new Error();
+    } catch {
+      btn.disabled = false;
+      btn.innerHTML = 'Unblock';
+    }
+  });
+</script>
+
+<script>
+  // ── Genre toggle ──────────────────────────────────────────────────────────
+  const genrePanel = document.getElementById('genre-panel');
+  if (genrePanel) {
+    const token = (document.getElementById('app-data') as HTMLElement)?.dataset.token;
+    const status = document.getElementById('genre-save-status');
+    const blocked: Set<string> = new Set(
+      Array.from(document.querySelectorAll('.genre-chip[data-genre]'))
+        .filter(el => el.classList.contains('bg-rose-600/20'))
+        .map(el => (el as HTMLElement).dataset.genre!)
+    );
+
+    function setStatus(msg: string, ok = true) {
+      if (!status) return;
+      status.textContent = msg;
+      status.className = `text-xs mt-2 h-4 transition-opacity ${ok ? 'text-emerald-400' : 'text-red-400'}`;
+      setTimeout(() => { status.textContent = ''; }, 2000);
+    }
+
+    async function saveGenres() {
+      try {
+        const res = await fetch('/api/proxy/media/content-filters/genres', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ genres: Array.from(blocked) }),
+        });
+        if (!res.ok) throw new Error();
+        setStatus(`✓ Saved — ${blocked.size} genre${blocked.size !== 1 ? 's' : ''} blocked`);
+      } catch {
+        setStatus('✗ Failed to save', false);
+      }
+    }
+
+    genrePanel.addEventListener('click', async (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-action="toggle-genre"]') as HTMLElement;
+      if (!btn) return;
+      const genre = btn.dataset.genre!;
+      if (blocked.has(genre)) {
+        blocked.delete(genre);
+        btn.className = 'genre-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none bg-zinc-900/60 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100';
+        btn.innerHTML = genre;
+      } else {
+        blocked.add(genre);
+        btn.className = 'genre-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none bg-rose-600/20 border-rose-500/50 text-rose-300 hover:bg-rose-600/30';
+        btn.innerHTML = `<svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>${genre}`;
+      }
+      await saveGenres();
+    });
+  }
+
+  // ── Content rating toggle ─────────────────────────────────────────────────
+  const ratingPanel = document.getElementById('rating-panel');
+  if (ratingPanel) {
+    const token = (document.getElementById('app-data') as HTMLElement)?.dataset.token;
+    const status = document.getElementById('rating-save-status');
+    const blockedRatings: Set<string> = new Set(
+      Array.from(document.querySelectorAll('.rating-chip[data-rating]'))
+        .filter(el => el.classList.contains('bg-rose-600/20'))
+        .map(el => (el as HTMLElement).dataset.rating!)
+    );
+
+    function setRatingStatus(msg: string, ok = true) {
+      if (!status) return;
+      status.textContent = msg;
+      status.className = `text-xs mt-2 h-4 transition-opacity ${ok ? 'text-emerald-400' : 'text-red-400'}`;
+      setTimeout(() => { status.textContent = ''; }, 2000);
+    }
+
+    async function saveRatings() {
+      try {
+        const res = await fetch('/api/proxy/media/content-filters/ratings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ ratings: Array.from(blockedRatings) }),
+        });
+        if (!res.ok) throw new Error();
+        setRatingStatus(`✓ Saved — ${blockedRatings.size} rating${blockedRatings.size !== 1 ? 's' : ''} blocked`);
+      } catch {
+        setRatingStatus('✗ Failed to save', false);
+      }
+    }
+
+    const chipsEl = document.getElementById('rating-chips');
+    const customInput = document.getElementById('rating-custom-input') as HTMLInputElement | null;
+
+    function makeChip(rating: string, blocked: boolean) {
+      const btn = document.createElement('button');
+      btn.dataset.action = 'toggle-rating';
+      btn.dataset.rating = rating;
+      btn.className = `rating-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none ${
+        blocked
+          ? 'bg-rose-600/20 border-rose-500/50 text-rose-300 hover:bg-rose-600/30'
+          : 'bg-zinc-900/60 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100'
+      }`;
+      btn.innerHTML = blocked
+        ? `<svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>${rating}`
+        : rating;
+      return btn;
+    }
+
+    async function addCustomRating() {
+      const raw = (customInput?.value ?? '').trim().toUpperCase().slice(0, 16);
+      if (!raw) return;
+      if (customInput) customInput.value = '';
+      if (blockedRatings.has(raw)) return;
+      blockedRatings.add(raw);
+      const existing = chipsEl?.querySelector(`[data-rating="${CSS.escape(raw)}"]`);
+      if (existing) {
+        existing.replaceWith(makeChip(raw, true));
+      } else {
+        chipsEl?.appendChild(makeChip(raw, true));
+      }
+      await saveRatings();
+    }
+
+    document.getElementById('rating-custom-add')?.addEventListener('click', addCustomRating);
+    customInput?.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter') {
+        e.preventDefault();
+        addCustomRating();
+      }
+    });
+
+    ratingPanel.addEventListener('click', async (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-action="toggle-rating"]') as HTMLElement;
+      if (!btn) return;
+      const rating = btn.dataset.rating!;
+      if (blockedRatings.has(rating)) {
+        blockedRatings.delete(rating);
+        btn.className = 'rating-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none bg-zinc-900/60 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100';
+        btn.innerHTML = rating;
+      } else {
+        blockedRatings.add(rating);
+        btn.className = 'rating-chip px-4 py-2 rounded-xl text-sm font-semibold border transition-all duration-150 cursor-pointer select-none bg-rose-600/20 border-rose-500/50 text-rose-300 hover:bg-rose-600/30';
+        btn.innerHTML = `<svg class="inline -mt-0.5 mr-1 w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg>${rating}`;
+      }
+      await saveRatings();
+    });
+  }
+</script>
+
+<script>
+  // ── Keyword & Regex filters ────────────────────────────────────────────────
+  const kwRePanel = document.getElementById('kw-re-panel');
+  if (kwRePanel) {
+    const token = (document.getElementById('app-data') as HTMLElement)?.dataset.token;
+
+    // --- helpers ---
+    function keywords(): string[] {
+      return Array.from(document.querySelectorAll('#kw-list li[data-kw]')).map(el => (el as HTMLElement).dataset.kw!);
+    }
+    function regexes(): string[] {
+      return Array.from(document.querySelectorAll('#re-list li[data-re]')).map(el => (el as HTMLElement).dataset.re!);
+    }
+    function showStatus(id: string, msg: string, ok = true) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = msg;
+      el.className = `text-xs mt-2 h-4 ${ok ? 'text-emerald-400' : 'text-red-400'}`;
+      setTimeout(() => { el.textContent = ''; }, 2500);
+    }
+
+    async function saveKeywords() {
+      const res = await fetch('/api/proxy/media/content-filters/keywords', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ keywords: keywords() }),
+      });
+      if (!res.ok) throw new Error();
+    }
+    async function saveRegexes() {
+      const res = await fetch('/api/proxy/media/content-filters/regexes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ regexes: regexes() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Invalid regex');
+      }
+    }
+
+    function makeKwItem(kw: string): HTMLLIElement {
+      const li = document.createElement('li');
+      li.className = 'flex items-center justify-between bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5';
+      li.dataset.kw = kw;
+      li.innerHTML = `<span class="font-mono text-sm text-zinc-200">${kw}</span>
+        <button data-action="remove-keyword" data-value="${kw}" class="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer ml-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>`;
+      return li;
+    }
+
+    function makeReItem(re: string): HTMLLIElement {
+      const li = document.createElement('li');
+      li.className = 'flex items-center justify-between bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5';
+      li.dataset.re = re;
+      li.innerHTML = `<span class="font-mono text-sm text-violet-300">${re}</span>
+        <button data-action="remove-regex" data-value="${re}" class="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer ml-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>`;
+      return li;
+    }
+
+    // --- Add keyword ---
+    document.getElementById('kw-add-btn')?.addEventListener('click', async () => {
+      const input = document.getElementById('kw-input') as HTMLInputElement;
+      const val = input.value.trim();
+      if (!val) return;
+      const list = document.getElementById('kw-list')!;
+      const empty = document.getElementById('kw-empty');
+      empty?.remove();
+      list.appendChild(makeKwItem(val));
+      input.value = '';
+      try { await saveKeywords(); showStatus('kw-save-status', `✓ "${val}" added`); }
+      catch { showStatus('kw-save-status', '✗ Failed to save', false); }
+    });
+
+    // --- Add regex ---
+    const reInput = document.getElementById('re-input') as HTMLInputElement;
+    const reValidity = document.getElementById('re-validity')!;
+    reInput?.addEventListener('input', () => {
+      const val = reInput.value.trim();
+      if (!val) { reValidity.classList.add('hidden'); return; }
+      try { new RegExp(val); reValidity.textContent = '✓'; reValidity.className = 'absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-emerald-400'; }
+      catch { reValidity.textContent = '✗'; reValidity.className = 'absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-red-400'; }
+    });
+
+    document.getElementById('re-add-btn')?.addEventListener('click', async () => {
+      const val = reInput.value.trim();
+      if (!val) return;
+      try { new RegExp(val); } catch { showStatus('re-save-status', '✗ Invalid regex pattern', false); return; }
+      const list = document.getElementById('re-list')!;
+      document.getElementById('re-empty')?.remove();
+      list.appendChild(makeReItem(val));
+      reInput.value = '';
+      reValidity.classList.add('hidden');
+      try { await saveRegexes(); showStatus('re-save-status', `✓ Pattern added`); }
+      catch (err: any) { showStatus('re-save-status', `✗ ${err.message}`, false); }
+    });
+
+    // --- Remove keyword / regex (event delegation) ---
+    document.addEventListener('click', async (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-action="remove-keyword"]') as HTMLElement;
+      if (btn) {
+        const li = btn.closest('li[data-kw]')!;
+        li.remove();
+        if (!keywords().length) {
+          const list = document.getElementById('kw-list')!;
+          const empty = document.createElement('li');
+          empty.id = 'kw-empty';
+          empty.className = 'text-sm text-zinc-500 italic py-2';
+          empty.textContent = 'No keyword filters yet.';
+          list.appendChild(empty);
+        }
+        try { await saveKeywords(); showStatus('kw-save-status', '✓ Removed'); }
+        catch { showStatus('kw-save-status', '✗ Failed to save', false); }
+      }
+
+      const btn2 = (e.target as HTMLElement).closest('[data-action="remove-regex"]') as HTMLElement;
+      if (btn2) {
+        const li = btn2.closest('li[data-re]')!;
+        li.remove();
+        if (!regexes().length) {
+          const list = document.getElementById('re-list')!;
+          const empty = document.createElement('li');
+          empty.id = 're-empty';
+          empty.className = 'text-sm text-zinc-500 italic py-2';
+          empty.textContent = 'No regex filters yet.';
+          list.appendChild(empty);
+        }
+        try { await saveRegexes(); showStatus('re-save-status', '✓ Removed'); }
+        catch { showStatus('re-save-status', '✗ Failed to save', false); }
+      }
+    });
+
+    // Enter key to add
+    document.getElementById('kw-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('kw-add-btn')?.click(); });
+    reInput?.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('re-add-btn')?.click(); });
+  }
+</script>
+
+<script>
+  // ── Language filters ────────────────────────────────────────────────────────
+  const langPanel = document.getElementById('lang-panel');
+  if (langPanel) {
+    const token = (document.getElementById('app-data') as HTMLElement)?.dataset.token;
+    
+    const LANGUAGE_NAMES: Record<string, string> = {
+      en: "English",
+      ja: "Japanese",
+      ko: "Korean",
+      es: "Spanish",
+      fr: "French",
+      de: "German",
+      it: "Italian",
+      pt: "Portuguese",
+      zh: "Chinese",
+      hi: "Hindi",
+      ru: "Russian",
+      ar: "Arabic",
+      sv: "Swedish",
+      nl: "Dutch",
+      pl: "Polish",
+      tr: "Turkish",
+      da: "Danish",
+      fi: "Finnish",
+      no: "Norwegian",
+      vi: "Vietnamese",
+      th: "Thai",
+      id: "Indonesian",
+    };
+
+    function languages(): string[] {
+      return Array.from(document.querySelectorAll('#lang-list li[data-lang]')).map(el => (el as HTMLElement).dataset.lang!);
+    }
+
+    function getActiveMode(): "blacklist" | "whitelist" {
+      const activeBtn = document.querySelector('[id^="mode-"][class*="bg-zinc-700"]') as HTMLElement;
+      return (activeBtn?.dataset.mode || 'blacklist') as "blacklist" | "whitelist";
+    }
+
+    function showStatus(msg: string, ok = true) {
+      const el = document.getElementById('lang-save-status');
+      if (!el) return;
+      el.textContent = msg;
+      el.className = `text-xs mt-2 h-4 ${ok ? 'text-emerald-400' : 'text-red-400'}`;
+      setTimeout(() => { el.textContent = ''; }, 2500);
+    }
+
+    async function saveLanguages(mode?: "blacklist" | "whitelist") {
+      const activeMode = mode || getActiveMode();
+      const currentLangs = languages();
+      try {
+        const res = await fetch('/api/proxy/media/content-filters/languages', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ languages: currentLangs, mode: activeMode }),
+        });
+        if (!res.ok) throw new Error();
+        showStatus('✓ Saved changes');
+      } catch {
+        showStatus('✗ Failed to save', false);
+      }
+    }
+
+    function makeLangItem(lang: string): HTMLLIElement {
+      const name = LANGUAGE_NAMES[lang] || lang.toUpperCase();
+      const li = document.createElement('li');
+      li.className = 'flex items-center justify-between bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-2.5';
+      li.dataset.lang = lang;
+      li.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="font-mono text-sm bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded uppercase">${lang}</span>
+          <span class="text-sm text-zinc-200">${name}</span>
+        </div>
+        <button data-action="remove-language" data-value="${lang}" class="text-zinc-500 hover:text-red-400 transition-colors p-1 cursor-pointer ml-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      `;
+      return li;
+    }
+
+    // Toggle Blacklist / Whitelist mode
+    const blacklistBtn = document.getElementById('mode-blacklist-btn')!;
+    const whitelistBtn = document.getElementById('mode-whitelist-btn')!;
+    const description = document.getElementById('lang-description')!;
+
+    async function setMode(mode: "blacklist" | "whitelist") {
+      if (mode === "blacklist") {
+        blacklistBtn.className = 'flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center bg-zinc-700 text-zinc-100 shadow-sm';
+        whitelistBtn.className = 'flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center text-zinc-400 hover:text-zinc-200';
+        description.textContent = 'Discovery results matching these languages will be hidden.';
+      } else {
+        whitelistBtn.className = 'flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center bg-zinc-700 text-zinc-100 shadow-sm';
+        blacklistBtn.className = 'flex-1 sm:flex-initial px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer text-center text-zinc-400 hover:text-zinc-200';
+        description.textContent = 'Only discovery results matching these languages will be shown.';
+      }
+      await saveLanguages(mode);
+    }
+
+    blacklistBtn.addEventListener('click', () => setMode('blacklist'));
+    whitelistBtn.addEventListener('click', () => setMode('whitelist'));
+
+    // Add language
+    const customInput = document.getElementById('lang-custom-input') as HTMLInputElement;
+    document.getElementById('lang-add-btn')?.addEventListener('click', async () => {
+      const select = document.getElementById('lang-select') as HTMLSelectElement;
+      
+      let val = customInput.value.trim().toLowerCase();
+      if (!val) {
+        val = select.value;
+      }
+      if (!val) return;
+
+      // Validate lang code
+      if (!/^[a-z]{2,3}$/.test(val)) {
+        showStatus('✗ Language code must be 2 or 3 letters', false);
+        return;
+      }
+
+      if (languages().includes(val)) {
+        showStatus('✗ Language already added', false);
+        return;
+      }
+
+      const list = document.getElementById('lang-list')!;
+      document.getElementById('lang-empty')?.remove();
+      list.appendChild(makeLangItem(val));
+
+      select.value = '';
+      customInput.value = '';
+      await saveLanguages();
+    });
+
+    // Remove language (event delegation)
+    document.addEventListener('click', async (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-action="remove-language"]') as HTMLElement;
+      if (!btn) return;
+      const li = btn.closest('li[data-lang]')!;
+      li.remove();
+      
+      if (!languages().length) {
+        const list = document.getElementById('lang-list')!;
+        const empty = document.createElement('li');
+        empty.id = 'lang-empty';
+        empty.className = 'text-sm text-zinc-500 italic py-2';
+        empty.textContent = 'No language filters configured yet.';
+        list.appendChild(empty);
+      }
+      await saveLanguages();
+    });
+
+    // Enter key to add
+    customInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('lang-add-btn')?.click(); });
+  }
+
+
+</script>
+

@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, U
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, case, or_
+from sqlalchemy import func, case, or_, update as sa_update, delete as sa_delete
 from sqlalchemy.orm import aliased
 from datetime import date as DateType, timedelta as TimeDelta
 from typing import Optional
@@ -48,6 +48,7 @@ async def get_public_access_status(db: AsyncSession = Depends(get_db)):
         # was removed after the admin enabled it.
         "enable_logged_out_navigation": bool(gs and gs.enable_logged_out_navigation and gs.tmdb_api_key),
         "disable_comments": bool(gs and gs.disable_comments),
+        "disable_user_ratings": bool(gs and gs.disable_user_ratings),
     }
 
 
@@ -150,10 +151,31 @@ async def update_profile(
         profile = UserProfileData(user_id=current_user.id)
         db.add(profile)
 
-    for field, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+    country_changed = (
+        "country" in updates
+        and (updates["country"] or "").upper() != (profile.country or "").upper()
+    )
+
+    for field, value in updates.items():
         setattr(profile, field, value)
 
     await db.commit()
+
+    # Certifications are region-specific, so a region change invalidates every
+    # stored rating. Clear them and let the normal on-demand lookup (or the admin
+    # backfill) repopulate for the new region.
+    if country_changed:
+        from models.show import Show as ShowModel
+        from models.media import Media as MediaModel
+        from models.provider_cache import ProviderCache
+
+        await db.execute(sa_update(ShowModel).values(content_rating=None))
+        await db.execute(sa_update(MediaModel).values(content_rating=None))
+        await db.execute(sa_delete(ProviderCache))
+        await db.commit()
+        db.info.pop(f"user_country_{current_user.id}", None)
+
     await db.refresh(profile)
     return profile
 
@@ -658,6 +680,7 @@ async def get_public_profile(
     )
     recently_watched_movies = [
         {
+            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "media_type": "movie",
             "title": media.title,
@@ -682,15 +705,23 @@ async def get_public_profile(
     )
     recently_watched_shows = [
         {
+            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "media_type": "episode",
             "title": media.title,
-            "backdrop_path": show.backdrop_path if show else media.backdrop_path,
-            "poster_path": show.poster_path if show else media.poster_path,
+            "poster_path": media.poster_path or (show.poster_path if show else None),
+            "backdrop_path": media.backdrop_path or (show.backdrop_path if show else None),
             "watched_at": we.watched_at.isoformat(),
             "show_title": show.title if show else None,
+            "show_uri_id": show.uri_id if show else None,
             "show_tmdb_id": show.tmdb_id if show else None,
-            "show_tvdb_id": show.tvdb_id if show else None,
+            "show_tvdb_id": (show.tvdb_id if show.tvdb_id else (
+                int(show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+                if (show.tmdb_data and show.tmdb_data.get("external_ids", {}).get("tvdb_id"))
+                else None
+            )) if show else None,
+            "show_poster_path": show.poster_path if show else None,
+            "show_backdrop_path": show.backdrop_path if show else None,
             "season_number": media.season_number,
             "episode_number": media.episode_number,
         }
@@ -712,6 +743,7 @@ async def get_public_profile(
     )
     top_rated_movies = [
         {
+            "uri_id": media.uri_id,
             "tmdb_id": media.tmdb_id,
             "media_type": "movie",
             "title": media.title,
@@ -725,7 +757,7 @@ async def get_public_profile(
     tr_shows_q = await db.execute(
         select(Rating, Media, ShowModel)
         .join(Media, Rating.media_id == Media.id)
-        .outerjoin(ShowModel, (Media.media_type == "series") & (Media.tmdb_id == ShowModel.tmdb_id))
+        .outerjoin(ShowModel, Media.show_id == ShowModel.id)
         .where(
             Rating.user_id == user_id,
             Rating.season_number.is_(None),
@@ -737,10 +769,12 @@ async def get_public_profile(
     )
     top_rated_shows = [
         {
+            "uri_id": (show.uri_id if show else media.uri_id),
             "tmdb_id": media.tmdb_id,
             "media_type": "series",
             "title": media.title,
             "poster_path": show.poster_path if show else media.poster_path,
+            "tvdb_id": (show.tvdb_id if show else None),
             "user_rating": rating.rating,
         }
         for rating, media, show in tr_shows_q.all()
@@ -755,42 +789,47 @@ async def get_public_profile(
     )
     comments_list = recent_comments_q.scalars().all()
 
-    # Batch resolve titles for comments
-    show_tmdb_ids = list({c.tmdb_id for c in comments_list if c.media_type in ("series", "season", "episode")})
-    movie_tmdb_ids = list({c.tmdb_id for c in comments_list if c.media_type == "movie"})
+    # Batch resolve titles for comments using uri_id
+    show_uris = list({c.uri_id for c in comments_list if c.media_type in ("series", "season", "episode") and c.uri_id})
+    movie_uris = list({c.uri_id for c in comments_list if c.media_type == "movie" and c.uri_id})
 
-    show_titles: dict[int, tuple[str, str | None]] = {}
-    movie_titles: dict[int, tuple[str, str | None]] = {}
+    show_titles: dict[str, tuple[str, str | None, dict | None, str | None]] = {}
+    movie_titles: dict[str, tuple[str, str | None]] = {}
 
-    if show_tmdb_ids:
+    if show_uris:
         sq = await db.execute(
-            select(ShowModel.tmdb_id, ShowModel.title, ShowModel.poster_path)
-            .where(ShowModel.tmdb_id.in_(show_tmdb_ids))
+            select(ShowModel.uri_id, ShowModel.title, ShowModel.poster_path, ShowModel.custom_season_names)
+            .where(ShowModel.uri_id.in_(show_uris))
         )
-        for tmdb_id, title, poster_path in sq.all():
-            show_titles[tmdb_id] = (title, poster_path)
+        for uri_id, title, poster_path, custom_season_names in sq.all():
+            show_titles[uri_id] = (title, poster_path, custom_season_names, uri_id)
 
-    if movie_tmdb_ids:
+    if movie_uris:
         mq = await db.execute(
-            select(Media.tmdb_id, Media.title, Media.poster_path)
-            .where(Media.tmdb_id.in_(movie_tmdb_ids), Media.media_type == "movie")
-            .group_by(Media.tmdb_id, Media.title, Media.poster_path)
+            select(Media.uri_id, Media.title, Media.poster_path)
+            .where(Media.uri_id.in_(movie_uris), Media.media_type == "movie")
+            .group_by(Media.uri_id, Media.title, Media.poster_path)
         )
-        for tmdb_id, title, poster_path in mq.all():
-            movie_titles[tmdb_id] = (title, poster_path)
+        for uri_id, title, poster_path in mq.all():
+            movie_titles[uri_id] = (title, poster_path)
 
     recent_comments = []
     for c in comments_list:
+        season_name = None
         if c.media_type in ("series", "season", "episode"):
-            info = show_titles.get(c.tmdb_id)
+            info = show_titles.get(c.uri_id)
+            if info and c.season_number is not None:
+                season_name = (info[2] or {}).get(str(c.season_number))
         else:
-            info = movie_titles.get(c.tmdb_id)
+            info = movie_titles.get(c.uri_id)
+
         recent_comments.append({
             "id": c.id,
             "content": c.content,
             "media_type": c.media_type,
-            "tmdb_id": c.tmdb_id,
+            "uri_id": c.uri_id,
             "season_number": c.season_number,
+            "season_name": season_name,
             "episode_number": c.episode_number,
             "title": info[0] if info else None,
             "poster_path": info[1] if info else None,
@@ -931,8 +970,7 @@ async def get_public_profile(
         "avatar_url": f"/profile/avatar/{user.id}" if (profile and profile.avatar_path) else None,
         "bio": profile.bio if profile else None,
         "country": profile.country if profile else None,
-        "movie_genres": profile.movie_genres if profile else [],
-        "show_genres": profile.show_genres if profile else [],
+        "liked_genres": profile.liked_genres if profile else [],
         "created_at": user.created_at,
         "total_watched": total_watched,
         "total_collected": total_collected,

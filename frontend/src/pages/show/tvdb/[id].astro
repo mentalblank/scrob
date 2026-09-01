@@ -169,7 +169,7 @@ const originalLanguage = show?.original_language
                   tmdbId={show.tmdb_id_cross}
                   tvdbId={show.tvdb_id}
                   selected="tvdb"
-                  token={token}
+                  token={token ?? ''}
                 />
               </div>
             )}
@@ -286,7 +286,7 @@ const originalLanguage = show?.original_language
                       tmdbId={show!.tmdb_id_cross ?? show!.tvdb_id}
                       mediaType="series"
                       watched={seasonState.watched}
-                      inLists={seasonState.in_lists ?? []}
+                      inLists={[]}
                       inLibrary={seasonState.in_library}
                       collectionPct={seasonState.collection_pct}
                       watchPct={seasonState.watch_pct ?? 0}
@@ -358,7 +358,7 @@ const originalLanguage = show?.original_language
 
         <CommentsSection
           mediaType="series"
-          tmdbId={show.tmdb_id_cross ?? show.tvdb_id}
+          uriId={`tvdb:s:${id}`}
         />
 
         {show.tmdb_id_cross && (
@@ -395,8 +395,8 @@ const originalLanguage = show?.original_language
   const backdrop = document.getElementById('poster-modal-backdrop');
   const closeBtn = document.getElementById('poster-modal-close');
   if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-    function closeModal() { modal.classList.add('hidden'); document.body.style.overflow = ''; }
+    const openModal = () => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
+    const closeModal = () => { modal.classList.add('hidden'); document.body.style.overflow = ''; };
     zoomBtn.addEventListener('click', openModal);
     backdrop?.addEventListener('click', closeModal);
     closeBtn?.addEventListener('click', closeModal);

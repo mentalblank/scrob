@@ -43,8 +43,23 @@ if [ -z "$DATABASE_URL" ]; then
         gosu scrob initdb -D "$PGDATA" --auth=trust --no-locale -E UTF8 -U scrob
     fi
 
+    # A data directory from an older image can't be read by a newer server. Say so
+    # plainly - otherwise the container restart-loops on an opaque pg_ctl failure.
+    DATA_MAJOR=$(cat "$PGDATA/PG_VERSION")
+    SERVER_MAJOR=$(postgres --version | sed -E 's/.* ([0-9]+)\..*/\1/')
+    if [ "$DATA_MAJOR" != "$SERVER_MAJOR" ]; then
+        echo "Error: the database in $PGDATA was created by PostgreSQL $DATA_MAJOR, but this image ships PostgreSQL $SERVER_MAJOR."
+        echo "PostgreSQL cannot read a data directory from a different major version."
+        echo "Either restore from a Scrob export into a fresh volume, or dump the old data with a PostgreSQL $DATA_MAJOR image and restore it here."
+        exit 1
+    fi
+
     # Start postgres temporarily so we can run migrations
-    gosu scrob pg_ctl -D "$PGDATA" -o "-k /var/run/postgresql -h 127.0.0.1" -l /tmp/pg-init.log start
+    if ! gosu scrob pg_ctl -D "$PGDATA" -o "-k /var/run/postgresql -h 127.0.0.1" -l /tmp/pg-init.log start; then
+        echo "Error: PostgreSQL failed to start. Logs:"
+        cat /tmp/pg-init.log
+        exit 1
+    fi
 
     # Wait until postgres accepts connections
     echo "Waiting for PostgreSQL to start..."

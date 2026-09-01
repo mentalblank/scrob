@@ -1,14 +1,10 @@
-import gzip
-import io
-import json
-import struct
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.future import select
-from sqlalchemy import delete, func, update
+from sqlalchemy import delete, func, update, text
 
 from db import get_db, engine
 from models.users import User
@@ -16,13 +12,14 @@ from models.profile import UserProfileData
 from models.global_settings import GlobalSettings
 from models.media import Media
 from models.collection import Collection
+from models.show import Show
 from models.sync import SyncJob, SyncStatus
 from models.base import CollectionSource, MediaType
 from models.media_request import MediaRequest, RequestStatus
 from models.users import UserSettings
 from dependencies import require_admin
 from core.url_validator import validate_service_url
-from core.backup import asyncpg_conn, restore_backup
+from core.backup import pg_dump, pg_restore
 import schemas
 
 router = APIRouter()
@@ -197,41 +194,22 @@ async def delete_user(
 
 @router.get("/backup")
 async def backup_database(_: User = Depends(require_admin)):
-    conn = await asyncpg_conn()
+    """Full database backup via pg_dump (schema + data + sequences)."""
     try:
-        rows = await conn.fetch(
-            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename != 'alembic_version'"
-        )
-        tables = [r["tablename"] for r in rows]
+        payload = await pg_dump()
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
-        buf = io.BytesIO()
-        with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
-            header = json.dumps({"version": 1, "tables": tables}).encode()
-            gz.write(struct.pack(">I", len(header)))
-            gz.write(header)
-            for table in tables:
-                data_buf = io.BytesIO()
-                await conn.copy_from_table(table, output=data_buf, format="binary")
-                data = data_buf.getvalue()
-                name_bytes = table.encode()
-                gz.write(struct.pack(">H", len(name_bytes)))
-                gz.write(name_bytes)
-                gz.write(struct.pack(">Q", len(data)))
-                gz.write(data)
-
-        payload = buf.getvalue()
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        filename = f"scrob_backup_{timestamp}.bak"
-        return Response(
-            content=payload,
-            media_type="application/octet-stream",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Content-Length": str(len(payload)),
-            },
-        )
-    finally:
-        await conn.close()
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"scrob_backup_{timestamp}.pgdump"
+    return Response(
+        content=payload,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(payload)),
+        },
+    )
 
 
 @router.get("/maintenance/cache-stats")
@@ -247,6 +225,7 @@ async def get_cache_stats(
         "total_size_bytes": total_size,
         "entry_count": count,
         "limit_gb": gs.image_cache_limit_gb if gs else None,
+        "expiry_days": gs.image_cache_expiry_days if gs else None,
     }
 
 
@@ -288,9 +267,147 @@ async def admin_heal_metadata(
     return {"status": "started", "message": "Server-wide metadata heal is running in the background"}
 
 
+@router.post("/maintenance/refresh-metadata")
+async def admin_refresh_metadata(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Re-fetch every show server-wide: metadata, both catalogues' artwork, and
+    the numbering episodes are filed under.
+
+    Shows and media rows are shared by every account, and merging an episode
+    stored twice moves plays that belong to other users, so this is an
+    admin-only action.
+    """
+    from routers.shows import get_user_tvdb_key
+    from routers.sync import run_refresh_metadata
+
+    gs = await _get_or_create_global_settings(db)
+    settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = settings_q.scalar_one_or_none()
+    tmdb_key = gs.tmdb_api_key or (settings.tmdb_api_key if settings else None)
+    if not tmdb_key:
+        raise HTTPException(status_code=400, detail="A TMDB API key is required to refresh metadata")
+
+    tvdb_key = await get_user_tvdb_key(db, current_user.id)
+    job = SyncJob(user_id=current_user.id, source=CollectionSource.tmdb, job_type="refresh", status=SyncStatus.pending)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    background_tasks.add_task(run_refresh_metadata, current_user.id, tmdb_key, tvdb_key, job.id)
+    return {"status": "started", "message": "Server-wide metadata refresh is running in the background"}
+
+
+@router.post("/maintenance/backfill-content-ratings")
+async def admin_backfill_content_ratings(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Fill in content_rating for shows/movies that predate the column.
+
+    TMDB only returns certifications on detail fetches, so rating filters can't
+    match anything until each title has been looked up once.
+    """
+    gs = await _get_or_create_global_settings(db)
+    if not gs.tmdb_api_key:
+        raise HTTPException(status_code=400, detail="A global TMDB API key is required")
+    from routers.media import get_user_country
+    country = await get_user_country(db, current_user.id)
+    job = SyncJob(user_id=current_user.id, source=CollectionSource.tmdb, job_type="ratings", status=SyncStatus.pending)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    background_tasks.add_task(run_content_rating_backfill, gs.tmdb_api_key, country, job.id)
+    return {"status": "started", "message": "Content rating backfill is running in the background"}
+
+
+async def run_content_rating_backfill(api_key: str, country: str = "US", job_id: int | None = None) -> None:
+    import asyncio
+    from models.show import Show
+    from core import tmdb as tmdb_client
+    from core.enrichment import extract_movie_certification, extract_show_content_rating
+
+    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with async_session() as db:
+        async def _update_job(**kwargs):
+            if job_id is None:
+                return
+            await db.execute(update(SyncJob).where(SyncJob.id == job_id).values(updated_at=func.now(), **kwargs))
+            await db.commit()
+
+        semaphore = asyncio.Semaphore(8)
+
+        async def _fetch(kind: str, tmdb_id: int):
+            async with semaphore:
+                try:
+                    if kind == "movie":
+                        data = await tmdb_client.get_movie(tmdb_id, api_key=api_key)
+                        return extract_movie_certification(data, country)
+                    data = await tmdb_client.get_show(tmdb_id, api_key=api_key)
+                    return extract_show_content_rating(data, country)
+                except Exception:
+                    return None
+
+        try:
+            await _update_job(status=SyncStatus.running, processed_items=0, total_items=0)
+
+            shows_q = await db.execute(
+                select(Show).where(Show.content_rating.is_(None), Show.tmdb_id.isnot(None))
+            )
+            shows = list(shows_q.scalars().all())
+
+            movies_q = await db.execute(
+                select(Media).where(
+                    Media.content_rating.is_(None),
+                    Media.media_type == MediaType.movie,
+                    Media.tmdb_id.isnot(None),
+                )
+            )
+            movies = list(movies_q.scalars().all())
+
+            # Shows and movies share one bar: both are counted up front so the
+            # total doesn't jump when the run crosses from one to the other.
+            await _update_job(total_items=len(shows) + len(movies))
+            processed = 0
+            filled = 0
+
+            for i in range(0, len(shows), 50):
+                chunk = shows[i:i + 50]
+                ratings = await asyncio.gather(*[_fetch("series", s.tmdb_id) for s in chunk])
+                for show, rating in zip(chunk, ratings):
+                    if rating:
+                        show.content_rating = rating
+                        filled += 1
+                await db.commit()
+                processed += len(chunk)
+                await _update_job(processed_items=processed)
+
+            for i in range(0, len(movies), 50):
+                chunk = movies[i:i + 50]
+                ratings = await asyncio.gather(*[_fetch("movie", m.tmdb_id) for m in chunk])
+                for movie, rating in zip(chunk, ratings):
+                    if rating:
+                        movie.content_rating = rating
+                        filled += 1
+                await db.commit()
+                processed += len(chunk)
+                await _update_job(processed_items=processed)
+
+            await _update_job(
+                status=SyncStatus.completed,
+                processed_items=processed,
+                stats={"shows_checked": len(shows), "movies_checked": len(movies), "ratings_filled": filled},
+            )
+        except Exception as e:
+            await db.rollback()
+            await _update_job(status=SyncStatus.failed, error_message=str(e)[:900])
+
+
 async def run_admin_heal(api_key: str, user_id: int | None = None, job_id: int | None = None):
     from models.show import Show
-    from routers.sync import batch_enrich_items
+    from routers.sync import batch_enrich_items, heal_show_ids_and_stingers
     from core.enrichment import is_unmapped_tvdb_episode
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session() as db:
@@ -322,9 +439,9 @@ async def run_admin_heal(api_key: str, user_id: int | None = None, job_id: int |
             ]
 
             if not movies and not episodes:
-                print("Admin heal: nothing to fix server-wide")
-                await _update_job(status=SyncStatus.completed, total_items=0, stats={"healed": True})
-                return
+                # Not done yet — the backfill below covers rows that have a
+                # poster and so never qualify for re-enrichment.
+                print("Admin heal: nothing to re-enrich server-wide")
 
             print(f"Admin heal: {len(movies)} movies, {len(episodes)} episodes to re-enrich")
 
@@ -341,9 +458,17 @@ async def run_admin_heal(api_key: str, user_id: int | None = None, job_id: int |
             ]
 
             await _update_job(total_items=len(to_enrich), processed_items=0)
-            await batch_enrich_items(db, to_enrich, api_key=api_key, user_id=user_id)
+            await batch_enrich_items(to_enrich, api_key=api_key)
             await db.commit()
-            await _update_job(processed_items=len(to_enrich), status=SyncStatus.completed, stats={"healed": True})
+
+            # Server-wide: every show and movie, not just this run's re-enriched
+            # ones — the ids and credits-scene flags are missing on rows that
+            # have a poster and so never reach the pass above.
+            await _update_job(processed_items=len(to_enrich), current_step="Backfilling ids and credits scenes")
+            backfill = await heal_show_ids_and_stingers(db, api_key)
+            print(f"Admin heal backfill: {backfill}")
+
+            await _update_job(status=SyncStatus.completed, stats={"healed": True, **backfill})
             print(f"Admin heal complete: processed {len(to_enrich)} items")
         except Exception as e:
             print(f"Admin heal failed: {e}")
@@ -358,25 +483,66 @@ async def restore_database(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    if not (file.filename or "").endswith(".bak"):
-        raise HTTPException(status_code=400, detail="Only .bak backup files are accepted.")
+    """Restore database from a pg_dump custom-format backup file."""
+    fname = (file.filename or "").lower()
+    if not (fname.endswith(".pgdump") or fname.endswith(".bak")):
+        raise HTTPException(status_code=400, detail="Only .pgdump backup files are accepted.")
 
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # Release the SQLAlchemy session's open transaction before the raw asyncpg
-    # TRUNCATE. get_current_user (via require_admin) holds ACCESS SHARE on `users`
-    # for the duration of the transaction; TRUNCATE needs ACCESS EXCLUSIVE on all
-    # tables and would deadlock waiting for that lock to be released.
+    # Release SQLAlchemy session before pg_restore takes exclusive locks.
     await db.rollback()
 
     try:
-        await restore_backup(content)
-    except ValueError as e:
+        await pg_restore(content)
+    except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return {"status": "restored"}
+
+@router.delete("/database")
+async def clear_database(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Resets all media, collections, history, lists, and comments globally.
+    User settings and admin settings are preserved.
+    """
+    # Anything keyed on a media or show row's primary key has to go with it.
+    # A left-behind alias keeps pointing at a deleted id, and its uniqueness
+    # constraint means the next import can't replace it — uri lookups then
+    # resolve to rows that no longer exist.
+    tables_to_truncate = [
+        "shows",
+        "media",
+        "collections",
+        "collection_files",
+        "watch_events",
+        "ratings",
+        "lists",
+        "list_items",
+        "sync_jobs",
+        "playback_sessions",
+        "playback_progress",
+        "follows",
+        "blocklist_items",
+        "comments",
+        "media_aliases",
+        "media_translations",
+        "show_translations",
+        "episode_movie_conversions",
+        "show_season_overrides",
+        "show_episode_overrides",
+    ]
+    
+    query = text(f"TRUNCATE {', '.join(tables_to_truncate)} CASCADE")
+    await db.execute(query)
+    await db.commit()
+    
+    return {"status": "ok", "message": "Database cleared successfully."}
 
 
 # ── Media requests (approval queue) ──────────────────────────────────────────
@@ -403,14 +569,30 @@ async def list_requests(
         .order_by(MediaRequest.updated_at.desc())
     )
     rows = result.all()
+    episode_uris = [req.uri_id for req, _ in rows if req.media_type == "episode"]
+    ep_to_show_uri = {}
+    if episode_uris:
+        from sqlalchemy.orm import selectinload
+        ep_media_q = await db.execute(
+            select(Media)
+            .options(selectinload(Media.show))
+            .where(Media.uri_id.in_(episode_uris), Media.media_type == MediaType.episode)
+        )
+        for ep in ep_media_q.scalars().all():
+            if ep.show and ep.show.uri_id:
+                ep_to_show_uri[ep.uri_id] = ep.show.uri_id
+
     return [
         {
             "id":          req.id,
-            "tmdb_id":     req.tmdb_id,
+            "uri_id":      req.uri_id,
             "media_type":  req.media_type,
             "title":       req.title,
             "poster_path": req.poster_path,
             "status":      req.status.value,
+            "season_number": req.season_number,
+            "episode_number": req.episode_number,
+            "show_uri_id": ep_to_show_uri.get(req.uri_id) if req.media_type == "episode" else None,
             "reviewed_by": req.reviewed_by,
             "created_at":  req.created_at,
             "updated_at":  req.updated_at,
@@ -439,17 +621,27 @@ async def approve_request(
     settings_q = await db.execute(select(UserSettings).where(UserSettings.user_id == req.user_id))
     settings = settings_q.scalar_one_or_none()
 
+    # Derive provider + numeric ID from uri_id
+    from utils.media_uri import MediaURI
+    try:
+        _uri = MediaURI.parse(req.uri_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid uri_id on request: {req.uri_id}")
+    _req_tmdb_id = int(_uri.id) if _uri.provider == "tmdb" else None
+
     if req.media_type == "movie":
         from routers.media import _effective_radarr
         from core import radarr as radarr_core
         radarr_cfg = _effective_radarr(settings, gs)
         if not radarr_cfg:
             raise HTTPException(status_code=400, detail="Radarr not configured")
+        if not _req_tmdb_id:
+            raise HTTPException(status_code=400, detail="Radarr requires TMDB ID; request is not TMDB-based")
         try:
             await radarr_core.add_movie(
                 url=radarr_cfg.radarr_url,
                 token=radarr_cfg.radarr_token,
-                tmdb_id=req.tmdb_id,
+                tmdb_id=_req_tmdb_id,
                 title=req.title or "",
                 root_folder=radarr_cfg.radarr_root_folder,
                 quality_profile_id=radarr_cfg.radarr_quality_profile,
@@ -458,16 +650,40 @@ async def approve_request(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Radarr error: {e}")
 
-    elif req.media_type == "series":
+    elif req.media_type in ("series", "season", "episode"):
         from routers.media import _effective_sonarr, get_user_tmdb_key
         from core import sonarr as sonarr_core, tmdb as tmdb_core
+        from sqlalchemy.orm import selectinload
         sonarr_cfg = _effective_sonarr(settings, gs)
         if not sonarr_cfg:
             raise HTTPException(status_code=400, detail="Sonarr not configured")
         try:
             tmdb_key = await get_user_tmdb_key(db, current_user.id)
-            ext_ids = await tmdb_core.get_external_ids(req.tmdb_id, "tv", api_key=tmdb_key)
-            tvdb_id = ext_ids.get("tvdb_id")
+            tvdb_id = None
+            
+            # If the request is for an episode, resolve its parent show first
+            if _uri.type_prefix == "e":
+                ep_media_q = await db.execute(
+                    select(Media)
+                    .options(selectinload(Media.show))
+                    .where(Media.uri_id == req.uri_id, Media.media_type == MediaType.episode)
+                )
+                ep_media = ep_media_q.scalars().first()
+                if ep_media and ep_media.show:
+                    tvdb_id = ep_media.show.tvdb_id
+                    _req_tmdb_id = ep_media.show.tmdb_id
+
+            if not tvdb_id:
+                if _uri.provider == "tvdb":
+                    tvdb_id = int(_uri.id)
+                else:
+                    if req.uri_id:
+                        from utils.alias_lookup import get_provider_id_for_uri as _get_tvdb_admin
+                        _tvdb_str = await _get_tvdb_admin(db, req.uri_id, "tvdb")
+                        tvdb_id = int(_tvdb_str) if _tvdb_str else None
+                    if not tvdb_id and _req_tmdb_id:
+                        ext_ids = await tmdb_core.get_external_ids(_req_tmdb_id, "tv", api_key=tmdb_key)
+                        tvdb_id = ext_ids.get("tvdb_id")
             if not tvdb_id:
                 raise HTTPException(status_code=400, detail="Could not find TVDB ID")
             await sonarr_core.add_series(

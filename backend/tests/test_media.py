@@ -5,7 +5,12 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 
 from models.episode_order import EpisodeOrderMapping, UserShowEpisodeOrder
-from routers.media import _attach_episode_order_fields, _resolve_add_overrides, RequestOverrides
+from routers.media import (
+    _attach_episode_order_fields,
+    _effective_episode_order,
+    _resolve_add_overrides,
+    RequestOverrides,
+)
 
 
 def _pref(series_tmdb_id, episode_order="tvdb"):
@@ -120,6 +125,47 @@ class AttachEpisodeOrderFieldsTests(unittest.TestCase):
         item = {"type": "movie", "tmdb_id": 550}
         _attach_episode_order_fields(item, {550: _pref(550)}, {})
         self.assertNotIn("show_episode_order", item)
+
+
+class AccountDefaultEpisodeOrderTests(unittest.TestCase):
+    """A per-show row is an override, not the only way to ask for TVDB
+    numbering: an account whose primary metadata source is TVDB has asked for
+    it everywhere it hasn't been overridden. Without this the card's link
+    carried the TVDB show id and TMDB's position - Re:ZERO's TMDB S01E79 is
+    TVDB's S04E13, so the link opened a real but unrelated episode."""
+
+    def test_missing_row_follows_the_account_default(self) -> None:
+        self.assertEqual(_effective_episode_order(None, "tvdb"), "tvdb")
+        self.assertEqual(_effective_episode_order(None, "tmdb"), "tmdb")
+
+    def test_per_show_row_outranks_the_account_default(self) -> None:
+        self.assertEqual(
+            _effective_episode_order(_pref(100, episode_order="tmdb"), "tvdb"), "tmdb"
+        )
+        self.assertEqual(
+            _effective_episode_order(_pref(100, episode_order="tvdb"), "tmdb"), "tvdb"
+        )
+
+    def test_episode_translates_under_the_account_default_alone(self) -> None:
+        item = {"type": "episode", "show_tmdb_id": 100, "season_number": 1, "episode_number": 79}
+        tmdb_to_tvdb = {(100, 1, 79): _mapping(100, 1, 79, 4, 13)}
+
+        _attach_episode_order_fields(item, {}, tmdb_to_tvdb, "tvdb")
+
+        self.assertEqual(item["show_episode_order"], "tvdb")
+        self.assertEqual(item["tvdb_season_number"], 4)
+        self.assertEqual(item["tvdb_episode_number"], 13)
+
+    def test_show_pinned_to_tmdb_stays_tmdb_under_a_tvdb_account(self) -> None:
+        item = {"type": "episode", "show_tmdb_id": 100, "season_number": 1, "episode_number": 79}
+        tmdb_to_tvdb = {(100, 1, 79): _mapping(100, 1, 79, 4, 13)}
+
+        _attach_episode_order_fields(
+            item, {100: _pref(100, episode_order="tmdb")}, tmdb_to_tvdb, "tvdb"
+        )
+
+        self.assertNotIn("show_episode_order", item)
+        self.assertNotIn("tvdb_season_number", item)
 
 
 class ResolveAddOverridesTests(unittest.TestCase):

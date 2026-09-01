@@ -272,7 +272,7 @@ class EnrichMediaEpisodeTvdbFallbackTests(unittest.IsolatedAsyncioTestCase):
              patch("core.enrichment.tvdb_client.get_series_episodes", AsyncMock()) as get_tvdb_eps:
             await enrich_media(
                 media, api_key="tmdb-key", series_tmdb_id=999,
-                tvdb_id=42, tvdb_api_key="tvdb-key",
+                series_tvdb_id=42, tvdb_api_key="tvdb-key",
             )
 
         get_ep.assert_awaited_once()
@@ -292,7 +292,7 @@ class EnrichMediaEpisodeTvdbFallbackTests(unittest.IsolatedAsyncioTestCase):
              patch("core.enrichment.tvdb_client.get_series_episodes", AsyncMock(return_value=tvdb_raw)) as get_tvdb_eps:
             await enrich_media(
                 media, api_key="tmdb-key", series_tmdb_id=65942,
-                tvdb_id=411, tvdb_api_key="tvdb-key", tvdb_lang="eng",
+                series_tvdb_id=411, tvdb_api_key="tvdb-key", tvdb_lang="eng",
             )
 
         get_tvdb_eps.assert_awaited_once_with(411, 4, "tvdb-key", language="eng")
@@ -314,7 +314,7 @@ class EnrichMediaEpisodeTvdbFallbackTests(unittest.IsolatedAsyncioTestCase):
              patch("core.enrichment.tvdb_client.get_series_episodes", AsyncMock(return_value=[])):
             await enrich_media(
                 media, api_key="tmdb-key", series_tmdb_id=65942,
-                tvdb_id=411, tvdb_api_key="tvdb-key",
+                series_tvdb_id=411, tvdb_api_key="tvdb-key",
             )
 
         self.assertEqual(media.tmdb_data, {})
@@ -328,7 +328,7 @@ class EnrichMediaEpisodeTvdbFallbackTests(unittest.IsolatedAsyncioTestCase):
         }]
         with patch("core.enrichment.tmdb.get_episode", AsyncMock()) as get_ep, \
              patch("core.enrichment.tvdb_client.get_series_episodes", AsyncMock(return_value=tvdb_raw)):
-            await enrich_media(media, api_key="tmdb-key", tvdb_id=999, tvdb_api_key="tvdb-key")
+            await enrich_media(media, api_key="tmdb-key", series_tvdb_id=999, tvdb_api_key="tvdb-key")
 
         get_ep.assert_not_awaited()
         self.assertEqual(media.tmdb_id, 100)

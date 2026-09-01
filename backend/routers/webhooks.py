@@ -10,8 +10,7 @@ from sqlalchemy import select, delete, func, or_
 from sqlalchemy.orm.exc import StaleDataError
 
 from db import get_db
-from dependencies import get_current_user_or_api_key
-from models.media import Media
+from models.media import Media, stamp_media_uri
 from models.show import Show
 from models.collection import Collection, CollectionFile
 from models.events import WatchEvent
@@ -40,8 +39,35 @@ from core import mdblist as mdblist_client
 from core import tvdb as tvdb_client
 from core.jellyfin import extract_quality
 from core.translations import get_user_metadata_language
+from dependencies import get_current_user_or_api_key
 
 router = APIRouter()
+
+
+async def _duplicated_by_full_connection(db: AsyncSession, source: str, user_id: int, raw_session_id: str) -> bool:
+    """True when a full <source> media-server connection already has an
+    active PlaybackSession for this exact server-assigned session id (#312).
+
+    A scrobble-only connection has no server URL/token of its own, so it
+    can't identify "the same physical server" the way exclude_connection_id
+    does elsewhere (#190) - but `raw_session_id` comes straight from the
+    server's own webhook payload (Jellyfin's session_id / Plex's
+    session_key), not something Scrob generates, so an identical value
+    arriving via both a full connection's webhook and a scrobble-only
+    connection's webhook is the server itself reporting the same playback
+    twice, e.g. a user with a full connection to one Jellyfin server and a
+    scrobble-only connection accidentally also pointed at that same server.
+    Two connections to two different servers never collide here, since each
+    server mints its own session ids independently.
+
+    Used to skip the *outbound* scrobble dispatch only - local session
+    tracking and watch-event writes are left as they already were (the
+    latter already has its own 5-minute completed-watch dedup guard, see
+    _write_watch_event).
+    """
+    full_key = f"{source}:{user_id}:{raw_session_id}"
+    result = await db.execute(select(PlaybackSession.id).where(PlaybackSession.session_key == full_key))
+    return result.scalar_one_or_none() is not None
 
 
 async def _maybe_trakt_scrobble(
@@ -375,39 +401,47 @@ async def _get_scrobble_connection_by_id(db: AsyncSession, user_id: int, connect
     return result.scalar_one_or_none()
 
 
-async def _duplicated_by_full_connection(db: AsyncSession, source: str, user_id: int, raw_session_id: str) -> bool:
-    """True when a full <source> media-server connection already has an
-    active PlaybackSession for this exact server-assigned session id (#312).
+async def _record_media_identity(
+    db: AsyncSession,
+    media: Media,
+    *,
+    tvdb_id: str | int | None = None,
+    imdb_id: str | None = None,
+) -> None:
+    """Keep every provider id the payload carried, and give the row a uri.
 
-    A scrobble-only connection has no server URL/token of its own, so it
-    can't identify "the same physical server" the way exclude_connection_id
-    does elsewhere (#190) - but `raw_session_id` comes straight from the
-    server's own webhook payload (Jellyfin's session_id / Plex's
-    session_key), not something Scrob generates, so an identical value
-    arriving via both a full connection's webhook and a scrobble-only
-    connection's webhook is the server itself reporting the same playback
-    twice, e.g. a user with a full connection to one Jellyfin server and a
-    scrobble-only connection accidentally also pointed at that same server.
-    Two connections to two different servers never collide here, since each
-    server mints its own session ids independently.
-
-    Used to skip the *outbound* scrobble dispatch only - local session
-    tracking and watch-event writes are left as they already were (the
-    latter already has its own 5-minute completed-watch dedup guard, see
-    _write_watch_event).
+    A scrobble is often the first time a title is seen, so this is the only
+    chance to capture ids the media server knows and TMDB may not expose.
     """
-    full_key = f"{source}:{user_id}:{raw_session_id}"
-    result = await db.execute(select(PlaybackSession.id).where(PlaybackSession.session_key == full_key))
-    return result.scalar_one_or_none() is not None
+    from utils.alias_lookup import record_provider_ids
+
+    stamp_media_uri(media, tvdb_id=tvdb_id, imdb_id=imdb_id)
+    await record_provider_ids(
+        db,
+        media.id,
+        media.media_type.value,
+        tmdb_id=media.tmdb_id,
+        tvdb_id=tvdb_id,
+        imdb_id=imdb_id,
+    )
 
 
-async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: str = None) -> Show:
+async def _find_or_create_show(
+    db: AsyncSession,
+    series_tmdb_id: int,
+    api_key: str = None,
+    tvdb_id: str | int | None = None,
+    imdb_id: str | None = None,
+) -> Show:
+    from utils.alias_lookup import link_show_provider_ids
+
     result = await db.execute(select(Show).where(Show.tmdb_id == series_tmdb_id))
     show = result.scalar_one_or_none()
     if not show:
         show_data = await tmdb.get_show(series_tmdb_id, api_key=api_key)
         show = Show(
             tmdb_id=series_tmdb_id,
+            uri_id=f"tmdb:s:{series_tmdb_id}" if series_tmdb_id else None,
             title=show_data.get("name", ""),
             original_title=show_data.get("original_name"),
             overview=show_data.get("overview"),
@@ -421,6 +455,7 @@ async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: s
             tmdb_data={
                 "genres": [g["name"] for g in show_data.get("genres", [])],
                 "external_ids": show_data.get("external_ids", {}),
+                **tmdb.credits_stinger_fields(show_data),
                 "seasons": [
                     {
                         "season_number": s["season_number"],
@@ -443,6 +478,29 @@ async def _find_or_create_show(db: AsyncSession, series_tmdb_id: int, api_key: s
         )
         db.add(show)
         await db.flush()
+        # Record the provider links so uri lookups resolve without a fallback.
+        await link_show_provider_ids(
+            db,
+            show,
+            external_ids=show_data.get("external_ids"),
+            tvdb_id=tvdb_id,
+            imdb_id=imdb_id,
+        )
+    elif not show.tvdb_id:
+        # A row created by a path that never resolved its ids would otherwise
+        # stay TMDB-only for good — the show is right here, so fill the gap
+        # rather than leaving it to a manual refresh.
+        external_ids = {}
+        if not tvdb_id:
+            try:
+                external_ids = await tmdb.get_external_ids(
+                    series_tmdb_id, "tv", api_key=api_key
+                )
+            except Exception:
+                external_ids = {}
+        await link_show_provider_ids(
+            db, show, external_ids=external_ids, tvdb_id=tvdb_id, imdb_id=imdb_id
+        )
     return show
 
 
@@ -757,13 +815,14 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
             "year": item.get("ProductionYear"),
             "media_type": "movie" if item.get("Type") == "Movie" else "episode",
             "tmdb_id": item.get("ProviderIds", {}).get("Tmdb"),
+            "tvdb_id": item.get("ProviderIds", {}).get("Tvdb"),
+            "imdb_id": item.get("ProviderIds", {}).get("Imdb"),
             "series_tmdb_id": item.get("SeriesProviderIds", {}).get("Tmdb"),
-            # Emby's native webhook notifications use this nested shape and don't
-            # reliably populate SeriesProviderIds the way Jellyfin's "send all
-            # properties" plugin does - without a series_name fallback here,
-            # find_or_create_media_jellyfin can never resolve show linkage for
-            # an Emby episode, leaving Now Playing showing the episode title
-            # with no poster instead of the series (see #192).
+            "series_tvdb_id": item.get("SeriesProviderIds", {}).get("Tvdb"),
+            "series_imdb_id": item.get("SeriesProviderIds", {}).get("Imdb"),
+            # Nested payloads often omit SeriesProviderIds entirely; the name is
+            # then the only handle on the show, and the resolver downstream
+            # falls back to it (local Show title, then a TMDB search).
             "series_name": item.get("SeriesName"),
             "season_number": item.get("ParentIndexNumber"),
             "episode_number": item.get("IndexNumber"),
@@ -792,6 +851,8 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
         or payload.get("Provider_Tmdb")
         or payload.get("Provider_tmdbid")
     )
+    tvdb_id = payload.get("Provider_tvdb") or payload.get("Provider_Tvdb")
+    imdb_id = payload.get("Provider_imdb") or payload.get("Provider_Imdb")
     position_ticks = payload.get("PlaybackPositionTicks") or payload.get("PositionTicks") or 0
     runtime_ticks = payload.get("RunTimeTicks") or 0
 
@@ -807,6 +868,8 @@ def parse_jellyfin_payload(payload: dict) -> dict | None:
         "year": payload.get("Year") or payload.get("ProductionYear"),
         "media_type": "movie" if item_type == "Movie" else "episode",
         "tmdb_id": str(tmdb_id) if tmdb_id else None,
+        "tvdb_id": str(tvdb_id) if tvdb_id else None,
+        "imdb_id": str(imdb_id) if imdb_id else None,
         "series_tmdb_id": None,  # not exposed in flat format; resolved in find_or_create
         "series_name": payload.get("SeriesName"),  # used to look up show when series_tmdb_id is absent
         "season_number": season_num,
@@ -999,7 +1062,11 @@ async def _resolve_show_for_episode(
 
     if data["media_type"] == "episode" and series_tmdb_id:
         try:
-            show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            show = await _find_or_create_show(
+                db, series_tmdb_id, api_key,
+                tvdb_id=data.get("series_tvdb_id"),
+                imdb_id=data.get("series_imdb_id"),
+            )
         except Exception:
             pass
 
@@ -1159,6 +1226,9 @@ async def find_or_create_media_jellyfin(
         )
     else:
         await enrich_media(media, api_key=api_key)
+    await _record_media_identity(
+        db, media, tvdb_id=data.get("tvdb_id"), imdb_id=data.get("imdb_id")
+    )
     return media
 
 
@@ -2383,7 +2453,11 @@ async def find_or_create_media_plex(
 
     if media.media_type == MediaType.episode and series_tmdb_id:
         try:
-            show = await _find_or_create_show(db, series_tmdb_id, api_key)
+            show = await _find_or_create_show(
+                db, series_tmdb_id, api_key,
+                tvdb_id=data.get("grandparent_tvdb_id"),
+                imdb_id=data.get("grandparent_imdb_id"),
+            )
             media.show_id = show.id
             tvdb_id, tvdb_api_key, tvdb_lang = await _resolve_tvdb_fallback(db, show, user_id)
             media = await enrich_media_safely(
@@ -2394,6 +2468,9 @@ async def find_or_create_media_plex(
             print(f"  Could not enrich episode with show context: {e}")
     else:
         await enrich_media(media, api_key=api_key)
+    await _record_media_identity(
+        db, media, tvdb_id=data.get("tvdb_id"), imdb_id=data.get("imdb_id")
+    )
     return media
 
 
@@ -3087,6 +3164,15 @@ async def find_or_create_media_kodi(
         )
     else:
         await enrich_media(media, api_key=api_key)
+    # Kodi names the series with those ids on an episode payload, so only a movie
+    # can claim them for itself.
+    is_movie = media.media_type == MediaType.movie
+    await _record_media_identity(
+        db,
+        media,
+        tvdb_id=data.get("tvdb_id") if is_movie else None,
+        imdb_id=data.get("imdb_id") if is_movie else None,
+    )
     return media
 
 

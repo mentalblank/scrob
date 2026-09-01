@@ -3,12 +3,12 @@ import { api, type Comment } from "../lib/api";
 
 interface Props {
   mediaType: string;
-  tmdbId: number;
+  uriId: string;
   seasonNumber?: number;
   episodeNumber?: number;
 }
 
-const { mediaType, tmdbId, seasonNumber, episodeNumber } = Astro.props;
+const { mediaType, uriId, seasonNumber, episodeNumber } = Astro.props;
 const token = Astro.cookies.get("token")?.value;
 const user = Astro.locals.user;
 const loginNextUrl = `/login?next=${encodeURIComponent(Astro.url.pathname + Astro.url.search)}`;
@@ -16,21 +16,21 @@ const loginNextUrl = `/login?next=${encodeURIComponent(Astro.url.pathname + Astr
 const { disable_comments: commentsDisabled } = await api.profile.publicAccessStatus().catch(() => ({ disable_comments: false }));
 
 let comments: Comment[] = [];
-if (!commentsDisabled) {
-  try {
-    comments = await api.comments.list({
-      media_type: mediaType,
-      tmdb_id: tmdbId,
-      season_number: seasonNumber,
-      episode_number: episodeNumber
-    }, token);
-  } catch (e) {
-    console.error("Failed to load comments", e);
-  }
+try {
+  comments = await api.comments.list({
+    media_type: mediaType,
+    uri_id: uriId,
+    season_number: seasonNumber,
+    episode_number: episodeNumber
+  }, token);
+} catch (e) {
+  console.error("Failed to load comments", e);
 }
----
 
-{!commentsDisabled && (
+const showComments = Astro.cookies.get("show_comments")?.value !== "false";
+---
+{showComments && !commentsDisabled ? (
+
 <div class="mt-24 border-zinc-900 pt-16 mb-20">
   <div class="flex items-center justify-between mb-10">
     <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase flex items-center gap-3">
@@ -38,7 +38,7 @@ if (!commentsDisabled) {
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
       </svg>
       Comments
-      <span class="text-sm font-bold text-zinc-500 bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800 ml-2">
+      <span class="text-sm font-bold text-zinc-400 bg-zinc-900/40 px-3 py-1 rounded-full border border-zinc-800/80 ml-2">
         {comments.length}
       </span>
     </h2>
@@ -46,20 +46,21 @@ if (!commentsDisabled) {
 
   <div class="w-full">
     {token ? (
-      <div class="mb-12 bg-zinc-900/40 border border-zinc-800 p-6 rounded-3xl backdrop-blur-sm">
+      <div class="mb-12 bg-zinc-950/40 border border-zinc-800/80 p-6 rounded-3xl backdrop-blur-md">
         <form id="comment-form" class="space-y-4">
           <input type="hidden" name="mediaType" value={mediaType} />
-          <input type="hidden" name="tmdbId" value={tmdbId} />
+          <input type="hidden" name="uriId" value={uriId} />
           {seasonNumber !== undefined && <input type="hidden" name="seasonNumber" value={seasonNumber} />}
           {episodeNumber !== undefined && <input type="hidden" name="episodeNumber" value={episodeNumber} />}
-
-          <textarea
-            name="content"
-            rows="3"
-            placeholder="What are your thoughts?"
-            class="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all resize-none"
-            required
-          ></textarea>
+          <div class="relative">
+            <textarea
+              name="content"
+              rows="3"
+              placeholder="What are your thoughts?"
+              class="w-full bg-zinc-950/60 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all resize-none"
+              required
+            ></textarea>
+          </div>
           <div class="flex items-center justify-between">
             <label class="flex items-center gap-2 cursor-pointer select-none group">
               <input
@@ -83,8 +84,8 @@ if (!commentsDisabled) {
         </form>
       </div>
     ) : (
-      <div class="mb-12 p-8 bg-zinc-900/20 border border-dashed border-zinc-800 rounded-3xl text-center">
-        <p class="text-zinc-400 font-medium">Please <a href={loginNextUrl} class="text-blue-500 hover:underline">log in</a> to leave a comment.</p>
+      <div class="mb-12 p-8 bg-zinc-950/20 border border-dashed border-zinc-800/80 rounded-3xl text-center backdrop-blur-md">
+        <p class="text-zinc-400 font-medium">Please <a href="/login" class="text-blue-500 hover:underline">log in</a> to leave a comment.</p>
       </div>
     )}
 
@@ -100,14 +101,14 @@ if (!commentsDisabled) {
           return (
             <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500" data-comment-id={comment.id}>
               {canSeeProfile ? (
-                <a href={`/profile/${comment.user_id}`} class="w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg hover:border-blue-500/50 transition-colors">
+                <a href={`/profile/${comment.user_id}`} class="w-12 h-12 rounded-2xl bg-zinc-900/20 border border-zinc-800/80 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg hover:border-blue-500/50 transition-colors">
                   {comment.avatar_url
                     ? <img src={`/api/proxy${comment.avatar_url}`} alt={comment.display_name} class="w-full h-full object-cover" loading="lazy" />
                     : comment.display_name[0].toUpperCase()
                   }
                 </a>
               ) : (
-                <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg">
+                <div class="w-12 h-12 rounded-2xl bg-zinc-900/20 border border-zinc-800/80 overflow-hidden flex items-center justify-center text-xl font-black text-zinc-400 shrink-0 shadow-lg">
                   {comment.avatar_url
                     ? <img src={`/api/proxy${comment.avatar_url}`} alt={comment.display_name} class="w-full h-full object-cover" loading="lazy" />
                     : comment.display_name[0].toUpperCase()
@@ -122,10 +123,10 @@ if (!commentsDisabled) {
                     ) : (
                       <span class="font-black text-zinc-100 truncate">{comment.display_name}</span>
                     )}
-                    <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded shrink-0">
+                    <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded-xl shrink-0">
                       {new Date(comment.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
-                    <span class={`spoiler-badge text-[10px] font-bold text-amber-400 uppercase tracking-widest px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded shrink-0${comment.is_spoiler ? '' : ' hidden'}`}>
+                    <span class={`spoiler-badge text-[10px] font-bold text-amber-400 uppercase tracking-widest px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded-xl shrink-0${comment.is_spoiler ? '' : ' hidden'}`}>
                       Spoiler
                     </span>
                   </div>
@@ -133,7 +134,7 @@ if (!commentsDisabled) {
                     <div class="flex items-center gap-1 shrink-0">
                       {isOwner && (
                         <button
-                          class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-lg hover:bg-zinc-800"
+                          class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-xl hover:bg-zinc-900/40 border border-transparent hover:border-zinc-800/50 cursor-pointer"
                           data-id={comment.id}
                           title="Edit Comment"
                         >
@@ -144,7 +145,7 @@ if (!commentsDisabled) {
                         </button>
                       )}
                       <button
-                        class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-800"
+                        class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-xl hover:bg-zinc-900/40 border border-transparent hover:border-zinc-800/50 cursor-pointer"
                         data-id={comment.id}
                         title="Delete Comment"
                       >
@@ -157,28 +158,28 @@ if (!commentsDisabled) {
                 </div>
                 <!-- Spoiler wrapper: always present, overlay toggled via JS -->
                 <div class="comment-body relative">
-                  <p class={`comment-text text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap break-words${comment.is_spoiler ? ' blur-sm select-none pointer-events-none' : ''}`}>{comment.content}</p>
-                  <div class={`spoiler-overlay absolute inset-0 flex items-center justify-center rounded-lg cursor-pointer bg-zinc-950/70 backdrop-blur-sm${comment.is_spoiler ? '' : ' hidden'}`}>
-                    <span class="text-amber-400 font-bold text-sm">Click to reveal</span>
+                  <p class={`comment-text text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap break-words${comment.is_spoiler ? ' blur-md select-none pointer-events-none' : ''}`}>{comment.content}</p>
+                  <div class={`spoiler-overlay absolute inset-0 flex items-center justify-center rounded-2xl cursor-pointer bg-zinc-950/70 backdrop-blur-sm${comment.is_spoiler ? '' : ' hidden'}`}>
+                    <span class="text-[10px] font-black uppercase tracking-widest text-amber-400 bg-zinc-900 px-3 py-1.5 rounded-xl border border-amber-500/30">Reveal Spoiler</span>
                   </div>
                 </div>
                 <div class="edit-form hidden mt-3 space-y-2">
                   <textarea
                     rows="3"
-                    class="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all resize-none text-sm"
+                    class="w-full bg-zinc-950/60 border border-zinc-800 focus:border-zinc-700 rounded-2xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all resize-none"
                   >{comment.content}</textarea>
                   <div class="flex items-center justify-between">
-                    <label class="flex items-center gap-2 cursor-pointer select-none group">
+                    <label class="flex items-center gap-2.5 cursor-pointer select-none group">
                       <input
                         type="checkbox"
-                        class="spoiler-edit-checkbox w-4 h-4 accent-amber-500 cursor-pointer"
+                        class="spoiler-edit-checkbox w-5 h-5 rounded-xl border-zinc-800 bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
                         checked={comment.is_spoiler}
                       />
-                      <span class="text-sm font-medium text-zinc-400 group-hover:text-amber-400 transition-colors">Spoiler</span>
+                      <span class="text-xs font-bold text-zinc-500 group-hover:text-zinc-300 transition-colors uppercase tracking-widest">Spoiler</span>
                     </label>
                     <div class="flex gap-2">
-                      <button class="cancel-edit px-4 py-2 text-sm font-bold text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
-                      <button class="save-edit px-5 py-2 text-sm font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all active:scale-95 disabled:opacity-50" data-id={comment.id}>Save</button>
+                      <button class="cancel-edit px-4 py-2 text-sm font-bold text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer">Cancel</button>
+                      <button class="save-edit px-6 py-2 text-sm font-black bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-600/20 cursor-pointer disabled:opacity-50" data-id={comment.id}>Save</button>
                     </div>
                   </div>
                 </div>
@@ -190,14 +191,16 @@ if (!commentsDisabled) {
     </div>
   </div>
 </div>
-)}
 
-{!commentsDisabled && (
 <script define:vars={{ token, currentUserId: user?.id, isAdmin: user?.role === 'admin' }}>
-  function esc(s) {
-    if (s == null) return '';
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  const esc = window.esc || function(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
 
   const SPOILER_OVERLAY_HTML = `<span class="text-amber-400 font-bold text-sm">Click to reveal</span>`;
 
@@ -216,13 +219,13 @@ if (!commentsDisabled) {
       ? `<a href="/profile/${esc(String(comment.user_id))}" class="font-black text-zinc-100 truncate hover:text-blue-400 transition-colors">${esc(comment.display_name)}</a>`
       : `<span class="font-black text-zinc-100 truncate">${esc(comment.display_name)}</span>`;
 
-    const spoilerBadgeHtml = `<span class="spoiler-badge text-[10px] font-bold text-amber-400 uppercase tracking-widest px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded shrink-0${comment.is_spoiler ? '' : ' hidden'}">Spoiler</span>`;
+    const spoilerBadgeHtml = `<span class="spoiler-badge text-[10px] font-bold text-amber-400 uppercase tracking-widest px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded-xl shrink-0${comment.is_spoiler ? '' : ' hidden'}">Spoiler</span>`;
 
     const editBtnHtml = showActions.edit
-      ? `<button class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-lg hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Edit Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
+      ? `<button class="edit-comment p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded-xl hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Edit Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
       : '';
     const deleteBtnHtml = showActions.delete
-      ? `<button class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Delete Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>`
+      ? `<button class="delete-comment p-1.5 text-zinc-500 hover:text-red-400 transition-colors rounded-xl hover:bg-zinc-800" data-id="${esc(String(comment.id))}" title="Delete Comment"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>`
       : '';
     const actionBtns = (showActions.edit || showActions.delete)
       ? `<div class="flex items-center gap-1 shrink-0">${editBtnHtml}${deleteBtnHtml}</div>`
@@ -238,14 +241,14 @@ if (!commentsDisabled) {
         <div class="flex items-center gap-3 mb-1.5">
           <div class="flex items-center gap-3 flex-1 min-w-0">
             ${nameHtml}
-            <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded shrink-0">${esc(dateStr)}</span>
+            <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded-xl shrink-0">${esc(dateStr)}</span>
             ${spoilerBadgeHtml}
           </div>
           ${actionBtns}
         </div>
         <div class="comment-body relative">
           <p class="comment-text text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap break-words${textBlurCls}">${esc(comment.content)}</p>
-          <div class="spoiler-overlay absolute inset-0 flex items-center justify-center rounded-lg cursor-pointer bg-zinc-950/70 backdrop-blur-sm${overlayCls}">${SPOILER_OVERLAY_HTML}</div>
+          <div class="spoiler-overlay absolute inset-0 flex items-center justify-center rounded-xl cursor-pointer bg-zinc-950/70 backdrop-blur-sm${overlayCls}">${SPOILER_OVERLAY_HTML}</div>
         </div>
         <div class="edit-form hidden mt-3 space-y-2">
           <textarea rows="3" class="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all resize-none text-sm">${esc(comment.content)}</textarea>
@@ -275,7 +278,7 @@ if (!commentsDisabled) {
       const formData = new FormData(form);
       const content = formData.get('content');
       const mediaType = formData.get('mediaType');
-      const tmdbId = parseInt(formData.get('tmdbId'));
+      const uriIdVal = formData.get('uriId');
       const seasonNumber = formData.get('seasonNumber') ? parseInt(formData.get('seasonNumber')) : undefined;
       const episodeNumber = formData.get('episodeNumber') ? parseInt(formData.get('episodeNumber')) : undefined;
       const isSpoiler = document.getElementById('is-spoiler-checkbox')?.checked ?? false;
@@ -294,7 +297,7 @@ if (!commentsDisabled) {
           },
           body: JSON.stringify({
             media_type: mediaType,
-            tmdb_id: tmdbId,
+            uri_id: uriIdVal,
             season_number: seasonNumber,
             episode_number: episodeNumber,
             content: content,
@@ -468,4 +471,4 @@ if (!commentsDisabled) {
 
   attachListeners();
 </script>
-)}
+) : null}

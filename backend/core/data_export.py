@@ -23,8 +23,10 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from models.base import MediaType
+from models.blocklist import BlocklistItem
 from models.collection import Collection, CollectionFile
 from models.comments import Comment
 from models.connections import MediaServerConnection
@@ -34,8 +36,10 @@ from models.media import Media
 from models.profile import UserProfileData
 from models.ratings import Rating
 from models.scrobble_connection import ScrobbleConnection
+from models.season_override import ShowEpisodeOverride, ShowSeasonOverride
 from models.show import Show
 from models.users import User, UserSettings
+from utils.media_uri import MediaURI
 
 HISTORY_CHUNK_SIZE = 2000
 COLLECTION_CHUNK_SIZE = 2000
@@ -305,10 +309,23 @@ async def build_lists(db: AsyncSession, user_id: int) -> tuple[list[dict], list[
 async def build_comments(db: AsyncSession, user_id: int) -> dict[str, list[dict]]:
     comments = (await db.execute(select(Comment).where(Comment.user_id == user_id))).scalars().all()
 
-    tmdb_ids_by_type: dict[str, set[int]] = {"movie": set(), "series": set(), "episode": set()}
+    # The export wire format carries bare TMDB ids; comments are stored as URIs.
+    # Anything not addressed by a TMDB URI can't be represented, so drop it.
+    tmdb_id_by_comment: dict[int, int] = {}
     for c in comments:
-        if c.media_type in tmdb_ids_by_type:
-            tmdb_ids_by_type[c.media_type].add(c.tmdb_id)
+        try:
+            uri = MediaURI.parse(c.uri_id)
+        except ValueError:
+            continue
+        if uri.provider == "tmdb":
+            tmdb_id_by_comment[c.id] = int(uri.id)
+    comments = [c for c in comments if c.id in tmdb_id_by_comment]
+
+    # Only a movie comment names a movie; every other comment names a show.
+    tmdb_ids_by_type: dict[str, set[int]] = {"movie": set(), "series": set()}
+    for c in comments:
+        bucket = "movie" if c.media_type == "movie" else "series"
+        tmdb_ids_by_type[bucket].add(tmdb_id_by_comment[c.id])
 
     movies_res = await db.execute(select(Media).where(Media.media_type == MediaType.movie, Media.tmdb_id.in_(tmdb_ids_by_type["movie"]))) if tmdb_ids_by_type["movie"] else None
     movies_by_tmdb = {m.tmdb_id: m for m in movies_res.scalars().all()} if movies_res else {}
@@ -318,22 +335,115 @@ async def build_comments(db: AsyncSession, user_id: int) -> dict[str, list[dict]
 
     out: dict[str, list[dict]] = {"movies": [], "shows": [], "seasons": [], "episodes": []}
     for c in comments:
+        tmdb_id = tmdb_id_by_comment[c.id]
         base = {"id": c.id, "created_at": _iso(c.created_at), "comment": c.content, "spoiler": c.is_spoiler}
         if c.media_type == "movie":
-            media = movies_by_tmdb.get(c.tmdb_id)
-            out["movies"].append({**base, "movie": {"title": media.title if media else None, "year": _year(media.release_date) if media else None, "ids": {"tmdb": c.tmdb_id}}})
-        elif c.media_type == "series" and c.season_number is None:
-            show = shows_by_tmdb.get(c.tmdb_id)
-            out["shows"].append({**base, "show": _show_dict(c.tmdb_id, show.title if show else "", show.first_air_date if show else None, show.tvdb_id if show else None)})
-        elif c.media_type == "series" and c.season_number is not None:
-            show = shows_by_tmdb.get(c.tmdb_id)
-            out["seasons"].append({**base, "season": {"number": c.season_number}, "show": _show_dict(c.tmdb_id, show.title if show else "", show.first_air_date if show else None, show.tvdb_id if show else None)})
-        elif c.media_type == "episode":
-            out["episodes"].append({**base, "episode": {"season": c.season_number, "number": c.episode_number}, "ids": {"tmdb": c.tmdb_id}})
+            media = movies_by_tmdb.get(tmdb_id)
+            out["movies"].append({**base, "movie": {"title": media.title if media else None, "year": _year(media.release_date) if media else None, "ids": {"tmdb": tmdb_id}}})
+            continue
+        # Everything else hangs off the show's uri, so what a comment is about
+        # is decided by its season and episode numbers, not its media_type.
+        show = shows_by_tmdb.get(tmdb_id)
+        show_dict = _show_dict(tmdb_id, show.title if show else "", show.first_air_date if show else None, show.tvdb_id if show else None)
+        if c.episode_number is not None:
+            out["episodes"].append({**base, "episode": {"season": c.season_number, "number": c.episode_number}, "show": show_dict, "ids": {"tmdb": tmdb_id}})
+        elif c.season_number is not None:
+            out["seasons"].append({**base, "season": {"number": c.season_number}, "show": show_dict})
+        else:
+            out["shows"].append({**base, "show": show_dict})
     return out
 
 
 # ── User metadata (no secrets) ───────────────────────────────────────────
+
+# ── Content filters and metadata overrides ─────────────────────────────
+
+def _override_show_ref(show: Show | None, fallback_id: int) -> dict:
+    """Portable reference to a show in an override row.
+
+    The row ids themselves are instance-local, so an import on another instance
+    resolves the show by uri/tmdb/tvdb instead; `id` is kept only to make a
+    same-instance restore unambiguous."""
+    if show is None:
+        return {"id": fallback_id, "uri_id": None, "title": None, "tmdb_id": None, "tvdb_id": None}
+    uri = None
+    if show.tmdb_id:
+        uri = f"tmdb:s:{show.tmdb_id}"
+    elif show.tvdb_id:
+        uri = f"tvdb:s:{show.tvdb_id}"
+    return {
+        "id": show.id,
+        "uri_id": uri,
+        "title": show.title,
+        "tmdb_id": show.tmdb_id,
+        "tvdb_id": show.tvdb_id,
+    }
+
+
+async def build_content_filters(db: AsyncSession, user_id: int, settings: UserSettings | None) -> dict:
+    """The /blocklist page's data: the preference-backed filter lists plus the
+    per-title blocklist rows."""
+    prefs: dict = (settings.preferences or {}) if settings else {}
+    cf: dict = prefs.get("content_filters", {}) or {}
+
+    rows = (await db.execute(select(BlocklistItem).where(BlocklistItem.user_id == user_id))).scalars().all()
+    return {
+        "blocked_genres": cf.get("blocked_genres", []),
+        "blocked_keywords": cf.get("blocked_keywords", []),
+        "blocked_regexes": cf.get("blocked_regexes", []),
+        "blocked_ratings": cf.get("blocked_ratings", []),
+        "filter_languages": cf.get("filter_languages", []),
+        "language_filter_mode": cf.get("language_filter_mode", "blacklist"),
+        "blocked_items": [
+            {
+                "uri_id": row.uri_id,
+                "media_type": row.media_type.value if row.media_type else None,
+                "is_dropped": row.is_dropped,
+                "created_at": _iso(row.created_at),
+            }
+            for row in rows
+        ],
+    }
+
+
+async def build_metadata_overrides(db: AsyncSession, user_id: int) -> dict:
+    """The /remaps page's data: season and episode remaps."""
+    season_rows = (await db.execute(
+        select(ShowSeasonOverride)
+        .where(ShowSeasonOverride.user_id == user_id)
+        .options(selectinload(ShowSeasonOverride.source_show), selectinload(ShowSeasonOverride.target_show))
+    )).scalars().all()
+    episode_rows = (await db.execute(
+        select(ShowEpisodeOverride)
+        .where(ShowEpisodeOverride.user_id == user_id)
+        .options(selectinload(ShowEpisodeOverride.source_show), selectinload(ShowEpisodeOverride.target_show))
+    )).scalars().all()
+
+    return {
+        "seasons": [
+            {
+                "source_show": _override_show_ref(o.source_show, o.source_show_id),
+                "source_season_number": o.source_season_number,
+                "target_show": _override_show_ref(o.target_show, o.target_show_id),
+                "target_season_number": o.target_season_number,
+                "created_at": _iso(o.created_at),
+            }
+            for o in season_rows
+        ],
+        "episodes": [
+            {
+                "source_show": _override_show_ref(o.source_show, o.source_show_id),
+                "source_season_number": o.source_season_number,
+                "source_episode_number": o.source_episode_number,
+                "target_show": _override_show_ref(o.target_show, o.target_show_id),
+                "target_season_number": o.target_season_number,
+                "target_episode_number": o.target_episode_number,
+                "created_at": _iso(o.created_at),
+            }
+            for o in episode_rows
+        ],
+    }
+
 
 def build_user_profile(user: User, display_name: str) -> dict:
     return {
@@ -417,6 +527,8 @@ async def build_export_zip(
     include_collection: bool = True,
     include_lists: bool = True,
     include_comments: bool = True,
+    include_content_filters: bool = True,
+    include_metadata_overrides: bool = True,
     include_api_keys: bool = False,
     include_media_connections: bool = False,
     include_scrobble_connections: bool = False,
@@ -478,6 +590,12 @@ async def build_export_zip(
             write_json("comments-shows.json", comments["shows"])
             write_json("comments-seasons.json", comments["seasons"])
             write_json("comments-episodes.json", comments["episodes"])
+
+        if include_content_filters:
+            write_json("content-filters.json", await build_content_filters(db, user.id, settings))
+
+        if include_metadata_overrides:
+            write_json("metadata-overrides.json", await build_metadata_overrides(db, user.id))
 
         if include_api_keys:
             write_json("api-keys.json", build_api_keys(user, settings))

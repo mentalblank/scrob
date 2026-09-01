@@ -1,0 +1,205 @@
+---
+interface Props {
+  type: string;
+  currentPage: number;
+  totalPages: number;
+  params?: Record<string, any>;
+  targetSelector?: string;
+  isHistory?: boolean;
+  endpoint?: string;
+}
+
+const { 
+  type, 
+  currentPage, 
+  totalPages, 
+  params = {}, 
+  targetSelector = "#media-grid",
+  isHistory = false,
+  endpoint = "/partials/media-grid"
+} = Astro.props;
+---
+
+<div 
+  id="infinite-scroll-sentinel" 
+  class="w-full py-12 flex justify-center items-center"
+  data-type={type}
+  data-next-page={currentPage + 1}
+  data-total-pages={totalPages}
+  data-params={JSON.stringify(params)}
+  data-target={targetSelector}
+  data-is-history={isHistory ? "true" : "false"}
+  data-endpoint={endpoint}
+>
+  {currentPage < totalPages && (
+    <div class="loading-spinner flex items-center gap-3 text-zinc-500 font-medium">
+      <div class="animate-spin rounded-full h-6 w-6 border-2 border-zinc-700 border-t-blue-500"></div>
+      <span>Loading more…</span>
+    </div>
+  )}
+</div>
+
+<script>
+  class InfiniteScroll {
+    sentinel: HTMLElement;
+    observer: IntersectionObserver;
+    loading = false;
+
+    constructor(sentinel: HTMLElement) {
+      this.sentinel = sentinel;
+      this.observer = new IntersectionObserver(this.handleIntersect.bind(this), {
+        rootMargin: '600px', // Start loading well before reaching the bottom
+      });
+      this.observer.observe(this.sentinel);
+    }
+
+    async handleIntersect(entries: IntersectionObserverEntry[]) {
+      const entry = entries[0];
+      if (entry.isIntersecting && !this.loading) {
+        await this.loadMore();
+      }
+    }
+
+    async loadMore() {
+      const nextPage = parseInt(this.sentinel.dataset.nextPage || '1');
+      const totalPages = parseInt(this.sentinel.dataset.totalPages || '0');
+      
+      if (nextPage > totalPages) {
+        this.observer.disconnect();
+        this.sentinel.innerHTML = '';
+        return;
+      }
+
+      this.loading = true;
+      const type = this.sentinel.dataset.type;
+      const params = JSON.parse(this.sentinel.dataset.params || '{}');
+      const targetSelector = this.sentinel.dataset.target || '#media-grid';
+      const isHistory = this.sentinel.dataset.isHistory === "true";
+      const endpoint = this.sentinel.dataset.endpoint || '/partials/media-grid';
+
+      const queryParams = new URLSearchParams({
+        type: type!,
+        page: nextPage.toString(),
+        ...params
+      });
+
+      try {
+        const res = await fetch(`${endpoint}?${queryParams.toString()}`);
+        if (!res.ok) throw new Error();
+        const html = await res.text();
+        
+        const target = document.querySelector(targetSelector);
+        if (target && html.trim()) {
+           if (isHistory) {
+              this.appendHistory(target, html);
+           } else {
+              target.insertAdjacentHTML('beforeend', html);
+           }
+           
+           this.sentinel.dataset.nextPage = (nextPage + 1).toString();
+           
+           if (nextPage + 1 > totalPages) {
+             this.observer.disconnect();
+             this.sentinel.innerHTML = '';
+           } else {
+             // If the sentinel is still in view (e.g. because everything we loaded is hidden),
+             // load the next page immediately.
+             setTimeout(() => {
+               const rect = this.sentinel.getBoundingClientRect();
+               if (rect.top < window.innerHeight + 600) {
+                 this.loadMore();
+               }
+             }, 50); // Small delay to allow CSS/layout to update
+           }
+        } else {
+           // No content returned, stop
+           this.observer.disconnect();
+           this.sentinel.innerHTML = '';
+        }
+      } catch (e) {
+        console.error('Failed to load more items:', e);
+      } finally {
+        this.loading = false;
+      }
+    }
+
+    appendHistory(target: Element, html: string) {
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      const cards = temp.querySelectorAll('[data-watched-at]');
+      const params = JSON.parse(this.sentinel.dataset.params || '{}');
+      const groupBy = params.group_by || 'date';
+      
+      cards.forEach(card => {
+        const watchedAt = card.getAttribute('data-watched-at');
+        if (!watchedAt) return;
+        
+        const mediaType = card.getAttribute('data-media-type') || '';
+        const mediaTitle = card.getAttribute('data-media-title') || '';
+        const showTitle = card.getAttribute('data-show-title') || '';
+        const seasonNumber = card.getAttribute('data-season-number') || '';
+        
+        // Must match the season heading the server rendered for page 1, or the
+        // appended rows start a duplicate group under a differently-worded title.
+        const specialsLabel = document.cookie.includes('specials_label=true');
+        const seasonHeading = specialsLabel && seasonNumber === '0' ? 'Specials' : `Season ${seasonNumber}`;
+
+        let groupStr = '';
+        if (groupBy === 'show_movie') {
+          groupStr = mediaType === 'episode' ? (showTitle || mediaTitle) : mediaTitle;
+        } else if (groupBy === 'season') {
+          groupStr = mediaType === 'episode'
+            ? `${showTitle || mediaTitle} - ${seasonHeading}`
+            : 'Movies';
+        } else if (groupBy === 'type') {
+          groupStr = mediaType === 'episode' ? 'TV Shows' : 'Movies';
+        } else {
+          // default is 'date'
+          // watched_at is naive UTC — parsing it raw would group by local-time-as-UTC
+          // and split a day that the server rendered as one group.
+          const dateObj = new Date(watchedAt.includes('Z') || watchedAt.includes('+') ? watchedAt : watchedAt + 'Z');
+          groupStr = dateObj.toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric'
+          });
+        }
+        
+        // Find or create group
+        let group = target.querySelector(`[data-history-group="${groupStr}"]`);
+        if (!group) {
+          const groupHtml = `
+            <div class="relative mb-10" data-history-group="${groupStr}">
+              <h2 class="text-lg font-bold text-zinc-100 mb-4 sticky top-[72px] py-2 bg-zinc-950/50 backdrop-blur-md z-10 flex items-center gap-3 border-b border-zinc-800/60">
+                ${groupStr}
+              </h2>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 history-grid">
+              </div>
+            </div>
+          `;
+          target.insertAdjacentHTML('beforeend', groupHtml);
+          group = target.querySelector(`[data-history-group="${groupStr}"]`);
+        }
+        
+        const grid = group?.querySelector('.history-grid');
+        if (grid) {
+          grid.appendChild(card);
+        }
+      });
+    }
+  }
+
+  // Initialize
+  const init = () => {
+    const sentinel = document.getElementById('infinite-scroll-sentinel');
+    if (sentinel && !sentinel.dataset.initialized) {
+      new InfiniteScroll(sentinel);
+      sentinel.dataset.initialized = "true";
+    }
+  };
+
+  init();
+  // For Astro view transitions if enabled
+  document.addEventListener('astro:page-load', init);
+</script>

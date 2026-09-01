@@ -2,33 +2,35 @@
 import type { MediaItem } from "../lib/api";
 import { tmdbImageUrl } from "../lib/api";
 import CardActionBar from "./CardActionBar.astro";
-import { episodeHref } from "../lib/episodeHref";
+import { mediaUrl } from "../lib/urls";
+import { displayEpisodeCode } from "../lib/media-format";
 
 interface Props {
   item: MediaItem;
+  hideBlock?: boolean;
+  hideRating?: boolean;
+  hideActionBar?: boolean;
+  hideShowTitle?: boolean;
+  /** Override the global metadata-source preference — pages that are already
+   *  pinned to one provider must keep their children on the same provider. */
+  preferTvdb?: boolean;
 }
 
-const { item } = Astro.props;
-const { user } = Astro.locals;
+const { item, hideBlock = false, hideRating = false, hideActionBar = false, hideShowTitle = false, preferTvdb: preferTvdbProp } = Astro.props;
 
 const isPerson = item.type === "person";
 const isCollection = item.type === "collection";
 const year = item.release_date?.slice(0, 4) ?? null;
-const rating = item.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
+const rating = !hideRating && item.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
 const isEpisode = item.type === "episode";
-// A "series" item with season_number set is a season list item (see routers/lists.py) -
-// it shares media with the whole show, so it's split out from the plain whole-show case.
-const isSeason = item.type === "series" && item.season_number != null;
-const isSeries = (item.type === "series" && item.season_number == null) || (item.type === "episode" && !item.season_number && !item.id);
-const sxe = isEpisode && item.season_number != null && item.episode_number != null
-  ? `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
-  : null;
+const isSeries = item.type === "series" || (item.type === "episode" && !item.season_number && !item.id);
+const isSeason = item.type === "season";
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
+const sxe = isEpisode ? displayEpisodeCode(item, specialsLabel) : null;
 
-const href = isPerson
-  ? `/person/${item.tmdb_id}`
-  : isCollection
-    ? `/collection/${item.tmdb_id}`
-    : episodeHref(item);
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
+const preferTvdb = preferTvdbProp ?? (primaryMetadataSource === "tvdb");
+const href = mediaUrl(item, preferTvdb) || null;
 
 const cardTitle = isSeason ? `Season ${item.season_number}` : item.title;
 const posterPath = tmdbImageUrl(
@@ -36,32 +38,127 @@ const posterPath = tmdbImageUrl(
   "w500"
 );
 
-const showActionBar = !isPerson && !isCollection && !!user;
-// Seasons get the same percentage-style Watched/Collected labels as a whole show
-// (state is already scoped to just that season by enrich_with_state).
-const isPercentageStyle = isSeries || isSeason;
+const showActionBar = !isPerson && !isCollection && !hideActionBar;
 const watched = item.watched ?? false;
 const inLists = item.in_lists ?? [];
 const collectionPct = item.collection_pct ?? (item.in_library ? 100 : 0);
 const watchPct = item.watch_pct ?? (item.watched ? 100 : 0);
 const inLibrary = item.in_library ?? false;
+const isDvr = item.is_monitored === true;
+const isPartialWatched = !watched && (
+  ((item.type === 'series' || item.type === 'season') && (item.watched_episodes_count ?? 0) > 0) ||
+  ((item.progress_percent ?? 0) > 0)
+);
+const isPartialCollected = (item.type === 'series' || item.type === 'season') && collectionPct > 0 && collectionPct < 100;
+
+const progressPct = (item.type === 'series' || item.type === 'season') && item.total_episodes_count 
+  ? ((item.watched_episodes_count ?? 0) / item.total_episodes_count * 100)
+  : (item.progress_percent ?? 0);
+const showProgress = progressPct > 0 && !watched;
+// A remapped season is borrowed from another show; say so, or it reads as one
+// this show has of its own.
+const remappedFrom = isSeason ? item.remapped_from ?? null : null;
 ---
 
 <div
-  class="group relative flex flex-col rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-blue-500/50 hover:shadow-2xl hover:shadow-blue-900/20 transition-all duration-300 transform hover:-translate-y-1 active:scale-95 active:opacity-70"
+  class="media-card group relative flex flex-col rounded-2xl overflow-hidden glass-card active:scale-95 active:opacity-70"
   data-card
-  data-id={item.id ? String(item.id) : ""}
+  data-media-id={item.id ? String(item.id) : ""}
   data-tmdb-id={item.tmdb_id ? String(item.tmdb_id) : ""}
+  data-uri-id={item.uri_id || (item.tmdb_id ? `tmdb:${item.type === 'series' || item.type === 'season' || item.type === 'episode' ? 's' : 'm'}:${item.tmdb_id}` : (item.tvdb_id ? `tvdb:s:${item.tvdb_id}` : ""))}
   data-media-type={item.type}
   data-show-tmdb-id={item.show_tmdb_id ? String(item.show_tmdb_id) : ""}
-  data-show-tvdb-id={item.show_tvdb_id ? String(item.show_tvdb_id) : ""}
+  data-show-uri-id={item.show_uri_id ?? (item.show_tvdb_id && !item.show_tmdb_id ? `tvdb:s:${item.show_tvdb_id}` : item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : "")}
   data-season={item.season_number != null ? String(item.season_number) : ""}
   data-episode-number={item.episode_number != null ? String(item.episode_number) : ""}
+  data-watched={String(watched)}
+  data-collected={String(inLibrary)}
+  data-listed={String(inLists.length > 0)}
+  data-dvr={String(isDvr)}
+  data-partial-watched={String(isPartialWatched)}
+  data-partial-collected={String(isPartialCollected)}
+  data-in-library={String(inLibrary)}
+  data-is-blocked={String(item.is_blocked ?? false)}
+  data-is-dropped={String(item.is_dropped ?? false)}
 >
   <!-- Clickable poster -->
   {href ? (
-    <a href={href} class="block">
+    <a href={href} class="media-card-poster block">
       <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5 group-hover:ring-blue-500/30 transition-all duration-300" data-adult={item.adult ? "true" : undefined}>
+        {/* Unified block/drop button — top-right corner, smart icon/colour */}
+        {showActionBar && !hideBlock && !isPerson && !isCollection && !isSeason && (!isEpisode || (isEpisode && (item.show_tmdb_id || item.show_tvdb_id))) && (() => {
+          const isBlocked = item.is_blocked ?? false;
+          const isDropped = item.is_dropped ?? false;
+          // Drop (amber) for series that are in collection or have any watch progress
+          const showDrop = (isSeries || isEpisode) && (inLibrary || isPartialWatched || watched || isEpisode);
+          const btnBase = 'nextup-unified-btn absolute top-1.5 z-10 w-7 h-7 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer';
+          const btnBaseRight = `${btnBase} right-1.5`;
+          const btnBaseOffset = `${btnBase} right-[38px]`;
+
+          const btnInactiveDrop = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-700 hover:bg-amber-950`;
+          const btnInactiveBlock = `${btnBaseRight} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+          const btnActiveDrop  = `${btnBaseRight} bg-amber-900/60 border border-amber-600 text-amber-300 hover:bg-amber-700 hover:border-amber-500 hover:text-white`;
+          const btnActiveBlock = `${btnBaseRight} bg-red-900/60 border border-red-600 text-red-300 hover:bg-red-700 hover:border-red-500 hover:text-white`;
+
+          const btnInactiveBlockOffset = `${btnBaseOffset} opacity-0 group-hover:opacity-100 bg-zinc-950/85 border border-zinc-800 text-zinc-500 hover:text-red-300 hover:border-red-700 hover:bg-red-950`;
+
+          if (isDropped) {
+            return (
+              <>
+                <button
+                  data-action="unified-block"
+                  data-is-blocked="false"
+                  data-is-dropped="true"
+                  title="Resume tracking"
+                  class={btnActiveDrop}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+                </button>
+                <button
+                  data-action="unified-block"
+                  data-is-blocked="false"
+                  data-is-dropped="false"
+                  data-force-block="true"
+                  data-action-intent="block"
+                  title="Block"
+                  class={btnInactiveBlockOffset}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                </button>
+              </>
+            );
+          } else if (isBlocked) {
+            return (
+              <button
+                data-action="unified-block"
+                data-is-blocked="true"
+                data-is-dropped="false"
+                title="Unblock"
+                class={btnActiveBlock}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+              </button>
+            );
+          } else {
+            return (
+              <button
+                data-action="unified-block"
+                data-is-blocked="false"
+                data-is-dropped="false"
+                data-action-intent={showDrop ? 'drop' : 'block'}
+                title={showDrop ? 'Drop show' : 'Block'}
+                class={showDrop ? btnInactiveDrop : btnInactiveBlock}
+              >
+                {showDrop ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14l-7 7-7-7"/><path d="M12 21V3"/></svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                )}
+              </button>
+            );
+          }
+        })()}
+
         {posterPath ? (
           <>
             <img
@@ -87,20 +184,26 @@ const inLibrary = item.in_library ?? false;
         <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 
         {rating && (
-          <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1">
+          <div class="rating-badge absolute top-2 left-2 bg-zinc-950/85 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800/50 flex items-center gap-1">
             <span class="text-xs leading-none">★</span> {rating}
           </div>
         )}
 
         {item.library?.resolution && (
-          <div class="absolute bottom-2 left-2 bg-zinc-900/90 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-md border border-zinc-700/50 shadow-lg tracking-tighter">
+          <div class="absolute bottom-2 left-2 bg-zinc-900/90 backdrop-blur-md text-zinc-100 text-[11px] font-bold px-2 py-0.5 rounded-xl border border-zinc-700/50 shadow-lg tracking-tighter">
             {item.library.resolution}
+          </div>
+        )}
+
+        {showProgress && (
+          <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+            <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
           </div>
         )}
       </div>
     </a>
   ) : (
-    <div class="block">
+    <div class="media-card-poster block">
       <div class="aspect-[2/3] bg-zinc-950 relative overflow-hidden ring-1 ring-white/5" data-adult={item.adult ? "true" : undefined}>
         {posterPath ? (
           <img
@@ -117,8 +220,14 @@ const inLibrary = item.in_library ?? false;
           </div>
         )}
         {rating && (
-          <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800 flex items-center gap-1">
+          <div class="rating-badge absolute top-2 left-2 bg-zinc-950/85 backdrop-blur-md text-yellow-400 text-xs font-bold px-2 py-0.5 rounded-full shadow-lg border border-zinc-800/50 flex items-center gap-1">
             <span class="text-xs leading-none">★</span> {rating}
+          </div>
+        )}
+
+        {showProgress && (
+          <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+            <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${progressPct}%`}></div>
           </div>
         )}
       </div>
@@ -133,7 +242,7 @@ const inLibrary = item.in_library ?? false;
       inLibrary={inLibrary}
       collectionPct={collectionPct}
       watchPct={watchPct}
-      isSeries={isPercentageStyle}
+      isSeries={isSeries || isSeason}
     />
   )}
 
@@ -141,39 +250,60 @@ const inLibrary = item.in_library ?? false;
 
   <!-- Info -->
   {href ? (
-    <a href={href} class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
-      {(isEpisode || isSeason) && item.show_title ? (
+    <a href={href} class="media-card-info block p-3 bg-transparent flex-1">
+      {isEpisode && item.show_title && !hideShowTitle ? (
         <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</h3>
       ) : null}
-      <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">{cardTitle}</h3>
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{sxe}</span>}
-          {isPerson && item.known_for_department && (
-            <span class="text-[11px] font-medium text-zinc-500 tracking-wide truncate">{item.known_for_department}</span>
-          )}
-          {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-500 tracking-wide">{year}</span>}
+      <h3 class="text-sm font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors leading-tight mb-1">{item.title}</h3>
+      {remappedFrom && (
+        <p class="text-[11px] text-zinc-500 truncate mb-1">
+          from <span class="text-zinc-400 font-medium">{remappedFrom.show_title}</span>
+        </p>
+      )}
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            {sxe && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{sxe}</span>}
+            {isSeason && item.total_episodes_count && <span class="text-[11px] font-bold text-blue-400 tracking-wide">{item.total_episodes_count} Episodes</span>}
+            {isPerson && item.known_for_department && (
+              <span class="text-[11px] font-medium text-zinc-500 tracking-wide truncate">{item.known_for_department}</span>
+            )}
+            {year && !sxe && !isPerson && !isSeason && <span class="text-[11px] font-medium text-zinc-500 tracking-wide">{year}</span>}
+          </div>
+          <div class="flex items-center gap-2">
+            {showProgress && (
+              <span class="text-xs font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+            )}
+            <span class="media-card-type text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
+              {isPerson ? 'Person' : isCollection ? 'Collection' : isSeries ? 'Show' : isSeason ? 'Season' : (item.type === 'episode' ? 'Episode' : item.type)}
+            </span>
+          </div>
         </div>
-        <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
-          {isPerson ? 'Person' : isCollection ? 'Collection' : isSeason ? `Season ${item.season_number}` : isSeries ? 'Show' : (item.type === 'episode' ? 'Episode' : item.type)}
-        </span>
-      </div>
     </a>
   ) : (
-    <div class="block p-3 bg-gradient-to-b from-zinc-900 to-zinc-950 flex-1">
-      {(isEpisode || isSeason) && item.show_title ? (
+    <div class="media-card-info block p-3 bg-transparent flex-1">
+      {isEpisode && item.show_title && !hideShowTitle ? (
         <h3 class="text-xs font-medium text-zinc-400 truncate mb-0.5">{item.show_title}</h3>
       ) : null}
-      <h3 class="text-sm font-bold text-zinc-500 truncate leading-tight mb-1">{cardTitle}</h3>
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide">{sxe}</span>}
-          {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-400 tracking-wide">{year}</span>}
+      <h3 class="text-sm font-bold text-zinc-500 truncate leading-tight mb-1">{item.title}</h3>
+      {remappedFrom && (
+        <p class="text-[11px] text-zinc-500 truncate mb-1">
+          from <span class="text-zinc-400 font-medium">{remappedFrom.show_title}</span>
+        </p>
+      )}
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            {sxe && <span class="text-[11px] font-bold text-zinc-400 tracking-wide">{sxe}</span>}
+            {year && !sxe && !isPerson && <span class="text-[11px] font-medium text-zinc-400 tracking-wide">{year}</span>}
+          </div>
+          <div class="flex items-center gap-2">
+            {showProgress && (
+              <span class="text-xs font-bold text-zinc-500 tabular-nums">{Math.round(progressPct)}%</span>
+            )}
+            <span class="media-card-type text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-900/40 border border-zinc-800/80 rounded">
+              {item.type === 'episode' ? 'Episode' : item.type}
+            </span>
+          </div>
         </div>
-        <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest px-1.5 py-0.5 bg-zinc-800/50 rounded border border-zinc-800">
-          {isSeason ? `Season ${item.season_number}` : (item.type === 'episode' ? 'Episode' : item.type)}
-        </span>
-      </div>
     </div>
   )}
 </div>

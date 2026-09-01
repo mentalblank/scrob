@@ -1,6 +1,9 @@
 ---
+import { api } from "../lib/api";
 interface Props {
-  tmdbId: number;
+  tmdbId?: number | null;
+  uriId?: string | null;
+  showUriId?: string | null;
   mediaType: string;
   watched: boolean;
   inLists: number[];
@@ -21,15 +24,18 @@ interface Props {
   requestStatus?: string | null;
   mediaId?: number | null;
   userRating?: number | null;
+  isBlocked?: boolean;
+  isDropped?: boolean;
   listOnly?: boolean;
+  hideBlock?: boolean;
+  hideRate?: boolean;
+  centered?: boolean;
   showRewatch?: boolean;
   rewatch?: { started_at: string; watched: number; total: number } | null;
   airDate?: string | null;
   showDrop?: boolean;
   showId?: number | null;
   dropped?: boolean;
-  // Poster + title/subtitle shown in the shared rating popover's header, so
-  // it's clear what's being rated once the modal dims the page behind it.
   ratingTitle?: string;
   ratingSubtitle?: string;
   ratingPosterPath?: string | null;
@@ -37,6 +43,8 @@ interface Props {
 
 const {
   tmdbId,
+  uriId,
+  showUriId,
   mediaType,
   watched,
   inLists,
@@ -57,20 +65,33 @@ const {
   requestStatus = null,
   mediaId = null,
   userRating = null,
+  isBlocked = false,
+  isDropped = false,
   listOnly = false,
+  hideBlock = false,
+  hideRate = false,
+  centered = false,
   showRewatch = false,
   rewatch = null,
   airDate = null,
   showDrop = false,
   showId = null,
   dropped = false,
-  ratingTitle,
-  ratingSubtitle,
-  ratingPosterPath,
+  ratingTitle = "",
+  ratingSubtitle = "",
+  ratingPosterPath = null,
 } = Astro.props;
 
-const isSeries = mediaType === "series";
-const showRequest = !hideRequest && requestEnabled && (mediaType === "movie" || mediaType === "series");
+// Admin's disable_user_ratings wins over the user's own show_user_ratings,
+// same precedence as disable_comments in CommentsSection.
+const { disable_user_ratings: userRatingsDisabled } = await api.profile.publicAccessStatusCached();
+const showUserRatings = !userRatingsDisabled && Astro.cookies.get("show_user_ratings")?.value !== "false";
+const effectivelyHideRate = hideRate || !showUserRatings;
+
+const effectivelyHideBlock = hideBlock;
+
+const isSeries = mediaType === "series" || (mediaType === "episode" && (showTmdbId != null || showUriId != null));
+const showRequest = !hideRequest && requestEnabled && (mediaType === "movie" || mediaType === "series" || (mediaType === "episode" && (showTmdbId != null || showUriId != null)));
 const ratingLabel = userRating != null ? userRating.toFixed(1) : "Rate";
 
 // Rating-popover header subtitle: callers pass the episode/season name in
@@ -83,32 +104,40 @@ const _rateSxe = mediaType === "episode" && _rateSeason != null && episodeNumber
 const ratingSubtitleFull = [_rateSxe, ratingSubtitle].filter(Boolean).join(" · ");
 
 // Shared button classes
-const btn = "flex flex-col items-center justify-center gap-0.5 md:gap-1.5 px-2 py-3 md:py-3.5 transition-all cursor-pointer";
-const btnW = "w-[52px] min-w-[52px] md:w-[85px] md:min-w-[85px]";
 const label = "hidden md:block text-[10px] font-bold uppercase tracking-wider leading-none";
+const btn = "flex items-center justify-center transition-all cursor-pointer";
+const btnW = "w-10 h-10 flex-shrink-0 last:border-r-0";
 
 // Consistent state classes per button colour — inactive / active
 // inactive: bg-zinc-800 text-zinc-500 hover:bg-[c]-500/10 hover:text-[c]-400
 // active:   bg-[c]-500/20 text-[c]-400 hover:bg-[c]-500/30
-// watchPct rounds down to 0 for e.g. 1 watched out of 200+ episodes - the
-// pill still shows "0%" (accurate), but needs watchStarted to know it
-// should render as active/green rather than looking untouched.
-const watchActive = isSeries ? (watchStarted || watchPct > 0) : watched;
+const isProgressBased = mediaType === "series" || mediaType === "season";
+
+const watchActive = isProgressBased ? watchPct > 0 : watched;
 const watchedCls  = watchActive
-  ? "bg-green-500/50  text-green-300  hover:bg-green-400/50"
-  : "bg-zinc-800 text-zinc-500 hover:bg-green-400/50 hover:text-green-400";
+  ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+  : "bg-zinc-950/25 text-zinc-500 hover:bg-green-500/10 hover:text-green-400";
 
 const listsCls    = inLists.length > 0
-  ? "bg-sky-500/50 text-sky-300 hover:bg-sky-400/50"
-  : "bg-zinc-800 text-zinc-500 hover:bg-sky-400/50 hover:text-sky-300";
+  ? "bg-sky-500/20 text-sky-400 hover:bg-sky-500/30"
+  : "bg-zinc-950/25 text-zinc-500 hover:bg-sky-500/10 hover:text-sky-400";
 
 const rateCls     = userRating != null
-  ? "bg-amber-500/50  text-amber-300  hover:bg-amber-400/50"
-  : "bg-zinc-800 text-zinc-500 hover:bg-amber-400/50  hover:text-amber-400";
+  ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+  : "bg-zinc-950/25 text-zinc-500 hover:bg-amber-500/10 hover:text-amber-400";
 
-const collectedCls = inLibrary
-  ? "bg-purple-500/50 text-purple-300 hover:bg-purple-400/50"
-  : "bg-zinc-800 text-zinc-500 hover:bg-purple-500/50 hover:text-purple-400";
+const collectActive = isProgressBased ? collectionPct > 0 : inLibrary;
+const collectedCls = collectActive
+  ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+  : "bg-zinc-950/25 text-zinc-500 hover:bg-purple-500/10 hover:text-purple-400";
+
+const watchStyle = isProgressBased && watchPct > 0
+  ? `background: linear-gradient(to right, rgba(34,197,94,0.2) ${watchPct}%, transparent ${watchPct}%)`
+  : '';
+
+const collectStyle = isProgressBased && collectionPct > 0
+  ? `background: linear-gradient(to right, rgba(168,85,247,0.2) ${collectionPct}%, transparent ${collectionPct}%)`
+  : '';
 
 const rewatchActive = !!rewatch;
 const rewatchCls = rewatchActive
@@ -119,11 +148,19 @@ const rewatchTitle = rewatchActive
   ? `Rewatching - ${rewatch!.watched}/${rewatch!.total} watched this cycle. Click for options.`
   : "Start a rewatch";
 
+const dropTitle = dropped
+  ? "Dropped - click for options"
+  : "Click for hide/drop options";
+
 const needsCheck  = !requestStatus && !isMonitored;
 const requestBlocked = isMonitored || !!requestStatus;
 const requestCls  = requestBlocked
-  ? "bg-orange-500/50 text-orange-300 hover:bg-orange-400/50"
-  : "bg-zinc-800 text-zinc-500 hover:bg-orange-300/60 hover:text-orange-400";
+  ? "bg-orange-500/20 text-orange-400 hover:bg-orange-500/30"
+  : "bg-zinc-950/25 text-zinc-500 hover:bg-orange-500/10 hover:text-orange-400";
+const dropCls = isDropped
+  ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+  : "bg-zinc-950/25 text-zinc-500 hover:bg-amber-500/10 hover:text-amber-400";
+
 const requestTitle = isMonitored
   ? (isSeries ? "Already in Sonarr" : "Already in Radarr")
   : requestStatus === "pending"
@@ -132,19 +169,21 @@ const requestTitle = isMonitored
       ? "Request rejected"
       : (isSeries ? "Request on Sonarr" : "Request on Radarr");
 
-const dropCls = dropped
-  ? "bg-rose-500/50 text-rose-300 hover:bg-rose-400/50"
-  : "bg-zinc-800 text-zinc-500 hover:bg-rose-400/50 hover:text-rose-400";
-const dropTitle = dropped
-  ? "Dropped - click for options"
-  : "Click for hide/drop options";
+let effectiveUriId = uriId;
+if (!effectiveUriId && tmdbId) {
+  if (mediaType === "movie") effectiveUriId = `tmdb:m:${tmdbId}`;
+  else if (mediaType === "series") effectiveUriId = `tmdb:s:${tmdbId}`;
+  else if (mediaType === "episode") effectiveUriId = `tmdb:e:${tmdbId}`;
+}
 ---
 
 <div
   data-card
-  data-tmdb-id={String(tmdbId)}
+  data-tmdb-id={tmdbId != null ? String(tmdbId) : ""}
+  data-uri-id={effectiveUriId ?? ""}
   data-media-type={mediaType}
   data-show-tmdb-id={showTmdbId ? String(showTmdbId) : ""}
+  data-show-uri-id={showUriId ?? ""}
   data-season={seasonNumber != null ? String(seasonNumber) : ""}
   data-episode-number={episodeNumber != null ? String(episodeNumber) : ""}
   data-episode-order={episodeOrder}
@@ -152,13 +191,9 @@ const dropTitle = dropped
   data-tvdb-id={tvdbId != null ? String(tvdbId) : ""}
   data-display-season={displaySeasonNumber != null ? String(displaySeasonNumber) : ""}
   data-media-id={mediaId != null ? String(mediaId) : ""}
-  data-rate-title={ratingTitle ?? ""}
-  data-rate-subtitle={ratingSubtitleFull}
-  data-rate-poster={ratingPosterPath ?? ""}
-  data-rate-landscape={mediaType === "episode" ? "true" : ""}
-  class="flex w-fit"
+  class={`flex w-full max-w-full overflow-hidden ${centered ? 'justify-center' : ''}`}
 >
-  <div class="flex flex-row rounded-2xl overflow-hidden border border-zinc-800 shadow-lg min-h-[52px] md:min-h-[64px] w-fit">
+  <div class="flex flex-row rounded-2xl bg-zinc-950/20 border border-zinc-800/80 shadow-lg backdrop-blur-md h-10 w-fit max-w-full overflow-hidden">
 
     <!-- Watched (green) -->
     {!listOnly && (
@@ -167,15 +202,14 @@ const dropTitle = dropped
         data-watched={String(watched)}
         data-watch-pct={String(watchPct)}
         data-state={watchActive ? "active" : "inactive"}
-        title={isSeries ? `${watchPct}% watched` : (watched ? "Mark as unwatched" : "Mark as watched")}
+        title={isProgressBased ? `${watchPct}% watched` : (watched ? "Mark as unwatched" : "Mark as watched")}
+        style={watchStyle}
         class={`${btn} ${btnW} border-r border-zinc-800/60 ${watchedCls}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
           <circle cx="12" cy="12" r="3" fill={watchActive ? "currentColor" : "none"}/>
         </svg>
-        <span class={label}>{isSeries ? `${watchPct}%` : "Watched"}</span>
-        {isSeries && <span class="md:hidden text-[9px] font-bold leading-none">{watchPct}%</span>}
       </button>
     )}
 
@@ -216,12 +250,11 @@ const dropTitle = dropped
           <line x1="3" y1="12" x2="3.01" y2="12"/>
           <line x1="3" y1="18" x2="3.01" y2="18"/>
         </svg>
-        <span class={label}>Lists</span>
       </button>
     )}
 
     <!-- Rate (amber) -->
-    {!listOnly && (
+    {!listOnly && !effectivelyHideRate && (
       <button
         data-action="rate"
         data-user-rating={userRating != null ? String(userRating) : ""}
@@ -232,8 +265,6 @@ const dropTitle = dropped
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill={userRating != null ? "currentColor" : "none"} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
         </svg>
-        <span class={label}>{ratingLabel}</span>
-        {userRating != null && <span class="md:hidden text-[9px] font-bold leading-none">{ratingLabel}</span>}
       </button>
     )}
 
@@ -243,9 +274,10 @@ const dropTitle = dropped
         data-action="collected"
         data-in-library={String(inLibrary)}
         data-collection-pct={String(collectionPct)}
-        data-state={inLibrary ? "active" : "inactive"}
-        title={isSeries ? `${collectionPct}% in library` : (inLibrary ? "In collection" : "Add to collection")}
-        class={`${btn} ${btnW} relative overflow-hidden ${collectedCls} ${showRequest ? "border-r border-zinc-800/60" : ""}`}
+        data-state={collectActive ? "active" : "inactive"}
+        title={isProgressBased ? `${collectionPct}% in library` : (inLibrary ? "In collection" : "Add to collection")}
+        style={collectStyle}
+        class={`${btn} ${btnW} relative overflow-hidden border-r border-zinc-800/60 ${collectedCls}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
@@ -253,8 +285,6 @@ const dropTitle = dropped
           <path d="M15 22v-4a3 3 0 0 0-6 0v4"/>
           <path d="M2 7h20"/>
         </svg>
-        <span class={label}>{isSeries ? `${collectionPct}%` : "Collected"}</span>
-        {isSeries && <span class="md:hidden text-[9px] font-bold leading-none">{collectionPct}%</span>}
       </button>
     )}
 
@@ -266,14 +296,45 @@ const dropTitle = dropped
         data-request-loading={needsCheck ? "true" : undefined}
         title={requestTitle}
         disabled={requestBlocked || needsCheck || collectionPct === 100 || (inLibrary && !isSeries)}
-        class={`${btn} ${btnW} disabled:cursor-not-allowed ${requestCls}`}
+        class={`${btn} ${btnW} disabled:cursor-not-allowed border-r border-zinc-800/60 ${requestCls}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
           <polyline points="7 10 12 15 17 10"/>
           <line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
-        <span class={label}>{isSeries ? "Sonarr" : "Radarr"}</span>
+      </button>
+    )}
+
+    <!-- Block (red) -->
+    {!listOnly && !effectivelyHideBlock && (
+      <button
+        data-action="block-item"
+        data-blocked={String(isBlocked)}
+        data-state={isBlocked ? "active" : "inactive"}
+        title={isBlocked ? "Unblock this item" : "Block this item"}
+        class={`${btn} ${btnW} ${effectivelyHideBlock ? "" : "border-r border-zinc-800/60"} ${isBlocked ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "bg-zinc-950/25 text-zinc-500 hover:bg-red-500/10 hover:text-red-400"}`}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+        </svg>
+      </button>
+    )}
+
+    <!-- Drop (amber) -->
+    {!listOnly && isSeries && (
+      <button
+        data-action="drop"
+        data-dropped={String(isDropped)}
+        data-state={isDropped ? "active" : "inactive"}
+        title={isDropped ? "Resume tracking in Next Up" : "Drop from Next Up"}
+        class={`${btn} ${btnW} ${isDropped ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" : "bg-zinc-950/25 text-zinc-500 hover:bg-amber-500/10 hover:text-amber-400"}`}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 14l-7 7-7-7"/>
+          <path d="M12 21V3"/>
+        </svg>
       </button>
     )}
 

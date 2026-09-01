@@ -152,7 +152,9 @@ def apply_media_translations(items: list[dict], translations: dict[int, dict]) -
         t = translations.get(item.get("id"))
         if not t:
             continue
-        if t.get("title"):
+        # A rename is the viewer's own words, so a translated title must not
+        # overwrite it the way it overwrites a provider's.
+        if t.get("title") and not item.get("custom_title"):
             item["title"] = t["title"]
         if t.get("overview"):
             item["overview"] = t["overview"]
@@ -169,7 +171,9 @@ def apply_show_translations(items: list[dict], translations: dict[int, dict]) ->
         t = translations.get(item.get("id"))
         if not t:
             continue
-        if t.get("title"):
+        # A rename is the viewer's own words, so a translated title must not
+        # overwrite it the way it overwrites a provider's.
+        if t.get("title") and not item.get("custom_title"):
             item["title"] = t["title"]
         if t.get("overview"):
             item["overview"] = t["overview"]

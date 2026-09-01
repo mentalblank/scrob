@@ -1,3 +1,4 @@
+import re
 import secrets
 import pyotp
 import logging
@@ -33,14 +34,19 @@ from core.config import settings as app_settings
 from core.email import send_activation_email, send_password_reset_email
 from core.url_validator import validate_service_url
 from core.limiter import limiter
-from core.backup import restore_backup
+from core.backup import pg_restore
 from core.nuvio import NuvioAPIError, parse_profile_id
+from core import user_timezone
 import schemas
 from dependencies import get_current_user, DEVICE_TOKEN_TYPE
 from sqlalchemy.orm import selectinload
 from fastapi import File, UploadFile
 
+from sqlalchemy.orm.attributes import flag_modified
+
 logger = logging.getLogger(__name__)
+
+USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._-]{3,32}")
 
 
 def _generate_backup_code() -> str:
@@ -89,12 +95,25 @@ async def _registration_allowed(db: AsyncSession) -> bool:
     if count == 0:
         return True
 
-    if not app_settings.enable_registrations:
+    # An admin-set value in global_settings wins; NULL falls back to the env var.
+    from models.global_settings import GlobalSettings
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    gs = gs_result.scalar_one_or_none()
+
+    enabled = app_settings.enable_registrations
+    max_users = app_settings.registration_max_allowed_users
+    if gs is not None:
+        if gs.enable_registrations is not None:
+            enabled = gs.enable_registrations
+        if gs.registration_max_allowed_users is not None:
+            max_users = gs.registration_max_allowed_users
+
+    if not enabled:
         return False
 
     # 0 means unlimited; otherwise enforce the cap
-    if app_settings.registration_max_allowed_users > 0:
-        return count < app_settings.registration_max_allowed_users
+    if max_users and max_users > 0:
+        return count < max_users
 
     return True
 
@@ -319,8 +338,9 @@ async def bootstrap_restore(
     if count_result.scalar_one() > 0:
         raise HTTPException(status_code=403, detail="Bootstrap restore is only available when no users exist.")
 
-    if not (file.filename or "").endswith(".bak"):
-        raise HTTPException(status_code=400, detail="Only .bak backup files are accepted.")
+    fname = (file.filename or "").lower()
+    if not (fname.endswith(".pgdump") or fname.endswith(".bak")):
+        raise HTTPException(status_code=400, detail="Only .pgdump backup files are accepted.")
 
     content = await file.read()
     if not content:
@@ -329,16 +349,36 @@ async def bootstrap_restore(
     await db.rollback()
 
     try:
-        await restore_backup(content)
-    except ValueError as e:
+        await pg_restore(content)
+    except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return {"status": "restored"}
 
 
 @router.get("/me", response_model=schemas.User)
-async def read_users_me(current_user: User = Depends(get_current_user)):
-    return current_user
+async def read_users_me(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    settings_result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )
+    user_settings = settings_result.scalar_one_or_none()
+    needs_onboarding = not (user_settings and user_settings.onboarded)
+
+    needs_setup = False
+    if current_user.is_admin:
+        gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+        global_settings = gs_result.scalar_one_or_none()
+        needs_setup = not (global_settings and global_settings.setup_completed)
+
+    resp = schemas.User.model_validate(current_user)
+    resp.needs_onboarding = needs_onboarding
+    resp.needs_setup = needs_setup
+    resp.preferences = (user_settings.preferences or {}) if user_settings else {}
+    resp.timezone = user_settings.timezone if user_settings else None
+    return resp
 
 @router.delete("/me")
 async def delete_user_me(
@@ -373,6 +413,10 @@ async def _settings_response(settings: UserSettings, db: AsyncSession) -> schema
     data.has_effective_tmdb_key = bool(settings.tmdb_api_key) or data.has_global_tmdb_key
     data.has_global_tvdb_key = bool(gs and gs.tvdb_api_key)
     data.has_effective_tvdb_key = bool(settings.tvdb_api_key) or data.has_global_tvdb_key
+
+    data.has_global_radarr_config = bool(gs and all([gs.radarr_url, gs.radarr_token, gs.radarr_root_folder, gs.radarr_quality_profile]))
+    data.has_global_sonarr_config = bool(gs and all([gs.sonarr_url, gs.sonarr_token, gs.sonarr_root_folder, gs.sonarr_quality_profile]))
+
     # Same "all 4 fields set, user config first" rule as _effective_radarr/
     # _effective_sonarr in routers/media.py - inlined rather than imported to
     # avoid a routers.media <-> routers.auth cross-import.
@@ -384,6 +428,7 @@ async def _settings_response(settings: UserSettings, db: AsyncSession) -> schema
         all([settings.sonarr_url, settings.sonarr_token, settings.sonarr_root_folder, settings.sonarr_quality_profile])
         or (gs and all([gs.sonarr_url, gs.sonarr_token, gs.sonarr_root_folder, gs.sonarr_quality_profile]))
     )
+
     return data
 
 
@@ -422,11 +467,20 @@ async def update_user_settings(
         db.add(settings)
 
     # Computed read-only fields; never write them back
-    READ_ONLY_FIELDS = {"trakt_connected", "simkl_connected", "mdblist_connected", "bingebase_connected", "has_global_tmdb_key", "has_effective_tmdb_key", "has_global_tvdb_key", "has_effective_tvdb_key"}
+    READ_ONLY_FIELDS = {
+        "trakt_connected", "simkl_connected", "mdblist_connected",
+        "has_global_tmdb_key", "has_effective_tmdb_key",
+        "has_global_tvdb_key", "has_effective_tvdb_key",
+        "has_global_radarr_config", "has_global_sonarr_config",
+        "has_effective_radarr", "has_effective_sonarr"
+    }
     update_data = {k: v for k, v in settings_in.model_dump(exclude_unset=True).items() if k not in READ_ONLY_FIELDS}
 
     if "tmdb_api_key" in update_data and update_data["tmdb_api_key"]:
-        success = await tmdb.validate_api_key(update_data["tmdb_api_key"])
+        try:
+            success = await tmdb.validate_api_key(update_data["tmdb_api_key"])
+        except tmdb.TMDBUnavailable:
+            raise HTTPException(status_code=503, detail="TMDB is unreachable right now — the key could not be checked. Try again shortly.")
         if not success:
             raise HTTPException(status_code=400, detail="Invalid TMDB API Key")
 
@@ -444,6 +498,18 @@ async def update_user_settings(
                 + ". A subscriber-supported key needs its account PIN; a free project key needs no PIN.",
             )
 
+    # Empty string means "clear it" (back to browser/server fallback); anything
+    # else has to be a real IANA zone or every date boundary computed from it
+    # would silently fall back to the server's.
+    if "timezone" in update_data:
+        tz_name = (update_data["timezone"] or "").strip()
+        if not tz_name:
+            update_data["timezone"] = None
+        elif not user_timezone.is_valid(tz_name):
+            raise HTTPException(status_code=400, detail=f"Unknown timezone: {tz_name}")
+        else:
+            update_data["timezone"] = tz_name
+
     if "mdblist_api_key" in update_data and update_data["mdblist_api_key"]:
         from core import mdblist
         if not await mdblist.validate_api_key(update_data["mdblist_api_key"]):
@@ -455,7 +521,14 @@ async def update_user_settings(
             update_data[field] = await validate_service_url(update_data[field], label)
 
     for field, value in update_data.items():
-        if hasattr(settings, field):
+        if field == "preferences" and value is not None:
+            # Merge preferences bag rather than total overwrite
+            current_prefs = dict(settings.preferences or {})
+            if isinstance(value, dict):
+                current_prefs.update(value)
+            settings.preferences = current_prefs
+            flag_modified(settings, "preferences")
+        elif hasattr(settings, field):
             setattr(settings, field, value)
 
     await db.commit()
@@ -580,6 +653,7 @@ async def create_connection(
         push_playback=body.push_playback if cloud_media_provider else False,
         push_ratings=body.push_ratings if not cloud_media_provider else False,
         auto_sync_interval=body.auto_sync_interval,
+        partial_sync_interval=body.partial_sync_interval,
         auto_push_interval=body.auto_push_interval,
     )
     db.add(conn)
@@ -819,6 +893,35 @@ async def change_password(
     await db.commit()
     return {"status": "password updated"}
 
+@router.post("/change-username", response_model=schemas.User)
+async def change_username(
+    body: schemas.UsernameUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    username = body.username.strip()
+    if not USERNAME_PATTERN.fullmatch(username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Usernames must be 3-32 characters using letters, numbers, dots, dashes or underscores",
+        )
+
+    if username.lower() != current_user.username.lower():
+        taken = await db.execute(
+            select(User.id).where(func.lower(User.username) == username.lower())
+        )
+        if taken.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="That username is already taken",
+            )
+
+    current_user.username = username
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
 @router.post("/api-key/regenerate", response_model=schemas.User)
 async def regenerate_api_key(
     db: AsyncSession = Depends(get_db),
@@ -837,7 +940,10 @@ async def test_tmdb(
 ):
     from core import tmdb
     _prevent_sensitive_response_caching(response)
-    success = await tmdb.validate_api_key(body.key.get_secret_value())
+    try:
+        success = await tmdb.validate_api_key(body.key.get_secret_value())
+    except tmdb.TMDBUnavailable:
+        raise HTTPException(status_code=503, detail="TMDB is unreachable right now — the key could not be checked. Try again shortly.")
     if not success:
         raise HTTPException(status_code=400, detail="Invalid TMDB API Key")
     return {"status": "ok", "message": "TMDB API key is valid."}
@@ -909,111 +1015,6 @@ async def test_plex(
     if not success:
         raise HTTPException(status_code=400, detail="Failed to connect to Plex")
     return {"status": "ok"}
-
-
-# ── "Login with Plex" (PIN auth) ──────────────────────────────────────────────
-
-# user_id -> {"pin_id": int, "client_id": str, "created_at": datetime}. Transient;
-# a pending PIN only needs to survive the ~2 min the user spends on app.plex.tv.
-_PLEX_PIN_CACHE: dict[int, dict] = {}
-_PLEX_PIN_TTL = timedelta(minutes=15)
-
-
-async def _get_plex_client_identifier(db: AsyncSession) -> str:
-    """Return this instance's stable X-Plex-Client-Identifier, generating and
-    persisting one on first use."""
-    gs = (await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))).scalar_one_or_none()
-    if gs is None:
-        gs = GlobalSettings(id=1)
-        db.add(gs)
-    if not gs.plex_client_identifier:
-        gs.plex_client_identifier = f"scrob-{secrets.token_hex(12)}"
-        await db.commit()
-    return gs.plex_client_identifier
-
-
-@router.post("/plex/pin/start")
-async def plex_pin_start(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Begin the "Login with Plex" flow. Returns a PIN code, the URL the user
-    opens to authorize it, and the poll interval."""
-    from core import plex
-
-    client_id = await _get_plex_client_identifier(db)
-    try:
-        pin = await plex.create_auth_pin(client_id)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Could not reach plex.tv: {exc}")
-
-    _PLEX_PIN_CACHE[current_user.id] = {
-        "pin_id": pin["id"],
-        "client_id": client_id,
-        "created_at": datetime.now(timezone.utc),
-    }
-    return {
-        "pin_id": pin["id"],
-        "auth_url": plex.build_auth_url(client_id, pin["code"]),
-        "interval": 2,
-    }
-
-
-@router.post("/plex/pin/poll")
-async def plex_pin_poll(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Check whether the user has authorized the PIN. While pending, returns
-    {status: "pending"}. Once claimed, returns the Plex account plus every server
-    it can reach, each with a ready-to-use URL and token for the connection form."""
-    from core import plex
-
-    entry = _PLEX_PIN_CACHE.get(current_user.id)
-    if not entry:
-        raise HTTPException(status_code=400, detail="No pending Plex login. Start again.")
-    if datetime.now(timezone.utc) - entry["created_at"] > _PLEX_PIN_TTL:
-        _PLEX_PIN_CACHE.pop(current_user.id, None)
-        raise HTTPException(status_code=400, detail="Plex login expired. Start again.")
-
-    try:
-        auth_token = await plex.poll_auth_pin(entry["client_id"], entry["pin_id"])
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Could not reach plex.tv: {exc}")
-    if not auth_token:
-        return {"status": "pending"}
-
-    _PLEX_PIN_CACHE.pop(current_user.id, None)
-
-    account = await plex.get_account(entry["client_id"], auth_token)
-    if not account:
-        raise HTTPException(status_code=502, detail="Plex authorized but the account could not be read.")
-
-    try:
-        servers = await plex.get_servers(entry["client_id"], auth_token)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Could not list Plex servers: {exc}")
-
-    resolved = []
-    for server in servers:
-        probe = await plex.resolve_connections(server)
-        if not probe["connections"]:
-            continue
-        resolved.append({
-            "name": server["name"],
-            "machine_identifier": server["machine_identifier"],
-            "owned": server["owned"],
-            "token": server["access_token"],
-            "url": probe["recommended"],
-            "connections": probe["connections"],
-        })
-
-    return {
-        "status": "connected",
-        "account": account,
-        "auth_token": auth_token,
-        "servers": resolved,
-    }
 
 
 @router.post("/stremio/link/start")
@@ -1235,10 +1236,14 @@ async def get_connection_status(
     current_user: User = Depends(get_current_user)
 ):
     import asyncio
+    from routers.media import _effective_radarr, _effective_sonarr
     from core import radarr as rdr, sonarr as snr
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     user_settings = settings_result.scalar_one_or_none()
+
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    global_settings = gs_result.scalar_one_or_none()
 
     conns_result = await db.execute(
         select(MediaServerConnection).where(MediaServerConnection.user_id == current_user.id)
@@ -1246,30 +1251,32 @@ async def get_connection_status(
     media_server_conns = conns_result.scalars().all()
 
     async def check_radarr():
-        if not user_settings or not (user_settings.radarr_url and user_settings.radarr_token):
+        cfg = _effective_radarr(user_settings, global_settings)
+        if not cfg:
             return {"configured": False, "connected": False}
-        connected = await rdr.validate_connection(user_settings.radarr_url, user_settings.radarr_token)
+        connected = await rdr.validate_connection(cfg.radarr_url, cfg.radarr_token)
         if not connected:
             return {"configured": True, "connected": False}
         quality_profiles, root_folders, tags = await asyncio.gather(
-            rdr.get_quality_profiles(user_settings.radarr_url, user_settings.radarr_token),
-            rdr.get_root_folders(user_settings.radarr_url, user_settings.radarr_token),
-            rdr.get_tags(user_settings.radarr_url, user_settings.radarr_token),
+            rdr.get_quality_profiles(cfg.radarr_url, cfg.radarr_token),
+            rdr.get_root_folders(cfg.radarr_url, cfg.radarr_token),
+            rdr.get_tags(cfg.radarr_url, cfg.radarr_token),
         )
-        return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags}
+        return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags, "is_global": cfg is global_settings}
 
     async def check_sonarr():
-        if not user_settings or not (user_settings.sonarr_url and user_settings.sonarr_token):
+        cfg = _effective_sonarr(user_settings, global_settings)
+        if not cfg:
             return {"configured": False, "connected": False}
-        connected = await snr.validate_connection(user_settings.sonarr_url, user_settings.sonarr_token)
+        connected = await snr.validate_connection(cfg.sonarr_url, cfg.sonarr_token)
         if not connected:
             return {"configured": True, "connected": False}
         quality_profiles, root_folders, tags = await asyncio.gather(
-            snr.get_quality_profiles(user_settings.sonarr_url, user_settings.sonarr_token),
-            snr.get_root_folders(user_settings.sonarr_url, user_settings.sonarr_token),
-            snr.get_tags(user_settings.sonarr_url, user_settings.sonarr_token),
+            snr.get_quality_profiles(cfg.sonarr_url, cfg.sonarr_token),
+            snr.get_root_folders(cfg.sonarr_url, cfg.sonarr_token),
+            snr.get_tags(cfg.sonarr_url, cfg.sonarr_token),
         )
-        return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags}
+        return {"configured": True, "connected": True, "quality_profiles": quality_profiles, "root_folders": root_folders, "tags": tags, "is_global": cfg is global_settings}
 
     async def check_trakt():
         from routers.trakt import TraktTokenError, ensure_valid_trakt_token
@@ -1523,6 +1530,32 @@ async def verify_2fa_login(
         return {"access_token": create_access_token(subject=user.id), "token_type": "bearer"}
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid verification code")
+
+
+async def _resolve_radarr_creds(db: AsyncSession, user_id: int) -> tuple[str, str]:
+    from routers.media import _effective_radarr
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    user_settings = settings_result.scalar_one_or_none()
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    global_settings = gs_result.scalar_one_or_none()
+    cfg = _effective_radarr(user_settings, global_settings)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Radarr not configured")
+    return cfg.radarr_url, cfg.radarr_token
+
+
+async def _resolve_sonarr_creds(db: AsyncSession, user_id: int) -> tuple[str, str]:
+    from routers.media import _effective_sonarr
+    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    user_settings = settings_result.scalar_one_or_none()
+    gs_result = await db.execute(select(GlobalSettings).where(GlobalSettings.id == 1))
+    global_settings = gs_result.scalar_one_or_none()
+    cfg = _effective_sonarr(user_settings, global_settings)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Sonarr not configured")
+    return cfg.sonarr_url, cfg.sonarr_token
+
+
 
 
 # --- OAuth 2.0 Device Authorization Grant (RFC 8628), #331 -------------------

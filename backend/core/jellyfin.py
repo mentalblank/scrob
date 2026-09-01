@@ -74,82 +74,26 @@ async def get_libraries(url: str, token: str, user_id: str) -> list:
     return data.get("Items", [])
 
 
-async def get_movies(library_id: str, url: str, token: str, user_id: str) -> list:
-    all_items = []
-    start = 0
-    page_size = 500
+async def get_movies(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
+    return await _get_all_paginated_items(
+        library_id, url, token, user_id, "Movie",
+        "ProviderIds,MediaStreams,Path,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData,DateCreated",
+        min_date
+    )
 
-    while True:
-        data = await _get(url, token, f"Users/{user_id}/Items", params={
-            "ParentId": library_id,
-            "IncludeItemTypes": "Movie",
-            "Recursive": True,
-            "Fields": "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData,DateCreated",
-            "Limit": page_size,
-            "StartIndex": start,
-        })
-        items = data.get("Items", [])
-        all_items.extend(items)
+async def get_shows(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
+    return await _get_all_paginated_items(
+        library_id, url, token, user_id, "Series",
+        "ProviderIds",
+        min_date
+    )
 
-        total = data.get("TotalRecordCount", 0)
-        start += page_size
-        if start >= total:
-            break
-
-    return all_items
-
-async def get_shows(library_id: str, url: str, token: str, user_id: str) -> list:
-    all_items = []
-    start = 0
-    page_size = 500
-
-    while True:
-        data = await _get(url, token, f"Users/{user_id}/Items", params={
-            "ParentId": library_id,
-            "IncludeItemTypes": "Series",
-            "Recursive": True,
-            "Fields": "ProviderIds",
-            "Limit": page_size,
-            "StartIndex": start,
-        })
-        items = data.get("Items", [])
-        all_items.extend(items)
-
-        total = data.get("TotalRecordCount", 0)
-        start += page_size
-        if start >= total:
-            break
-
-    return all_items
-
-async def get_episodes(library_id: str, url: str, token: str, user_id: str) -> list:
-    all_items = []
-    start = 0
-    page_size = 500
-
-    while True:
-        data = await _get(url, token, f"Users/{user_id}/Items", params={
-            "ParentId": library_id,
-            "IncludeItemTypes": "Episode",
-            "Recursive": True,
-            # Jellyfin returns virtual records for missing episodes unless they
-            # are explicitly excluded. They have no local media file and must
-            # never be imported into a user's collection.
-            "ExcludeLocationTypes": "Virtual",
-            "IsMissing": False,
-            "Fields": "ProviderIds,MediaStreams,Overview,Genres,CommunityRating,RunTimeTicks,PremiereDate,UserData,DateCreated",
-            "Limit": page_size,
-            "StartIndex": start,
-        })
-        items = data.get("Items", [])
-        all_items.extend(items)
-
-        total = data.get("TotalRecordCount", 0)
-        start += page_size
-        if start >= total:
-            break
-
-    return all_items
+async def get_episodes(library_id: str, url: str, token: str, user_id: str, min_date: Optional[str] = None) -> list:
+    return await _get_all_paginated_items(
+        library_id, url, token, user_id, "Episode",
+        "ProviderIds,MediaStreams,Path,Overview,Genres,CommunityRating,RunTimeTicks,PremiereDate,UserData,DateCreated",
+        min_date
+    )
 
 def extract_quality(media_streams: list) -> dict:
     quality = {
@@ -260,8 +204,6 @@ async def find_movie_by_tmdb_id(url: str, token: str, tmdb_id: int, user_id: Opt
         return await get_item(url, token, match["Id"], user_id=user_id)
     except Exception:
         return None
-
-
 async def find_episode_in_series(url: str, token: str, series_id: str, season: int, episode: int, user_id: Optional[str] = None) -> Optional[Dict]:
     """Look up an episode within an already-known series.
 
@@ -320,8 +262,6 @@ async def find_episode_by_ids(url: str, token: str, series_tmdb_id: int, season:
     except Exception:
         return None
     return await find_episode_in_series(url, token, series_id, season, episode, user_id=user_id)
-
-
 async def build_tmdb_index(url: str, token: str, item_type: str) -> Dict[int, str]:
     """Pages the whole library once, building a tmdb_id -> item_id index.
 
@@ -423,3 +363,59 @@ async def set_rating(url: str, token: str, user_id: str, item_id: str, rating: f
             return await _do(c)
     except Exception:
         return False
+
+async def _get_all_paginated_items(
+    library_id: str,
+    url: str,
+    token: str,
+    user_id: str,
+    item_type: str,
+    fields: str,
+    min_date: Optional[str] = None
+) -> list:
+    all_items = []
+    start = 0
+    page_size = 500
+
+    while True:
+        params = {
+            "ParentId": library_id,
+            "IncludeItemTypes": item_type,
+            "Recursive": True,
+            "Fields": fields,
+            "Limit": page_size,
+            "StartIndex": start,
+        }
+        if item_type == "Episode":
+            # Jellyfin returns virtual records for missing episodes unless they
+            # are explicitly excluded. They have no local media file and must
+            # never be imported into a user's collection.
+            params["ExcludeLocationTypes"] = "Virtual"
+            params["IsMissing"] = False
+        if min_date:
+            params["MinDateLastSaved"] = min_date
+
+        data = await _get(url, token, f"Users/{user_id}/Items", params=params)
+        items = data.get("Items", [])
+        all_items.extend(items)
+
+        total = data.get("TotalRecordCount", 0)
+        start += page_size
+        if start >= total:
+            break
+
+    return all_items
+
+async def get_items_by_ids(url: str, token: str, user_id: str, item_ids: List[str]) -> List[Dict]:
+    """Fetch specific items by their IDs in one batch call."""
+    if not item_ids:
+        return []
+    params = {
+        "Ids": ",".join(item_ids),
+        "Fields": "ProviderIds,MediaStreams,Path,Overview,Genres,CommunityRating,OfficialRating,RunTimeTicks,PremiereDate,UserData,DateCreated",
+    }
+    data = await _get(url, token, f"Users/{user_id}/Items", params=params)
+    return data.get("Items", [])
+
+
+

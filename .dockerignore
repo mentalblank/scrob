@@ -13,6 +13,14 @@ CLAUDE.md
 .env
 *.env
 
+# Locally-built dependencies — each Dockerfile stage installs its own via
+# `uv sync`/`npm ci`; a host-built copy in the build context would silently
+# overwrite the container's own (wrong interpreter/arch, breaks on start).
+.venv/
+**/.venv/
+node_modules/
+**/node_modules/
+
 # Test files
 test.http
 docker-compose-test-db.yaml

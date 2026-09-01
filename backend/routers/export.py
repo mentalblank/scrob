@@ -26,6 +26,8 @@ async def export_data(
     collection: bool = Query(True),
     lists: bool = Query(True),
     comments: bool = Query(True),
+    content_filters: bool = Query(True),
+    metadata_overrides: bool = Query(True),
     api_keys: bool = Query(False),
     media_connections: bool = Query(False),
     scrobble_connections: bool = Query(False),
@@ -52,6 +54,8 @@ async def export_data(
         include_collection=collection,
         include_lists=lists,
         include_comments=comments,
+        include_content_filters=content_filters,
+        include_metadata_overrides=metadata_overrides,
         include_api_keys=api_keys,
         include_media_connections=media_connections,
         include_scrobble_connections=scrobble_connections,
@@ -108,6 +112,8 @@ async def import_data(
     collection: bool = Form(True),
     lists: bool = Form(True),
     comments: bool = Form(True),
+    content_filters: bool = Form(True),
+    metadata_overrides: bool = Form(True),
     api_keys: bool = Form(False),
     media_connections: bool = Form(False),
     scrobble_connections: bool = Form(False),
@@ -122,7 +128,9 @@ async def import_data(
 
     include = {
         "include_watched": watched, "include_ratings": ratings, "include_collection": collection,
-        "include_lists": lists, "include_comments": comments, "include_api_keys": api_keys,
+        "include_lists": lists, "include_comments": comments,
+        "include_content_filters": content_filters, "include_metadata_overrides": metadata_overrides,
+        "include_api_keys": api_keys,
         "include_media_connections": media_connections, "include_scrobble_connections": scrobble_connections,
         "include_connections": connections,
     }

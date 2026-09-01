@@ -1,7 +1,10 @@
 services:
   scrob:
     container_name: scrob
-    image: bellamy/scrob:latest-omnibus
+    build:
+      context: .
+      dockerfile: Dockerfile.omnibus
+    image: mentalblank/scrob:latest-omnibus
     restart: unless-stopped
     ports:
       - "7330:7330"
@@ -53,9 +56,5 @@ services:
       # Override the internal backend port (only needed if 7331 conflicts on bare metal)
       # BACKEND_PORT: "7331"
     volumes:
-      - scrob_data:/app/backend/data
-      - scrob_db:/app/postgres/data
-
-volumes:
-  scrob_data:
-  scrob_db:
+      - ./data/app:/app/backend/data
+      - ./data/db:/app/postgres/data

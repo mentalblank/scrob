@@ -33,6 +33,8 @@ const RAW_ICON_SVGS: Record<string, string> = {
 const MONOGRAM_ICONS: Record<string, { label: string; classes: string }> = {
   arvio: { label: "AR", classes: "bg-teal-500/15 text-teal-400" },
   nuvio: { label: "NV", classes: "bg-cyan-500/15 text-cyan-400" },
+  scrob: { label: "S", classes: "bg-blue-500/15 text-blue-400" },
+  yamtrack: { label: "YT", classes: "bg-emerald-500/15 text-emerald-400" },
 };
 
 export function connectionIconHtml(type: string): string {

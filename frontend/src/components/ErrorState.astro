@@ -1,0 +1,15 @@
+---
+interface Props {
+  error: string;
+}
+
+const { error } = Astro.props;
+---
+
+<div class="max-w-md mx-auto mt-20 text-center">
+  <div class="bg-red-500/10 border border-red-500/20 text-red-500 p-6 rounded-2xl mb-6">
+    <p class="font-bold text-lg mb-2">Oops!</p>
+    <p class="text-sm opacity-80">{error}</p>
+  </div>
+  <a href="/" class="text-blue-500 hover:underline">Return to Dashboard</a>
+</div>

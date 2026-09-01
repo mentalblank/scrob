@@ -540,11 +540,16 @@ class SettingsResponseEffectiveRadarrSonarrTests(unittest.IsolatedAsyncioTestCas
 
 class _RegisterFakeDB:
     """Queues results for register()'s db.execute() calls in order: the
-    registration-allowed count check, the existing-user lookup, and the
-    is_first_user count check."""
+    registration-allowed count check, the global-settings lookup that check
+    now consults, the existing-user lookup, and the is_first_user count check.
+
+    None for the global settings row leaves registration governed by the env
+    settings the tests patch. The very first user short-circuits before that
+    lookup, so it is only queued when there is an existing user to gate on."""
 
     def __init__(self, count: int, existing_user=None):
-        self._results = [count, existing_user, count]
+        gs_lookup = [] if count == 0 else [None]
+        self._results = [count, *gs_lookup, existing_user, count]
         self.commit = AsyncMock()
         self.refresh = AsyncMock()
         self.added: list = []

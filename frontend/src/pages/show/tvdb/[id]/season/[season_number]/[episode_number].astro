@@ -190,12 +190,12 @@ const thumbnail = episode?.image_url || show?.poster_path || null;
 
             {user && !episode.unmatched && (
               <ManualScrobble
-                tmdbId={episode.tmdb_id}
+                uriId={`tvdb:e:${episode.tvdb_id}`}
+                showUriId={`tvdb:s:${id}`}
                 mediaId={episode.id}
                 mediaType="episode"
                 runtime={episode.runtime}
                 title={episode.name ?? `Episode ${episode_number}`}
-                showTmdbId={episode.show_tmdb_id ?? episode.show.tmdb_id ?? undefined}
                 seasonNumber={episode.tmdb_season_number}
                 episodeNumber={episode.tmdb_episode_number}
               />
@@ -253,7 +253,7 @@ const thumbnail = episode?.image_url || show?.poster_path || null;
                     mediaType="episode"
                     inLibrary={episode.in_library}
                     title={`${show?.title} - ${episode.name ?? `Episode ${episode_number}`}`}
-                    token={token}
+                    token={token ?? ''}
                     secondary
                   />
                 )}
@@ -277,7 +277,7 @@ const thumbnail = episode?.image_url || show?.poster_path || null;
 
         <CommentsSection
           mediaType="series"
-          tmdbId={episode.show_tmdb_id ?? episode.show.tmdb_id ?? Number(id)}
+          uriId={`tvdb:s:${id}`}
           seasonNumber={episode.tmdb_season_number}
           episodeNumber={episode.tmdb_episode_number}
         />
@@ -379,8 +379,8 @@ const thumbnail = episode?.image_url || show?.poster_path || null;
   const backdrop = document.getElementById("poster-modal-backdrop");
   const closeBtn = document.getElementById("poster-modal-close");
   if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove("hidden"); document.body.style.overflow = "hidden"; }
-    function closeModal() { modal.classList.add("hidden"); document.body.style.overflow = ""; }
+    const openModal = () => { modal.classList.remove("hidden"); document.body.style.overflow = "hidden"; };
+    const closeModal = () => { modal.classList.add("hidden"); document.body.style.overflow = ""; };
     zoomBtn.addEventListener("click", openModal);
     backdrop?.addEventListener("click", closeModal);
     closeBtn?.addEventListener("click", closeModal);

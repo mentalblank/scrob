@@ -18,7 +18,8 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.base import CollectionSource, PrivacyLevel
+from models.base import CollectionSource, MediaType, PrivacyLevel
+from models.blocklist import BlocklistItem
 from models.collection import Collection, CollectionFile
 from models.comments import Comment
 from models.connections import MediaServerConnection
@@ -27,10 +28,12 @@ from models.lists import List as ListModel, ListItem
 from models.media import Media
 from models.ratings import Rating, RatingChanges
 from models.scrobble_connection import ScrobbleConnection
+from models.season_override import ShowEpisodeOverride, ShowSeasonOverride
 from models.show import Show
 from core.rewatch import record_rewatch_progress
 from models.sync import SyncJob
 from models.users import UserSettings
+from utils.media_uri import MediaURI
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,8 @@ class ScrobImportData:
     lists: list[dict] = field(default_factory=list)
     list_items: dict[str, list[dict]] = field(default_factory=dict)
     comments: dict[str, list[dict]] = field(default_factory=dict)
+    content_filters: dict | None = None
+    metadata_overrides: dict | None = None
     api_keys: dict | None = None
     media_connections: list[dict] | None = None
     scrobble_connections: list[dict] | None = None
@@ -185,6 +190,8 @@ def parse_scrob_export(content: bytes) -> ScrobImportData:
         lists=lists_meta,
         list_items=list_items,
         comments=comments,
+        content_filters=_load_dict("content-filters.json"),
+        metadata_overrides=_load_dict("metadata-overrides.json"),
         api_keys=_load_dict("api-keys.json"),
         media_connections=_load_list("media-connections.json") if "media-connections.json" in names else None,
         scrobble_connections=_load_list("scrobble-connections.json") if "scrobble-connections.json" in names else None,
@@ -226,6 +233,8 @@ async def apply_scrob_import(
     include_collection: bool,
     include_lists: bool,
     include_comments: bool,
+    include_content_filters: bool,
+    include_metadata_overrides: bool,
     include_api_keys: bool,
     include_media_connections: bool,
     include_scrobble_connections: bool,
@@ -256,6 +265,7 @@ async def apply_scrob_import(
     stats = {
         "movies": 0, "episodes": 0, "ratings": 0, "collected": 0,
         "lists": 0, "list_items": 0, "comments": 0, "connections": 0,
+        "filters": 0, "overrides": 0,
         "skipped": 0, "errors": 0,
     }
     processed = 0
@@ -562,12 +572,12 @@ async def apply_scrob_import(
 
     # ── Comments ───────────────────────────────────────────────────────
     if include_comments:
-        def _comment_key(media_type: str, tmdb_id: int | None, season_number: int | None, episode_number: int | None, content: str) -> tuple:
-            return (media_type, tmdb_id, season_number, episode_number, content)
+        def _comment_key(media_type: str, uri_id: str | None, season_number: int | None, episode_number: int | None, content: str) -> tuple:
+            return (media_type, uri_id, season_number, episode_number, content)
 
         existing_comments_result = await db.execute(select(Comment).where(Comment.user_id == user_id))
         existing_comment_keys = {
-            _comment_key(c.media_type, c.tmdb_id, c.season_number, c.episode_number, c.content)
+            _comment_key(c.media_type, c.uri_id, c.season_number, c.episode_number, c.content)
             for c in existing_comments_result.scalars()
         }
 
@@ -575,8 +585,13 @@ async def apply_scrob_import(
             if not tmdb_id:
                 stats["skipped"] += 1
                 return
+            # Season and episode comments hang off the show's URI, addressed by the number columns.
+            uri_id = str(
+                MediaURI.for_movie("tmdb", tmdb_id) if media_type == "movie"
+                else MediaURI.for_show("tmdb", tmdb_id)
+            )
             content = entry.get("comment") or ""
-            key = _comment_key(media_type, tmdb_id, season_number, episode_number, content)
+            key = _comment_key(media_type, uri_id, season_number, episode_number, content)
             if key in existing_comment_keys:
                 stats["skipped"] += 1
                 return
@@ -591,7 +606,7 @@ async def apply_scrob_import(
                 stats["errors"] += 1
                 return
             db.add(Comment(
-                user_id=user_id, media_type=media_type, tmdb_id=tmdb_id,
+                user_id=user_id, media_type=media_type, uri_id=uri_id,
                 season_number=season_number, episode_number=episode_number,
                 content=content, is_spoiler=bool(entry.get("spoiler")),
                 created_at=created_at,
@@ -610,8 +625,140 @@ async def apply_scrob_import(
             await _tick()
         for entry in data.comments.get("episodes", []):
             ep = entry.get("episode", {})
-            _add_comment("episode", entry.get("ids", {}).get("tmdb"), ep.get("season"), ep.get("number"), entry)
+            show_tmdb_id = entry.get("show", {}).get("ids", {}).get("tmdb") or entry.get("ids", {}).get("tmdb")
+            # "series" for anything under a show — the same media_type the app
+            # writes, so an imported comment is found by the same query.
+            _add_comment("series", show_tmdb_id, ep.get("season"), ep.get("number"), entry)
             await _tick()
+        await db.commit()
+
+    # ── Content filters ────────────────────────────────────────────────
+    if include_content_filters and data.content_filters:
+        settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+        settings = settings_result.scalar_one_or_none()
+        if settings:
+            prefs = dict(settings.preferences or {})
+            existing_cf = dict(prefs.get("content_filters") or {})
+            # Union rather than replace — an import is a restore, not a reset,
+            # and silently dropping a filter the user added since the export
+            # would quietly un-hide content they had blocked.
+            for key in ("blocked_genres", "blocked_keywords", "blocked_regexes", "blocked_ratings", "filter_languages"):
+                imported = data.content_filters.get(key) or []
+                if not imported:
+                    continue
+                current = list(existing_cf.get(key) or [])
+                for value in imported:
+                    if value not in current:
+                        current.append(value)
+                        stats["filters"] += 1
+                existing_cf[key] = current
+            mode = data.content_filters.get("language_filter_mode")
+            if mode and not existing_cf.get("language_filter_mode"):
+                existing_cf["language_filter_mode"] = mode
+            prefs["content_filters"] = existing_cf
+            settings.preferences = prefs
+            await db.commit()
+
+        bl_result = await db.execute(select(BlocklistItem.uri_id).where(BlocklistItem.user_id == user_id))
+        existing_blocked = {row[0] for row in bl_result}
+        for entry in data.content_filters.get("blocked_items") or []:
+            uri_id = entry.get("uri_id")
+            raw_type = entry.get("media_type")
+            if not uri_id or uri_id in existing_blocked or not raw_type:
+                stats["skipped"] += 1
+                continue
+            try:
+                media_type = MediaType(raw_type)
+            except ValueError:
+                stats["skipped"] += 1
+                continue
+            db.add(BlocklistItem(
+                user_id=user_id,
+                uri_id=uri_id,
+                media_type=media_type,
+                is_dropped=bool(entry.get("is_dropped")),
+            ))
+            existing_blocked.add(uri_id)
+            stats["filters"] += 1
+        await db.commit()
+
+    # ── Metadata overrides ─────────────────────────────────────────────
+    if include_metadata_overrides and data.metadata_overrides:
+        async def _resolve_show(ref: dict | None) -> Show | None:
+            """Match the exported show against a local row by provider id.
+
+            Never creates a Show: an override for a show this account has never
+            seen has nothing to apply to, and inventing the row would leave a
+            titleless placeholder behind."""
+            if not ref:
+                return None
+            tmdb_id = ref.get("tmdb_id")
+            if tmdb_id:
+                found = (await db.execute(select(Show).where(Show.tmdb_id == tmdb_id))).scalars().first()
+                if found:
+                    return found
+            tvdb_id = ref.get("tvdb_id")
+            if tvdb_id:
+                found = (await db.execute(select(Show).where(Show.tvdb_id == tvdb_id))).scalars().first()
+                if found:
+                    return found
+            return None
+
+        for entry in data.metadata_overrides.get("seasons") or []:
+            source = await _resolve_show(entry.get("source_show"))
+            target = await _resolve_show(entry.get("target_show"))
+            source_season = entry.get("source_season_number")
+            target_season = entry.get("target_season_number")
+            if not source or not target or source_season is None or target_season is None:
+                stats["skipped"] += 1
+                continue
+            existing_result = await db.execute(select(ShowSeasonOverride).where(
+                ShowSeasonOverride.user_id == user_id,
+                ShowSeasonOverride.source_show_id == source.id,
+                ShowSeasonOverride.source_season_number == source_season,
+            ))
+            if existing_result.scalars().first():
+                stats["skipped"] += 1
+                continue
+            db.add(ShowSeasonOverride(
+                user_id=user_id,
+                source_show_id=source.id,
+                source_season_number=source_season,
+                target_show_id=target.id,
+                target_season_number=target_season,
+            ))
+            stats["overrides"] += 1
+
+        for entry in data.metadata_overrides.get("episodes") or []:
+            source = await _resolve_show(entry.get("source_show"))
+            target = await _resolve_show(entry.get("target_show"))
+            source_season = entry.get("source_season_number")
+            source_episode = entry.get("source_episode_number")
+            target_season = entry.get("target_season_number")
+            target_episode = entry.get("target_episode_number")
+            if (not source or not target or source_season is None or source_episode is None
+                    or target_season is None or target_episode is None):
+                stats["skipped"] += 1
+                continue
+            existing_result = await db.execute(select(ShowEpisodeOverride).where(
+                ShowEpisodeOverride.user_id == user_id,
+                ShowEpisodeOverride.source_show_id == source.id,
+                ShowEpisodeOverride.source_season_number == source_season,
+                ShowEpisodeOverride.source_episode_number == source_episode,
+            ))
+            if existing_result.scalars().first():
+                stats["skipped"] += 1
+                continue
+            db.add(ShowEpisodeOverride(
+                user_id=user_id,
+                source_show_id=source.id,
+                source_season_number=source_season,
+                source_episode_number=source_episode,
+                target_show_id=target.id,
+                target_season_number=target_season,
+                target_episode_number=target_episode,
+            ))
+            stats["overrides"] += 1
         await db.commit()
 
     # ── Secret categories (fill-gaps-only, never overwrite) ───────────

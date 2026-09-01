@@ -89,8 +89,9 @@ const seasonTitle = season
                 <div class="flex items-center gap-2 shrink-0">
                   {(() => {
                     const currentSeason = Number(season_number);
+                    // Specials included: the show page links to them like any
+                    // other season, so the season stepper must reach them too.
                     const validSeasons = show.seasons_meta
-                      .filter((s) => s.season_number > 0)
                       .sort((a, b) => a.season_number - b.season_number);
                     const currentIndex = validSeasons.findIndex((s) => s.season_number === currentSeason);
                     const prevSeason = currentIndex > 0 ? validSeasons[currentIndex - 1] : null;
@@ -145,7 +146,7 @@ const seasonTitle = season
                   tmdbId={season.show.tmdb_id ?? Number(id)}
                   mediaType="series"
                   watched={season.season_watched}
-                  inLists={season.season_in_lists ?? []}
+                  inLists={[]}
                   inLibrary={season.season_in_library}
                   collectionPct={season.season_collection_pct}
                   watchPct={season.season_watch_pct ?? 0}
@@ -196,7 +197,7 @@ const seasonTitle = season
 
         <CommentsSection
           mediaType="series"
-          tmdbId={season.show.tmdb_id ?? Number(id)}
+          uriId={`tvdb:s:${id}`}
           seasonNumber={Number(season_number)}
         />
 
@@ -319,8 +320,8 @@ const seasonTitle = season
   const backdrop = document.getElementById('poster-modal-backdrop');
   const closeBtn = document.getElementById('poster-modal-close');
   if (zoomBtn && modal) {
-    function openModal() { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-    function closeModal() { modal.classList.add('hidden'); document.body.style.overflow = ''; }
+    const openModal = () => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
+    const closeModal = () => { modal.classList.add('hidden'); document.body.style.overflow = ''; };
     zoomBtn.addEventListener('click', openModal);
     backdrop?.addEventListener('click', closeModal);
     closeBtn?.addEventListener('click', closeModal);

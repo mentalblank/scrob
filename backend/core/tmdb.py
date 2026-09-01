@@ -30,10 +30,13 @@ _breaker_fail_count = 0
 _breaker_open_until = 0.0
 
 
-class TMDBUnavailable(Exception):
-    """Raised by _get while the circuit breaker is open (TMDB looks down).
-    Callers that already tolerate a missing TMDB response - the metadata
-    enrichers, trending rows, etc. - catch this like any other fetch error."""
+class TMDBUnavailable(RuntimeError):
+    """TMDB could not be reached — says nothing about whether a key is valid.
+
+    Also raised by _get, with no HTTP attempt at all, while the circuit breaker
+    is open. Callers that already tolerate a missing TMDB response - the
+    metadata enrichers, trending rows - catch this like any other fetch error.
+    """
 
 
 def _breaker_blocked() -> bool:
@@ -58,7 +61,12 @@ class _TTLCache:
     entry evicted on overflow (dict insertion order). No shared/multi-worker
     guarantees — fine here since scrob runs a single uvicorn process; this just
     avoids re-hitting TMDB for identical requests within the TTL window, which is
-    what was actually making every click slow for users far from TMDB's servers."""
+    what was actually making every click slow for users far from TMDB's servers.
+
+    Distinct from core/provider_cache, which is the database-backed cache shared
+    across processes and restarts: this one exists so a single page render does
+    not fan out the same request a dozen times, and so a caller can bypass it
+    with cache_ttl=None when a user explicitly asked to refresh."""
 
     def __init__(self, maxsize: int = 2000):
         self._store: dict[tuple, tuple[float, dict]] = {}
@@ -107,7 +115,8 @@ async def _get(
     api_key in `headers` is auth-only and doesn't change TMDB's response content,
     so it's deliberately excluded from the cache key to share hits across users/
     jobs. Pass cache_ttl=None to bypass caching (e.g. validate_api_key, where the
-    response genuinely depends on which key was used).
+    response genuinely depends on which key was used, or a user-initiated
+    refresh that must not be served from a response fetched moments earlier).
 
     Raises TMDBUnavailable immediately (no HTTP attempt) while the circuit
     breaker is open — see the _breaker_* helpers above.
@@ -143,24 +152,43 @@ async def _get(
         except _RETRYABLE as e:
             last_exc = e
             if attempt < max_retries:
-                await asyncio.sleep(_BACKOFF_BASE * 2 ** attempt)  # 1s, 2s, ...
-        except httpx.HTTPStatusError:
-            raise  # 4xx/5xx — don't retry, surface immediately
-    # Only a genuine connectivity/timeout failure trips the breaker; a 429 just
-    # means TMDB is up and throttling us.
+                await asyncio.sleep(_BACKOFF_BASE * 2 ** attempt)
+        except httpx.HTTPStatusError as e:
+            # TMDB answers 5xx for its own upstream blips (status 43,
+            # "Couldn't connect to the backend server") — the same request
+            # succeeds moments later, so retry those. 4xx is our fault and
+            # never fixes itself.
+            if e.response.status_code < 500:
+                raise
+            last_exc = e
+            if attempt >= max_retries:
+                raise
+            await asyncio.sleep(_BACKOFF_BASE * 2 ** attempt)
+    # Only a genuine connectivity/timeout failure trips the breaker; a 429 or a
+    # 5xx means TMDB is up and answering.
     if isinstance(last_exc, _RETRYABLE):
         _breaker_record_failure()
     raise last_exc
 
 
 async def validate_api_key(api_key: str) -> bool:
+    """True if TMDB accepts the key, False if it rejects it.
+
+    Raises TMDBUnavailable when TMDB can't answer — an outage is not a verdict
+    on the key, and reporting one as the other sends people to regenerate a key
+    that was fine all along.
+    """
     if not api_key:
         return False
     try:
         await _get(f"{TMDB_BASE}/authentication", headers=get_headers(api_key), cache_ttl=None)
         return True
-    except Exception:
-        return False
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code < 500:
+            return False
+        raise TMDBUnavailable(str(e)) from e
+    except Exception as e:
+        raise TMDBUnavailable(str(e)) from e
 
 
 async def get_movie(tmdb_id: int, api_key: str = None, language: str | None = None, cache_ttl: float | None = DEFAULT_CACHE_TTL) -> dict:
@@ -175,16 +203,8 @@ async def get_movie(tmdb_id: int, api_key: str = None, language: str | None = No
     )
 
 
-def extract_credits_stingers(data: dict) -> tuple[bool, bool]:
-    """Returns (has_mid_credits_scene, has_post_credits_scene) from a movie
-    response's appended keywords (#319) - TMDB tags these via community-added
-    keywords rather than a dedicated field, and only does so for movies."""
-    names = {k.get("name", "") for k in (data.get("keywords") or {}).get("keywords", [])}
-    return "duringcreditsstinger" in names, "aftercreditsstinger" in names
-
-
 async def get_show(tmdb_id: int, api_key: str = None, language: str | None = None, cache_ttl: float | None = DEFAULT_CACHE_TTL) -> dict:
-    params: dict = {"append_to_response": "credits,content_ratings,recommendations,external_ids"}
+    params: dict = {"append_to_response": "credits,content_ratings,recommendations,external_ids,keywords"}
     if language:
         params["language"] = language
     return await _get(
@@ -227,6 +247,45 @@ async def get_episode_external_ids(
 ) -> dict:
     return await _get(
         f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}/episode/{episode_number}/external_ids",
+        headers=get_headers(api_key),
+    )
+
+
+async def get_movie_images(tmdb_id: int, api_key: str = None, language: str | None = None) -> dict:
+    """All artwork TMDB holds for a movie: posters, backdrops, logos.
+
+    include_image_language keeps the language-less artwork ("null"), which is
+    most of the textless backdrops, alongside the requested language.
+    """
+    return await _get(
+        f"{TMDB_BASE}/movie/{tmdb_id}/images",
+        headers=get_headers(api_key),
+        params={"include_image_language": f"{(language or 'en').split('-')[0]},null"},
+    )
+
+
+async def get_show_images(tmdb_id: int, api_key: str = None, language: str | None = None) -> dict:
+    """All artwork TMDB holds for a show: posters, backdrops, logos."""
+    return await _get(
+        f"{TMDB_BASE}/tv/{tmdb_id}/images",
+        headers=get_headers(api_key),
+        params={"include_image_language": f"{(language or 'en').split('-')[0]},null"},
+    )
+
+
+async def get_season_images(tmdb_id: int, season_number: int, api_key: str = None, language: str | None = None) -> dict:
+    """Season posters."""
+    return await _get(
+        f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}/images",
+        headers=get_headers(api_key),
+        params={"include_image_language": f"{(language or 'en').split('-')[0]},null"},
+    )
+
+
+async def get_episode_images(tmdb_id: int, season_number: int, episode_number: int, api_key: str = None) -> dict:
+    """Episode stills. TMDB does not language-filter these."""
+    return await _get(
+        f"{TMDB_BASE}/tv/{tmdb_id}/season/{season_number}/episode/{episode_number}/images",
         headers=get_headers(api_key),
     )
 
@@ -344,6 +403,29 @@ async def get_genre_list(api_key: str = None) -> dict:
     return await _get(f"{TMDB_BASE}/genre/movie/list", headers=get_headers(api_key))
 
 
+async def get_tv_genre_list(api_key: str = None) -> dict:
+    return await _get(f"{TMDB_BASE}/genre/tv/list", headers=get_headers(api_key))
+
+
+async def get_languages(api_key: str = None) -> list[dict]:
+    return await _get(f"{TMDB_BASE}/configuration/languages", headers=get_headers(api_key))
+
+
+async def get_countries(api_key: str = None) -> list[dict]:
+    return await _get(f"{TMDB_BASE}/configuration/countries", headers=get_headers(api_key))
+
+
+async def get_watch_providers(type: str = "movie", region: str = "US", api_key: str = None) -> list[dict]:
+    """Fetch available watch providers for a specific region from TMDB."""
+    path = "movie" if type == "movie" else "tv"
+    res = await _get(
+        f"{TMDB_BASE}/watch/providers/{path}",
+        headers=get_headers(api_key),
+        params={"watch_region": region},
+    )
+    return res.get("results", [])
+
+
 async def get_now_playing(page: int = 1, api_key: str = None) -> dict:
     return await _get(f"{TMDB_BASE}/movie/now_playing", headers=get_headers(api_key), params={"page": page})
 
@@ -376,8 +458,8 @@ async def discover_movies(
     watch_provider_id: int | None = None,
     watch_region: str = "US",
     with_original_language: str | None = None,
-    api_key: str = None,
     language: str | None = None,
+    api_key: str = None,
 ) -> dict:
     params: dict = {
         "page": page,
@@ -402,7 +484,14 @@ async def discover_movies(
         params["with_original_language"] = with_original_language
     if language:
         params["language"] = language
-    return await _get(f"{TMDB_BASE}/discover/movie", headers=get_headers(api_key), params=params)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{TMDB_BASE}/discover/movie",
+            headers=get_headers(api_key),
+            params=params,
+        )
+        r.raise_for_status()
+        return r.json()
 
 
 async def discover_shows(
@@ -418,8 +507,8 @@ async def discover_shows(
     watch_provider_id: int | None = None,
     watch_region: str = "US",
     with_original_language: str | None = None,
-    api_key: str = None,
     language: str | None = None,
+    api_key: str = None,
 ) -> dict:
     params: dict = {
         "page": page,
@@ -446,7 +535,14 @@ async def discover_shows(
         params["with_original_language"] = with_original_language
     if language:
         params["language"] = language
-    return await _get(f"{TMDB_BASE}/discover/tv", headers=get_headers(api_key), params=params)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{TMDB_BASE}/discover/tv",
+            headers=get_headers(api_key),
+            params=params,
+        )
+        r.raise_for_status()
+        return r.json()
 
 
 async def get_collection(collection_id: int, api_key: str = None) -> dict:
@@ -474,3 +570,28 @@ async def get_movie_watch_providers(movie_id: int, api_key: str = None) -> dict:
 
 async def get_show_watch_providers(show_id: int, api_key: str = None) -> dict:
     return await _get(f"{TMDB_BASE}/tv/{show_id}/watch/providers", headers=get_headers(api_key))
+
+
+def credits_stinger_fields(data: dict) -> dict:
+    """The two stinger flags as tmdb_data keys, for spreading into a snapshot.
+
+    Written together and always both present, so their presence is what marks
+    a row as already checked - see webhooks._backfill_credits_stingers.
+    """
+    has_mid, has_post = extract_credits_stingers(data)
+    return {"has_mid_credits_scene": has_mid, "has_post_credits_scene": has_post}
+
+
+def extract_credits_stingers(data: dict) -> tuple[bool, bool]:
+    """(has_mid_credits_scene, has_post_credits_scene) for a movie or show payload.
+
+    TMDB has no dedicated field for this - it is carried by the
+    community-maintained keywords 'duringcreditsstinger' and
+    'aftercreditsstinger' on an append_to_response=keywords payload (#319).
+    The two endpoints disagree on the shape: a movie nests the list under
+    "keywords", a show under "results".
+    """
+    block = (data or {}).get("keywords") or {}
+    keywords = block.get("keywords") or block.get("results") or []
+    names = {str(k.get("name", "")).lower() for k in keywords if isinstance(k, dict)}
+    return "duringcreditsstinger" in names, "aftercreditsstinger" in names

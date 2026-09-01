@@ -78,3 +78,7 @@ test.http
 vuln.md
 vuln.env
 test.py
+/data
+/.serena
+examplebackup.pgdump
+/snapshots

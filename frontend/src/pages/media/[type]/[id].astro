@@ -1,12 +1,24 @@
 ---
 import Base from "../../../layouts/Base.astro";
+import ErrorState from "../../../components/ErrorState.astro";
+import PosterModal from "../../../components/PosterModal.astro";
+import ImagePicker from "../../../components/ImagePicker.astro";
+import ImagePickerButton from "../../../components/ImagePickerButton.astro";
+import RefreshMetadataButton from "../../../components/RefreshMetadataButton.astro";
 import MediaRow from "../../../components/MediaRow.astro";
 import ActionBar from "../../../components/ActionBar.astro";
 import CommentsSection from "../../../components/CommentsSection.astro";
 import VideoPlayer from "../../../components/VideoPlayer.astro";
 import ManualScrobble from "../../../components/ManualScrobble.astro";
-import { api, type MediaItem } from "../../../lib/api";
+import TrailerButton from "../../../components/TrailerButton.astro";
+import ProgressStrip from "../../../components/ProgressStrip.astro";
+import { api, tmdbImageUrl, type MediaItem } from "../../../lib/api";
+import { personUrl } from "../../../lib/urls";
+import { seasonLabel } from "../../../lib/media-format";
+const specialsLabel = Astro.cookies.get("specials_label")?.value === "true";
 export const prerender = false;
+
+const primaryMetadataSource = Astro.cookies.get("primary_metadata_source")?.value || "tmdb";
 
 const { type, id } = Astro.params;
 const { token, user } = Astro.locals;
@@ -16,7 +28,7 @@ let item: MediaItem | null = null;
 let error = "";
 
 try {
-  item = await api.media.get(type!, Number(id), token);
+  item = await api.media.get(type!, id!.includes(":") ? id! : Number(id), token);
 } catch (e: any) {
   error = e.message;
 }
@@ -30,15 +42,17 @@ const rating = item?.tmdb_rating ? item.tmdb_rating.toFixed(1) : null;
 const isEpisode = item?.type === "episode";
 const isMovie = item?.type === "movie";
 const collection = item?.collection;
-
-// Header for the shared rating popover (shown once the modal dims the page).
-// ActionBar prefixes the SxxExx itself, so pass just the episode name here.
-const rateTitle = isEpisode ? (item?.show_title ?? item?.title) : item?.title;
-const rateSubtitle = isEpisode ? (item?.title ?? "") : "";
-// Episode: the landscape still (ActionBar flags episodes landscape), show
-// poster as fallback. Movie: its poster.
-const ratePosterPath = isEpisode ? (item?.poster_path ?? item?.show_poster_path) : item?.poster_path;
-const showRefreshBtn = !!user && item?.in_library && (item.type === "movie" || (isEpisode && !!item.show_tmdb_id));
+const showRefreshBtn = item?.in_library && (item.type === "movie" || (isEpisode && !!(item.show_uri_id || item.show_tmdb_id)));
+// Spoiler guards blur the backdrop/still and the synopsis of anything unwatched;
+// posters are deliberately left alone (see Base.astro / global.css).
+const spoilerPrefix = item?.watched ? undefined : isMovie ? "movie-" : isEpisode ? "ep-" : undefined;
+// A movie's artwork is its own; an episode's belongs to its show, addressed by
+// season and episode number.
+const pickerSubject = isMovie
+  ? item?.uri_id ?? (item?.tmdb_id ? `tmdb:m:${item.tmdb_id}` : null)
+  : isEpisode
+    ? item?.show_uri_id ?? (item?.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : null)
+    : null;
 
 const today = new Date();
 function fmtDate(iso: string): string {
@@ -55,29 +69,38 @@ const originalLanguage = item?.original_language
   ? langNames.of(item.original_language) ?? item.original_language
   : null;
 const refreshUrl = isEpisode
-  ? `/api/proxy/shows/${item?.show_tmdb_id}/refresh`
-  : `/api/proxy/media/movie/${item?.tmdb_id}/refresh`;
+  ? `/api/proxy/shows/${item?.show_uri_id ?? item?.show_tmdb_id}/refresh`
+  : `/api/proxy/media/movie/${item?.uri_id ?? `tmdb:m:${item?.tmdb_id}`}/refresh`;
+const trailerYoutubeId = item?.trailer_youtube_id ?? null;
+const tmdbUrl = isEpisode
+  ? (item?.show_tmdb_id ? `https://www.themoviedb.org/tv/${item.show_tmdb_id}` : null)
+  : `https://www.themoviedb.org/movie/${item?.tmdb_id}`;
+const logoPath = item?.logo_path ?? null;
+
+const subscribedProviders = item?.where_to_watch?.filter(s => s.is_subscribed) ?? [];
+const otherProviders = item?.where_to_watch?.filter(s => !s.is_subscribed) ?? [];
+const productionCompany = !isEpisode ? (item?.production_companies?.find(c => c.logo_path) ?? null) : null;
+const showComments = Astro.cookies.get("show_comments")?.value !== "false";
+
+const activeButtonsCount = [
+  item && (item.type === 'movie' || item.type === 'episode') && item.in_library,
+  item && (item.type === 'movie' || item.type === 'episode'),
+  showRefreshBtn,
+  !!trailerYoutubeId
+].filter(Boolean).length;
 ---
 
 <Base title={item?.title || "Media Details"}>
-  {error && !item && (
-    <div class="max-w-md mx-auto mt-20 text-center">
-        <div class="bg-red-500/10 border border-red-500/20 text-red-500 p-6 rounded-2xl mb-6">
-            <p class="font-bold text-lg mb-2">Oops!</p>
-            <p class="text-sm opacity-80">{error}</p>
-        </div>
-        <a href="/" class="text-blue-500 hover:underline">Return to Dashboard</a>
-    </div>
-  )}
+  {error && !item && <ErrorState error={error} />}
 
   {item && (
     <div class="relative">
       <!-- Backdrop -->
       {item.backdrop_path && (
-        <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-screen h-[600px] overflow-hidden" data-adult-backdrop={item.adult ? "true" : undefined}>
-          <div class="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent z-10"></div>
+        <div class="absolute -top-20 md:-top-32 left-1/2 -translate-x-1/2 w-screen h-[600px] lg:h-[700px] xl:h-[780px] 2xl:h-[880px] overflow-hidden" style="mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 60%, transparent 100%);" data-adult-backdrop={item.adult ? "true" : undefined} data-spoiler={spoilerPrefix && `${spoilerPrefix}image`}>
+          <div class="absolute inset-0 bg-gradient-to-t from-[var(--color-hero-fade)] via-[var(--color-hero-fade)]/40 to-transparent z-10"></div>
           <img
-            src={item.backdrop_path}
+            src={tmdbImageUrl(item.backdrop_path, "w1280")}
             alt=""
             class="w-full h-full object-cover opacity-50 blur-[1px]"
             loading="eager"
@@ -97,58 +120,388 @@ const refreshUrl = isEpisode
           <span class="text-zinc-100 font-bold truncate">{item.title}</span>
         </nav>
 
-        <div class="flex flex-col md:flex-row gap-8 lg:gap-12">
-          <!-- Poster -->
-          <div class="w-64 shrink-0 mx-auto md:mx-0">
-            <div class="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative" data-adult={item.adult ? "true" : undefined}>
-              {item.poster_path ? (
-                <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${item.title}`}>
-                  <img
-                    src={item.poster_path}
-                    alt={item.title}
-                    class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
-                    loading="eager"
-                    decoding="async"
+        <!-- Title / Logo / Tagline Header -->
+        <div class="mb-10 text-center md:text-left">
+          {isEpisode && (
+            <div class="inline-flex items-center justify-center gap-2 px-3 py-1 bg-purple-600/10 border border-purple-600/30 text-purple-400 text-xs font-bold rounded-full mb-4 uppercase tracking-wider">
+              {seasonLabel(item.season_number, specialsLabel)} · Episode {item.episode_number}
+            </div>
+          )}
+
+          {logoPath ? (
+            <div class="mb-4 flex flex-col items-center md:items-start">
+              <img
+                src={tmdbImageUrl(logoPath, "w500")}
+                alt={item.title}
+                class="max-h-20 md:max-h-28 max-w-xs md:max-w-sm object-contain drop-shadow-2xl mx-auto md:mx-0"
+                loading="eager"
+                decoding="async"
+              />
+              <h1 class="sr-only">{item.title}</h1>
+            </div>
+          ) : (
+            <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none text-center md:text-left">{item.title}</h1>
+          )}
+
+          {item.original_title && item.original_title !== item.title && (
+            <p class="text-sm text-zinc-500 text-center md:text-left mb-2">Original title: <span class="text-zinc-400">{item.original_title}</span></p>
+          )}
+
+          {item.tagline && (
+            <p class="text-lg md:text-xl italic text-zinc-400 font-light leading-relaxed text-center md:text-left mb-4">"{item.tagline}"</p>
+          )}
+
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+          
+          <!-- LEFT COLUMN: Poster & Metadata Sidebar (4 cols on desktop) -->
+          <div class="lg:col-span-4 space-y-6 min-w-0">
+            <!-- Poster -->
+            <div class="w-64 lg:w-full max-w-full shrink-0 mx-auto lg:mx-0">
+              <div class="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 bg-zinc-900 ring-1 ring-white/10 relative" data-adult={item.adult ? "true" : undefined}>
+                {isMovie && (
+                  <>
+                    <ImagePickerButton subjectUri={pickerSubject} kind="poster" label={`${item.title} poster`} />
+                    <ImagePickerButton subjectUri={pickerSubject} kind="backdrop" label={`${item.title} backdrop`} class="!top-14" />
+                  </>
+                )}
+                {isEpisode && item.season_number != null && item.episode_number != null && (
+                  <ImagePickerButton
+                    subjectUri={pickerSubject}
+                    kind="still"
+                    label={`${item.title} still`}
+                    seasonNumber={item.season_number}
+                    episodeNumber={item.episode_number}
                   />
-                  <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover/poster:opacity-100 transition-opacity duration-200 bg-black/30">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8 text-white drop-shadow-lg">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
-                    </svg>
+                )}
+                {item.poster_path ? (
+                  <button id="poster-zoom-btn" class="w-full h-full group/poster block cursor-zoom-in" aria-label={`Enlarge poster for ${item.title}`}>
+                    <img
+                      src={tmdbImageUrl(item.poster_path, "w500")}
+                      alt={item.title}
+                      class="w-full h-full object-cover transition-transform duration-300 group-hover/poster:scale-105"
+                      loading="eager"
+                      decoding="async"
+                    />
+                    <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover/poster:opacity-100 transition-opacity duration-200 bg-black/30">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8 text-white drop-shadow-lg">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
+                      </svg>
+                    </div>
+
+                    {item.progress_percent !== undefined && item.progress_percent !== null && item.progress_percent > 0 && (
+                      <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-zinc-800/80">
+                        <div class="h-full bg-blue-500 rounded-r-full" style={`width: ${item.progress_percent}%`}></div>
+                      </div>
+                    )}
+                  </button>
+                ) : (
+                  <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
+                    <span class="text-4xl mb-2">🎬</span>
+                    <span class="text-sm font-medium">No Poster Available</span>
                   </div>
-                </button>
-              ) : (
-                <div class="w-full h-full flex flex-col items-center justify-center text-zinc-400 p-4 text-center">
-                  <span class="text-4xl mb-2">🎬</span>
-                  <span class="text-sm font-medium">No Poster Available</span>
+                )}
+              </div>
+            </div>
+
+            <!-- ActionBar & Progress -->
+            <div class="bg-zinc-900/20 border border-zinc-800/50 backdrop-blur-sm p-4 rounded-2xl space-y-4">
+              <ActionBar
+                tmdbId={item.tmdb_id}
+                mediaType={item.type}
+                watched={item.watched ?? false}
+                inLists={item.in_lists ?? []}
+                inLibrary={item.in_library ?? false}
+                collectionPct={item.collection_pct ?? 0}
+                showUriId={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : undefined)}
+                showTmdbId={item.show_tmdb_id ?? undefined}
+                seasonNumber={item.season_number ?? undefined}
+                episodeNumber={item.episode_number ?? undefined}
+                isMonitored={item.is_monitored ?? false}
+                requestEnabled={item.request_enabled ?? false}
+                requestStatus={item.request_status ?? null}
+                mediaId={item.id}
+                userRating={item.user_rating ?? null}
+                isBlocked={item.is_blocked ?? false}
+                isDropped={item.is_dropped ?? false}
+                centered={true}
+              />
+
+              {item && item.progress_percent !== undefined && item.progress_percent !== null && item.progress_percent > 0 && (
+                <div class="pt-2 border-t border-zinc-800/60">
+                  <ProgressStrip
+                    progressPct={item.progress_percent}
+                    title="Playback Progress"
+                    currentDuration={item.runtime ? item.runtime * (item.progress_percent / 100) : undefined}
+                    totalDuration={item.runtime ?? undefined}
+                    className="mt-0"
+                  />
                 </div>
               )}
             </div>
-          </div>
 
-          <!-- Info -->
-          <div class="flex-1 min-w-0 pt-4">
-            {isEpisode && (
-              <div class="inline-flex items-center gap-2 px-3 py-1 bg-purple-600/10 border border-purple-600/30 text-purple-400 text-xs font-bold rounded-full mb-4 uppercase tracking-wider">
-                Season {item.season_number} · Episode {item.episode_number}
+            <!-- Action Buttons Container (Play, Session, Refresh, Trailer) -->
+            {activeButtonsCount > 0 && (
+              <div class="flex flex-col gap-2.5 w-full [&>*]:w-full [&>*]:min-w-0">
+                {((item.type === 'movie' || item.type === 'episode')) && item.in_library && (
+                  <VideoPlayer
+                    uriId={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : item.type === 'episode' ? `tmdb:e:${item.tmdb_id}` : undefined)}
+                    tmdbId={item.tmdb_id}
+                    mediaType={item.type}
+                    inLibrary={item.in_library ?? false}
+                    title={item.title}
+                    token={token ?? ''}
+                    mediaId={item.id}
+                  />
+                )}
+                {((item.type === 'movie' || item.type === 'episode')) && (
+                  <ManualScrobble
+                    uriId={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : `tmdb:e:${item.tmdb_id}`)}
+                    mediaType={item.type}
+                    runtime={item.runtime}
+                    title={item.title}
+                    showUriId={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : null)}
+                    seasonNumber={item.season_number}
+                    episodeNumber={item.episode_number}
+                  />
+                )}
+                <RefreshMetadataButton refreshUrl={refreshUrl} showRefreshBtn={showRefreshBtn} />
+                <TrailerButton youtubeId={trailerYoutubeId} />
               </div>
             )}
-            
-            <h1 class="text-4xl md:text-6xl font-black text-zinc-100 mb-3 tracking-tight leading-none">{item.title}</h1>
 
-            {item.original_title && item.original_title !== item.title && (
-              <p class="text-sm text-zinc-500 mb-3">Original title: <span class="text-zinc-400">{item.original_title}</span></p>
+            <!-- Technical Specs Badge -->
+            {(() => {
+              const hasLibraryTags = !!(item.library && (
+                item.library.resolution ||
+                item.library.video_codec ||
+                item.library.audio_codec ||
+                item.library.audio_channels ||
+                item.library.audio_languages?.length ||
+                item.library.subtitle_languages?.length
+              ));
+              return hasLibraryTags && (
+                <details class="bg-zinc-900/40 border border-zinc-800/50 backdrop-blur-sm rounded-xl group/specs" open>
+                  <summary class="list-none flex items-center justify-between cursor-pointer select-none p-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">
+                    <span>Technical Specs</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="transition-transform duration-200 group-open/specs:rotate-180"><polyline points="6 9 12 15 18 9"/></svg>
+                  </summary>
+                  <div class="flex flex-wrap gap-1.5 px-4 pb-4">
+                    {[
+                      item.library?.resolution,
+                      item.library?.video_codec,
+                      item.library?.audio_codec,
+                      item.library?.audio_channels,
+                    ].filter(Boolean).map(tag => (
+                      <span class="px-2 py-0.5 bg-zinc-900/60 border border-zinc-800 text-zinc-400 text-[10px] rounded font-mono">
+                        {tag}
+                      </span>
+                    ))}
+                    {item.library?.audio_languages?.map((lang: string) => (
+                      <span class="px-2 py-0.5 bg-zinc-900/60 border border-zinc-800 text-zinc-400 text-[10px] rounded font-mono flex items-center gap-1">
+                        🔊 {lang}
+                      </span>
+                    ))}
+                    {item.library?.subtitle_languages?.map((lang: string) => (
+                      <span class="px-2 py-0.5 bg-zinc-900/60 border border-zinc-800 text-zinc-400 text-[10px] rounded font-mono flex items-center gap-1">
+                        💬 {lang}
+                      </span>
+                    ))}
+                  </div>
+                </details>
+              );
+            })()}
+
+            <!-- Where to Watch -->
+            {(subscribedProviders.length > 0 || otherProviders.length > 0) && (
+              <div class="w-full flex flex-col">
+                <h3 class="text-xs font-bold text-zinc-400 mb-3 uppercase tracking-widest flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v2"/><path d="M2 12V4"/><path d="M22 12V4"/><path d="M2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6"/><path d="M2 12h20"/><path d="M7 15h.01"/><path d="M11 15h.01"/><path d="M15 15h.01"/><path d="M19 15h.01"/><path d="M7 18h.01"/><path d="M11 18h.01"/><path d="M15 18h.01"/><path d="M19 18h.01"/></svg>
+                  Where to Watch
+                </h3>
+                
+                <div class="space-y-4 w-full">
+                  {subscribedProviders.length > 0 && (
+                    <div class="space-y-2">
+                      <p class="text-[9px] font-bold text-blue-400 uppercase tracking-wider">Your Services</p>
+                      <div class="grid grid-cols-1 gap-2">
+                        {subscribedProviders.map(s => {
+                          const isLocal = s.category === 'local';
+                          const content = (
+                            <>
+                              {s.logo ? (
+                                <img src={tmdbImageUrl(s.logo, "w92")} alt={s.name} class="w-6 h-6 rounded-md object-cover shadow-lg" />
+                              ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
+                                <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-6 h-6 rounded-md object-contain shadow-lg" />
+                              ) : (
+                                <div class="w-6 h-6 bg-zinc-800 rounded-md flex items-center justify-center text-[10px]">
+                                  ▶
+                                </div>
+                              )}
+                              <div class="min-w-0 text-left">
+                                <p class="text-zinc-200 text-xs font-bold truncate group-hover:text-blue-400 transition-colors">{s.name}</p>
+                                <p class="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter truncate">{s.category === 'flatrate' ? 'Stream' : s.category === 'local' ? 'Local' : s.category}</p>
+                              </div>
+                            </>
+                          );
+
+                          if (isLocal) {
+                            return (
+                              <button 
+                                type="button" 
+                                class="wtw-local-link w-full text-left flex items-center gap-2.5 p-2 bg-zinc-900/60 border border-zinc-800 rounded-xl hover:border-blue-500/30 transition-colors group cursor-pointer"
+                                data-connection-id={s.connection_id}
+                              >
+                                {content}
+                              </button>
+                            );
+                          } else {
+                            return (
+                              <div class="w-full text-left flex items-center gap-2.5 p-2 bg-zinc-900/60 border border-zinc-800 rounded-xl transition-colors group">
+                                {content}
+                              </div>
+                            );
+                          }
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {otherProviders.length > 0 && (
+                    <details class="w-full group/details watch-providers-details" open>
+                      <summary class="list-none flex items-center gap-1 cursor-pointer select-none text-[9px] font-bold text-zinc-500 hover:text-zinc-300 uppercase tracking-wider transition-colors outline-none mb-2">
+                        <span>{subscribedProviders.length > 0 ? "Other Options" : "Available On"}</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="transition-transform duration-200 group-open/details:rotate-180 text-zinc-600"><polyline points="6 9 12 15 18 9"/></svg>
+                      </summary>
+                      <div class="flex flex-wrap gap-2">
+                        {otherProviders.map(s => {
+                          const isLocal = s.category === 'local';
+                          const content = (
+                            <>
+                              {s.logo ? (
+                                <img src={tmdbImageUrl(s.logo, "w92")} alt={s.name} class="w-4 h-4 rounded-sm object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                              ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
+                                <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-4 h-4 rounded-sm object-contain opacity-70 group-hover:opacity-100 transition-opacity" />
+                              ) : (
+                                <span class="text-[10px]">▶</span>
+                              )}
+                              <span class="text-zinc-400 text-[10px] font-medium group-hover:text-zinc-200 transition-colors">{s.name}</span>
+                            </>
+                          );
+
+                          if (isLocal) {
+                            return (
+                              <button 
+                                type="button"
+                                class="wtw-local-link flex items-center gap-1.5 px-2 py-1 bg-zinc-900/40 border border-zinc-800/50 rounded-lg hover:border-zinc-700 transition-colors group cursor-pointer"
+                                data-connection-id={s.connection_id}
+                              >
+                                {content}
+                              </button>
+                            );
+                          } else {
+                            return (
+                              <div class="flex items-center gap-1.5 px-2 py-1 bg-zinc-900/40 border border-zinc-800/50 rounded-lg transition-colors group">
+                                {content}
+                              </div>
+                            );
+                          }
+                        })}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              </div>
             )}
 
-            {item.tagline && (
-              <p class="text-xl italic text-zinc-400 mb-8 font-light leading-relaxed">"{item.tagline}"</p>
-            )}
-
-            <div class="flex flex-wrap items-center gap-3 mb-10">
-              <div class="flex flex-wrap items-center gap-4 text-zinc-300 text-sm bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm">
-                {year && <span class="font-bold">{year}</span>}
+            <!-- Details Sidebar Card -->
+            <div class="bg-zinc-900/40 border border-zinc-800/50 backdrop-blur-sm rounded-2xl p-5 space-y-4">
+              <h3 class="text-xs font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-800 pb-2">Information</h3>
+              
+              <div class="space-y-3.5 text-xs">
+                {year && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Released</span>
+                    <span class="text-zinc-200 font-semibold">{year}</span>
+                  </div>
+                )}
                 {rating && (
-                  <span class="flex items-center gap-1.5 text-yellow-400 font-black item-rating">
-                    <span class="text-lg leading-none">★</span> {rating}
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Rating</span>
+                    <span class="flex items-center gap-1 text-yellow-400 font-bold">★ {rating}</span>
+                  </div>
+                )}
+                {item.runtime && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Runtime</span>
+                    <span class="text-zinc-200 font-semibold">{item.runtime} min</span>
+                  </div>
+                )}
+                {item.age_rating && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Content Rating</span>
+                    <span class="px-1.5 py-0.5 border border-zinc-700 rounded text-[9px] font-bold text-zinc-400">{item.age_rating}</span>
+                  </div>
+                )}
+                {originalLanguage && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Language</span>
+                    <span class="text-zinc-200 font-semibold">{originalLanguage}</span>
+                  </div>
+                )}
+                {item.status && (
+                  <div class="flex justify-between items-center">
+                    <span class="text-zinc-500">Status</span>
+                    <span class="capitalize px-1.5 py-0.5 bg-zinc-800 border border-zinc-800 rounded text-[9px] font-bold text-zinc-300">{item.status}</span>
+                  </div>
+                )}
+                
+                <!-- External links -->
+                <div class="pt-3 border-t border-zinc-800/60 flex items-center gap-2">
+                  {item.imdb_id && (
+                    <a href={`https://www.imdb.com/title/${item.imdb_id}/`} target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-1.5 bg-[#f5c518] rounded text-[10px] font-bold text-black hover:bg-[#e6b800] transition-colors">
+                      IMDb
+                    </a>
+                  )}
+                  {tmdbUrl && (
+                    <a href={tmdbUrl} target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-1.5 bg-[#01b4e4] rounded text-[10px] font-bold text-black hover:bg-[#00a8d8] transition-colors">
+                      TMDB
+                    </a>
+                  )}
+                  {item.tvdb_id && (
+                    <a href={item.type === 'episode' ? `https://thetvdb.com/episodes/${item.tvdb_id}` : `https://thetvdb.com/movies/${item.tvdb_id}`} target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-1.5 bg-[#005a2b] rounded text-[10px] font-bold text-white hover:bg-[#008c44] transition-colors">
+                      TVDB
+                    </a>
+                  )}
+                </div>
+
+                <!-- Production companies -->
+                {productionCompany && (
+                  <div class="pt-3 border-t border-zinc-800/60 flex flex-col gap-1.5">
+                    <span class="text-zinc-500 text-[10px]">Studio</span>
+                    <div class="flex items-center gap-2">
+                      <img src={tmdbImageUrl(productionCompany.logo_path, "w154")} alt={productionCompany.name} title={productionCompany.name} class="h-4 max-w-[90px] object-contain opacity-70" />
+                      <span class="text-zinc-300 text-[11px] font-medium">{productionCompany.name}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <!-- RIGHT COLUMN: Main Content Details (8 cols on desktop) -->
+          <div class="lg:col-span-8 space-y-8 lg:pt-0">
+            {(item.release_date || rating || item.runtime || !!item.play_count || productionCompany) && (
+              <div class="flex flex-wrap items-center gap-2.5 md:gap-4 text-zinc-300 text-xs md:text-sm bg-zinc-900/40 p-2.5 md:p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm w-fit">
+                {item.release_date && (
+                  <span class="font-bold">
+                    {new Date(item.release_date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </span>
+                )}
+                {rating && (
+                  <span class="flex items-center gap-1.5 text-yellow-400 font-black">
+                    <span class="text-base md:text-lg leading-none">★</span> {rating}
                   </span>
                 )}
                 {item.runtime && (
@@ -207,219 +560,118 @@ const refreshUrl = isEpisode
                     {originalLanguage}
                   </span>
                 )}
-                {item.directors?.length > 0 && (
+                {(item.directors?.length ?? 0) > 0 && (
                   <span class="flex items-center gap-1.5 font-medium text-zinc-400">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-4 h-4 text-zinc-500">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75.125v-.125A1.125 1.125 0 0 1 3.375 18H21m-18 0v-1.5A1.125 1.125 0 0 1 3.375 15h17.25M3.375 15v-1.5m0 1.5h17.25M3.375 15a1.125 1.125 0 0 1-1.125-1.125v-1.5M21 13.5V18a1.125 1.125 0 0 1-1.125 1.125H21m0-7.5v1.5m0-1.5a1.125 1.125 0 0 0-1.125-1.125H4.125A1.125 1.125 0 0 0 3 13.5m18 0v-7.5A1.125 1.125 0 0 0 19.875 4.5H4.125A1.125 1.125 0 0 0 3 5.625v7.875" />
                     </svg>
-                    {item.directors.map((d: any) => (
+                    {item.directors?.map((d: any) => (
                       <a href={`/person/${d.tmdb_id}`} class="hover:text-zinc-100 transition-colors">{d.name}</a>
                     )).reduce((acc: any[], el: any, i: number) => i === 0 ? [el] : [...acc, ', ', el], [])}
                   </span>
                 )}
-              </div>
-              {!isEpisode && (() => { const c = item.production_companies?.find(c => c.logo_path); return c ? <div class="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50 backdrop-blur-sm flex items-center"><img src={c.logo_path!} alt={c.name} title={c.name} class="h-5 max-w-[80px] object-contain" loading="lazy" /></div> : null; })()}
-            </div>
-
-            {user && (
-              <div class="mb-4">
-                <ActionBar
-                  tmdbId={item.tmdb_id}
-                  mediaType={item.type}
-                  watched={item.watched ?? false}
-                  inLists={item.in_lists ?? []}
-                  inLibrary={item.in_library ?? false}
-                  collectionPct={item.collection_pct ?? 0}
-                  showTmdbId={item.show_tmdb_id}
-                  seasonNumber={item.season_number}
-                  episodeNumber={item.episode_number}
-                  isMonitored={item.is_monitored ?? false}
-                  requestEnabled={item.request_enabled ?? false}
-                  requestStatus={item.request_status ?? null}
-                  mediaId={item.id}
-                  userRating={item.user_rating ?? null}
-                  ratingTitle={rateTitle}
-                  ratingSubtitle={rateSubtitle}
-                  ratingPosterPath={ratePosterPath}
-                  showDrop={item.type === 'movie'}
-                  dropped={item.dropped ?? false}
-                />
-              </div>
-            )}
-
-            {user && (item.type === 'movie' || item.type === 'episode') && (
-              <ManualScrobble
-                tmdbId={item.tmdb_id}
-                mediaType={item.type}
-                runtime={item.runtime}
-                title={item.title}
-                showTmdbId={item.show_tmdb_id}
-                seasonNumber={item.season_number}
-                episodeNumber={item.episode_number}
-              />
-            )}
-
-            <!-- Library info -->
-            {item.library && (
-              <div class="mb-4 flex flex-wrap gap-2">
                 {!!item.play_count && (
-                  <span class="inline-flex items-center px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-bold">
+                  <span id="play-count-badge" class="inline-flex items-center px-2.5 py-1 bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-100 text-xs font-bold rounded-lg cursor-pointer transition-all duration-200" title="Click to view/remove specific plays" data-uri-id={item.uri_id ?? (item.type === "movie" ? `tmdb:m:${item.tmdb_id}` : `tmdb:s:${item.tmdb_id}`)} data-media-type={item.type} data-media-id={item.id ?? ""} data-show-uri={item.show_uri_id ?? (item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : "")} data-season={item.season_number ?? ""} data-episode={item.episode_number ?? ""}>
                     {item.play_count} {item.play_count === 1 ? 'Play' : 'Plays'}
                   </span>
                 )}
-                {[
-                  item.library.resolution,
-                  item.library.video_codec,
-                  item.library.audio_codec,
-                  item.library.audio_channels,
-                ].filter(Boolean).map(tag => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold">
-                    {tag}
+                {productionCompany && (
+                  <span class="flex items-center" title={productionCompany.name}>
+                    <img src={tmdbImageUrl(productionCompany.logo_path, "w154")} alt={productionCompany.name} class="h-4 max-w-[80px] object-contain opacity-80" loading="lazy" />
                   </span>
-                ))}
-                {item.library.audio_languages?.map((lang: string) => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
-                    <span class="opacity-50">🔊</span> {lang}
-                  </span>
-                ))}
-                {item.library.subtitle_languages?.map((lang: string) => (
-                  <span class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs rounded-lg font-mono font-bold flex items-center gap-1.5">
-                    <span class="opacity-50">💬</span> {lang}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {((item.type === 'movie' || item.type === 'episode') && (item.in_library ?? false)) && (
-              <div class="mb-8 flex flex-wrap gap-3 items-start">
-                {showRefreshBtn && (
-                  <button
-                    id="refresh-metadata-btn"
-                    class="flex items-center gap-2 px-4 py-2 text-sm font-bold leading-none text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                      <path d="M21 3v5h-5"/>
-                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                      <path d="M8 16H3v5"/>
-                    </svg>
-                    <span id="refresh-label">Refresh Metadata</span>
-                  </button>
-                )}
-                {item.playable && (
-                  <VideoPlayer
-                    tmdbId={item.tmdb_id}
-                    mediaType={item.type}
-                    inLibrary={item.in_library ?? false}
-                    title={item.title}
-                    token={token}
-                    secondary
-                  />
                 )}
               </div>
             )}
 
-            <!-- Where to Watch -->
-            {item.where_to_watch && item.where_to_watch.length > 0 && (
-              <div class="mb-8">
-                <h2 class="text-sm font-black text-zinc-500 mb-3 uppercase tracking-widest">Where to Watch</h2>
-                <div class="flex flex-wrap gap-2">
-                  {item.where_to_watch.map((s: { type: string; name: string; logo: string | null }) => (
-                    <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg">
-                      {s.logo ? (
-                        <img src={s.logo} alt={s.name} class="w-5 h-5 rounded object-cover" />
-                      ) : (s.type === "plex" || s.type === "jellyfin" || s.type === "emby") ? (
-                        <img src={`/icons/${s.type}.svg`} alt={s.name} class="w-5 h-5 rounded object-cover" />
-                      ) : (
-                        <span class="text-zinc-400 text-xs">▶</span>
-                      )}
-                      <span class="text-zinc-300 text-xs font-semibold">{s.name}</span>
-                    </div>
-                  ))}
-                </div>
+
+            <!-- Overview -->
+            {item.overview && (
+              <div class="space-y-3">
+                <h2 class="text-sm font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
+                  Overview
+                </h2>
+                <p class="text-zinc-300 leading-relaxed text-base md:text-lg opacity-90" data-spoiler={spoilerPrefix && `${spoilerPrefix}text`}>
+                  {item.overview}
+                </p>
               </div>
             )}
 
-            <div class="mb-12">
-              <h2 class="text-xl font-black text-zinc-100 mb-4 flex items-center gap-2 uppercase tracking-tight">
-                <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                Overview
-              </h2>
-              <p class="text-zinc-300 leading-relaxed text-lg max-w-4xl font-medium opacity-90">
-                {item.overview}
-              </p>
-            </div>
-
-            {item.genres?.length > 0 && (
-              <div class="flex flex-wrap gap-2 mb-12">
-                {item.genres.map((g: string) => (
-                  <span class="px-4 py-1.5 bg-zinc-900/80 border border-zinc-800 hover:border-zinc-700 transition-colors text-zinc-400 text-xs rounded-full font-bold uppercase tracking-widest">
+            <!-- Genres -->
+            {(item.genres?.length ?? 0) > 0 && (
+              <div class="flex flex-wrap gap-2">
+                {item.genres?.map((g: string) => (
+                  <span class="px-3 py-1 bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 text-zinc-400 text-xs rounded-full font-bold uppercase tracking-wider transition-colors">
                     {g}
                   </span>
                 ))}
               </div>
             )}
+
+            <!-- Cast -->
+            {(item.cast?.length ?? 0) > 0 && (
+              <div class="pt-8 border-t border-zinc-800/60">
+                <div class="flex items-center justify-between mb-6">
+                  <h2 class="text-xl font-black text-zinc-100 tracking-tight uppercase">Top Cast</h2>
+                </div>
+                <div class="grid grid-cols-2 min-[480px]:grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 gap-3">
+                  {item.cast?.slice(0, 12).map((person) => (
+                    <a href={personUrl(person.tmdb_id, null, primaryMetadataSource === 'tvdb')} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-3 rounded-2xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-300 active:scale-95 active:opacity-70 flex flex-col h-full">
+                      <div class="aspect-square w-full rounded-xl overflow-hidden mb-3 ring-1 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-300 shadow-md">
+                        {person.profile_path ? (
+                          <img
+                            src={tmdbImageUrl(person.profile_path, "w185")}
+                            alt={person.name}
+                            class="w-full h-full object-cover group-hover/cast:scale-105 transition-transform duration-500"
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-2xl">
+                            👤
+                          </div>
+                        )}
+                      </div>
+                      <div class="space-y-1 text-center">
+                        <p class="text-xs font-bold text-zinc-100 group-hover/cast:text-blue-400 transition-colors line-clamp-2 leading-tight">{person.name}</p>
+                        <p class="text-[10px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-2 opacity-85">{person.character}</p>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {collection && collection.parts?.length > 1 && (
+              <div class="pt-8 border-t border-zinc-800/60">
+                <MediaRow
+                  title={collection.name}
+                  items={collection.parts.filter((p) => p.tmdb_id !== item.tmdb_id)}
+                  href={`/collection/${collection.id}`}
+                />
+              </div>
+            )}
+
+            {showComments && (
+              <div class="pt-8 border-t border-zinc-800/60">
+                <CommentsSection
+                  mediaType={item.type}
+                  uriId={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : item.show_tmdb_id ? `tmdb:s:${item.show_tmdb_id}` : `tmdb:s:${item.tmdb_id}`)}
+                  seasonNumber={isEpisode ? item.season_number ?? undefined : undefined}
+                  episodeNumber={isEpisode ? item.episode_number ?? undefined : undefined}
+                />
+              </div>
+            )}
+
+            <div id="recommendations-container" data-type={item.type} data-id={item.uri_id ?? (item.type === 'movie' ? `tmdb:m:${item.tmdb_id}` : `tmdb:s:${item.tmdb_id}`)} class="pt-8 border-t border-zinc-800/60"></div>
           </div>
         </div>
-
-        <!-- Cast -->
-        {item.cast?.length > 0 && (
-          <div class="mt-24 border-zinc-900 pt-16">
-            <div class="flex items-center justify-between mb-10">
-              <h2 class="text-3xl font-black text-zinc-100 tracking-tighter uppercase">Top Cast</h2>
-            </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-              {item.cast.slice(0, 12).map((person) => (
-                <a href={`/person/${person.tmdb_id}`} class="group/cast bg-zinc-900/20 border border-zinc-800/40 p-4 rounded-3xl hover:bg-zinc-800/40 hover:border-blue-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-blue-900/10 active:scale-95 active:opacity-70">
-                  <div class="aspect-square w-full rounded-2xl overflow-hidden mb-5 ring-2 ring-zinc-800/50 group-hover/cast:ring-blue-500 transition-all duration-500 shadow-lg">
-                    {person.profile_path ? (
-                      <img
-                        src={person.profile_path}
-                        alt={person.name}
-                        class="w-full h-full object-cover group-hover/cast:scale-110 transition-transform duration-700"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <div class="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-400 text-4xl">
-                        👤
-                      </div>
-                    )}
-                  </div>
-                  <div class="space-y-1.5 text-center">
-                    <p class="text-sm font-black text-zinc-100 group-hover/cast:text-blue-400 transition-colors line-clamp-1 leading-tight">{person.name}</p>
-                    <p class="text-[11px] text-zinc-500 font-bold uppercase tracking-wider line-clamp-1 opacity-80">{person.character}</p>
-                  </div>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {collection && collection.parts?.length > 1 && (
-          <div class="mt-32">
-            <MediaRow
-              title={collection.name}
-              items={collection.parts.filter((p) => p.tmdb_id !== item.tmdb_id)}
-              href={`/collection/${collection.id}`}
-            />
-          </div>
-        )}
-
-        <CommentsSection
-          mediaType={item.type}
-          tmdbId={item.tmdb_id}
-          seasonNumber={isEpisode ? item.season_number : undefined}
-          episodeNumber={isEpisode ? item.episode_number : undefined}
-        />
-
-        <div id="recommendations-container" data-type={item.type} data-id={item.tmdb_id}></div>
       </div>
     </div>
   )}
 
   {isMovie && item?.status && (
-    <div id="release-schedule-popover" class="hidden absolute z-50 w-52 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden">
+    <div id="release-schedule-popover" class="hidden absolute z-50 w-52 bg-zinc-950/80 backdrop-blur-2xl border border-zinc-800 rounded-xl shadow-2xl overflow-hidden">
       <div class="px-3 pt-2.5 pb-2 border-b border-zinc-800">
         <p class="text-[10px] font-black text-zinc-500 tracking-widest uppercase">Release Schedule</p>
       </div>
@@ -472,86 +724,50 @@ const refreshUrl = isEpisode
   }
 </script>
 
-{item?.poster_path && (
-  <div id="poster-modal" class="fixed inset-0 z-[999] flex items-center justify-center hidden" role="dialog" aria-modal="true">
-    <div id="poster-modal-backdrop" class="absolute inset-0 bg-black/90 backdrop-blur-sm cursor-pointer"></div>
-    <img
-      src={item.poster_path}
-      alt={item.title}
-      class="relative max-h-[90vh] max-w-[85vw] md:max-w-[50vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
-    />
-    <button
-      id="poster-modal-close"
-      class="absolute top-4 right-4 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white transition-all duration-200 cursor-pointer"
-      aria-label="Close"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-5 h-5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-      </svg>
-    </button>
-  </div>
-)}
+<PosterModal posterPath={item?.poster_path} title={item?.title || ""} />
+<ImagePicker />
 
-<script>
-  const zoomBtn = document.getElementById('poster-zoom-btn');
-  const modal = document.getElementById('poster-modal');
-  const backdrop = document.getElementById('poster-modal-backdrop');
-  const closeBtn = document.getElementById('poster-modal-close');
+<script define:vars={{ token: Astro.locals.token }}>
+  const badge = document.getElementById('play-count-badge');
 
-  if (zoomBtn && modal) {
-    function openModal() {
-      modal.classList.remove('hidden');
-      document.body.style.overflow = 'hidden';
-    }
-    function closeModal() {
-      modal.classList.add('hidden');
-      document.body.style.overflow = '';
-    }
+  if (badge) {
+    const uriId = badge.getAttribute('data-uri-id');
+    const mediaType = badge.getAttribute('data-media-type');
+    const mediaId = badge.getAttribute('data-media-id');
+    const showUri = badge.getAttribute('data-show-uri');
+    const season = badge.getAttribute('data-season');
+    const episode = badge.getAttribute('data-episode');
 
-    zoomBtn.addEventListener('click', openModal);
-    backdrop?.addEventListener('click', closeModal);
-    closeBtn?.addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    badge.addEventListener('click', () => {
+      if (window["openWatchHistoryModal"]) {
+        window["openWatchHistoryModal"](null, uriId, mediaType, mediaId, showUri, season, episode);
+      }
+    });
   }
 </script>
 
-<script define:vars={{ refreshUrl, showRefreshBtn, token: Astro.locals.token }}>
-  if (showRefreshBtn) {
-    const btn = document.getElementById('refresh-metadata-btn');
-    if (btn) {
-      btn.addEventListener('click', async () => {
-        const icon = document.getElementById('refresh-icon');
-        const label = document.getElementById('refresh-label');
-        if (!label || !icon) return;
 
-        btn.setAttribute('disabled', 'true');
-        btn.classList.add('opacity-60', 'cursor-not-allowed');
-        icon.classList.add('animate-spin');
-        label.textContent = 'Refreshing...';
 
-        try {
-          const res = await fetch(refreshUrl, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            throw new Error(data.detail || 'Refresh failed');
-          }
-          label.textContent = 'Done!';
-          icon.classList.remove('animate-spin');
-          setTimeout(() => { window.location.reload(); }, 800);
-        } catch (err) {
-          icon.classList.remove('animate-spin');
-          label.textContent = 'Refresh failed';
-          btn.removeAttribute('disabled');
-          btn.classList.remove('opacity-60', 'cursor-not-allowed');
-          setTimeout(() => { label.textContent = 'Refresh Metadata'; }, 3000);
-        }
-      });
-    }
+
+
+<script>
+  if (window.innerWidth < 768) {
+    document.querySelectorAll('.watch-providers-details').forEach(el => {
+      el.removeAttribute('open');
+    });
   }
+</script>
 
+<script define:vars={{ tmdbId: id }}>
+  document.querySelectorAll('.wtw-local-link').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const connectionId = btn.getAttribute('data-connection-id');
+      document.dispatchEvent(new CustomEvent(`start-playback-${tmdbId}`, {
+        detail: { connectionId: connectionId ? parseInt(connectionId) : undefined }
+      }));
+    });
+  });
 </script>
 
 <script>
